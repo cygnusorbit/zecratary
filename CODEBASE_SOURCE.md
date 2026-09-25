@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.8.5",
+  "version": "7.8.6",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -110,7 +110,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.8.5",
+  "version": "7.8.6",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -21790,12 +21790,16 @@ export default function ChefAISettingsPage() {
 // Generated / Updated by AI Collaborator
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { 
   ArrowLeft, Plus, Check, Trash2, Edit3, Sparkles, 
   RefreshCw, CheckCircle2, AlertCircle, Shield, 
-  Coins, Zap, Eye, Save, Layers, ArrowRight
+  Coins, Zap, Eye, Save, Layers, ArrowRight,
+  History, Search, Filter, Sliders, X, CheckCircle,
+  Ban, AlertTriangle, ArrowUpRight, User as UserIcon,
+  Calendar, CreditCard, ChevronLeft, ChevronRight,
+  Pencil, DollarSign
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -21824,14 +21828,148 @@ interface PlanConfig {
   isDefault?: boolean;
 }
 
+interface PaymentTransaction {
+  id: string;
+  customerName: string;
+  customerEmail: string;
+  planName: string;
+  planSlug?: string;
+  amount: number;
+  currency: string;
+  gateway: 'stripe' | 'paypal' | 'manual' | string;
+  status: 'succeeded' | 'failed' | 'refunded' | 'pending' | 'canceled';
+  failureReason?: string;
+  testMode?: boolean;
+  createdAt: string;
+  expiryDate?: string;
+  isRecurring?: boolean;
+  recurringInterval?: 'MONTH' | 'YEAR';
+  autoRenew?: boolean;
+  gatewayTransactionId?: string;
+}
+
+interface AppUser {
+  id: string;
+  name: string;
+  email: string;
+  role: 'admin' | 'user';
+  subscriptionPlan?: string;
+}
+
+interface PlanOption {
+  id: string;
+  name: string;
+  slug: string;
+  priceFormatted: string;
+  priceDollars: number;
+  interval?: 'MONTH' | 'YEAR';
+  isFree?: boolean;
+}
+
 const SUPPORTED_CURRENCIES: Record<string, string> = {
   USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$',
   JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
 };
 
+const sanitizeSinglePlan = (planInput?: string | string[]): string => {
+  if (!planInput) return 'taster';
+  if (Array.isArray(planInput)) return planInput[0] ? String(planInput[0]).trim() : 'taster';
+  if (typeof planInput === 'string') {
+    if (planInput.includes(',')) {
+      const parts = planInput.split(',').map((s) => s.trim()).filter(Boolean);
+      return parts[0] || 'taster';
+    }
+    return planInput.trim() || 'taster';
+  }
+  return 'taster';
+};
+
+const parseAmount = (val: any): number => {
+  if (typeof val === 'number') return isNaN(val) ? 0 : val;
+  if (!val) return 0;
+  const cleaned = String(val).replace(/[^0-9.-]+/g, '');
+  const num = parseFloat(cleaned);
+  return isNaN(num) ? 0 : num;
+};
+
+const isSucceeded = (status?: string): boolean => {
+  if (!status) return false;
+  const s = String(status).toLowerCase().trim();
+  return s === 'succeeded' || s === 'succeded' || s === 'success' || s === 'paid' || s === 'completed';
+};
+
+const isCanceled = (status?: string): boolean => {
+  if (!status) return false;
+  const s = String(status).toLowerCase().trim();
+  return s === 'canceled' || s === 'cancelled';
+};
+
+const isRefunded = (status?: string): boolean => {
+  if (!status) return false;
+  const s = String(status).toLowerCase().trim();
+  return s === 'refunded' || s === 'refund';
+};
+
+const isFailed = (status?: string): boolean => {
+  if (!status) return false;
+  const s = String(status).toLowerCase().trim();
+  return s === 'failed' || s === 'declined' || s === 'fail' || s === 'error';
+};
+
+const calculateDefaultExpiry = (startDateStr: string, interval?: string): string => {
+  if (!interval) return '';
+  const date = startDateStr ? new Date(startDateStr) : new Date();
+  if (isNaN(date.getTime())) return '';
+  if (interval === 'MONTH') {
+    date.setMonth(date.getMonth() + 1);
+    return date.toISOString().slice(0, 10);
+  }
+  if (interval === 'YEAR') {
+    date.setFullYear(date.getFullYear() + 1);
+    return date.toISOString().slice(0, 10);
+  }
+  return '';
+};
+
+const normalizeTransaction = (raw: any, defaultCurrency: string): PaymentTransaction => {
+  const rawRecurring = raw.isRecurring !== undefined ? raw.isRecurring : raw.is_recurring;
+  const isRecurring = rawRecurring !== undefined 
+    ? (rawRecurring === true || rawRecurring === 'true' || rawRecurring === 't' || rawRecurring === 1 || rawRecurring === '1') 
+    : true;
+
+  const rawAutoRenew = raw.autoRenew !== undefined ? raw.autoRenew : raw.auto_renew;
+  const autoRenew = rawAutoRenew !== undefined 
+    ? (rawAutoRenew === true || rawAutoRenew === 'true' || rawAutoRenew === 't' || rawAutoRenew === 1 || rawAutoRenew === '1') 
+    : isRecurring;
+
+  return {
+    id: String(raw.id || 'tx_' + Math.random().toString(36).substring(2, 8)),
+    customerName: String(raw.customerName || raw.customer_name || 'Customer'),
+    customerEmail: String(raw.customerEmail || raw.customer_email || '').toLowerCase().trim(),
+    planName: String(raw.planName || raw.plan_name || 'Plan'),
+    planSlug: sanitizeSinglePlan(raw.planSlug || raw.plan_slug || ''),
+    amount: parseAmount(raw.amount),
+    currency: String(raw.currency || defaultCurrency || 'USD'),
+    gateway: (raw.gateway || 'stripe') as any,
+    status: (raw.status || 'succeeded') as any,
+    failureReason: raw.failureReason || raw.failure_reason || undefined,
+    testMode: Boolean(raw.testMode !== undefined ? raw.testMode : raw.test_mode),
+    createdAt: raw.createdAt || raw.created_at || new Date().toISOString(),
+    expiryDate: raw.expiryDate || raw.expiry_date || undefined,
+    isRecurring,
+    recurringInterval: (raw.recurringInterval || raw.recurring_interval || (String(raw.planSlug || raw.plan_slug || '').includes('annual') ? 'YEAR' : 'MONTH')) as any,
+    autoRenew,
+    gatewayTransactionId: raw.gatewayTransactionId || raw.gateway_transaction_id || raw.transaction_id || undefined
+  };
+};
+
 export default function AdminPlansPage() {
   const { t } = useTranslation();
   
+  // Navigation Tabs State
+  const [activeMainTab, setActiveMainTab] = useState<'plans' | 'transactions'>('plans');
+
+  // Shared System & Identity States
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -21842,13 +21980,13 @@ export default function AdminPlansPage() {
   const [previewInterval, setPreviewInterval] = useState<'MONTH' | 'YEAR'>('MONTH');
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
-  // Dynamic Token & Currency Identity from Settings
+  // Dynamic Token & Currency Identity
   const [tokenSymbol, setTokenSymbol] = useState('🪙');
   const [tokenName, setTokenName] = useState('Tokens');
   const [currencyCode, setCurrencyCode] = useState('USD');
   const [currencySymbol, setCurrencySymbol] = useState('$');
 
-  // Plan Form State
+  // Plan Form State (Tab 1: Plans)
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
@@ -21865,6 +22003,47 @@ export default function AdminPlansPage() {
   const [descriptionAnnual, setDescriptionAnnual] = useState('');
   const [featuresText, setFeaturesText] = useState('Personal recipe library\nSmart ingredient repurposing\nAutomated shopping list creation');
   const [isFree, setIsFree] = useState(false);
+
+  // Transactions State (Tab 2: Plan Transactions)
+  const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
+  const [registeredUsers, setRegisteredUsers] = useState<AppUser[]>([]);
+  const [loadingTransactions, setLoadingTransactions] = useState<boolean>(false);
+  const [txSearchQuery, setTxSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'succeeded' | 'canceled' | 'failed' | 'refunded' | 'pending'>('all');
+  const [gatewayFilter, setGatewayFilter] = useState<'all' | 'stripe' | 'paypal' | 'manual'>('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [togglingTxId, setTogglingTxId] = useState<string | null>(null);
+
+  // Modal States for Transactions
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [modalSubmitting, setModalSubmitting] = useState(false);
+  const [modalError, setModalError] = useState('');
+
+  // Add Transaction Form States
+  const [selectedUserId, setSelectedUserId] = useState('');
+  const [selectedPlanSlug, setSelectedPlanSlug] = useState('');
+  const [paymentAmount, setPaymentAmount] = useState<number>(8.99);
+  const [paymentDate, setPaymentDate] = useState('');
+  const [paymentExpiryDate, setPaymentExpiryDate] = useState('');
+  const [paymentGateway, setPaymentGateway] = useState<'stripe' | 'paypal' | 'manual'>('stripe');
+  const [paymentStatus, setPaymentStatus] = useState<'succeeded' | 'pending'>('succeeded');
+  const [isPaymentRecurring, setIsPaymentRecurring] = useState(true);
+
+  // Edit Transaction Form States
+  const [editingTx, setEditingTx] = useState<PaymentTransaction | null>(null);
+  const [editCustomerName, setEditCustomerName] = useState('');
+  const [editCustomerEmail, setEditCustomerEmail] = useState('');
+  const [editPlanSlug, setEditPlanSlug] = useState('');
+  const [editPlanName, setEditPlanName] = useState('');
+  const [editAmount, setEditAmount] = useState<number>(0);
+  const [editGateway, setEditGateway] = useState<string>('stripe');
+  const [editStatus, setEditStatus] = useState<string>('succeeded');
+  const [editFailureReason, setEditFailureReason] = useState('');
+  const [editDate, setEditDate] = useState('');
+  const [editExpiryDate, setEditExpiryDate] = useState('');
+  const [editIsRecurring, setEditIsRecurring] = useState(true);
 
   // Dynamic Theme Synchronization
   const applySavedTheme = useCallback(() => {
@@ -21945,12 +22124,10 @@ export default function AdminPlansPage() {
       try {
         const parsed = JSON.parse(p.features);
         if (Array.isArray(parsed)) rawFeatures = parsed.map(String).filter(Boolean);
-        else rawFeatures = p.features.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+        else rawFeatures = p.features.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
       } catch (_) {
-        rawFeatures = p.features.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+        rawFeatures = p.features.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
       }
-    } else if (typeof p.featuresText === 'string') {
-      rawFeatures = p.featuresText.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
     }
 
     const mPrice = Number(p.monthlyPriceDollars ?? p.monthly_price_dollars ?? p.price ?? 0);
@@ -21997,14 +22174,94 @@ export default function AdminPlansPage() {
     }
   }, []);
 
+  // Fetch Users for Transaction Association
+  const fetchUsers = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.users)) {
+          setRegisteredUsers(data.users);
+          if (data.users.length > 0 && !selectedUserId) {
+            setSelectedUserId(data.users[0].id);
+          }
+        }
+      }
+    } catch (_) {}
+  }, [selectedUserId]);
+
+  // Fetch Payment Transactions (Tab 2: Plan Transactions)
+  const fetchTransactions = useCallback(async () => {
+    setLoadingTransactions(true);
+    try {
+      const res = await fetch('/api/admin/payment?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.transactions)) {
+          const list = data.transactions.map((tx: any) => normalizeTransaction(tx, currencyCode));
+          setTransactions(list);
+        }
+      }
+    } catch (_) {
+    } finally {
+      setLoadingTransactions(false);
+    }
+  }, [currencyCode]);
+
   useEffect(() => {
     fetchPlans();
-    window.addEventListener('zecratary_plans_updated', fetchPlans);
-    return () => {
-      window.removeEventListener('zecratary_plans_updated', fetchPlans);
-    };
-  }, [fetchPlans]);
+    fetchUsers();
+    fetchTransactions();
 
+    const handleSync = () => {
+      fetchPlans();
+      fetchUsers();
+      fetchTransactions();
+    };
+
+    window.addEventListener('zecratary_plans_updated', handleSync);
+    window.addEventListener('zecratary_payment_updated', handleSync);
+    window.addEventListener('zecratary_users_updated', handleSync);
+
+    return () => {
+      window.removeEventListener('zecratary_plans_updated', handleSync);
+      window.removeEventListener('zecratary_payment_updated', handleSync);
+      window.removeEventListener('zecratary_users_updated', handleSync);
+    };
+  }, [fetchPlans, fetchUsers, fetchTransactions]);
+
+  // Flattened Available Plans for Payment Operations
+  const availablePlanOptions = useMemo<PlanOption[]>(() => {
+    const list: PlanOption[] = [];
+    plans.forEach((p) => {
+      if (p.isFree || p.slug === 'taster') return;
+      if (p.monthlyPriceDollars > 0) {
+        list.push({
+          id: p.monthlyPlanId || `${p.slug}-monthly`,
+          name: `${p.name} (Monthly)`,
+          slug: `${p.slug}-monthly`,
+          priceFormatted: `${currencySymbol}${p.monthlyPriceDollars.toFixed(2)}/mo`,
+          priceDollars: p.monthlyPriceDollars,
+          interval: 'MONTH',
+          isFree: false
+        });
+      }
+      if (p.annualPriceDollars > 0) {
+        list.push({
+          id: p.annualPlanId || `${p.slug}-annual`,
+          name: `${p.name} (Annual)`,
+          slug: `${p.slug}-annual`,
+          priceFormatted: `${currencySymbol}${p.annualPriceDollars.toFixed(2)}/yr`,
+          priceDollars: p.annualPriceDollars,
+          interval: 'YEAR',
+          isFree: false
+        });
+      }
+    });
+    return list;
+  }, [plans, currencySymbol]);
+
+  // Plan Slug Change Helper
   const handleSlugChange = (val: string) => {
     const clean = val.toLowerCase().replace(/[^a-z0-9_-]/g, '');
     setSlug(clean);
@@ -22016,6 +22273,7 @@ export default function AdminPlansPage() {
   };
 
   const handleEdit = (p: PlanConfig) => {
+    setActiveMainTab('plans');
     setEditingId(p.id);
     setName(p.name);
     setSlug(p.slug);
@@ -22054,14 +22312,15 @@ export default function AdminPlansPage() {
     setIsFree(false);
   };
 
-  const handleSavePlan = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Save Plan to PostgreSQL (Tab 1)
+  const handleSavePlan = async () => {
+    if (!name.trim()) return;
     setSaving(true);
     setErrorMsg('');
     setSuccessMsg('');
 
     try {
-      const parsedFeatures = featuresText.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      const parsedFeatures = featuresText.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
       const cleanSlug = slug.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
       const planId = editingId || (cleanSlug ? `plan_${cleanSlug}` : `plan_${Date.now()}`);
 
@@ -22111,6 +22370,7 @@ export default function AdminPlansPage() {
     }
   };
 
+  // Delete Plan from PostgreSQL (Tab 1)
   const handleDeletePlan = async (p: PlanConfig) => {
     if (p.isDefault || p.slug === 'taster' || p.id === 'preset_taster') {
       alert(t('cannotDeleteDefaultPlan', 'The default free plan (Taster) is required by the system and cannot be deleted.'));
@@ -22140,11 +22400,8 @@ export default function AdminPlansPage() {
         throw new Error(data.error || t('failedDeletePlan', 'Failed to delete plan from database.'));
       }
 
-      setPlans(prev => prev.filter(item => item.id !== p.id && item.slug !== p.slug));
-
-      if (editingId === p.id || editingId === p.slug) {
-        resetForm();
-      }
+      setPlans((prev) => prev.filter((item) => item.id !== p.id && item.slug !== p.slug));
+      if (editingId === p.id || editingId === p.slug) resetForm();
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_plans_updated'));
@@ -22158,6 +22415,265 @@ export default function AdminPlansPage() {
       fetchPlans();
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  // -------------------------------------------------------------
+  // Plan Transactions Logic (Tab 2)
+  // -------------------------------------------------------------
+  const filteredTransactions = useMemo(() => {
+    const q = txSearchQuery.toLowerCase().trim();
+    return transactions.filter((tx) => {
+      const matchesSearch = !q || 
+        (tx.customerName && tx.customerName.toLowerCase().includes(q)) ||
+        (tx.customerEmail && tx.customerEmail.toLowerCase().includes(q)) ||
+        (tx.planName && tx.planName.toLowerCase().includes(q)) ||
+        (tx.planSlug && tx.planSlug.toLowerCase().includes(q)) ||
+        (tx.id && tx.id.toLowerCase().includes(q));
+
+      const s = String(tx.status || '').toLowerCase().trim();
+      let matchesStatus = true;
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'succeeded') matchesStatus = isSucceeded(s);
+        else if (statusFilter === 'canceled') matchesStatus = isCanceled(s);
+        else if (statusFilter === 'refunded') matchesStatus = isRefunded(s);
+        else if (statusFilter === 'failed') matchesStatus = isFailed(s);
+        else matchesStatus = s === statusFilter;
+      }
+
+      const g = String(tx.gateway || '').toLowerCase().trim();
+      const matchesGateway = gatewayFilter === 'all' || g === gatewayFilter;
+
+      return matchesSearch && matchesStatus && matchesGateway;
+    });
+  }, [transactions, txSearchQuery, statusFilter, gatewayFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / pageSize));
+  const paginatedTransactions = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredTransactions.slice(start, start + pageSize);
+  }, [filteredTransactions, currentPage, pageSize]);
+
+  // Inline Auto-Renew Toggle
+  const handleToggleRecurring = async (tx: PaymentTransaction) => {
+    const nextVal = !tx.autoRenew;
+    setTogglingTxId(tx.id);
+
+    try {
+      const updatedTx = {
+        ...tx,
+        autoRenew: nextVal,
+        isRecurring: nextVal
+      };
+
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update_transaction',
+          transaction: updatedTx
+        })
+      });
+
+      if (!res.ok) throw new Error('Failed to update recurring state');
+
+      setTransactions((prev) => prev.map((tItem) => tItem.id === tx.id ? updatedTx : tItem));
+      setSuccessMsg(t('recurringUpdated', `Recurring renewal turned ${nextVal ? 'ON' : 'OFF'} for ${tx.customerName}`));
+      setTimeout(() => setSuccessMsg(''), 3000);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error updating recurring auto-renew status');
+      setTimeout(() => setErrorMsg(''), 4000);
+    } finally {
+      setTogglingTxId(null);
+    }
+  };
+
+  // Open Add Transaction Modal
+  const handleOpenAddModal = () => {
+    setModalError('');
+    const today = new Date().toISOString().slice(0, 10);
+    setPaymentDate(today);
+
+    if (registeredUsers.length > 0 && !selectedUserId) {
+      setSelectedUserId(registeredUsers[0].id);
+    }
+
+    if (availablePlanOptions.length > 0) {
+      const first = availablePlanOptions[0];
+      setSelectedPlanSlug(first.slug);
+      setPaymentAmount(first.priceDollars);
+      setPaymentExpiryDate(calculateDefaultExpiry(today, first.interval || 'MONTH'));
+    }
+
+    setIsPaymentRecurring(true);
+    setPaymentGateway('stripe');
+    setPaymentStatus('succeeded');
+    setShowAddModal(true);
+  };
+
+  const handlePlanSelectChange = (slugVal: string) => {
+    setSelectedPlanSlug(slugVal);
+    const matched = availablePlanOptions.find((p) => p.slug === slugVal);
+    if (matched) {
+      setPaymentAmount(matched.priceDollars);
+      setPaymentExpiryDate(calculateDefaultExpiry(paymentDate || new Date().toISOString().slice(0, 10), matched.interval || 'MONTH'));
+    }
+  };
+
+  // Submit Add Transaction (Tab 2)
+  const handleSaveAddPayment = async () => {
+    setModalSubmitting(true);
+    setModalError('');
+
+    try {
+      const targetUser = registeredUsers.find((u) => u.id === selectedUserId);
+      if (!targetUser) throw new Error('Please select a valid user');
+
+      const matchedPlan = availablePlanOptions.find((p) => p.slug === selectedPlanSlug);
+      const planTitle = matchedPlan ? matchedPlan.name : selectedPlanSlug;
+
+      const newTx: PaymentTransaction = {
+        id: 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
+        customerName: targetUser.name || 'Customer',
+        customerEmail: (targetUser.email || '').toLowerCase().trim(),
+        planName: planTitle,
+        planSlug: selectedPlanSlug,
+        amount: Number(paymentAmount || 0),
+        currency: currencyCode,
+        gateway: paymentGateway,
+        status: paymentStatus,
+        createdAt: paymentDate ? new Date(paymentDate).toISOString() : new Date().toISOString(),
+        expiryDate: paymentExpiryDate ? new Date(paymentExpiryDate).toISOString() : undefined,
+        isRecurring: isPaymentRecurring,
+        recurringInterval: selectedPlanSlug.includes('annual') ? 'YEAR' : 'MONTH',
+        autoRenew: isPaymentRecurring
+      };
+
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'add_transaction',
+          transaction: newTx
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to record transaction');
+      }
+
+      setShowAddModal(false);
+      setSuccessMsg(t('paymentRecordedSuccess', `Payment of ${currencySymbol}${Number(paymentAmount).toFixed(2)} recorded successfully in PostgreSQL!`));
+      setTimeout(() => setSuccessMsg(''), 4000);
+      await fetchTransactions();
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+      }
+    } catch (err: any) {
+      setModalError(err.message || 'Error recording transaction');
+    } finally {
+      setModalSubmitting(false);
+    }
+  };
+
+  // Open Edit Transaction Modal
+  const handleOpenEditModal = (tx: PaymentTransaction) => {
+    setEditingTx(tx);
+    setEditCustomerName(tx.customerName || '');
+    setEditCustomerEmail(tx.customerEmail || '');
+    setEditPlanSlug(tx.planSlug || '');
+    setEditPlanName(tx.planName || '');
+    setEditAmount(parseAmount(tx.amount));
+    setEditGateway(tx.gateway || 'stripe');
+    setEditStatus(isSucceeded(tx.status) ? 'succeeded' : isCanceled(tx.status) ? 'canceled' : isFailed(tx.status) ? 'failed' : isRefunded(tx.status) ? 'refunded' : 'pending');
+    setEditFailureReason(tx.failureReason || '');
+    setEditDate(tx.createdAt ? new Date(tx.createdAt).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
+    setEditExpiryDate(tx.expiryDate ? new Date(tx.expiryDate).toISOString().slice(0, 10) : '');
+    setEditIsRecurring(tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : true);
+    setModalError('');
+    setShowEditModal(true);
+  };
+
+  // Save Edit Transaction
+  const handleSaveEditPayment = async () => {
+    if (!editingTx) return;
+    setModalSubmitting(true);
+    setModalError('');
+
+    try {
+      const updatedTx = {
+        ...editingTx,
+        customerName: editCustomerName.trim(),
+        customerEmail: editCustomerEmail.trim().toLowerCase(),
+        planName: editPlanName.trim(),
+        planSlug: editPlanSlug.trim(),
+        amount: Number(editAmount || 0),
+        gateway: editGateway,
+        status: editStatus as any,
+        failureReason: editFailureReason.trim() || undefined,
+        createdAt: editDate ? new Date(editDate).toISOString() : editingTx.createdAt,
+        expiryDate: editExpiryDate ? new Date(editExpiryDate).toISOString() : undefined,
+        isRecurring: editIsRecurring,
+        autoRenew: editIsRecurring
+      };
+
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update_transaction',
+          transaction: updatedTx
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to update transaction');
+      }
+
+      setShowEditModal(false);
+      setSuccessMsg(t('paymentUpdatedSuccess', 'Transaction successfully updated in PostgreSQL!'));
+      setTimeout(() => setSuccessMsg(''), 4000);
+      await fetchTransactions();
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+      }
+    } catch (err: any) {
+      setModalError(err.message || 'Error updating transaction');
+    } finally {
+      setModalSubmitting(false);
+    }
+  };
+
+  // Delete Transaction
+  const handleDeleteTransaction = async (tx: PaymentTransaction) => {
+    const confirmMsg = `${t('confirmDeleteTx', 'Are you sure you want to permanently delete transaction')} "${tx.id}"?`;
+    if (!confirm(confirmMsg)) return;
+
+    try {
+      const res = await fetch(`/api/admin/payment?id=${encodeURIComponent(tx.id)}`, {
+        method: 'DELETE'
+      });
+
+      if (!res.ok) throw new Error('Failed to delete transaction from database');
+
+      setTransactions((prev) => prev.filter((item) => item.id !== tx.id));
+      setSuccessMsg(t('txDeletedSuccess', 'Transaction permanently removed from PostgreSQL.'));
+      setTimeout(() => setSuccessMsg(''), 3000);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Error deleting transaction');
+      setTimeout(() => setErrorMsg(''), 4000);
     }
   };
 
@@ -22178,23 +22694,72 @@ export default function AdminPlansPage() {
               <ArrowLeft className="h-4 w-4" />
             </Link>
             <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-              <Zap className="h-6 w-6" style={{ color: 'var(--color-primary)' }} /> {t('adminPlansTitle', 'Subscription Plans & Token Allocations')}
+              <Zap className="h-6 w-6" style={{ color: 'var(--color-primary)' }} /> 
+              {activeMainTab === 'plans' ? t('adminPlansTitle', 'Subscription Plans & Token Allocations') : t('planTransactionsTitle', 'Plan Transactions Ledger')}
             </h1>
           </div>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('adminPlansSubtitle', 'Configure subscription intervals, group identifiers, and automated AI token purchase grants.')}
+            {activeMainTab === 'plans' 
+              ? t('adminPlansSubtitle', 'Configure subscription intervals, group identifiers, and automated AI token purchase grants.')
+              : t('planTransactionsSubtitle', 'Audit customer subscription plan purchase receipts, auto-renewals, and lifecycle status.')}
           </p>
         </div>
 
         <div className="flex items-center gap-2">
+          {activeMainTab === 'transactions' && (
+            <button
+              type="button"
+              onClick={handleOpenAddModal}
+              className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs text-white cursor-pointer hover:opacity-90"
+              style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
+            >
+              <Plus className="h-3.5 w-3.5" /> {t('addPaymentBtn', 'Add Payment')}
+            </button>
+          )}
+
           <Link
             href="/admin/token-setting"
-            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs"
+            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer hover:opacity-80"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <Coins className="h-3.5 w-3.5 text-amber-500" /> {t('viewTokenTransactions', 'Token Transactions Ledger')}
           </Link>
         </div>
+      </div>
+
+      {/* Navigation Tabs */}
+      <div className="flex border-b gap-3 sm:gap-6" style={{ borderColor: 'var(--color-border)' }}>
+        <button
+          type="button"
+          onClick={() => setActiveMainTab('plans')}
+          className="pb-3 px-2 text-sm font-black border-b-2 flex items-center gap-2 transition cursor-pointer"
+          style={{
+            borderColor: activeMainTab === 'plans' ? 'var(--color-primary)' : 'transparent',
+            color: activeMainTab === 'plans' ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+          }}
+        >
+          <Zap className="h-4 w-4" />
+          <span>{t('tabSubscriptionPlans', 'Subscription Plans')}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveMainTab('transactions')}
+          className="pb-3 px-2 text-sm font-black border-b-2 flex items-center gap-2 transition cursor-pointer"
+          style={{
+            borderColor: activeMainTab === 'transactions' ? 'var(--color-primary)' : 'transparent',
+            color: activeMainTab === 'transactions' ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+          }}
+        >
+          <History className="h-4 w-4" />
+          <span>{t('tabPlanTransactions', 'Plan Transactions')}</span>
+          <span 
+            className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border shadow-xs ml-1"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          >
+            {transactions.length}
+          </span>
+        </button>
       </div>
 
       {/* Notifications */}
@@ -22218,457 +22783,1108 @@ export default function AdminPlansPage() {
         </div>
       )}
 
-      {/* Main Grid: Editor & Live Preview */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Plan Configuration Form */}
-        <form 
-          onSubmit={handleSavePlan}
-          className="lg:col-span-7 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-            <h2 className="text-sm font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-              <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-              <span>{editingId ? t('editPlanHeader', 'Edit Subscription Plan') : t('createNewPlanHeader', 'Create New Plan')}</span>
-            </h2>
-            {editingId && (
-              <div className="flex items-center gap-3">
-                {editingId !== 'preset_taster' && slug !== 'taster' && (
-                  <button
-                    type="button"
-                    disabled={deletingId === editingId}
-                    onClick={() => {
-                      const matched = plans.find(p => p.id === editingId || p.slug === editingId);
-                      if (matched) handleDeletePlan(matched);
-                    }}
-                    className="text-xs text-red-400 hover:text-red-300 cursor-pointer font-bold flex items-center gap-1 transition"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    <span>{t('deletePlan', 'Delete Plan')}</span>
-                  </button>
+      {/* ========================================================= */}
+      {/* TAB 1: SUBSCRIPTION PLANS (ORIGINAL DESIGN PRESERVED)     */}
+      {/* ========================================================= */}
+      {activeMainTab === 'plans' && (
+        <div className="space-y-6">
+          {/* Main Grid: Editor & Live Preview */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Plan Configuration Form (Replaced <form> with <div> per constraint 9) */}
+            <div 
+              className="lg:col-span-7 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                <h2 className="text-sm font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                  <span>{editingId ? t('editPlanHeader', 'Edit Subscription Plan') : t('createNewPlanHeader', 'Create New Plan')}</span>
+                </h2>
+                {editingId && (
+                  <div className="flex items-center gap-3">
+                    {editingId !== 'preset_taster' && slug !== 'taster' && (
+                      <button
+                        type="button"
+                        disabled={deletingId === editingId}
+                        onClick={() => {
+                          const matched = plans.find((p) => p.id === editingId || p.slug === editingId);
+                          if (matched) handleDeletePlan(matched);
+                        }}
+                        className="text-xs text-red-400 hover:text-red-300 cursor-pointer font-bold flex items-center gap-1 transition"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span>{t('deletePlan', 'Delete Plan')}</span>
+                      </button>
+                    )}
+                    <button 
+                      type="button" 
+                      onClick={resetForm} 
+                      className="text-xs opacity-70 hover:opacity-100 cursor-pointer font-bold transition"
+                      style={{ color: 'var(--color-text-secondary)' }}
+                    >
+                      {t('cancelEdit', 'Cancel Edit')}
+                    </button>
+                  </div>
                 )}
-                <button 
-                  type="button" 
-                  onClick={resetForm} 
-                  className="text-xs opacity-70 hover:opacity-100 cursor-pointer font-bold transition"
-                  style={{ color: 'var(--color-text-secondary)' }}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('planNameLabel', 'Plan Name *')}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Nutrition Pro"
+                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none transition"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('planSlugLabel', 'Plan Slug *')}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={slug}
+                    onChange={(e) => handleSlugChange(e.target.value)}
+                    placeholder="e.g. nutrition-pro"
+                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none transition"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+              </div>
+
+              {/* Group & Interval Identifiers */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 rounded-2xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('planGroupIdLabel', 'Plan Group ID')}
+                  </label>
+                  <input
+                    type="text"
+                    value={planGroupId}
+                    onChange={(e) => setPlanGroupId(e.target.value)}
+                    className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none"
+                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('monthlyPlanIdLabel', 'Monthly Plan ID')}
+                  </label>
+                  <input
+                    type="text"
+                    value={monthlyPlanId}
+                    onChange={(e) => setMonthlyPlanId(e.target.value)}
+                    className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none"
+                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('annualPlanIdLabel', 'Annual Plan ID')}
+                  </label>
+                  <input
+                    type="text"
+                    value={annualPlanId}
+                    onChange={(e) => setAnnualPlanId(e.target.value)}
+                    className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none"
+                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+              </div>
+
+              {/* Pricing & AI Token Allowance */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('monthlyPriceLabel', 'Monthly Price')} ({currencySymbol} {currencyCode})
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    disabled={isFree}
+                    value={isFree ? 0 : monthlyPrice}
+                    onChange={(e) => setMonthlyPrice(parseFloat(e.target.value) || 0)}
+                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none disabled:opacity-50"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('annualPriceLabel', 'Annual Price')} ({currencySymbol} {currencyCode})
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    disabled={isFree}
+                    value={isFree ? 0 : annualPrice}
+                    onChange={(e) => setAnnualPrice(parseFloat(e.target.value) || 0)}
+                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none disabled:opacity-50"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+
+                {/* AI Token Allowance on Purchase */}
+                <div className="space-y-1">
+                  <label className="block text-xs font-bold flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
+                    <span>{t('tokenAllowanceLabel', 'Token Grant on Purchase')}</span>
+                    <span className="text-amber-500 font-bold">{tokenSymbol}</span>
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={tokenLimit}
+                    onChange={(e) => setTokenLimit(Math.max(0, parseInt(e.target.value) || 0))}
+                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-black outline-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+              </div>
+
+              <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('tokenGrantHelp', 'When a user purchases this plan, these tokens are credited to their balance and an audit record appears on /admin/token-setting.')}
+              </p>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('planFeaturesListLabel', 'Plan Features (One per line)')}
+                </label>
+                <textarea
+                  rows={3}
+                  value={featuresText}
+                  onChange={(e) => setFeaturesText(e.target.value)}
+                  className="w-full border rounded-xl p-3 text-xs font-medium outline-none transition"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <label className="flex items-center gap-2 text-xs font-bold cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={isFree}
+                    onChange={(e) => {
+                      const val = e.target.checked;
+                      setIsFree(val);
+                      if (val) {
+                        setMonthlyPrice(0);
+                        setAnnualPrice(0);
+                      }
+                    }}
+                    className="rounded w-4 h-4 cursor-pointer accent-[#10b981]"
+                  />
+                  <span>{t('isFreeTierLabel', 'Mark as Free Tier')}</span>
+                </label>
+
+                <button
+                  type="button"
+                  onClick={handleSavePlan}
+                  disabled={saving || !name.trim()}
+                  className="px-6 py-2.5 rounded-xl text-white font-extrabold text-xs flex items-center gap-2 shadow-lg transition cursor-pointer disabled:opacity-50 hover:opacity-90"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
                 >
-                  {t('cancelEdit', 'Cancel Edit')}
+                  {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  <span>{editingId ? t('updatePlanBtn', 'Update Plan & Tokens') : t('createPlanBtn', 'Create Plan & Publish')}</span>
                 </button>
               </div>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('planNameLabel', 'Plan Name *')}
-              </label>
-              <input
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Nutrition Pro"
-                className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none transition"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-              />
             </div>
 
-            <div className="space-y-1">
-              <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('planSlugLabel', 'Plan Slug *')}
-              </label>
-              <input
-                type="text"
-                required
-                value={slug}
-                onChange={(e) => handleSlugChange(e.target.value)}
-                placeholder="e.g. nutrition-pro"
-                className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none transition"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-              />
-            </div>
-          </div>
-
-          {/* Group & Interval Identifiers */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 rounded-2xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-            <div className="space-y-1">
-              <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('planGroupIdLabel', 'Plan Group ID')}
-              </label>
-              <input
-                type="text"
-                value={planGroupId}
-                onChange={(e) => setPlanGroupId(e.target.value)}
-                className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('monthlyPlanIdLabel', 'Monthly Plan ID')}
-              </label>
-              <input
-                type="text"
-                value={monthlyPlanId}
-                onChange={(e) => setMonthlyPlanId(e.target.value)}
-                className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('annualPlanIdLabel', 'Annual Plan ID')}
-              </label>
-              <input
-                type="text"
-                value={annualPlanId}
-                onChange={(e) => setAnnualPlanId(e.target.value)}
-                className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
-            </div>
-          </div>
-
-          {/* Pricing & AI Token Allowance */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="space-y-1">
-              <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('monthlyPriceLabel', 'Monthly Price')} ({currencySymbol} {currencyCode})
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                disabled={isFree}
-                value={isFree ? 0 : monthlyPrice}
-                onChange={(e) => setMonthlyPrice(parseFloat(e.target.value) || 0)}
-                className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none disabled:opacity-50"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('annualPriceLabel', 'Annual Price')} ({currencySymbol} {currencyCode})
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                disabled={isFree}
-                value={isFree ? 0 : annualPrice}
-                onChange={(e) => setAnnualPrice(parseFloat(e.target.value) || 0)}
-                className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none disabled:opacity-50"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
-            </div>
-
-            {/* AI Token Allowance on Purchase */}
-            <div className="space-y-1">
-              <label className="block text-xs font-bold flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
-                <span>{t('tokenAllowanceLabel', 'Token Grant on Purchase')}</span>
-                <span className="text-amber-500 font-bold">{tokenSymbol}</span>
-              </label>
-              <input
-                type="number"
-                min="0"
-                value={tokenLimit}
-                onChange={(e) => setTokenLimit(Math.max(0, parseInt(e.target.value) || 0))}
-                className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-black outline-none"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              />
-            </div>
-          </div>
-
-          <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('tokenGrantHelp', 'When a user purchases this plan, these tokens are credited to their balance and an audit record appears on /admin/token-setting.')}
-          </p>
-
-          <div className="space-y-1">
-            <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('planFeaturesListLabel', 'Plan Features (One per line)')}
-            </label>
-            <textarea
-              rows={3}
-              value={featuresText}
-              onChange={(e) => setFeaturesText(e.target.value)}
-              className="w-full border rounded-xl p-3 text-xs font-medium outline-none transition"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-            />
-          </div>
-
-          <div className="flex items-center justify-between pt-2">
-            <label className="flex items-center gap-2 text-xs font-bold cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={isFree}
-                onChange={(e) => {
-                  const val = e.target.checked;
-                  setIsFree(val);
-                  if (val) {
-                    setMonthlyPrice(0);
-                    setAnnualPrice(0);
-                  }
-                }}
-                className="rounded w-4 h-4 cursor-pointer accent-[#10b981]"
-              />
-              <span>{t('isFreeTierLabel', 'Mark as Free Tier')}</span>
-            </label>
-
-            <button
-              type="submit"
-              disabled={saving || !name.trim()}
-              className="px-6 py-2.5 rounded-xl text-white font-extrabold text-xs flex items-center gap-2 shadow-lg transition cursor-pointer disabled:opacity-50 hover:opacity-90"
-              style={{ backgroundColor: 'var(--color-primary)' }}
+            {/* Live Mockup Preview */}
+            <div 
+              className="lg:col-span-5 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200 flex flex-col justify-between"
+              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
             >
-              {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              <span>{editingId ? t('updatePlanBtn', 'Update Plan & Tokens') : t('createPlanBtn', 'Create Plan & Publish')}</span>
-            </button>
-          </div>
-        </form>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center gap-2">
+                    <Eye className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
+                    <h3 className="text-sm font-black" style={{ color: 'var(--color-text)' }}>
+                      {t('planCardMockup', 'Live Card Mockup')}
+                    </h3>
+                  </div>
+                  <div className="flex p-0.5 rounded-lg border text-[10px] font-bold" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewInterval('MONTH')}
+                      className="px-2.5 py-1 rounded-md transition cursor-pointer"
+                      style={previewInterval === 'MONTH' ? {
+                        backgroundColor: 'var(--color-primary)',
+                        color: '#ffffff'
+                      } : {
+                        color: 'var(--color-text-secondary)'
+                      }}
+                    >
+                      Monthly
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewInterval('YEAR')}
+                      className="px-2.5 py-1 rounded-md transition cursor-pointer"
+                      style={previewInterval === 'YEAR' ? {
+                        backgroundColor: 'var(--color-primary)',
+                        color: '#ffffff'
+                      } : {
+                        color: 'var(--color-text-secondary)'
+                      }}
+                    >
+                      Annual
+                    </button>
+                  </div>
+                </div>
 
-        {/* Live Mockup Preview */}
-        <div 
-          className="lg:col-span-5 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200 flex flex-col justify-between"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="space-y-4">
+                {/* Mockup Card */}
+                <div 
+                  className="p-5 rounded-2xl border space-y-4 relative shadow-inner"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-lg font-black" style={{ color: 'var(--color-text)' }}>
+                        {name || 'Plan Preview'}
+                      </h4>
+                      <p className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                        ID: {previewInterval === 'MONTH' ? (monthlyPlanId || 'plan_monthly') : (annualPlanId || 'plan_annual')}
+                      </p>
+                    </div>
+                    <span 
+                      className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full border shadow-xs"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
+                    >
+                      {previewInterval === 'MONTH' ? (monthlyBadge || 'Monthly') : (annualBadge || 'Annual')}
+                    </span>
+                  </div>
+
+                  {/* Price & Token Allowance Display */}
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-3xl font-black" style={{ color: 'var(--color-text)' }}>
+                      {currencySymbol}{previewInterval === 'MONTH' 
+                        ? (isFree ? '0.00' : Number(monthlyPrice || 0).toFixed(2)) 
+                        : (isFree ? '0.00' : Number(annualPrice || 0).toFixed(2))}
+                    </span>
+                    <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                      /{previewInterval === 'MONTH' ? 'mo' : 'yr'}
+                    </span>
+                  </div>
+
+                  {/* Token Allocation Badge in Card */}
+                  <div className="flex items-center gap-2 p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+                    <Coins className="h-4 w-4 text-amber-500 shrink-0" />
+                    <div className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                      <span>+{Number(tokenLimit || 0).toLocaleString()} {tokenSymbol}</span>{' '}
+                      <span className="text-[10px] font-normal" style={{ color: 'var(--color-text-secondary)' }}>
+                        {t('creditedUponPurchase', 'credited instantly on purchase')}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Features snippet */}
+                  <ul className="space-y-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                    {featuresText.split(/\r?\n/).slice(0, 4).map((f: string, i: number) => (
+                      <li key={i} className="flex items-center gap-2">
+                        <Check className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-emerald)' }} />
+                        <span>{f}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t text-[11px] flex items-center justify-between" style={{ borderColor: 'var(--color-border)' }}>
+                <span style={{ color: 'var(--color-text-secondary)' }}>Parent Group: {planGroupId || 'None'}</span>
+                <span className="font-mono font-bold" style={{ color: 'var(--color-emerald)' }}>PostgreSQL Synced</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Configured Plans List Table */}
+          <div 
+            className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
             <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
               <div className="flex items-center gap-2">
-                <Eye className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
-                <h3 className="text-sm font-black" style={{ color: 'var(--color-text)' }}>
-                  {t('planCardMockup', 'Live Card Mockup')}
-                </h3>
+                <Layers className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                  {t('publishedPlansTable', 'Configured Subscription Plans in PostgreSQL')}
+                </h2>
               </div>
-              <div className="flex p-0.5 rounded-lg border text-[10px] font-bold" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                <button
-                  type="button"
-                  onClick={() => setPreviewInterval('MONTH')}
-                  className="px-2.5 py-1 rounded-md transition cursor-pointer"
-                  style={previewInterval === 'MONTH' ? {
-                    backgroundColor: 'var(--color-primary)',
-                    color: '#ffffff'
-                  } : {
-                    color: 'var(--color-text-secondary)'
-                  }}
-                >
-                  Monthly
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPreviewInterval('YEAR')}
-                  className="px-2.5 py-1 rounded-md transition cursor-pointer"
-                  style={previewInterval === 'YEAR' ? {
-                    backgroundColor: 'var(--color-primary)',
-                    color: '#ffffff'
-                  } : {
-                    color: 'var(--color-text-secondary)'
-                  }}
-                >
-                  Annual
-                </button>
-              </div>
+              <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full border shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                {plans.length} {t('plansCount', 'Plans')}
+              </span>
             </div>
 
-            {/* Mockup Card */}
-            <div 
-              className="p-5 rounded-2xl border space-y-4 relative shadow-inner"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="text-lg font-black" style={{ color: 'var(--color-text)' }}>
-                    {name || 'Plan Preview'}
-                  </h4>
-                  <p className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
-                    ID: {previewInterval === 'MONTH' ? (monthlyPlanId || 'plan_monthly') : (annualPlanId || 'plan_annual')}
-                  </p>
-                </div>
-                <span 
-                  className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full border shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-primary)',
-                    color: 'var(--color-primary)'
-                  }}
-                >
-                  {previewInterval === 'MONTH' ? (monthlyBadge || 'Monthly') : (annualBadge || 'Annual')}
-                </span>
-              </div>
-
-              {/* Price & Token Allowance Display */}
-              <div className="flex items-baseline gap-1">
-                <span className="text-3xl font-black" style={{ color: 'var(--color-text)' }}>
-                  {currencySymbol}{previewInterval === 'MONTH' 
-                    ? (isFree ? '0.00' : Number(monthlyPrice || 0).toFixed(2)) 
-                    : (isFree ? '0.00' : Number(annualPrice || 0).toFixed(2))}
-                </span>
-                <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                  /{previewInterval === 'MONTH' ? 'mo' : 'yr'}
-                </span>
-              </div>
-
-              {/* Token Allocation Badge in Card */}
-              <div className="flex items-center gap-2 p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
-                <Coins className="h-4 w-4 text-amber-500 shrink-0" />
-                <div className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
-                  <span>+{Number(tokenLimit || 0).toLocaleString()} {tokenSymbol}</span>{' '}
-                  <span className="text-[10px] font-normal" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('creditedUponPurchase', 'credited instantly on purchase')}
-                  </span>
-                </div>
-              </div>
-
-              {/* Features snippet */}
-              <ul className="space-y-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {featuresText.split(/\r?\n/).slice(0, 4).map((f, i) => (
-                  <li key={i} className="flex items-center gap-2">
-                    <Check className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-emerald)' }} />
-                    <span>{f}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-
-          <div className="pt-2 border-t text-[11px] flex items-center justify-between" style={{ borderColor: 'var(--color-border)' }}>
-            <span style={{ color: 'var(--color-text-secondary)' }}>Parent Group: {planGroupId || 'None'}</span>
-            <span className="font-mono font-bold" style={{ color: 'var(--color-emerald)' }}>PostgreSQL Synced</span>
-          </div>
-        </div>
-      </div>
-
-      {/* System Plans List with Token Badges & Actions */}
-      <div 
-        className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
-        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-      >
-        <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-          <div className="flex items-center gap-2">
-            <Layers className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-            <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-              {t('publishedPlansTable', 'Configured Subscription Plans in PostgreSQL')}
-            </h2>
-          </div>
-          <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full border shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-            {plans.length} {t('plansCount', 'Plans')}
-          </span>
-        </div>
-
-        <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b font-extrabold uppercase text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                <th className="p-3.5">Plan Name / Slug</th>
-                <th className="p-3.5">Interval IDs</th>
-                <th className="p-3.5">Pricing</th>
-                <th className="p-3.5">AI Token Allowance</th>
-                <th className="p-3.5 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
-              {loading ? (
-                <tr>
-                  <td colSpan={5} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    <RefreshCw className="h-4 w-4 animate-spin inline mr-2" style={{ color: 'var(--color-primary)' }} /> Loading plans...
-                  </td>
-                </tr>
-              ) : plans.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                    No subscription plans configured yet.
-                  </td>
-                </tr>
-              ) : (
-                plans.map((p) => {
-                  const isProtected = p.isDefault || p.slug === 'taster' || p.id === 'preset_taster';
-                  return (
-                    <tr key={p.id} className="hover:bg-slate-500/5 transition">
-                      <td className="p-3.5">
-                        <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{p.name}</div>
-                        <div className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>{p.slug}</div>
-                      </td>
-
-                      <td className="p-3.5">
-                        <div className="space-y-0.5 text-[10px] font-mono">
-                          <div style={{ color: '#60a5fa' }}>M: {p.monthlyPlanId || `plan_${p.slug}_monthly`}</div>
-                          <div style={{ color: '#c084fc' }}>A: {p.annualPlanId || `plan_${p.slug}_annual`}</div>
-                        </div>
-                      </td>
-
-                      <td className="p-3.5 font-mono font-bold">
-                        {p.isFree ? (
-                          <span className="font-bold" style={{ color: 'var(--color-emerald)' }}>Free</span>
-                        ) : (
-                          <div>
-                            <div>{currencySymbol}{Number(p.monthlyPriceDollars || 0).toFixed(2)}/mo</div>
-                            <div className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                              {currencySymbol}{Number(p.annualPriceDollars || 0).toFixed(2)}/yr
-                            </div>
-                          </div>
-                        )}
-                      </td>
-
-                      <td className="p-3.5">
-                        <span 
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black border font-mono shadow-xs"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-primary)'
-                          }}
-                        >
-                          <Coins className="h-3 w-3 text-amber-500" /> +{Number(p.tokenLimit ?? 500).toLocaleString()} {tokenSymbol}
-                        </span>
-                      </td>
-
-                      <td className="p-3.5 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleEdit(p)}
-                            className="px-3 py-1.5 rounded-lg border text-xs font-bold transition hover:opacity-80 cursor-pointer flex items-center gap-1 shadow-xs"
-                            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
-                          >
-                            <Edit3 className="h-3.5 w-3.5" />
-                            <span>{t('edit', 'Edit')}</span>
-                          </button>
-
-                          {!isProtected && (
-                            <button
-                              type="button"
-                              disabled={deletingId === p.id}
-                              onClick={() => handleDeletePlan(p)}
-                              className="px-2.5 py-1.5 rounded-lg border text-xs font-bold transition hover:bg-red-500/10 text-red-400 border-red-500/30 hover:text-red-300 cursor-pointer disabled:opacity-50 flex items-center gap-1 shadow-xs"
-                              style={{ backgroundColor: 'var(--color-inner-dark)' }}
-                              title={t('deletePlan', 'Delete Plan')}
-                            >
-                              {deletingId === p.id ? (
-                                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-3.5 w-3.5" />
-                              )}
-                              <span className="hidden sm:inline">{t('delete', 'Delete')}</span>
-                            </button>
-                          )}
-                        </div>
+            <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b font-extrabold uppercase text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                    <th className="p-3.5">Plan Name / Slug</th>
+                    <th className="p-3.5">Interval IDs</th>
+                    <th className="p-3.5">Pricing</th>
+                    <th className="p-3.5">AI Token Allowance</th>
+                    <th className="p-3.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={5} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                        <RefreshCw className="h-4 w-4 animate-spin inline mr-2" style={{ color: 'var(--color-primary)' }} /> Loading plans...
                       </td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                  ) : plans.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                        No subscription plans configured yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    plans.map((p) => {
+                      const isProtected = p.isDefault || p.slug === 'taster' || p.id === 'preset_taster';
+                      return (
+                        <tr key={p.id} className="hover:bg-slate-500/5 transition">
+                          <td className="p-3.5">
+                            <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{p.name}</div>
+                            <div className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>{p.slug}</div>
+                          </td>
+
+                          <td className="p-3.5">
+                            <div className="space-y-0.5 text-[10px] font-mono">
+                              <div style={{ color: '#60a5fa' }}>M: {p.monthlyPlanId || `plan_${p.slug}_monthly`}</div>
+                              <div style={{ color: '#c084fc' }}>A: {p.annualPlanId || `plan_${p.slug}_annual`}</div>
+                            </div>
+                          </td>
+
+                          <td className="p-3.5 font-mono font-bold">
+                            {p.isFree ? (
+                              <span className="font-bold" style={{ color: 'var(--color-emerald)' }}>Free</span>
+                            ) : (
+                              <div>
+                                <div>{currencySymbol}{Number(p.monthlyPriceDollars || 0).toFixed(2)}/mo</div>
+                                <div className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                                  {currencySymbol}{Number(p.annualPriceDollars || 0).toFixed(2)}/yr
+                                </div>
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="p-3.5">
+                            <span 
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black border font-mono shadow-xs"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-primary)'
+                              }}
+                            >
+                              <Coins className="h-3 w-3 text-amber-500" /> +{Number(p.tokenLimit ?? 500).toLocaleString()} {tokenSymbol}
+                            </span>
+                          </td>
+
+                          <td className="p-3.5 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleEdit(p)}
+                                className="px-3 py-1.5 rounded-lg border text-xs font-bold transition hover:opacity-80 cursor-pointer flex items-center gap-1 shadow-xs"
+                                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
+                              >
+                                <Edit3 className="h-3.5 w-3.5" />
+                                <span>{t('edit', 'Edit')}</span>
+                              </button>
+
+                              {!isProtected && (
+                                <button
+                                  type="button"
+                                  disabled={deletingId === p.id}
+                                  onClick={() => handleDeletePlan(p)}
+                                  className="px-2.5 py-1.5 rounded-lg border text-xs font-bold transition hover:bg-red-500/10 text-red-400 border-red-500/30 hover:text-red-300 cursor-pointer disabled:opacity-50 flex items-center gap-1 shadow-xs"
+                                  style={{ backgroundColor: 'var(--color-inner-dark)' }}
+                                  title={t('deletePlan', 'Delete Plan')}
+                                >
+                                  {deletingId === p.id ? (
+                                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  )}
+                                  <span className="hidden sm:inline">{t('delete', 'Delete')}</span>
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* TAB 2: PLAN TRANSACTIONS (MATCHING /admin/payment HISTORY) */}
+      {/* ========================================================= */}
+      {activeMainTab === 'transactions' && (
+        <div className="space-y-6">
+          {/* Quick Metrics Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="border rounded-2xl p-4 shadow-sm" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+              <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('totalVolume', 'Total Volume')}
+              </div>
+              <div className="text-xl font-black mt-1" style={{ color: 'var(--color-emerald)' }}>
+                {currencySymbol}{transactions
+                  .filter((tItem) => isSucceeded(tItem.status))
+                  .reduce((acc, curr) => acc + (curr.amount || 0), 0)
+                  .toFixed(2)}
+              </div>
+            </div>
+
+            <div className="border rounded-2xl p-4 shadow-sm" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+              <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('succeededCount', 'Succeeded')}
+              </div>
+              <div className="text-xl font-black mt-1" style={{ color: 'var(--color-primary)' }}>
+                {transactions.filter((tItem) => isSucceeded(tItem.status)).length}
+              </div>
+            </div>
+
+            <div className="border rounded-2xl p-4 shadow-sm" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+              <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('activeRecurring', 'Auto-Renew ON')}
+              </div>
+              <div className="text-xl font-black mt-1 text-blue-400">
+                {transactions.filter((tItem) => tItem.autoRenew && isSucceeded(tItem.status)).length}
+              </div>
+            </div>
+
+            <div className="border rounded-2xl p-4 shadow-sm" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+              <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('refundedOrCanceled', 'Canceled / Refunded')}
+              </div>
+              <div className="text-xl font-black mt-1 text-amber-500">
+                {transactions.filter((tItem) => isCanceled(tItem.status) || isRefunded(tItem.status)).length}
+              </div>
+            </div>
+          </div>
+
+          {/* Table Container */}
+          <div 
+            className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            {/* Search and Filters Toolbar */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="relative flex-1">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 opacity-40" />
+                <input
+                  type="text"
+                  placeholder={t('searchTransactionsPlaceholder', 'Search customer, email, plan, or ID...')}
+                  value={txSearchQuery}
+                  onChange={(e) => {
+                    setTxSearchQuery(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="w-full pl-10 pr-4 py-2 rounded-xl border text-xs outline-none transition"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <select
+                  value={statusFilter}
+                  onChange={(e) => {
+                    setStatusFilter(e.target.value as any);
+                    setCurrentPage(1);
+                  }}
+                  className="px-3 py-2 rounded-xl border text-xs font-bold outline-none cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                >
+                  <option value="all">{t('allStatuses', 'All Statuses')}</option>
+                  <option value="succeeded">{t('succeeded', 'Succeeded')}</option>
+                  <option value="canceled">{t('canceled', 'Canceled')}</option>
+                  <option value="refunded">{t('refunded', 'Refunded')}</option>
+                  <option value="failed">{t('failed', 'Failed')}</option>
+                  <option value="pending">{t('pending', 'Pending')}</option>
+                </select>
+
+                <select
+                  value={gatewayFilter}
+                  onChange={(e) => {
+                    setGatewayFilter(e.target.value as any);
+                    setCurrentPage(1);
+                  }}
+                  className="px-3 py-2 rounded-xl border text-xs font-bold outline-none cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                >
+                  <option value="all">{t('allGateways', 'All Gateways')}</option>
+                  <option value="stripe">Stripe</option>
+                  <option value="paypal">PayPal</option>
+                  <option value="manual">Manual</option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={fetchTransactions}
+                  disabled={loadingTransactions}
+                  className="p-2 rounded-xl border transition cursor-pointer hover:opacity-80"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  title={t('refreshTransactions', 'Refresh Transactions')}
+                >
+                  <RefreshCw className={`h-4 w-4 ${loadingTransactions ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+            </div>
+
+            {/* Transactions Table */}
+            <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b font-extrabold uppercase text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                    <th className="p-3.5">{t('colDate', 'Date')}</th>
+                    <th className="p-3.5">{t('colCustomer', 'Customer')}</th>
+                    <th className="p-3.5">{t('colPlan', 'Plan')}</th>
+                    <th className="p-3.5">{t('colAmount', 'Amount')}</th>
+                    <th className="p-3.5">{t('colGateway', 'Gateway')}</th>
+                    <th className="p-3.5">{t('colStatus', 'Status')}</th>
+                    <th className="p-3.5">{t('colRecurring', 'Auto-Renew')}</th>
+                    <th className="p-3.5">{t('colExpiry', 'Billing Expiry')}</th>
+                    <th className="p-3.5 text-right">{t('colActions', 'Actions')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
+                  {loadingTransactions ? (
+                    <tr>
+                      <td colSpan={9} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                        <RefreshCw className="h-4 w-4 animate-spin inline mr-2" style={{ color: 'var(--color-primary)' }} /> Loading plan transactions...
+                      </td>
+                    </tr>
+                  ) : paginatedTransactions.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                        No subscription plan transactions found.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedTransactions.map((tx) => {
+                      const succeeded = isSucceeded(tx.status);
+                      const canceled = isCanceled(tx.status);
+                      const refunded = isRefunded(tx.status);
+                      const failed = isFailed(tx.status);
+
+                      return (
+                        <tr key={tx.id} className="hover:bg-slate-500/5 transition">
+                          <td className="p-3.5 font-mono text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                            {new Date(tx.createdAt).toLocaleDateString()}
+                          </td>
+
+                          <td className="p-3.5">
+                            <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{tx.customerName}</div>
+                            <div className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>{tx.customerEmail}</div>
+                          </td>
+
+                          <td className="p-3.5">
+                            <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{tx.planName}</div>
+                            {tx.planSlug && (
+                              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                                {tx.planSlug}
+                              </span>
+                            )}
+                          </td>
+
+                          <td className="p-3.5 font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
+                            {currencySymbol}{Number(tx.amount || 0).toFixed(2)}
+                            <span className="text-[10px] font-normal ml-1 opacity-70">{tx.currency}</span>
+                          </td>
+
+                          <td className="p-3.5 uppercase font-bold text-[10px] tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
+                            {tx.gateway}
+                          </td>
+
+                          <td className="p-3.5">
+                            {succeeded && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border border-emerald-500/30 text-emerald-400 bg-emerald-500/10">
+                                <CheckCircle className="h-3 w-3" /> Succeeded
+                              </span>
+                            )}
+                            {canceled && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border border-orange-500/30 text-orange-400 bg-orange-500/10">
+                                <Ban className="h-3 w-3" /> Canceled
+                              </span>
+                            )}
+                            {refunded && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border border-amber-500/30 text-amber-400 bg-amber-500/10">
+                                <RefreshCw className="h-3 w-3" /> Refunded
+                              </span>
+                            )}
+                            {failed && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border border-red-500/30 text-red-400 bg-red-500/10">
+                                <AlertTriangle className="h-3 w-3" /> Failed
+                              </span>
+                            )}
+                            {!succeeded && !canceled && !refunded && !failed && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border border-slate-500/30 text-slate-400 bg-slate-500/10">
+                                {tx.status}
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Inline Auto-Renew Toggle */}
+                          <td className="p-3.5">
+                            <button
+                              type="button"
+                              disabled={togglingTxId === tx.id}
+                              onClick={() => handleToggleRecurring(tx)}
+                              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                tx.autoRenew ? 'bg-emerald-500' : 'bg-slate-700'
+                              }`}
+                              title={tx.autoRenew ? 'Click to disable auto-renewal' : 'Click to enable auto-renewal'}
+                            >
+                              <span
+                                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                                  tx.autoRenew ? 'translate-x-4' : 'translate-x-0'
+                                }`}
+                              />
+                            </button>
+                          </td>
+
+                          <td className="p-3.5 font-mono text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                            {tx.expiryDate ? new Date(tx.expiryDate).toLocaleDateString() : '—'}
+                          </td>
+
+                          <td className="p-3.5 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditModal(tx)}
+                                className="p-1.5 rounded-lg border transition hover:opacity-80 cursor-pointer shadow-xs"
+                                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
+                                title={t('edit', 'Edit')}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTransaction(tx)}
+                                className="p-1.5 rounded-lg border transition hover:bg-red-500/10 text-red-400 border-red-500/30 hover:text-red-300 cursor-pointer shadow-xs"
+                                style={{ backgroundColor: 'var(--color-inner-dark)' }}
+                                title={t('delete', 'Delete')}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs pt-2" style={{ color: 'var(--color-text-secondary)' }}>
+              <span>
+                {t('showingCount', 'Showing')} {Math.min(filteredTransactions.length, (currentPage - 1) * pageSize + 1)} - {Math.min(filteredTransactions.length, currentPage * pageSize)} {t('ofTotal', 'of')} {filteredTransactions.length}
+              </span>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage <= 1}
+                  className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer hover:opacity-80"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+                <span className="px-2 font-mono font-bold">
+                  {currentPage} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage >= totalPages}
+                  className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer hover:opacity-80"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: ADD PAYMENT TRANSACTION                           */}
+      {/* ========================================================= */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div 
+            className="w-full max-w-lg rounded-3xl border p-6 space-y-4 shadow-2xl relative animate-in fade-in zoom-in-95"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 className="text-sm font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Plus className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                <span>{t('recordPaymentModalTitle', 'Record Plan Payment & Activate')}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="p-1 rounded-lg border hover:opacity-80 transition cursor-pointer"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {modalError && (
+              <div className="p-3 border rounded-xl text-xs text-red-400 border-red-500/30 bg-red-500/10">
+                {modalError}
+              </div>
+            )}
+
+            <div className="space-y-3 text-xs">
+              <div className="space-y-1">
+                <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('selectCustomerLabel', 'Select Registered User')}
+                </label>
+                <select
+                  value={selectedUserId}
+                  onChange={(e) => setSelectedUserId(e.target.value)}
+                  className="w-full border rounded-xl px-3.5 py-2.5 font-bold outline-none cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                >
+                  {registeredUsers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} ({u.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('selectPlanTierLabel', 'Select Subscription Plan')}
+                </label>
+                <select
+                  value={selectedPlanSlug}
+                  onChange={(e) => handlePlanSelectChange(e.target.value)}
+                  className="w-full border rounded-xl px-3.5 py-2.5 font-bold outline-none cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                >
+                  {availablePlanOptions.map((opt) => (
+                    <option key={opt.slug} value={opt.slug}>
+                      {opt.name} — {opt.priceFormatted}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('amountLabel', 'Payment Amount')} ({currencySymbol})
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(parseFloat(e.target.value) || 0)}
+                    className="w-full border rounded-xl px-3.5 py-2.5 font-mono font-bold outline-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('gatewayLabel', 'Payment Gateway')}
+                  </label>
+                  <select
+                    value={paymentGateway}
+                    onChange={(e) => setPaymentGateway(e.target.value as any)}
+                    className="w-full border rounded-xl px-3.5 py-2.5 font-bold outline-none cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  >
+                    <option value="stripe">Stripe</option>
+                    <option value="paypal">PayPal</option>
+                    <option value="manual">Manual / Bank</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('paymentDateLabel', 'Payment Date')}
+                  </label>
+                  <input
+                    type="date"
+                    value={paymentDate}
+                    onChange={(e) => {
+                      setPaymentDate(e.target.value);
+                      const matched = availablePlanOptions.find((p) => p.slug === selectedPlanSlug);
+                      if (matched) {
+                        setPaymentExpiryDate(calculateDefaultExpiry(e.target.value, matched.interval || 'MONTH'));
+                      }
+                    }}
+                    className="w-full border rounded-xl px-3.5 py-2 font-mono outline-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('expiryDateLabel', 'Billing Expiry Date')}
+                  </label>
+                  <input
+                    type="date"
+                    value={paymentExpiryDate}
+                    onChange={(e) => setPaymentExpiryDate(e.target.value)}
+                    className="w-full border rounded-xl px-3.5 py-2 font-mono outline-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <label className="flex items-center gap-2 cursor-pointer select-none font-bold">
+                  <input
+                    type="checkbox"
+                    checked={isPaymentRecurring}
+                    onChange={(e) => setIsPaymentRecurring(e.target.checked)}
+                    className="rounded w-4 h-4 cursor-pointer accent-[#10b981]"
+                  />
+                  <span>{t('recurringRenewalLabel', 'Recurring Auto-Renew Enabled')}</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold border transition cursor-pointer hover:opacity-80"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+              >
+                {t('cancel', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                disabled={modalSubmitting}
+                onClick={handleSaveAddPayment}
+                className="px-5 py-2 rounded-xl text-xs font-extrabold text-white transition cursor-pointer shadow-lg disabled:opacity-50 flex items-center gap-2"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {modalSubmitting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                <span>{t('recordPaymentBtn', 'Record & Sync PostgreSQL')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: EDIT PAYMENT TRANSACTION                          */}
+      {/* ========================================================= */}
+      {showEditModal && editingTx && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div 
+            className="w-full max-w-lg rounded-3xl border p-6 space-y-4 shadow-2xl relative animate-in fade-in zoom-in-95"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 className="text-sm font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Pencil className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                <span>{t('editPaymentModalTitle', 'Edit Transaction Record')}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowEditModal(false)}
+                className="p-1 rounded-lg border hover:opacity-80 transition cursor-pointer"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {modalError && (
+              <div className="p-3 border rounded-xl text-xs text-red-400 border-red-500/30 bg-red-500/10">
+                {modalError}
+              </div>
+            )}
+
+            <div className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Customer Name</label>
+                  <input
+                    type="text"
+                    value={editCustomerName}
+                    onChange={(e) => setEditCustomerName(e.target.value)}
+                    className="w-full border rounded-xl px-3 py-2 font-bold outline-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Customer Email</label>
+                  <input
+                    type="email"
+                    value={editCustomerEmail}
+                    onChange={(e) => setEditCustomerEmail(e.target.value)}
+                    className="w-full border rounded-xl px-3 py-2 font-mono outline-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Plan Name</label>
+                  <input
+                    type="text"
+                    value={editPlanName}
+                    onChange={(e) => setEditPlanName(e.target.value)}
+                    className="w-full border rounded-xl px-3 py-2 font-bold outline-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Plan Slug</label>
+                  <input
+                    type="text"
+                    value={editPlanSlug}
+                    onChange={(e) => setEditPlanSlug(e.target.value)}
+                    className="w-full border rounded-xl px-3 py-2 font-mono outline-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Amount</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editAmount}
+                    onChange={(e) => setEditAmount(parseFloat(e.target.value) || 0)}
+                    className="w-full border rounded-xl px-3 py-2 font-mono font-bold outline-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Gateway</label>
+                  <select
+                    value={editGateway}
+                    onChange={(e) => setEditGateway(e.target.value)}
+                    className="w-full border rounded-xl px-3 py-2 font-bold outline-none cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  >
+                    <option value="stripe">Stripe</option>
+                    <option value="paypal">PayPal</option>
+                    <option value="manual">Manual</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Status</label>
+                  <select
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value)}
+                    className="w-full border rounded-xl px-3 py-2 font-bold outline-none cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  >
+                    <option value="succeeded">Succeeded</option>
+                    <option value="canceled">Canceled</option>
+                    <option value="refunded">Refunded</option>
+                    <option value="failed">Failed</option>
+                    <option value="pending">Pending</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Created Date</label>
+                  <input
+                    type="date"
+                    value={editDate}
+                    onChange={(e) => setEditDate(e.target.value)}
+                    className="w-full border rounded-xl px-3 py-2 font-mono outline-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Expiry Date</label>
+                  <input
+                    type="date"
+                    value={editExpiryDate}
+                    onChange={(e) => setEditExpiryDate(e.target.value)}
+                    className="w-full border rounded-xl px-3 py-2 font-mono outline-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <label className="flex items-center gap-2 cursor-pointer select-none font-bold">
+                  <input
+                    type="checkbox"
+                    checked={editIsRecurring}
+                    onChange={(e) => setEditIsRecurring(e.target.checked)}
+                    className="rounded w-4 h-4 cursor-pointer accent-[#10b981]"
+                  />
+                  <span>{t('recurringRenewalLabel', 'Recurring Auto-Renew Enabled')}</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setShowEditModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold border transition cursor-pointer hover:opacity-80"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+              >
+                {t('cancel', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                disabled={modalSubmitting}
+                onClick={handleSaveEditPayment}
+                className="px-5 py-2 rounded-xl text-xs font-extrabold text-white transition cursor-pointer shadow-lg disabled:opacity-50 flex items-center gap-2"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {modalSubmitting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                <span>{t('updateRecordBtn', 'Update & Save Changes')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -23595,4725 +24811,10 @@ export default function RecipeTypeAdminPage() {
 
 ## File: `apps/web/src/app/admin/payment/page.tsx`
 ```typescript
-'use client';
+import { redirect } from 'next/navigation';
 
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import Link from 'next/link';
-import { 
-  CreditCard, Shield, CheckCircle2, AlertCircle, Save, 
-  RefreshCw, Search, ArrowDownLeft, XCircle, 
-  Check, Eye, EyeOff, Globe, Zap, History, Sliders, Filter,
-  PlusCircle, X, User as UserIcon, Activity, Calendar,
-  Pencil, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  ShieldAlert, Ban, ArrowUpRight, AlertTriangle, Repeat, RotateCcw,
-  ShieldCheck, CheckCheck, Columns3, Coins, Copy, Terminal, ExternalLink, Code2
-} from 'lucide-react';
-import { useTranslation } from '@/components/LanguageProvider';
-import { 
-  purgeLegacyBrowserAdminStorage, 
-  fetchServerAdminSettings, 
-  persistServerAdminSettings 
-} from '@/lib/adminSync';
-
-interface PaymentTransaction {
-  id: string;
-  customerName: string;
-  customerEmail: string;
-  planName: string;
-  planSlug?: string;
-  amount: number;
-  currency: string;
-  gateway: 'stripe' | 'paypal' | 'manual';
-  status: 'succeeded' | 'failed' | 'refunded' | 'pending' | 'canceled';
-  failureReason?: string;
-  testMode?: boolean;
-  createdAt: string;
-  expiryDate?: string;
-  isRecurring?: boolean;
-  recurringInterval?: 'MONTH' | 'YEAR';
-  autoRenew?: boolean;
-  gatewayTransactionId?: string;
-  confirmedAmount?: number;
-  confirmedAt?: string;
-}
-
-interface GatewayConfig {
-  activeGateway: 'stripe' | 'paypal' | 'both';
-  currency: string;
-  testMode: boolean;
-  stripeConnected?: boolean;
-  stripeKeysVerified?: boolean;
-  stripeWebhookVerified?: boolean;
-  stripe: {
-    enabled: boolean;
-    publishableKey: string;
-    secretKey: string;
-    webhookSecret: string;
-  };
-  paypal: {
-    enabled: boolean;
-    clientId: string;
-    clientSecret: string;
-    webhookId: string;
-    environment: 'sandbox' | 'live';
-  };
-}
-
-interface PlanOption {
-  id: string;
-  name: string;
-  slug: string;
-  priceFormatted: string;
-  priceDollars: number;
-  interval?: string;
-  isFree?: boolean;
-  tokenLimit?: number;
-}
-
-interface AppUser {
-  id: string;
-  name: string;
-  email: string;
-  role: 'admin' | 'user';
-  subscriptionPlan?: string;
-}
-
-const SUPPORTED_CURRENCIES = [
-  { code: 'USD', label: 'USD - United States Dollar ($)', symbol: '$' },
-  { code: 'EUR', label: 'EUR - Euro (€)', symbol: '€' },
-  { code: 'GBP', label: 'GBP - British Pound (£)', symbol: '£' },
-  { code: 'CAD', label: 'CAD - Canadian Dollar ($)', symbol: 'CA$' },
-  { code: 'AUD', label: 'AUD - Australian Dollar ($)', symbol: 'A$' },
-  { code: 'JPY', label: 'JPY - Japanese Yen (¥)', symbol: '¥' },
-  { code: 'SGD', label: 'SGD - Singapore Dollar ($)', symbol: 'S$' },
-  { code: 'CHF', label: 'CHF - Swiss Franc (Fr)', symbol: 'Fr' },
-  { code: 'NZD', label: 'NZD - New Zealand Dollar ($)', symbol: 'NZ$' },
-  { code: 'THB', label: 'THB - Thai Baht (฿)', symbol: '฿' },
-];
-
-const DEFAULT_COLUMNS = {
-  customer: true,
-  plan: true,
-  amount: true,
-  status: true,
-  recurring: true,
-  date: true,
-  expiryDate: true,
-  actions: true,
-};
-
-const sanitizeSinglePlan = (planInput?: string | string[]): string => {
-  if (!planInput) return 'taster';
-  if (Array.isArray(planInput)) return planInput[0] ? String(planInput[0]).trim() : 'taster';
-  if (typeof planInput === 'string') {
-    if (planInput.includes(',')) {
-      const parts = planInput.split(',').map(s => s.trim()).filter(Boolean);
-      return parts[0] || 'taster';
-    }
-    return planInput.trim() || 'taster';
-  }
-  return 'taster';
-};
-
-const parseAmount = (val: any): number => {
-  if (typeof val === 'number') return isNaN(val) ? 0 : val;
-  if (!val) return 0;
-  const cleaned = String(val).replace(/[^0-9.-]+/g, '');
-  const num = parseFloat(cleaned);
-  return isNaN(num) ? 0 : num;
-};
-
-const isSucceeded = (status?: string): boolean => {
-  if (!status) return false;
-  const s = String(status).toLowerCase().trim();
-  return s === 'succeeded' || s === 'succeded' || s === 'success' || s === 'paid' || s === 'completed';
-};
-
-const isRefunded = (status?: string): boolean => {
-  if (!status) return false;
-  const s = String(status).toLowerCase().trim();
-  return s === 'refunded' || s === 'refund';
-};
-
-const isCanceled = (status?: string): boolean => {
-  if (!status) return false;
-  const s = String(status).toLowerCase().trim();
-  return s === 'canceled' || s === 'cancelled';
-};
-
-const isFailed = (status?: string): boolean => {
-  if (!status) return false;
-  const s = String(status).toLowerCase().trim();
-  return s === 'failed' || s === 'declined' || s === 'fail' || s === 'error';
-};
-
-const isPending = (status?: string): boolean => {
-  if (!status) return false;
-  const s = String(status).toLowerCase().trim();
-  return s === 'pending' || s === 'processing';
-};
-
-const calculateDefaultExpiry = (startDateStr: string, interval?: string): string => {
-  if (!interval) return '';
-  const date = startDateStr ? new Date(startDateStr) : new Date();
-  if (isNaN(date.getTime())) return '';
-  if (interval === 'MONTH') {
-    date.setMonth(date.getMonth() + 1);
-    return date.toISOString().slice(0, 10);
-  }
-  if (interval === 'YEAR') {
-    date.setFullYear(date.getFullYear() + 1);
-    return date.toISOString().slice(0, 10);
-  }
-  return '';
-};
-
-const normalizeTransaction = (raw: any, defaultCurrency: string): PaymentTransaction => {
-  const rawRecurring = raw.isRecurring !== undefined ? raw.isRecurring : raw.is_recurring;
-  const isRecurring = rawRecurring !== undefined 
-    ? (rawRecurring === true || rawRecurring === 'true' || rawRecurring === 't' || rawRecurring === 1 || rawRecurring === '1')
-    : true;
-
-  const rawAutoRenew = raw.autoRenew !== undefined ? raw.autoRenew : raw.auto_renew;
-  const autoRenew = rawAutoRenew !== undefined 
-    ? (rawAutoRenew === true || rawAutoRenew === 'true' || rawAutoRenew === 't' || rawAutoRenew === 1 || rawAutoRenew === '1')
-    : isRecurring;
-
-  return {
-    id: String(raw.id || 'tx_' + Math.random().toString(36).substring(2, 8)),
-    customerName: String(raw.customerName || raw.customer_name || 'Customer'),
-    customerEmail: String(raw.customerEmail || raw.customer_email || '').toLowerCase().trim(),
-    planName: String(raw.planName || raw.plan_name || 'Plan'),
-    planSlug: sanitizeSinglePlan(raw.planSlug || raw.plan_slug || ''),
-    amount: parseAmount(raw.amount),
-    currency: String(raw.currency || defaultCurrency || 'USD'),
-    gateway: (raw.gateway || 'stripe') as any,
-    status: (raw.status || 'succeeded') as any,
-    failureReason: raw.failureReason || raw.failure_reason || undefined,
-    testMode: Boolean(raw.testMode !== undefined ? raw.testMode : raw.test_mode),
-    createdAt: raw.createdAt || raw.created_at || new Date().toISOString(),
-    expiryDate: raw.expiryDate || raw.expiry_date || undefined,
-    isRecurring,
-    recurringInterval: raw.recurringInterval || raw.recurring_interval || (String(raw.planSlug || raw.plan_slug || '').includes('annual') ? 'YEAR' : 'MONTH'),
-    autoRenew,
-    gatewayTransactionId: raw.gatewayTransactionId || raw.gateway_transaction_id || raw.transaction_id || undefined,
-    confirmedAmount: raw.confirmedAmount !== undefined ? parseAmount(raw.confirmedAmount) : (raw.confirmed_amount !== undefined ? parseAmount(raw.confirmed_amount) : undefined),
-    confirmedAt: raw.confirmedAt || raw.confirmed_at || undefined,
-  };
-};
-
-export default function AdminPaymentPage() {
-  const langContext = useTranslation();
-  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
-  const version = langContext?.version;
-
-  const [activeTab, setActiveTab] = useState<'history' | 'settings'>('history');
-  const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
-  const [availablePlans, setAvailablePlans] = useState<PlanOption[]>([]);
-  const [registeredUsers, setRegisteredUsers] = useState<AppUser[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [verifyingStripe, setVerifyingStripe] = useState(false);
-  const [verifyingWebhook, setVerifyingWebhook] = useState(false);
-  const [copiedWebhook, setCopiedWebhook] = useState(false);
-  const [showStripeGuideModal, setShowStripeGuideModal] = useState(false);
-  const [copiedCliKey, setCopiedCliKey] = useState<string | null>(null);
-  const [webhookEndpointUrl, setWebhookEndpointUrl] = useState('');
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
-  const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
-  const [refundingTxId, setRefundingTxId] = useState<string | null>(null);
-  const [togglingTxId, setTogglingTxId] = useState<string | null>(null);
-
-  // Table Column Visibility State
-  const [visibleColumns, setVisibleColumns] = useState<Record<string, boolean>>(DEFAULT_COLUMNS);
-  const [showColumnPopup, setShowColumnPopup] = useState<boolean>(false);
-  const columnPopupRef = useRef<HTMLDivElement>(null);
-
-  // Selection state
-  const [selectedTxIds, setSelectedTxIds] = useState<string[]>([]);
-
-  // Filter States
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'succeeded' | 'failed' | 'refunded' | 'pending' | 'canceled'>('all');
-  const [gatewayFilter, setGatewayFilter] = useState<'all' | 'stripe' | 'paypal' | 'manual'>('all');
-
-  // Pagination States
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-
-  // Gateway Settings State
-  const [config, setConfig] = useState<GatewayConfig>({
-    activeGateway: 'stripe',
-    currency: 'USD',
-    testMode: true,
-    stripeConnected: false,
-    stripeKeysVerified: false,
-    stripeWebhookVerified: false,
-    stripe: {
-      enabled: true,
-      publishableKey: '',
-      secretKey: '',
-      webhookSecret: '',
-    },
-    paypal: {
-      enabled: false,
-      clientId: '',
-      clientSecret: '',
-      webhookId: '',
-      environment: 'sandbox',
-    },
-  });
-
-  const transactionsRef = useRef<PaymentTransaction[]>([]);
-  const configRef = useRef<GatewayConfig>(config);
-  const isFetchingRef = useRef<boolean>(false);
-
-  useEffect(() => {
-    transactionsRef.current = transactions;
-  }, [transactions]);
-
-  useEffect(() => {
-    configRef.current = config;
-  }, [config]);
-
-  // Load Saved Column Visibility Preferences
-  useEffect(() => {
-    try {
-      const savedLocal = typeof window !== 'undefined' ? localStorage.getItem('zecratary_payment_columns') : null;
-      if (savedLocal) {
-        const parsed = JSON.parse(savedLocal);
-        setVisibleColumns((prev) => ({ ...prev, ...parsed }));
-      }
-      fetchServerAdminSettings().then((serverData) => {
-        const remoteCols = serverData?.settings?.paymentTableColumns || serverData?.paymentTableColumns;
-        if (remoteCols && typeof remoteCols === 'object') {
-          setVisibleColumns((prev) => ({ ...prev, ...remoteCols }));
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('zecratary_payment_columns', JSON.stringify(remoteCols));
-          }
-        }
-      }).catch(() => {});
-    } catch (_) {}
-  }, []);
-
-  // Click outside to dismiss column popup
-  useEffect(() => {
-    const handlePointerDown = (event: MouseEvent) => {
-      if (columnPopupRef.current && !columnPopupRef.current.contains(event.target as Node)) {
-        setShowColumnPopup(false);
-      }
-    };
-    if (showColumnPopup) {
-      document.addEventListener('mousedown', handlePointerDown);
-    }
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-    };
-  }, [showColumnPopup]);
-
-  const toggleColumnVisibility = async (colKey: string) => {
-    const nextState = {
-      ...visibleColumns,
-      [colKey]: !visibleColumns[colKey]
-    };
-    if (!Object.values(nextState).some(Boolean)) return;
-
-    setVisibleColumns(nextState);
-    try {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('zecratary_payment_columns', JSON.stringify(nextState));
-      }
-      await persistServerAdminSettings({ paymentTableColumns: nextState });
-    } catch (_) {}
-  };
-
-  const resetColumnVisibility = async () => {
-    setVisibleColumns(DEFAULT_COLUMNS);
-    try {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('zecratary_payment_columns', JSON.stringify(DEFAULT_COLUMNS));
-      }
-      await persistServerAdminSettings({ paymentTableColumns: DEFAULT_COLUMNS });
-    } catch (_) {}
-  };
-
-  const activeColumnCount = useMemo(() => {
-    let count = 1;
-    if (visibleColumns.customer) count++;
-    if (visibleColumns.plan) count++;
-    if (visibleColumns.amount) count++;
-    if (visibleColumns.status) count++;
-    if (visibleColumns.recurring) count++;
-    if (visibleColumns.date) count++;
-    if (visibleColumns.expiryDate) count++;
-    if (visibleColumns.actions) count++;
-    return count;
-  }, [visibleColumns]);
-
-  // Modal States
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [selectedUserId, setSelectedUserId] = useState('');
-  const [selectedPlanSlug, setSelectedPlanSlug] = useState('');
-  const [paymentAmount, setPaymentAmount] = useState<number>(0);
-  const [paymentGateway, setPaymentGateway] = useState<'stripe' | 'paypal' | 'manual'>('stripe');
-  const [paymentStatus, setPaymentStatus] = useState<'succeeded' | 'failed' | 'refunded' | 'pending' | 'canceled'>('succeeded');
-  const [paymentDate, setPaymentDate] = useState<string>(() => new Date().toISOString().slice(0, 10));
-  const [paymentExpiryDate, setPaymentExpiryDate] = useState<string>('');
-  const [isPaymentRecurring, setIsPaymentRecurring] = useState<boolean>(true);
-  const [failureReason, setFailureReason] = useState('');
-  const [syncUserPlan, setSyncUserPlan] = useState(true);
-  const [modalError, setModalError] = useState('');
-  const [addGatewayTxId, setAddGatewayTxId] = useState('');
-  const [addGatewayConfirmed, setAddGatewayConfirmed] = useState(true);
-
-  // Edit Modal States
-  const [editingTx, setEditingTx] = useState<PaymentTransaction | null>(null);
-  const [editCustomerName, setEditCustomerName] = useState('');
-  const [editCustomerEmail, setEditCustomerEmail] = useState('');
-  const [editPlanSlug, setEditPlanSlug] = useState('');
-  const [editPlanName, setEditPlanName] = useState('');
-  const [editAmount, setEditAmount] = useState<number>(0);
-  const [editGateway, setEditGateway] = useState<'stripe' | 'paypal' | 'manual'>('stripe');
-  const [editStatus, setEditStatus] = useState<'succeeded' | 'failed' | 'refunded' | 'pending' | 'canceled'>('succeeded');
-  const [editDate, setEditDate] = useState<string>('');
-  const [editExpiryDate, setEditExpiryDate] = useState<string>('');
-  const [editIsRecurring, setEditIsRecurring] = useState<boolean>(true);
-  const [editFailureReason, setEditFailureReason] = useState('');
-  const [editSyncUserPlan, setEditSyncUserPlan] = useState(false);
-  const [editGatewayTxId, setEditGatewayTxId] = useState('');
-  const [editGatewayConfirmed, setEditGatewayConfirmed] = useState(false);
-
-  // Confirm Gateway Modal States
-  const [confirmingTx, setConfirmingTx] = useState<PaymentTransaction | null>(null);
-  const [confirmGatewayTxId, setConfirmGatewayTxId] = useState('');
-  const [confirmAmount, setConfirmAmount] = useState<number>(0);
-  const [confirmCheckbox, setConfirmCheckbox] = useState(false);
-  const [confirmSyncPlan, setConfirmSyncPlan] = useState(true);
-  const [isSubmittingConfirm, setIsSubmittingConfirm] = useState(false);
-
-  useEffect(() => {
-    if (feedback) {
-      const timer = setTimeout(() => setFeedback(null), 4500);
-      return () => clearTimeout(timer);
-    }
-  }, [feedback]);
-
-  // Theme Synchronization
-  const handleModeChange = useCallback(() => {
-    try {
-      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const root = typeof document !== 'undefined' ? document.documentElement : null;
-      const day = mode === 'light' || mode === 'day' || (root && root.classList.contains('light'));
-      setIsDayMode(Boolean(day));
-    } catch (_) {}
-  }, []);
-
-  useEffect(() => {
-    handleModeChange();
-    window.addEventListener('zecratary_theme_mode_changed', handleModeChange);
-    window.addEventListener('zecratary_theme_changed', handleModeChange);
-    window.addEventListener('storage', handleModeChange);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', handleModeChange);
-      window.removeEventListener('zecratary_theme_changed', handleModeChange);
-      window.removeEventListener('storage', handleModeChange);
-    };
-  }, [handleModeChange]);
-
-  const getCurrencySymbol = useCallback((currencyCode?: string) => {
-    const code = currencyCode || configRef.current?.currency || 'USD';
-    const found = SUPPORTED_CURRENCIES.find((c) => c.code.toUpperCase() === code.toUpperCase());
-    return found ? found.symbol : '$';
-  }, []);
-
-  const activeCurrencySymbol = useMemo(() => {
-    return getCurrencySymbol(config.currency);
-  }, [config.currency, getCurrencySymbol]);
-
-  const allowedGateways = useMemo(() => {
-    const list: Array<{ id: 'stripe' | 'paypal' | 'manual'; label: string }> = [];
-    const stripeActive = config.activeGateway === 'stripe' || config.activeGateway === 'both' || config.stripe.enabled;
-    const paypalActive = config.activeGateway === 'paypal' || config.activeGateway === 'both' || config.paypal.enabled;
-
-    if (stripeActive) list.push({ id: 'stripe', label: `Stripe ${config.testMode ? `(${t('sandboxTest', 'Test Mode')})` : `(${t('liveProduction', 'Live')})`}` });
-    if (paypalActive) list.push({ id: 'paypal', label: `PayPal ${config.paypal.environment === 'sandbox' ? '(Sandbox)' : '(Live)'}` });
-    list.push({ id: 'manual', label: t('gatewayManual', 'Manual') });
-    return list;
-  }, [config, t]);
-
-  const toggleVisibility = (field: string) => {
-    setVisibleFields((prev) => ({ ...prev, [field]: !prev[field] }));
-  };
-
-  const loadPlans = useCallback(async (currencyOverride?: string) => {
-    let parsedPlans: PlanOption[] = [];
-    const symbol = getCurrencySymbol(currencyOverride || configRef.current.currency);
-    let rawPlansList: any[] = [];
-
-    try {
-      const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        const list = Array.isArray(data)
-          ? data
-          : (data.configs || data.plans || data.packages || data.subscriptionPlans || data.data);
-        if (Array.isArray(list) && list.length > 0) {
-          rawPlansList = [...list];
-        }
-      }
-    } catch (_) {}
-
-    if (rawPlansList.length > 0) {
-      rawPlansList.forEach((cfg: any) => {
-        if (!cfg) return;
-        const rawSlug = String(cfg.slug || cfg.id || '').toLowerCase().trim();
-        const baseSlug = rawSlug.replace(/-(monthly|annual|free)$/, '');
-        const rawName = String(cfg.name || baseSlug || '').trim();
-        const baseName = rawName.replace(/\s*\((Monthly|Annual|Free)\)/i, '').trim();
-
-        const isFreeTier = Boolean(
-          cfg.isFree === true || cfg.is_free === true || cfg.free === true ||
-          baseSlug === 'taster' || baseSlug === 'free'
-        );
-        if (isFreeTier) return;
-
-        const tokenLimit = cfg.tokenLimit !== undefined 
-          ? Number(cfg.tokenLimit) 
-          : (cfg.token_limit !== undefined ? Number(cfg.token_limit) : 500);
-
-        const monthlyPrice = Number(cfg.monthlyPriceDollars ?? cfg.monthly_price_dollars ?? (cfg.interval === 'MONTH' ? cfg.price : 0) ?? 0);
-        const annualPrice = Number(cfg.annualPriceDollars ?? cfg.annual_price_dollars ?? (cfg.interval === 'YEAR' ? cfg.price : 0) ?? 0);
-
-        if (monthlyPrice > 0) {
-          parsedPlans.push({
-            id: cfg.monthlyPlanId || `${cfg.id || baseSlug}-monthly`,
-            name: `${baseName} (Monthly)`,
-            slug: `${baseSlug}-monthly`,
-            priceFormatted: `${symbol}${monthlyPrice.toFixed(2)}/mo`,
-            priceDollars: monthlyPrice,
-            interval: 'MONTH',
-            isFree: false,
-            tokenLimit
-          });
-        }
-
-        if (annualPrice > 0) {
-          parsedPlans.push({
-            id: cfg.annualPlanId || `${cfg.id || baseSlug}-annual`,
-            name: `${baseName} (Annual)`,
-            slug: `${baseSlug}-annual`,
-            priceFormatted: `${symbol}${annualPrice.toFixed(2)}/yr`,
-            priceDollars: annualPrice,
-            interval: 'YEAR',
-            isFree: false,
-            tokenLimit
-          });
-        }
-      });
-    }
-
-    const validPricedPlans = parsedPlans.filter((p) => p.priceDollars > 0 && !p.isFree);
-    const uniquePlans: PlanOption[] = [];
-    const seenSlugs = new Set<string>();
-    for (const p of validPricedPlans) {
-      if (!seenSlugs.has(p.slug)) {
-        seenSlugs.add(p.slug);
-        uniquePlans.push(p);
-      }
-    }
-
-    const fallbackList: PlanOption[] = uniquePlans.length > 0 ? uniquePlans : [
-      { id: 'nutrition-pro-monthly', name: 'Nutrition Pro (Monthly)', slug: 'nutrition-pro-monthly', priceFormatted: `${symbol}8.99/mo`, priceDollars: 8.99, interval: 'MONTH', tokenLimit: 500 },
-      { id: 'nutrition-pro-annual', name: 'Nutrition Pro (Annual)', slug: 'nutrition-pro-annual', priceFormatted: `${symbol}59.99/yr`, priceDollars: 59.99, interval: 'YEAR', tokenLimit: 500 },
-    ];
-
-    setAvailablePlans(fallbackList);
-  }, [getCurrencySymbol]);
-
-  const validateAndSyncUserPlans = useCallback((usersList: AppUser[], txList: PaymentTransaction[]): AppUser[] => {
-    const now = new Date();
-    return usersList.map((u) => {
-      const currentPlan = sanitizeSinglePlan(u.subscriptionPlan);
-      if (currentPlan === 'taster' || currentPlan === 'free') {
-        return { ...u, subscriptionPlan: 'taster' };
-      }
-
-      const uEmail = (u.email || '').toLowerCase().trim();
-      const currentBase = currentPlan.replace(/-(monthly|annual|free)$/, '');
-
-      const userTx = txList.find((tx) => {
-        const txEmail = (tx.customerEmail || '').toLowerCase().trim();
-        const matchesEmail = txEmail === uEmail && txEmail !== '';
-        
-        const statusLower = String(tx.status || '').toLowerCase().trim();
-        const isValidStatus = isSucceeded(statusLower) || isCanceled(statusLower);
-        const notExpired = !tx.expiryDate || new Date(tx.expiryDate).getTime() > now.getTime();
-        
-        const txSlug = sanitizeSinglePlan((tx.planSlug || tx.plan_slug || 'taster'));
-        const txBase = txSlug.replace(/-(monthly|annual|free)$/, '');
-
-        const matchesPlan = (txSlug === currentPlan) || 
-                            (txBase === currentBase && currentBase !== '') ||
-                            (tx.planName && (tx.planName || tx.plan_name || '').toLowerCase().includes(currentBase.replace(/-/g, ' ')));
-        return matchesEmail && isValidStatus && matchesPlan && notExpired;
-      });
-
-      if (!userTx) {
-        return { ...u, subscriptionPlan: 'taster' };
-      }
-
-      return u;
-    });
-  }, []);
-
-  const loadUsers = useCallback(async (currentTxs?: PaymentTransaction[]) => {
-    try {
-      const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && Array.isArray(data.users)) {
-          const normalized = data.users.map((u: any) => ({
-            ...u,
-            subscriptionPlan: sanitizeSinglePlan(u.subscriptionPlan)
-          }));
-          const targetTxList = currentTxs || transactionsRef.current;
-          const validated = validateAndSyncUserPlans(normalized, targetTxList);
-          setRegisteredUsers(validated);
-          setSelectedUserId((prev) => {
-            if (!prev && validated.length > 0) {
-              return validated[0].id;
-            }
-            return prev;
-          });
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load users from server:', e);
-    }
-  }, [validateAndSyncUserPlans]);
-
-  const fetchData = useCallback(async () => {
-    if (isFetchingRef.current) return;
-    isFetchingRef.current = true;
-    purgeLegacyBrowserAdminStorage();
-    try {
-      const res = await fetch('/api/admin/payment?t=' + Date.now(), { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          let normalizedList: PaymentTransaction[] = [];
-          const curr = configRef.current.currency || 'USD';
-          if (Array.isArray(data.transactions)) {
-            normalizedList = data.transactions.map((tItem: any) => normalizeTransaction(tItem, curr));
-            if (JSON.stringify(transactionsRef.current) !== JSON.stringify(normalizedList)) {
-              transactionsRef.current = normalizedList;
-              setTransactions(normalizedList);
-            }
-          }
-          if (data.settings) {
-            const merged = { ...configRef.current, ...data.settings };
-            if (JSON.stringify(configRef.current) !== JSON.stringify(merged)) {
-              configRef.current = merged;
-              setConfig(merged);
-            }
-          }
-          await loadUsers(normalizedList);
-        }
-      }
-    } catch (e) {
-      console.error('Failed to load server payment data:', e);
-    } finally {
-      isFetchingRef.current = false;
-    }
-  }, [loadUsers]);
-
-  const fetchDataRef = useRef(fetchData);
-  fetchDataRef.current = fetchData;
-
-  const loadPlansRef = useRef(loadPlans);
-  loadPlansRef.current = loadPlans;
-
-  useEffect(() => {
-    document.title = `${t('paymentManagerTitle', 'Payment Manager')} - Admin`;
-    fetchDataRef.current();
-    loadPlansRef.current();
-
-    let debounceTimer: NodeJS.Timeout | null = null;
-    const handleDebouncedSync = () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        fetchDataRef.current();
-        loadPlansRef.current();
-      }, 300);
-    };
-
-    window.addEventListener('zecratary_plans_updated', handleDebouncedSync);
-    window.addEventListener('zecratary_payment_updated', handleDebouncedSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
-
-    return () => {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      window.removeEventListener('zecratary_plans_updated', handleDebouncedSync);
-      window.removeEventListener('zecratary_payment_updated', handleDebouncedSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
-    };
-  }, [t, version]);
-
-  const currentSelectedUser = useMemo(() => {
-    return registeredUsers.find((u) => u.id === selectedUserId) || null;
-  }, [registeredUsers, selectedUserId]);
-
-  const planTransitionInfo = useMemo(() => {
-    if (!showAddModal || !selectedUserId || !currentSelectedUser) return null;
-
-    const userEmailClean = (currentSelectedUser.email || '').toLowerCase().trim();
-    const activeTx = transactionsRef.current.find(
-      (t) => (t.customerEmail || '').toLowerCase().trim() === userEmailClean && isSucceeded(t.status)
-    );
-
-    const activePlanSlug = sanitizeSinglePlan(activeTx?.planSlug || currentSelectedUser.subscriptionPlan || 'taster');
-    const chosenPlanSlug = sanitizeSinglePlan(selectedPlanSlug);
-
-    const getBase = (slug: string) => slug.replace(/-(monthly|annual|free)$/, '');
-    const activeBase = getBase(activePlanSlug);
-    const chosenBase = getBase(chosenPlanSlug);
-
-    const activeInterval = (activePlanSlug.includes('annual') || (activeTx && activeTx.recurringInterval === 'YEAR')) ? 'YEAR' : 'MONTH';
-    const chosenInterval = (chosenPlanSlug.includes('annual') || chosenPlanSlug.includes('yr')) ? 'YEAR' : 'MONTH';
-
-    const matchedChosen = availablePlans.find((p) => p.slug === chosenPlanSlug);
-    const matchedActive = availablePlans.find((p) => p.slug === activePlanSlug);
-
-    if (activePlanSlug === chosenPlanSlug && chosenPlanSlug !== 'taster' && chosenPlanSlug !== 'free') {
-      const intervalName = chosenInterval === 'YEAR' ? 'Annual' : 'Monthly';
-      return {
-        isRenewal: true,
-        isIntervalSwitch: false,
-        isPlanSwitch: false,
-        isUpgrade: false,
-        isDowngrade: false,
-        fromPlan: matchedActive?.name || activePlanSlug,
-        toPlan: matchedChosen?.name || chosenPlanSlug,
-        message: `User "${currentSelectedUser.name}" currently holds "${matchedActive?.name || chosenPlanSlug}". Recording this payment will renew their ${intervalName} subscription and extend active validity.`
-      };
-    }
-
-    if (activeBase === chosenBase && activePlanSlug !== 'taster' && chosenPlanSlug !== 'taster' && activeInterval !== chosenInterval) {
-      const isUpgrade = chosenInterval === 'YEAR' && activeInterval === 'MONTH';
-      const fromIntervalName = activeInterval === 'YEAR' ? 'Annual' : 'Monthly';
-      const toIntervalName = chosenInterval === 'YEAR' ? 'Annual' : 'Monthly';
-
-      return {
-        isRenewal: false,
-        isIntervalSwitch: true,
-        isPlanSwitch: false,
-        isUpgrade,
-        isDowngrade: !isUpgrade,
-        fromPlan: `${activeBase} (${fromIntervalName})`,
-        toPlan: `${chosenBase} (${toIntervalName})`,
-        fromInterval: fromIntervalName,
-        toInterval: toIntervalName,
-        message: isUpgrade
-          ? `Plan Upgrade (${fromIntervalName} → ${toIntervalName}): User cannot hold both Monthly and Annual subscriptions for ${activeBase}. The previous ${fromIntervalName} plan will be automatically CANCELLED (Status: Cancelled, Recurring: OFF) and replaced with this Annual plan.`
-          : `Plan Downgrade (${fromIntervalName} → ${toIntervalName}): User cannot hold both Monthly and Annual subscriptions for ${activeBase}. The previous ${fromIntervalName} plan will be automatically CANCELLED (Status: Cancelled, Recurring: OFF) and replaced with this Monthly plan.`
-      };
-    }
-
-    if (activePlanSlug !== 'taster' && chosenPlanSlug !== 'taster' && activeBase !== chosenBase) {
-      return {
-        isRenewal: false,
-        isIntervalSwitch: false,
-        isPlanSwitch: true,
-        isUpgrade: (matchedChosen?.priceDollars || 0) >= (matchedActive?.priceDollars || 0),
-        isDowngrade: (matchedChosen?.priceDollars || 0) < (matchedActive?.priceDollars || 0),
-        fromPlan: matchedActive?.name || activePlanSlug,
-        toPlan: matchedChosen?.name || chosenPlanSlug,
-        message: `Plan Switch: Switching "${currentSelectedUser.name}" from "${matchedActive?.name || activePlanSlug}" to "${matchedChosen?.name || chosenPlanSlug}". Previous plan subscription will be automatically CANCELLED.`
-      };
-    }
-
-    return null;
-  }, [showAddModal, selectedUserId, currentSelectedUser, selectedPlanSlug, availablePlans]);
-
-  const handleToggleRecurring = async (tx: PaymentTransaction) => {
-    const nextState = !tx.isRecurring;
-    setTogglingTxId(tx.id);
-
-    setTransactions((prev) =>
-      prev.map((tItem) =>
-        tItem.id === tx.id
-          ? { ...tItem, isRecurring: nextState, autoRenew: nextState }
-          : tItem
-      )
-    );
-
-    const updatedTx: PaymentTransaction = {
-      ...tx,
-      isRecurring: nextState,
-      autoRenew: nextState,
-    };
-
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'update_transaction', transaction: updatedTx }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to update recurring setting');
-      }
-
-      setFeedback({
-        type: 'success',
-        msg: nextState
-          ? t('recurringTurnedOnMsg', `Recurring renewal turned ON for ${tx.customerName} (${tx.planName})`)
-          : t('recurringTurnedOffMsg', `Recurring renewal turned OFF for ${tx.customerName} (${tx.planName})`),
-      });
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-      }
-    } catch (err: any) {
-      setTransactions((prev) =>
-        prev.map((tItem) =>
-          tItem.id === tx.id
-            ? { ...tItem, isRecurring: tx.isRecurring, autoRenew: tx.autoRenew }
-            : tItem
-        )
-      );
-      setFeedback({
-        type: 'error',
-        msg: err.message || 'Failed to update recurring status.',
-      });
-    } finally {
-      setTogglingTxId(null);
-    }
-  };
-
-  const handleRefundTransaction = async (tx: PaymentTransaction) => {
-    const symbol = getCurrencySymbol(tx.currency || config.currency);
-    const amountStr = `${symbol}${parseAmount(tx.amount).toFixed(2)}`;
-    const confirmMsg = t('confirmRefundPayment', 'Are you sure you want to process a gateway refund for');
-    
-    if (!window.confirm(`${confirmMsg} ${tx.customerName} (${amountStr})?\n\nThis will trigger an automatic refund via ${tx.gateway.toUpperCase()}, turn off recurring, and immediately revoke active subscription privileges.`)) {
-      return;
-    }
-
-    setRefundingTxId(tx.id);
-    setFeedback(null);
-
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'refund_transaction',
-          id: tx.id,
-          transaction: {
-            ...tx,
-            status: 'refunded',
-            isRecurring: false,
-            autoRenew: false,
-            expiryDate: new Date().toISOString()
-          }
-        })
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to trigger gateway refund.');
-      }
-
-      await fetchData();
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
-
-      setFeedback({
-        type: 'success',
-        msg: data.message || `Payment of ${amountStr} refunded successfully via ${tx.gateway.toUpperCase()} for ${tx.customerName}.`
-      });
-    } catch (err: any) {
-      setFeedback({
-        type: 'error',
-        msg: err.message || 'Payment gateway refund failed. Please verify gateway keys.'
-      });
-    } finally {
-      setRefundingTxId(null);
-    }
-  };
-
-  const handleOpenConfirmModal = (tx: PaymentTransaction) => {
-    setModalError('');
-    setConfirmingTx(tx);
-    setConfirmGatewayTxId(tx.gatewayTransactionId || '');
-    setConfirmAmount(parseAmount(tx.amount));
-    setConfirmCheckbox(false);
-    setConfirmSyncPlan(true);
-  };
-
-  const handleConfirmPaymentSubmit = async (e?: React.SyntheticEvent) => {
-    if (e && typeof e.preventDefault === 'function') e.preventDefault();
-    if (!confirmingTx) return;
-    setModalError('');
-
-    if (!confirmCheckbox) {
-      setModalError(t('mustConfirmGatewayAmountError', 'Please check the box confirming you have verified the transaction amount from the payment gateway.'));
-      return;
-    }
-
-    const cleanAmount = parseAmount(confirmAmount);
-    if (cleanAmount <= 0) {
-      setModalError(t('amountMustBePositive', 'Confirmed payment amount must be greater than zero.'));
-      return;
-    }
-
-    setIsSubmittingConfirm(true);
-    const nowIso = new Date().toISOString();
-    const cleanEmail = (confirmingTx.customerEmail || '').toLowerCase().trim();
-    const singlePlanSlug = sanitizeSinglePlan(confirmingTx.planSlug);
-
-    const existingExpiry = confirmingTx.expiryDate;
-    const fallbackExpiry = calculateDefaultExpiry(nowIso.slice(0, 10), confirmingTx.recurringInterval || 'MONTH');
-    const finalExpiryDate = existingExpiry || (fallbackExpiry ? new Date(`${fallbackExpiry}T23:59:59Z`).toISOString() : undefined);
-
-    const updatedTx: PaymentTransaction = {
-      ...confirmingTx,
-      amount: cleanAmount,
-      status: 'succeeded',
-      gatewayTransactionId: confirmGatewayTxId.trim() || confirmingTx.gatewayTransactionId,
-      confirmedAmount: cleanAmount,
-      confirmedAt: nowIso,
-      expiryDate: finalExpiryDate,
-      isRecurring: confirmingTx.isRecurring !== undefined ? confirmingTx.isRecurring : true,
-      autoRenew: confirmingTx.autoRenew !== undefined ? confirmingTx.autoRenew : true,
-    };
-
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          action: 'confirm_payment', 
-          id: confirmingTx.id,
-          transaction: updatedTx 
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to confirm transaction with gateway.');
-      }
-
-      const targetUser = registeredUsers.find((u) => (u.email || '').toLowerCase().trim() === cleanEmail);
-
-      if (confirmSyncPlan && singlePlanSlug && targetUser) {
-        await fetch('/api/admin/users', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            ...targetUser, 
-            subscriptionPlan: singlePlanSlug,
-            planExpiryDate: finalExpiryDate,
-            expiryDate: finalExpiryDate
-          }),
-        }).catch(() => {});
-      }
-
-      const matchedPlan = availablePlans.find((p) => p.slug === singlePlanSlug);
-      if (matchedPlan?.tokenLimit && matchedPlan.tokenLimit > 0 && targetUser) {
-        await fetch('/api/tokens', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'grant',
-            userId: targetUser.id,
-            email: cleanEmail,
-            amount: matchedPlan.tokenLimit,
-            type: 'plan_purchase',
-            description: `Token grant for confirming ${confirmingTx.planName}`
-          })
-        }).catch(() => {});
-      }
-
-      await fetchData();
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-        window.dispatchEvent(new Event('zecratary_tokens_updated'));
-        window.dispatchEvent(new Event('zecratary_token_settings_updated'));
-      }
-
-      setConfirmingTx(null);
-      setFeedback({
-        type: 'success',
-        msg: t('paymentConfirmedSuccess', `Payment amount of ${getCurrencySymbol(updatedTx.currency)}${cleanAmount.toFixed(2)} confirmed via ${updatedTx.gateway.toUpperCase()}! Status set to Succeeded.`),
-      });
-    } catch (err: any) {
-      setModalError(err.message || 'Failed to confirm gateway payment');
-    } finally {
-      setIsSubmittingConfirm(false);
-    }
-  };
-
-  const handleCurrencyChange = async (newCurrency: string) => {
-    const updatedConfig: GatewayConfig = {
-      ...config,
-      currency: newCurrency,
-    };
-    setConfig(updatedConfig);
-    configRef.current = updatedConfig;
-    loadPlans(newCurrency);
-
-    await persistServerAdminSettings({ currency: newCurrency, paymentSettings: updatedConfig });
-    try {
-      await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedConfig),
-      });
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
-
-      setFeedback({
-        type: 'success',
-        msg: `Processing currency updated to ${newCurrency} (${getCurrencySymbol(newCurrency)}) and saved to server!`,
-      });
-    } catch (err: any) {
-      setFeedback({
-        type: 'error',
-        msg: `Failed to persist currency: ${err.message || 'Server error'}`,
-      });
-    }
-  };
-
-  const handleUserSelectChange = (userId: string) => {
-    setSelectedUserId(userId);
-    setModalError('');
-    const target = registeredUsers.find((u) => u.id === userId);
-    if (target) {
-      const userPlan = sanitizeSinglePlan(target.subscriptionPlan);
-      const matched = availablePlans.find((p) => p.slug === userPlan && p.priceDollars > 0) ||
-                      availablePlans.find((p) => p.slug.replace(/-(monthly|annual)$/, '') === userPlan.replace(/-(monthly|annual)$/, '') && p.priceDollars > 0) ||
-                      availablePlans[0];
-      if (matched && matched.priceDollars > 0) {
-        setSelectedPlanSlug(matched.slug);
-        setPaymentAmount(matched.priceDollars);
-        setPaymentExpiryDate(calculateDefaultExpiry(paymentDate, matched.interval));
-      }
-    }
-  };
-
-  const handlePlanSelectChange = (slug: string) => {
-    const singleSlug = sanitizeSinglePlan(slug);
-    setSelectedPlanSlug(singleSlug);
-    const matched = availablePlans.find((p) => p.slug === singleSlug);
-    if (matched && matched.priceDollars > 0) {
-      setPaymentAmount(matched.priceDollars);
-      setIsPaymentRecurring(true);
-      const calculatedExpiry = calculateDefaultExpiry(paymentDate, matched.interval);
-      setPaymentExpiryDate(calculatedExpiry);
-    }
-  };
-
-  const handlePaymentDateChange = (newDate: string) => {
-    setPaymentDate(newDate);
-    const matched = availablePlans.find((p) => p.slug === selectedPlanSlug);
-    if (matched && matched.interval) {
-      setPaymentExpiryDate(calculateDefaultExpiry(newDate, matched.interval));
-    }
-  };
-
-  useEffect(() => {
-    if (availablePlans.length > 0) {
-      const exists = availablePlans.some((p) => p.slug === selectedPlanSlug && p.priceDollars > 0);
-      if (!exists) {
-        const first = availablePlans.find((p) => p.priceDollars > 0) || availablePlans[0];
-        if (first) {
-          setSelectedPlanSlug(first.slug);
-          setPaymentAmount(first.priceDollars);
-          setPaymentExpiryDate(calculateDefaultExpiry(paymentDate, first.interval));
-        }
-      }
-    }
-  }, [availablePlans, selectedPlanSlug, paymentDate]);
-
-  const handleOpenAddModal = async () => {
-    loadPlans();
-    await loadUsers();
-    setModalError('');
-    const today = new Date().toISOString().slice(0, 10);
-    setPaymentDate(today);
-
-    const targetUser = registeredUsers[0] || null;
-    if (targetUser) {
-      setSelectedUserId(targetUser.id);
-    }
-
-    const userCurrentPlan = targetUser ? sanitizeSinglePlan(targetUser.subscriptionPlan) : '';
-    
-    const matchedPlan = availablePlans.find((p) => p.slug === userCurrentPlan && p.priceDollars > 0) ||
-                        availablePlans.find((p) => p.slug.replace(/-(monthly|annual)$/, '') === userCurrentPlan.replace(/-(monthly|annual)$/, '') && p.priceDollars > 0) ||
-                        availablePlans[0];
-
-    const initialSlug = sanitizeSinglePlan(matchedPlan?.slug || 'nutrition-pro-monthly');
-    setSelectedPlanSlug(initialSlug);
-    setPaymentAmount(matchedPlan?.priceDollars || 8.99);
-    setPaymentExpiryDate(calculateDefaultExpiry(today, matchedPlan?.interval || 'MONTH'));
-    setIsPaymentRecurring(true);
-
-    if (config.activeGateway === 'paypal' && (config.paypal.enabled || config.activeGateway === 'paypal')) {
-      setPaymentGateway('paypal');
-    } else {
-      setPaymentGateway('stripe');
-    }
-
-    setPaymentStatus('succeeded');
-    setFailureReason('');
-    setSyncUserPlan(true);
-    setAddGatewayTxId('');
-    setAddGatewayConfirmed(true);
-    setShowAddModal(true);
-  };
-
-  const handleOpenEditModal = (tx: PaymentTransaction) => {
-    loadPlans();
-    setModalError('');
-    setEditingTx(tx);
-    setEditCustomerName(tx.customerName || '');
-    setEditCustomerEmail(tx.customerEmail || '');
-
-    const rawSlug = sanitizeSinglePlan((tx.planSlug || tx.plan_slug || 'taster') || '');
-    const matched = availablePlans.find((p) => p.slug === rawSlug) ||
-                    availablePlans.find((p) => p.id === (tx.planSlug || tx.plan_slug || 'taster')) ||
-                    availablePlans.find((p) => p.slug.replace(/-(monthly|annual)$/, '') === rawSlug.replace(/-(monthly|annual)$/, ''));
-
-    const resolvedSlug = matched ? matched.slug : rawSlug;
-    setEditPlanSlug(resolvedSlug);
-    setEditPlanName(matched ? matched.name : (tx.planName || ''));
-    setEditAmount(parseAmount(tx.amount));
-    setEditGateway(tx.gateway || 'stripe');
-    setEditStatus(isSucceeded(tx.status) ? 'succeeded' : isFailed(tx.status) ? 'failed' : isRefunded(tx.status) ? 'refunded' : isCanceled(tx.status) ? 'canceled' : 'pending');
-    setEditFailureReason(tx.failureReason || '');
-    setEditDate(tx.createdAt ? new Date(tx.createdAt).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
-    setEditExpiryDate(tx.expiryDate ? new Date(tx.expiryDate).toISOString().slice(0, 10) : '');
-    setEditIsRecurring(tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : true);
-    setEditSyncUserPlan(false);
-    setEditGatewayTxId(tx.gatewayTransactionId || '');
-    setEditGatewayConfirmed(isSucceeded(tx.status));
-  };
-
-  const handleEditPlanSelectChange = (slug: string) => {
-    const singleSlug = sanitizeSinglePlan(slug);
-    setEditPlanSlug(singleSlug);
-    const matched = availablePlans.find((p) => p.slug === singleSlug);
-    if (matched && matched.priceDollars > 0) {
-      setEditPlanName(matched.name);
-      setEditAmount(matched.priceDollars);
-      if (matched.interval && !editExpiryDate) {
-        setEditExpiryDate(calculateDefaultExpiry(editDate || new Date().toISOString().slice(0, 10), matched.interval));
-      }
-    }
-  };
-
-  const handleCancelPlan = async (tx: PaymentTransaction) => {
-    const confirmMsg = t('confirmCancelPlanFor', 'Are you sure you want to cancel plan');
-    if (!window.confirm(`${confirmMsg} "${tx.planName}" for ${tx.customerName}? Recurring will be turned OFF and status set to "cancelled", keeping the current plan active until expiration.`)) {
-      return;
-    }
-
-    const now = new Date();
-    const hasUnreachedExpiry = Boolean(tx.expiryDate && new Date(tx.expiryDate).getTime() > now.getTime());
-
-    const updatedTx: PaymentTransaction = { 
-      ...tx, 
-      status: 'canceled', 
-      isRecurring: false,
-      autoRenew: false,
-      expiryDate: hasUnreachedExpiry ? tx.expiryDate : now.toISOString() 
-    };
-
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'cancel_transaction', transaction: updatedTx, id: tx.id }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to cancel plan');
-      }
-
-      const cleanEmail = (tx.customerEmail || '').toLowerCase().trim();
-      const targetUser = registeredUsers.find((u) => (u.email || '').toLowerCase().trim() === cleanEmail);
-      if (targetUser) {
-        if (hasUnreachedExpiry) {
-          await fetch('/api/admin/users', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              ...targetUser, 
-              subscriptionPlan: targetUser.subscriptionPlan || (tx.planSlug || tx.plan_slug || 'taster'), 
-              planExpiryDate: tx.expiryDate, 
-              expiryDate: tx.expiryDate 
-            }),
-          }).catch(() => {});
-        } else {
-          await fetch('/api/admin/users', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...targetUser, subscriptionPlan: 'taster', planExpiryDate: null, expiryDate: null }),
-          }).catch(() => {});
-        }
-      }
-
-      await fetchData();
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
-
-      setFeedback({
-        type: 'success',
-        msg: hasUnreachedExpiry
-          ? `Recurring turned OFF and status set to "cancelled" for ${tx.customerName}. Current plan remains ACTIVE until ${new Date(tx.expiryDate!).toLocaleDateString()}.`
-          : `Plan cancelled and user subscription reverted to Free (Taster) for ${tx.customerName}.`,
-      });
-    } catch (err: any) {
-      setFeedback({
-        type: 'error',
-        msg: err.message || 'Failed to cancel plan',
-      });
-    }
-  };
-
-  const handleUpdatePaymentSubmit = async (e?: React.SyntheticEvent) => {
-    if (e && typeof e.preventDefault === 'function') e.preventDefault();
-    if (!editingTx) return;
-    setModalError('');
-
-    if (!editCustomerName.trim() || !editCustomerEmail.trim()) {
-      setModalError(t('customerNameEmailRequired', 'Please enter customer name and valid email.'));
-      return;
-    }
-
-    const cleanAmount = parseAmount(editAmount);
-    const normalizedStatus = editStatus.toLowerCase();
-    const singlePlanSlug = sanitizeSinglePlan(editPlanSlug);
-    const cleanEmail = editCustomerEmail.trim().toLowerCase();
-
-    if (isSucceeded(normalizedStatus) && !isSucceeded(editingTx.status) && editGateway !== 'manual' && !editGatewayConfirmed) {
-      setModalError(t('requireGatewayConfirmToUpdateSucceeded', 'Confirmation required: You must confirm the transaction amount from the payment gateway to mark status as Succeeded.'));
-      return;
-    }
-
-    const formattedCreatedAt = editDate 
-      ? new Date(`${editDate}T12:00:00Z`).toISOString() 
-      : editingTx.createdAt;
-
-    const formattedExpiryDate = editExpiryDate 
-      ? new Date(`${editExpiryDate}T23:59:59Z`).toISOString() 
-      : undefined;
-
-    const detectedInterval = (singlePlanSlug.includes('annual') || editPlanName.toLowerCase().includes('annual')) ? 'YEAR' : 'MONTH';
-    const isStatusCanceled = isCanceled(normalizedStatus);
-    const finalRecurring = isStatusCanceled ? false : editIsRecurring;
-
-    const updatedTx: PaymentTransaction = {
-      ...editingTx,
-      customerName: editCustomerName.trim(),
-      customerEmail: cleanEmail,
-      planName: editPlanName.trim() || editingTx.planName,
-      planSlug: singlePlanSlug,
-      amount: cleanAmount,
-      currency: editingTx.currency || config.currency,
-      gateway: editGateway,
-      status: normalizedStatus as any,
-      failureReason: normalizedStatus === 'failed' ? editFailureReason || 'Declined by issuer' : undefined,
-      isRecurring: finalRecurring,
-      recurringInterval: detectedInterval as any,
-      autoRenew: finalRecurring,
-      createdAt: formattedCreatedAt,
-      expiryDate: formattedExpiryDate,
-      gatewayTransactionId: editGatewayTxId.trim() || editingTx.gatewayTransactionId,
-      confirmedAmount: isSucceeded(normalizedStatus) ? cleanAmount : editingTx.confirmedAmount,
-      confirmedAt: isSucceeded(normalizedStatus) ? (editingTx.confirmedAt || new Date().toISOString()) : undefined,
-    };
-
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'update_transaction', transaction: updatedTx }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to update transaction');
-      }
-
-      if (isStatusCanceled) {
-        const targetUser = registeredUsers.find((u) => (u.email || '').toLowerCase().trim() === cleanEmail);
-        if (targetUser) {
-          const now = new Date();
-          const hasUnreachedExpiry = Boolean(formattedExpiryDate && new Date(formattedExpiryDate).getTime() > now.getTime());
-          if (hasUnreachedExpiry) {
-            await fetch('/api/admin/users', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                ...targetUser, 
-                subscriptionPlan: singlePlanSlug || targetUser.subscriptionPlan,
-                planExpiryDate: formattedExpiryDate,
-                expiryDate: formattedExpiryDate
-              }),
-            }).catch(() => {});
-          } else {
-            await fetch('/api/admin/users', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                ...targetUser, 
-                subscriptionPlan: 'taster',
-                planExpiryDate: null,
-                expiryDate: null
-              }),
-            }).catch(() => {});
-          }
-        }
-      } else if (editSyncUserPlan && isSucceeded(normalizedStatus) && singlePlanSlug) {
-        const targetUser = registeredUsers.find((u) => (u.email || '').toLowerCase().trim() === cleanEmail);
-        if (targetUser) {
-          await fetch('/api/admin/users', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              ...targetUser, 
-              subscriptionPlan: singlePlanSlug,
-              planExpiryDate: formattedExpiryDate,
-              expiryDate: formattedExpiryDate
-            }),
-          }).catch(() => {});
-        }
-      }
-
-      await fetchData();
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
-
-      setEditingTx(null);
-      setFeedback({
-        type: 'success',
-        msg: `Transaction updated! Status: ${normalizedStatus.toUpperCase()}, Recurring: ${finalRecurring ? 'ON' : 'OFF'}.`,
-      });
-    } catch (err: any) {
-      setModalError(err.message || 'Failed to update transaction');
-    }
-  };
-
-  const handleDeleteTransaction = async (id: string, customerName: string) => {
-    const confirmMsg = t('confirmDeletePaymentFor', 'Are you sure you want to delete payment record for');
-    if (!window.confirm(`${confirmMsg} ${customerName}?`)) {
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/admin/payment?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to delete transaction');
-      }
-
-      await fetchData();
-      setSelectedTxIds((prev) => prev.filter((item) => item !== id));
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
-
-      setFeedback({
-        type: 'success',
-        msg: `Payment record deleted successfully and user plans re-verified in PostgreSQL.`,
-      });
-    } catch (err: any) {
-      setFeedback({
-        type: 'error',
-        msg: err.message || 'Failed to delete transaction',
-      });
-    }
-  };
-
-  const handleBulkDeleteUsers = async () => {
-    if (selectedTxIds.length === 0) return;
-    const confirmTmpl = t('confirmRemovePayments', 'Are you sure you want to remove {count} selected payment record(s)?');
-    if (!window.confirm(confirmTmpl.replace('{count}', String(selectedTxIds.length)))) {
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: selectedTxIds })
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to remove selected records.');
-      }
-
-      const count = selectedTxIds.length;
-      setSelectedTxIds([]);
-      await fetchData();
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
-
-      setFeedback({
-        type: 'success',
-        msg: `Successfully removed ${count} selected payment record(s) and re-verified user plans.`,
-      });
-    } catch (err: any) {
-      setFeedback({
-        type: 'error',
-        msg: err.message || 'Failed to remove selected records.',
-      });
-    }
-  };
-
-  const handleAddPaymentSubmit = async (e?: React.SyntheticEvent) => {
-    if (e && typeof e.preventDefault === 'function') e.preventDefault();
-    setModalError('');
-
-    const targetUser = registeredUsers.find((u) => u.id === selectedUserId);
-    if (!targetUser) {
-      setModalError(t('selectValidUserError', 'Please select a valid user.'));
-      return;
-    }
-
-    const customerName = targetUser.name || 'Customer';
-    const customerEmail = (targetUser.email || '').trim().toLowerCase();
-    const singlePlanSlug = sanitizeSinglePlan(selectedPlanSlug);
-    const matchedPlan = availablePlans.find((p) => p.slug === singlePlanSlug);
-    const planName = matchedPlan ? matchedPlan.name : singlePlanSlug;
-    const cleanAmount = parseAmount(paymentAmount);
-    const normalizedStatus = paymentStatus.toLowerCase();
-
-    if (isSucceeded(normalizedStatus) && paymentGateway !== 'manual' && !addGatewayConfirmed) {
-      setModalError(t('requireGatewayConfirmToAddSucceeded', 'Confirmation required: Please verify and confirm the transaction amount from the payment gateway to record as Succeeded.'));
-      return;
-    }
-
-    const formattedCreatedAt = paymentDate 
-      ? new Date(`${paymentDate}T12:00:00Z`).toISOString() 
-      : new Date().toISOString();
-
-    const formattedExpiryDate = paymentExpiryDate 
-      ? new Date(`${paymentExpiryDate}T23:59:59Z`).toISOString() 
-      : undefined;
-
-    const detectedInterval = (matchedPlan?.interval || (singlePlanSlug.includes('annual') ? 'YEAR' : 'MONTH')) as any;
-
-    if (isSucceeded(normalizedStatus)) {
-      const isSwitchOrUpgradeDowngrade = Boolean(
-        planTransitionInfo?.isIntervalSwitch || planTransitionInfo?.isPlanSwitch
-      );
-
-      const existingUserActiveTxs = transactionsRef.current.filter((tItem) => {
-        const matchesEmail = (tItem.customerEmail || '').toLowerCase().trim() === customerEmail;
-        return matchesEmail && (isSucceeded(tItem.status) || isPending(tItem.status));
-      });
-
-      for (const oldTx of existingUserActiveTxs) {
-        const shouldCancelStatus = isSwitchOrUpgradeDowngrade || (oldTx.planSlug !== singlePlanSlug);
-        
-        const updatedOldTx: PaymentTransaction = { 
-          ...oldTx, 
-          status: shouldCancelStatus ? 'canceled' : oldTx.status,
-          isRecurring: false,
-          autoRenew: false,
-          expiryDate: shouldCancelStatus ? new Date().toISOString() : oldTx.expiryDate
-        };
-
-        await fetch('/api/admin/payment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            action: shouldCancelStatus ? 'cancel_transaction' : 'update_transaction', 
-            transaction: updatedOldTx, 
-            id: oldTx.id 
-          }),
-        }).catch(() => {});
-      }
-    }
-
-    const newTx: PaymentTransaction = {
-      id: 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5),
-      customerName,
-      customerEmail,
-      planName,
-      planSlug: singlePlanSlug,
-      amount: cleanAmount,
-      currency: config.currency,
-      gateway: paymentGateway,
-      status: normalizedStatus as any,
-      testMode: config.testMode,
-      failureReason: normalizedStatus === 'failed' ? failureReason || 'Transaction declined by issuer' : undefined,
-      isRecurring: isPaymentRecurring,
-      recurringInterval: detectedInterval,
-      autoRenew: isPaymentRecurring,
-      createdAt: formattedCreatedAt,
-      expiryDate: formattedExpiryDate,
-      gatewayTransactionId: addGatewayTxId.trim() || undefined,
-      confirmedAmount: isSucceeded(normalizedStatus) ? cleanAmount : undefined,
-      confirmedAt: isSucceeded(normalizedStatus) ? new Date().toISOString() : undefined,
-    };
-
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'add_transaction', transaction: newTx }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to record transaction in database');
-      }
-
-      const finalPlanToSync = (syncUserPlan && isSucceeded(normalizedStatus) && singlePlanSlug) 
-        ? singlePlanSlug 
-        : (targetUser.subscriptionPlan || 'taster');
-
-      await fetch('/api/admin/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          ...targetUser, 
-          subscriptionPlan: finalPlanToSync,
-          planExpiryDate: formattedExpiryDate || null,
-          expiryDate: formattedExpiryDate || null
-        }),
-      }).catch(() => {});
-
-      if (isSucceeded(normalizedStatus) && matchedPlan?.tokenLimit && matchedPlan.tokenLimit > 0) {
-        await fetch('/api/tokens', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'grant',
-            userId: targetUser.id,
-            email: customerEmail,
-            amount: matchedPlan.tokenLimit,
-            type: 'plan_purchase',
-            description: `Token grant for purchasing ${planName}`
-          })
-        }).catch(() => {});
-      }
-
-      await fetchData();
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-        window.dispatchEvent(new Event('zecratary_tokens_updated'));
-        window.dispatchEvent(new Event('zecratary_token_settings_updated'));
-      }
-
-      setShowAddModal(false);
-      const isRenewal = planTransitionInfo?.isRenewal;
-      const isSwitched = planTransitionInfo?.isIntervalSwitch || planTransitionInfo?.isPlanSwitch;
-      setFeedback({
-        type: 'success',
-        msg: isRenewal
-          ? `Successfully renewed ${planName} for ${customerName} (Payment: ${activeCurrencySymbol}${cleanAmount.toFixed(2)}, Recurring: ${isPaymentRecurring ? 'ON' : 'OFF'})!`
-          : isSwitched 
-          ? `Successfully updated plan to ${planName} for ${customerName} (Recurring: ${isPaymentRecurring ? 'ON' : 'OFF'})!`
-          : `Payment of ${activeCurrencySymbol}${cleanAmount.toFixed(2)} recorded for ${customerName} (${planName}, Recurring: ${isPaymentRecurring ? 'ON' : 'OFF'})!`,
-      });
-    } catch (err: any) {
-      setModalError(err.message || 'Failed to record transaction');
-    }
-  };
-
-  const filteredTransactions = useMemo(() => {
-    const q = (searchQuery || '').toLowerCase().trim();
-    return transactions.filter((tx) => {
-      const cName = (tx.customerName || '').toLowerCase();
-      const cEmail = (tx.customerEmail || '').toLowerCase();
-      const pName = (tx.planName || '').toLowerCase();
-
-      const matchesSearch = !q || cName.includes(q) || cEmail.includes(q) || pName.includes(q);
-      
-      const matchesStatus = 
-        statusFilter === 'all' ||
-        (statusFilter === 'succeeded' && isSucceeded(tx.status)) ||
-        (statusFilter === 'failed' && isFailed(tx.status)) ||
-        (statusFilter === 'refunded' && isRefunded(tx.status)) ||
-        (statusFilter === 'canceled' && isCanceled(tx.status)) ||
-        (statusFilter === 'pending' && isPending(tx.status)) ||
-        tx.status === statusFilter;
-
-      const matchesGateway = gatewayFilter === 'all' || tx.gateway === gatewayFilter;
-      return matchesSearch && matchesStatus && matchesGateway;
-    });
-  }, [transactions, searchQuery, statusFilter, gatewayFilter]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-    setSelectedTxIds([]);
-  }, [searchQuery, statusFilter, gatewayFilter, pageSize]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / pageSize));
-  const paginatedTransactions = useMemo(() => {
-    const startIndex = (currentPage - 1) * pageSize;
-    return filteredTransactions.slice(startIndex, startIndex + pageSize);
-  }, [filteredTransactions, currentPage, pageSize]);
-
-  const isAllCurrentPageSelected = useMemo(() => {
-    return (
-      paginatedTransactions.length > 0 &&
-      paginatedTransactions.every((tx) => selectedTxIds.includes(tx.id))
-    );
-  }, [paginatedTransactions, selectedTxIds]);
-
-  const handleToggleSelectAll = () => {
-    if (isAllCurrentPageSelected) {
-      const pageIds = paginatedTransactions.map((tx) => tx.id);
-      setSelectedTxIds((prev) => prev.filter((id) => !pageIds.includes(id)));
-    } else {
-      const pageIds = paginatedTransactions.map((tx) => tx.id);
-      setSelectedTxIds((prev) => Array.from(new Set([...prev, ...pageIds])));
-    }
-  };
-
-  const handleToggleSelectRow = (id: string) => {
-    setSelectedTxIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
-  };
-
-  const metrics = useMemo(() => {
-    const succeeded = transactions.filter((t) => isSucceeded(t.status));
-    const failed = transactions.filter((t) => isFailed(t.status));
-    const canceled = transactions.filter((t) => isCanceled(t.status));
-    const refunded = transactions.filter((t) => isRefunded(t.status));
-
-    const totalRevenue = succeeded.reduce((sum, t) => sum + parseAmount(t.amount), 0);
-    const refundedTotal = refunded.reduce((sum, t) => sum + parseAmount(t.amount), 0);
-
-    return {
-      totalRevenue,
-      succeededTotal: totalRevenue,
-      refundedTotal,
-      succeededCount: succeeded.length,
-      failedCount: failed.length,
-      canceledCount: canceled.length,
-      refundedCount: refunded.length,
-    };
-  }, [transactions]);
-
-  const handleCopyCliCommand = (cmd: string, key: string) => {
-    if (typeof window !== 'undefined') {
-      navigator.clipboard.writeText(cmd);
-      setCopiedCliKey(key);
-      setTimeout(() => setCopiedCliKey(null), 2500);
-    }
-  };
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setWebhookEndpointUrl(`${window.location.origin}/api/webhooks/stripe`);
-    }
-  }, []);
-
-  const handleCopyWebhookUrl = () => {
-    if (typeof window !== 'undefined' && webhookEndpointUrl) {
-      navigator.clipboard.writeText(webhookEndpointUrl);
-      setCopiedWebhook(true);
-      setTimeout(() => setCopiedWebhook(false), 2500);
-    }
-  };
-
-  const handleToggleTestMode = async () => {
-    const nextMode = !config.testMode;
-    const updatedConfig: GatewayConfig = {
-      ...config,
-      testMode: nextMode,
-      stripeKeysVerified: false,
-      stripeWebhookVerified: false,
-    };
-    setConfig(updatedConfig);
-    configRef.current = updatedConfig;
-
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'toggle_test_mode', testMode: nextMode }),
-      });
-      await persistServerAdminSettings({ paymentSettings: updatedConfig });
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
-
-      setFeedback({
-        type: 'success',
-        msg: nextMode
-          ? t('sandboxTestModeEnabled', 'Sandbox (Test Mode) enabled and saved to server!')
-          : t('liveProductionModeEnabled', 'Live Production mode enabled and saved to server!'),
-      });
-    } catch (err: any) {
-      setFeedback({
-        type: 'error',
-        msg: err.message || 'Failed to update gateway environment.',
-      });
-    }
-  };
-
-  const handleVerifyWebhookSecret = async () => {
-    const secret = config.stripe.webhookSecret?.trim();
-    if (!secret) {
-      setFeedback({
-        type: 'error',
-        msg: t('webhookSecretRequiredToVerify', 'Please enter a Webhook Signing Secret (whsec_...) to verify.'),
-      });
-      return;
-    }
-
-    setVerifyingWebhook(true);
-    setFeedback(null);
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'verify_webhook_secret',
-          webhookSecret: secret,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.success) {
-        const updated: GatewayConfig = { 
-          ...config, 
-          stripeWebhookVerified: true 
-        };
-        setConfig(updated);
-        configRef.current = updated;
-        await persistServerAdminSettings({ paymentSettings: updated });
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_payment_updated'));
-          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-        }
-        setFeedback({ 
-          type: 'success', 
-          msg: data.message || t('webhookSecretVerifiedSuccess', 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!'),
-        });
-      } else {
-        const updated: GatewayConfig = { 
-          ...config, 
-          stripeWebhookVerified: false 
-        };
-        setConfig(updated);
-        configRef.current = updated;
-        setFeedback({ 
-          type: 'error', 
-          msg: data.error || t('webhookSecretVerificationFailed', 'Webhook Secret verification failed. Must start with "whsec_" and be a valid HMAC key.'),
-        });
-      }
-    } catch (e: any) {
-      setFeedback({ 
-        type: 'error', 
-        msg: e.message || 'Failed to communicate with webhook verification endpoint.',
-      });
-    } finally {
-      setVerifyingWebhook(false);
-    }
-  };
-
-  const handleVerifyStripeKey = async () => {
-    const pKey = config.stripe.publishableKey?.trim();
-    const sKey = config.stripe.secretKey?.trim();
-    const wSecret = config.stripe.webhookSecret?.trim();
-
-    if (!pKey || !sKey || !wSecret) {
-      if (!pKey && !sKey && !wSecret) {
-        setShowStripeGuideModal(true);
-      }
-      const missing: string[] = [];
-      if (!pKey) missing.push(t('publishableKeyLabel', 'Publishable Key'));
-      if (!sKey) missing.push(t('secretKeyLabel', 'Secret Key'));
-      if (!wSecret) missing.push(t('webhookSecretLabel', 'Webhook Secret'));
-
-      setFeedback({
-        type: 'error',
-        msg: t('stripeAllThreeRequired', `Verification required: Please enter ${missing.join(', ')} to verify.`),
-      });
-      return;
-    }
-
-    setVerifyingStripe(true);
-    setFeedback(null);
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'verify_stripe_keys',
-          publishableKey: pKey,
-          secretKey: sKey,
-          webhookSecret: wSecret,
-          stripe: config.stripe,
-          testMode: config.testMode,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.success) {
-        const updated: GatewayConfig = { 
-          ...config, 
-          stripeKeysVerified: true,
-          stripeWebhookVerified: true,
-        };
-        setConfig(updated);
-        configRef.current = updated;
-        await persistServerAdminSettings({ paymentSettings: updated });
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_payment_updated'));
-          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-        }
-        setFeedback({ 
-          type: 'success', 
-          msg: data.message || t('stripeKeyVerifiedSuccess', 'Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers!'),
-        });
-      } else {
-        const updated: GatewayConfig = { 
-          ...config, 
-          stripeKeysVerified: false,
-          stripeWebhookVerified: false,
-        };
-        setConfig(updated);
-        configRef.current = updated;
-        setFeedback({ 
-          type: 'error', 
-          msg: data.error || t('stripeKeyVerificationFailed', 'Stripe verification failed. Please check your Publishable Key, Secret Key, and Webhook Secret.'),
-        });
-      }
-    } catch (e: any) {
-      setFeedback({ 
-        type: 'error', 
-        msg: e.message || t('failedToVerifyStripeKeys', 'Failed to communicate with Stripe verification endpoint.'),
-      });
-    } finally {
-      setVerifyingStripe(false);
-    }
-  };
-
-  const handleVerifyStripeKeys = handleVerifyStripeKey;
-
-  const handleSaveSettings = async (e?: React.SyntheticEvent) => {
-    if (e && typeof e.preventDefault === 'function') e.preventDefault();
-    setLoading(true);
-    setFeedback(null);
-
-    const updatedConfig: GatewayConfig = { ...config };
-
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedConfig),
-      });
-      const data = await res.json();
-
-      await persistServerAdminSettings({
-        paymentSettings: updatedConfig,
-        currency: updatedConfig.currency
-      });
-
-      if (data.success) {
-        setConfig(updatedConfig);
-        configRef.current = updatedConfig;
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_payment_updated'));
-          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-        }
-        await loadPlans();
-        setFeedback({ type: 'success', msg: 'Gateway settings and currency saved successfully to server!' });
-      } else {
-        setFeedback({ type: 'error', msg: data.error || 'Failed to save settings.' });
-      }
-    } catch (e: any) {
-      await persistServerAdminSettings({
-        paymentSettings: updatedConfig,
-        currency: updatedConfig.currency
-      });
-      setConfig(updatedConfig);
-      configRef.current = updatedConfig;
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
-      await loadPlans();
-      setFeedback({ type: 'success', msg: 'Settings saved to server.' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
-    >
-      <style dangerouslySetInnerHTML={{ __html: `
-        .payment-input:-webkit-autofill,
-        .payment-input:-webkit-autofill:hover,
-        .payment-input:-webkit-autofill:focus,
-        .payment-input:-webkit-autofill:active {
-          -webkit-box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
-          box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
-          -webkit-text-fill-color: var(--color-text) !important;
-          caret-color: var(--color-text) !important;
-          transition: background-color 50000s ease-in-out 0s !important;
-        }
-
-        .payment-input[type="date"],
-        input[type="date"].payment-input {
-          color-scheme: ${isDayMode ? 'light' : 'dark'};
-        }
-      `}} />
-
-      {/* HEADER & TOP NAV */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-            {t('paymentManagerTitle', 'Payment Manager')}
-          </h1>
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('paymentManagerSubtitle', 'Manage payment transactions, recurring billing subscriptions, and gateways.')}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleOpenAddModal}
-            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer"
-            style={{ backgroundColor: 'var(--color-primary)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-          >
-            <PlusCircle className="h-4 w-4" /> {t('addPaymentBtn', 'Add Payment')}
-          </button>
-          <Link
-            href="/admin/plans"
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <Zap className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('managePlans', 'Manage Plans')}
-          </Link>
-        </div>
-      </div>
-
-      {/* TABS SELECTOR */}
-      <div 
-        className="flex items-center gap-2 p-1.5 rounded-2xl border w-fit shadow-xs transition-colors duration-200"
-        style={{
-          backgroundColor: 'var(--color-card)',
-          borderColor: 'var(--color-border)'
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => setActiveTab('history')}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
-          style={{
-            backgroundColor: activeTab === 'history' ? 'var(--color-primary)' : 'transparent',
-            color: activeTab === 'history' ? '#ffffff' : 'var(--color-text-secondary)'
-          }}
-        >
-          <History className="h-4 w-4" /> {t('paymentHistoryTab', 'Payment History')}
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('settings')}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer"
-          style={{
-            backgroundColor: activeTab === 'settings' ? 'var(--color-primary)' : 'transparent',
-            color: activeTab === 'settings' ? '#ffffff' : 'var(--color-text-secondary)'
-          }}
-        >
-          <Sliders className="h-4 w-4" /> {t('gatewaySettingsTab', 'Gateway Settings')}
-        </button>
-      </div>
-
-      {feedback && (
-        <div
-          className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 border shadow-xs animate-in fade-in"
-          style={{
-            backgroundColor: 'var(--color-inner-dark)',
-            borderColor: feedback.type === 'success' ? 'var(--color-emerald)' : '#ef4444',
-            color: feedback.type === 'success' ? 'var(--color-emerald)' : '#ef4444'
-          }}
-        >
-          {feedback.type === 'success' ? <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} /> : <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />}
-          <span>{feedback.msg}</span>
-        </div>
-      )}
-
-      {/* TAB 1: PAYMENT HISTORY CONTAINER */}
-      <div className={activeTab === 'history' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
-        <div
-          className="p-3 px-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs transition-colors duration-200"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)'
-          }}
-        >
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1.5 font-bold" style={{ color: 'var(--color-text)' }}>
-              <Activity className="h-4 w-4 text-emerald-500 animate-pulse" /> {t('gatewayEngine', 'Gateway Engine')}
-            </span>
-            <span 
-              className="font-extrabold uppercase px-2.5 py-0.5 rounded text-[11px] border"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-            >
-              {config.activeGateway}
-            </span>
-            <span 
-              className="font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: config.testMode ? '#f59e0b' : 'var(--color-emerald)',
-                color: config.testMode ? '#fbbf24' : 'var(--color-emerald)'
-              }}
-            >
-              {config.testMode ? t('sandboxTest', 'Sandbox Test') : t('liveProduction', 'Live Production')}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-4 font-semibold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-            <div>
-              {t('currencyLabel', 'Currency:')} <span className="font-bold" style={{ color: 'var(--color-text)' }}>{config.currency} ({activeCurrencySymbol})</span>
-            </div>
-            <div>
-              {t('stripeKeysLabel', 'Stripe Keys:')}{' '}
-              <span 
-                className="font-bold" 
-                style={{ color: (config.stripeKeysVerified && config.stripeWebhookVerified) ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}
-              >
-                {(config.stripeKeysVerified && config.stripeWebhookVerified) ? t('verifiedStatus', 'Verified') : t('unverifiedStatus', 'Unverified')}
-              </span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setActiveTab('settings')}
-              className="font-bold text-[11px] hover:underline transition cursor-pointer"
-              style={{ color: 'var(--color-primary)' }}
-            >
-              {t('changeCurrencyKeys', 'Change currency & keys')}
-            </button>
-          </div>
-        </div>
-
-        {/* KPI STATS TILES */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
-          <div 
-            className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('totalRevenueTitle', 'Total Revenue')}
-            </div>
-            <div className="text-xl font-black flex items-baseline gap-1" style={{ color: 'var(--color-text)' }}>
-              <span>{activeCurrencySymbol}{metrics.totalRevenue.toFixed(2)}</span>
-              <span className="text-[10px] font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{config.currency}</span>
-            </div>
-          </div>
-
-          <div 
-            className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('successfulPaymentsTitle', 'Successful')}
-            </div>
-            <div 
-              className="text-xl font-black flex items-center gap-1.5"
-              style={{ color: 'var(--color-emerald)' }}
-            >
-              {metrics.succeededCount}
-              <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
-            </div>
-          </div>
-
-          <div 
-            className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('cancelledTitle', 'Cancelled')}
-            </div>
-            <div className="text-xl font-black flex items-center gap-1.5" style={{ color: '#fb923c' }}>
-              {metrics.canceledCount}
-              <Ban className="h-4 w-4 text-orange-500" />
-            </div>
-          </div>
-
-          <div 
-            className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('refundedTitle', 'Refunded')}
-            </div>
-            <div className="text-xl font-black flex items-center gap-1.5" style={{ color: '#fbbf24' }}>
-              {metrics.refundedCount}
-              <ArrowDownLeft className="h-4 w-4" />
-            </div>
-          </div>
-
-          <div 
-            className="border p-4 rounded-2xl shadow-sm space-y-1 transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('failedPaymentsTitle', 'Failed')}
-            </div>
-            <div className="text-xl font-black flex items-center gap-1.5 text-red-500">
-              {metrics.failedCount}
-              <XCircle className="h-4 w-4 text-red-500" />
-            </div>
-          </div>
-        </div>
-
-        {/* SEARCH, FILTERS, TABLE COLUMNS & BULK ACTIONS BAR */}
-        <div 
-          className="border p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-3 shadow-sm transition-colors duration-200"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)'
-          }}
-        >
-          <div className="relative w-full md:w-80">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--color-text-secondary)' }} />
-            <input
-              type="text"
-              placeholder={t('searchPaymentPlaceholder', 'Search by customer name, email, or plan...')}
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="payment-input w-full border rounded-xl pl-9 pr-3 py-2 text-xs outline-none transition font-medium"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-              onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-              onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-            {selectedTxIds.length > 0 && (
-              <button
-                type="button"
-                onClick={handleBulkDeleteUsers}
-                className="px-3.5 py-2 text-white font-bold rounded-xl transition flex items-center gap-1.5 text-xs shadow-md bg-red-600 hover:bg-red-700 animate-in fade-in cursor-pointer"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                {t('removeUsersBtn', 'Remove Selected')} ({selectedTxIds.length})
-              </button>
-            )}
-
-            <div className="flex items-center gap-1.5">
-              <Filter className="h-3.5 w-3.5" style={{ color: 'var(--color-text-secondary)' }} />
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as any)}
-                className="border rounded-xl px-3 py-2 text-xs font-semibold outline-none cursor-pointer transition"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              >
-                <option value="all" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('allStatuses', 'All Statuses')}</option>
-                <option value="succeeded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusSucceeded', 'Succeeded')}</option>
-                <option value="canceled" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusCanceled', 'Cancelled')}</option>
-                <option value="failed" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusFailed', 'Failed')}</option>
-                <option value="refunded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusRefunded', 'Refunded')}</option>
-                <option value="pending" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusPending', 'Pending')}</option>
-              </select>
-            </div>
-
-            <select
-              value={gatewayFilter}
-              onChange={(e) => setGatewayFilter(e.target.value as any)}
-              className="border rounded-xl px-3 py-2 text-xs font-semibold outline-none cursor-pointer transition"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <option value="all" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('allGateways', 'All Gateways')}</option>
-              <option value="stripe" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayStripe', 'Stripe')}</option>
-              <option value="paypal" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayPaypal', 'PayPal')}</option>
-              <option value="manual" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayManual', 'Manual')}</option>
-            </select>
-
-            <select
-              value={pageSize}
-              onChange={(e) => setPageSize(Number(e.target.value))}
-              className="border rounded-xl px-2.5 py-2 text-xs font-semibold outline-none cursor-pointer transition"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text-secondary)'
-              }}
-            >
-              <option value={5} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('perPage5', '5 per page')}</option>
-              <option value={10} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('perPage10', '10 per page')}</option>
-              <option value={20} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('perPage20', '20 per page')}</option>
-              <option value={50} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('perPage50', '50 per page')}</option>
-            </select>
-
-            {/* TABLE COLUMN SHOW / HIDE POPUP TOGGLE */}
-            <div className="relative" ref={columnPopupRef}>
-              <button
-                type="button"
-                onClick={() => setShowColumnPopup(!showColumnPopup)}
-                className="border rounded-xl px-3 py-2 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: showColumnPopup ? 'var(--color-primary)' : 'var(--color-border)',
-                  color: showColumnPopup ? 'var(--color-primary)' : 'var(--color-text-secondary)'
-                }}
-                title={t('customizeColumnsTooltip', 'Show / Hide Table Columns')}
-              >
-                <Columns3 className="h-3.5 w-3.5" style={{ color: showColumnPopup ? 'var(--color-primary)' : undefined }} />
-                <span className="hidden sm:inline">{t('columnsBtn', 'Columns')}</span>
-              </button>
-
-              {showColumnPopup && (
-                <div
-                  className="absolute right-0 mt-2 w-56 rounded-2xl border shadow-2xl p-3.5 z-50 text-xs animate-in fade-in transition-colors duration-200"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  <div 
-                    className="flex items-center justify-between pb-2.5 border-b mb-2"
-                    style={{ borderColor: 'var(--color-border)' }}
-                  >
-                    <div className="flex items-center gap-1.5 font-bold text-xs">
-                      <Columns3 className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                      <span>{t('tableColumnsTitle', 'Table Columns')}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={resetColumnVisibility}
-                      className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
-                    >
-                      {t('resetColumnsBtn', 'Reset')}
-                    </button>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    {[
-                      { key: 'customer', label: t('customerCol', 'Customer') },
-                      { key: 'plan', label: t('planCol', 'Plan') },
-                      { key: 'amount', label: t('amountCol', 'Amount') },
-                      { key: 'status', label: t('statusCol', 'Status') },
-                      { key: 'recurring', label: t('recurringCol', 'Recurring') },
-                      { key: 'date', label: t('dateCol', 'Date') },
-                      { key: 'expiryDate', label: t('expiryDateCol', 'Expiry Date') },
-                      { key: 'actions', label: t('actionsCol', 'Actions') },
-                    ].map((col) => {
-                      const isChecked = visibleColumns[col.key] !== false;
-                      return (
-                        <label
-                          key={col.key}
-                          className="flex items-center justify-between px-2.5 py-1.5 rounded-xl cursor-pointer transition select-none hover:bg-emerald-500/10"
-                        >
-                          <span className="font-medium text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                            {col.label}
-                          </span>
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => toggleColumnVisibility(col.key)}
-                            className="w-3.5 h-3.5 rounded cursor-pointer accent-[#E05638]"
-                          />
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* ACTIVE MULTI-SELECT BANNER */}
-        {selectedTxIds.length > 0 && (
-          <div
-            className="p-3 px-4 rounded-2xl border flex items-center justify-between text-xs animate-in fade-in"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'rgba(239, 68, 68, 0.4)',
-              color: '#ef4444'
-            }}
-          >
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4 text-red-500" />
-              <span>
-                <strong>{selectedTxIds.length}</strong> {t('userRecordsSelected', 'user record(s) selected')}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setSelectedTxIds([])}
-                className="px-3 py-1 rounded-lg border transition font-medium cursor-pointer shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text-secondary)'
-                }}
-              >
-                {t('clearSelection', 'Clear')}
-              </button>
-              <button
-                type="button"
-                onClick={handleBulkDeleteUsers}
-                className="px-3 py-1 text-white font-bold rounded-lg shadow transition flex items-center gap-1.5 cursor-pointer bg-red-600 hover:bg-red-700"
-              >
-                <Trash2 className="h-3.5 w-3.5" /> {t('removeSelected', 'Remove')}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* TRANSACTIONS TABLE */}
-        <div 
-          className="border rounded-3xl overflow-hidden shadow-sm transition-colors duration-200"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)'
-          }}
-        >
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead 
-                className="font-bold uppercase tracking-wider border-b transition-colors duration-200"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text-secondary)'
-                }}
-              >
-                <tr>
-                  <th className="px-4 py-3.5 w-10 text-center">
-                    <input
-                      type="checkbox"
-                      checked={isAllCurrentPageSelected}
-                      onChange={handleToggleSelectAll}
-                      className="w-4 h-4 rounded cursor-pointer accent-[#E05638]"
-                      title="Select All On Current Page"
-                    />
-                  </th>
-                  {visibleColumns.customer && <th className="px-5 py-3.5">{t('customerCol', 'Customer')}</th>}
-                  {visibleColumns.plan && <th className="px-5 py-3.5">{t('planCol', 'Plan')}</th>}
-                  {visibleColumns.amount && <th className="px-5 py-3.5">{t('amountCol', 'Amount')}</th>}
-                  {visibleColumns.status && <th className="px-5 py-3.5">{t('statusCol', 'Status')}</th>}
-                  {visibleColumns.recurring && <th className="px-5 py-3.5">{t('recurringCol', 'Recurring')}</th>}
-                  {visibleColumns.date && <th className="px-5 py-3.5">{t('dateCol', 'Date')}</th>}
-                  {visibleColumns.expiryDate && <th className="px-5 py-3.5">{t('expiryDateCol', 'Expiry Date')}</th>}
-                  {visibleColumns.actions && <th className="px-5 py-3.5 text-right">{t('actionsCol', 'Actions')}</th>}
-                </tr>
-              </thead>
-              <tbody 
-                className="divide-y transition-colors duration-200"
-                style={{ borderColor: 'var(--color-border)' }}
-              >
-                {paginatedTransactions.length === 0 ? (
-                  <tr>
-                    <td colSpan={activeColumnCount} className="text-center py-10 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('noTransactionsFound', 'No payment transactions found matching your criteria.')}
-                    </td>
-                  </tr>
-                ) : (
-                  paginatedTransactions.map((tx) => {
-                    const txSymbol = getCurrencySymbol(tx.currency || config.currency);
-                    const isRowSelected = selectedTxIds.includes(tx.id);
-                    const isTxRefunding = refundingTxId === tx.id;
-                    const isTxToggling = togglingTxId === tx.id;
-                    const isTxCanceled = isCanceled(tx.status);
-                    const isTxRefunded = isRefunded(tx.status);
-                    const isTxSucceeded = isSucceeded(tx.status);
-                    const isRecurringActive = Boolean(tx.isRecurring ?? true);
-
-                    return (
-                      <tr 
-                        key={tx.id} 
-                        className="transition"
-                        style={{
-                          backgroundColor: isRowSelected ? 'var(--color-inner-dark)' : 'transparent'
-                        }}
-                      >
-                        <td className="px-4 py-3.5 text-center">
-                          <input
-                            type="checkbox"
-                            checked={isRowSelected}
-                            onChange={() => handleToggleSelectRow(tx.id)}
-                            className="w-4 h-4 rounded cursor-pointer accent-[#E05638]"
-                          />
-                        </td>
-
-                        {visibleColumns.customer && (
-                          <td className="px-5 py-3.5">
-                            <div className="font-bold" style={{ color: 'var(--color-text)' }}>{tx.customerName || 'Customer'}</div>
-                            <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{tx.customerEmail || ''}</div>
-                          </td>
-                        )}
-
-                        {visibleColumns.plan && (
-                          <td className="px-5 py-3.5 font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                            {tx.planName || (tx.planSlug || tx.plan_slug || 'taster') || 'Plan'}
-                          </td>
-                        )}
-
-                        {visibleColumns.amount && (
-                          <td className="px-5 py-3.5 font-bold whitespace-nowrap" style={{ color: 'var(--color-text)' }}>
-                            {txSymbol}{parseAmount(tx.amount).toFixed(2)}{' '}
-                            <span className="text-[10px] font-normal" style={{ color: 'var(--color-text-secondary)' }}>{tx.currency || config.currency}</span>
-                          </td>
-                        )}
-
-                        {visibleColumns.status && (
-                          <td className="px-5 py-3.5 whitespace-nowrap">
-                            {isSucceeded(tx.status) && (
-                              <span 
-                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
-                                style={{
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: 'var(--color-emerald)',
-                                  color: 'var(--color-emerald)'
-                                }}
-                                title={tx.gatewayTransactionId ? `Gateway Ref: ${tx.gatewayTransactionId}` : 'Confirmed Payment'}
-                              >
-                                <CheckCircle2 className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {t('statusSucceeded', 'Succeeded')}
-                              </span>
-                            )}
-                            {isCanceled(tx.status) && (
-                              <span 
-                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
-                                style={{
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: '#f97316',
-                                  color: '#f97316'
-                                }}
-                              >
-                                <Ban className="h-3 w-3 text-orange-500" /> {t('statusCanceled', 'Cancelled')}
-                              </span>
-                            )}
-                            {isFailed(tx.status) && (
-                              <span 
-                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs cursor-help"
-                                style={{
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: 'rgba(239, 68, 68, 0.4)',
-                                  color: '#ef4444'
-                                }}
-                                title={tx.failureReason || 'Declined by payment processor'}
-                              >
-                                <XCircle className="h-3 w-3 text-red-500" /> {t('statusFailed', 'Failed')}
-                              </span>
-                            )}
-                            {isRefunded(tx.status) && (
-                              <span 
-                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
-                                style={{
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: '#f59e0b',
-                                  color: '#f59e0b'
-                                }}
-                              >
-                                <ArrowDownLeft className="h-3 w-3 text-amber-500" /> {t('statusRefunded', 'Refunded')}
-                              </span>
-                            )}
-                            {isPending(tx.status) && (
-                              <span 
-                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full border shadow-xs"
-                                style={{
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: 'var(--color-border)',
-                                  color: 'var(--color-text-secondary)'
-                                }}
-                              >
-                                <RefreshCw className="h-3 w-3 animate-spin" /> {t('statusPending', 'Pending')}
-                              </span>
-                            )}
-                          </td>
-                        )}
-
-                        {visibleColumns.recurring && (
-                          <td className="px-5 py-3.5 whitespace-nowrap">
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                role="switch"
-                                aria-checked={isRecurringActive}
-                                disabled={isTxToggling || isTxCanceled || isTxRefunded}
-                                onClick={() => handleToggleRecurring(tx)}
-                                title={
-                                  (isTxCanceled || isTxRefunded) 
-                                    ? t('cancelledNoRecurring', 'Plan is canceled/refunded') 
-                                    : isRecurringActive 
-                                    ? t('clickTurnRecurringOff', 'Click to turn recurring OFF') 
-                                    : t('clickTurnRecurringOn', 'Click to turn recurring ON')
-                                }
-                                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-xs disabled:opacity-40 disabled:cursor-not-allowed ${
-                                  isRecurringActive 
-                                    ? 'bg-[var(--color-emerald)]' 
-                                    : 'bg-slate-700'
-                                }`}
-                              >
-                                <span
-                                  aria-hidden="true"
-                                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                                    isRecurringActive ? 'translate-x-4' : 'translate-x-0'
-                                  }`}
-                                />
-                              </button>
-
-                              <span 
-                                className="text-[10px] font-black uppercase tracking-wider"
-                                style={{
-                                  color: isRecurringActive 
-                                    ? 'var(--color-emerald)' 
-                                    : 'var(--color-text-secondary)'
-                                }}
-                              >
-                                {isRecurringActive 
-                                  ? (tx.recurringInterval === 'YEAR' ? t('annualRecurring', 'Annual') : t('monthlyRecurring', 'Monthly'))
-                                  : t('offLabel', 'OFF')}
-                              </span>
-                            </div>
-                          </td>
-                        )}
-                        
-                        {visibleColumns.date && (
-                          <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
-                            {tx.createdAt ? new Date(tx.createdAt).toLocaleDateString() : '-'}
-                          </td>
-                        )}
-                        
-                        {visibleColumns.expiryDate && (
-                          <td className="px-5 py-3.5 font-medium whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
-                            {tx.expiryDate ? (() => {
-                              const exp = new Date(tx.expiryDate);
-                              const now = new Date();
-                              const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                              const expMidnight = new Date(exp.getFullYear(), exp.getMonth(), exp.getDate());
-                              const diffDays = Math.ceil((expMidnight.getTime() - todayMidnight.getTime()) / (1000 * 60 * 60 * 24));
-
-                              let badgeStyle = {
-                                backgroundColor: 'var(--color-inner-dark)',
-                                borderColor: 'var(--color-emerald)',
-                                color: 'var(--color-emerald)'
-                              };
-                              let badgeNotice = '';
-
-                              if (diffDays < 0) {
-                                badgeStyle = {
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: 'rgba(239, 68, 68, 0.4)',
-                                  color: '#ef4444'
-                                };
-                                badgeNotice = t('expiredBadge', 'EXPIRED');
-                              } else if (diffDays <= 7) {
-                                badgeStyle = {
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: 'rgba(245, 158, 11, 0.4)',
-                                  color: '#f59e0b'
-                                };
-                              }
-
-                              return (
-                                <span
-                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border font-semibold text-[11px] transition shadow-xs"
-                                  style={badgeStyle}
-                                  title={badgeNotice ? `${exp.toLocaleDateString()} (${badgeNotice})` : exp.toLocaleDateString()}
-                                >
-                                  <Calendar className="h-3 w-3 shrink-0" />
-                                  {exp.toLocaleDateString()}
-                                  {badgeNotice && (
-                                    <span className="text-[9px] font-extrabold uppercase px-1 py-0.2 rounded border border-current/30 leading-none">
-                                      {badgeNotice}
-                                    </span>
-                                  )}
-                                </span>
-                              );
-                            })() : (
-                              <span className="text-[11px] italic font-normal" style={{ color: 'var(--color-text-secondary)' }}>
-                                {t('lifetimeNone', 'Lifetime / None')}
-                              </span>
-                            )}
-                          </td>
-                        )}
-
-                        {visibleColumns.actions && (
-                          <td className="px-5 py-3.5 text-right whitespace-nowrap">
-                            <div className="flex items-center justify-end gap-1.5">
-                              {!isTxSucceeded && !isTxRefunded && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenConfirmModal(tx)}
-                                  className="p-1.5 rounded-lg border transition shadow-xs cursor-pointer"
-                                  style={{
-                                    backgroundColor: 'var(--color-inner-dark)',
-                                    borderColor: 'var(--color-emerald)',
-                                    color: 'var(--color-emerald)'
-                                  }}
-                                  title={t('confirmPaymentTooltip', 'Confirm payment amount from gateway to mark Succeeded')}
-                                >
-                                  <ShieldCheck className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
-                                </button>
-                              )}
-
-                              <button
-                                type="button"
-                                disabled={isTxRefunded}
-                                onClick={() => handleOpenEditModal(tx)}
-                                className={`p-1.5 rounded-lg border transition shadow-xs ${
-                                  isTxRefunded
-                                    ? 'opacity-30 cursor-not-allowed'
-                                    : 'cursor-pointer'
-                                }`}
-                                style={{
-                                  backgroundColor: 'var(--color-card)',
-                                  borderColor: 'var(--color-border)',
-                                  color: 'var(--color-text)'
-                                }}
-                                title={isTxRefunded ? t('cannotModifyRefundedTooltip', 'Cannot modify refunded payment') : t('modifyPaymentTooltip', 'Modify payment record & expiration')}
-                              >
-                                <Pencil 
-                                  className="h-3.5 w-3.5" 
-                                  style={{ color: isTxRefunded ? 'var(--color-text-secondary)' : 'var(--color-primary)' }} 
-                                />
-                              </button>
-
-                              <button
-                                type="button"
-                                disabled={isTxRefunded || isTxRefunding || isFailed(tx.status)}
-                                onClick={() => handleRefundTransaction(tx)}
-                                className={`p-1.5 rounded-lg border transition shadow-xs ${
-                                  isTxRefunded || isFailed(tx.status)
-                                    ? 'opacity-30 cursor-not-allowed'
-                                    : 'cursor-pointer'
-                                }`}
-                                style={{
-                                  backgroundColor: 'var(--color-card)',
-                                  borderColor: 'var(--color-border)',
-                                  color: '#f59e0b'
-                                }}
-                                title={
-                                  isTxRefunded
-                                    ? t('alreadyRefundedTooltip', 'Payment already refunded')
-                                    : t('refundPaymentTooltip', 'Trigger payment gateway refund')
-                              }
-                              >
-                                {isTxRefunding ? (
-                                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-amber-500" />
-                                ) : (
-                                  <RotateCcw className="h-3.5 w-3.5 text-amber-500" />
-                                )}
-                              </button>
-
-                              <button
-                                type="button"
-                                disabled={isTxCanceled || isTxRefunded}
-                                onClick={() => handleCancelPlan(tx)}
-                                className={`p-1.5 rounded-lg border transition shadow-xs ${
-                                  isTxCanceled || isTxRefunded
-                                  ? 'opacity-30 cursor-not-allowed'
-                                  : 'cursor-pointer'
-                                }`}
-                                style={{
-                                  backgroundColor: 'var(--color-card)',
-                                  borderColor: 'var(--color-border)',
-                                  color: '#f97316'
-                                }}
-                                title={isTxCanceled ? t('planAlreadyCancelledTooltip', 'Plan already cancelled') : isTxRefunded ? t('planAlreadyRefundedTooltip', 'Plan refunded') : t('cancelPlanTooltip', 'Cancel plan renewal & keep active until expiry')}
-                              >
-                                <XCircle className="h-3.5 w-3.5 text-orange-500" />
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteTransaction(tx.id, tx.customerName)}
-                                className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shadow-xs"
-                                style={{
-                                  backgroundColor: 'var(--color-card)',
-                                  borderColor: 'var(--color-border)',
-                                  color: 'var(--color-text-secondary)'
-                                }}
-                                title={t('deletePaymentTooltip', 'Delete payment record permanently')}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          {/* PAGINATION CONTROLS */}
-          <div 
-            className="px-5 py-3.5 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('showing', 'Showing')}{' '}
-              <span className="font-bold" style={{ color: 'var(--color-text)' }}>
-                {filteredTransactions.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}
-              </span>{' '}
-              {t('to', 'to')}{' '}
-              <span className="font-bold" style={{ color: 'var(--color-text)' }}>
-                {Math.min(currentPage * pageSize, filteredTransactions.length)}
-              </span>{' '}
-              {t('of', 'of')} <span className="font-bold" style={{ color: 'var(--color-text)' }}>{filteredTransactions.length}</span> {t('resultsSuffix', 'results')}
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                disabled={currentPage === 1}
-                onClick={() => setCurrentPage(1)}
-                className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-                title={t('firstPageTooltip', 'First Page')}
-              >
-                <ChevronsLeft className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                disabled={currentPage === 1}
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-                title={t('previousPageTooltip', 'Previous Page')}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-
-              <div className="px-3 py-1 font-bold text-xs" style={{ color: 'var(--color-text)' }}>
-                {t('page', 'Page')} {currentPage} {t('of', 'of')} {totalPages}
-              </div>
-
-              <button
-                type="button"
-                disabled={currentPage >= totalPages}
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-                title={t('nextPageTooltip', 'Next Page')}
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-              <button
-                type="button"
-                disabled={currentPage >= totalPages}
-                onClick={() => setCurrentPage(totalPages)}
-                className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-                title={t('lastPageTooltip', 'Last Page')}
-              >
-                <ChevronsRight className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* TAB 2: GATEWAY SETTINGS CONTAINER */}
-      <div className={activeTab === 'settings' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
-        <div className="space-y-6">
-          <div 
-            className="border p-6 rounded-3xl shadow-sm transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                  <Globe className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('processingCurrencyTitle', 'Processing Currency')}
-                </h2>
-                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('processingCurrencySub', 'Select the default currency for processing subscriptions and recording transactions.')}
-                </p>
-              </div>
-
-              <div className="w-full sm:w-80">
-                <select
-                  value={config.currency}
-                  onChange={(e) => handleCurrencyChange(e.target.value)}
-                  className="payment-input w-full border rounded-xl p-3 text-xs font-bold outline-none transition cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                >
-                  {SUPPORTED_CURRENCIES.map((curr) => (
-                    <option key={curr.code} value={curr.code} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
-                      {curr.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div 
-            className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                <Shield className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('defaultGatewayTitle', 'Default Payment Gateway')}
-              </h2>
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>{t('environmentLabel', 'Environment:')}</label>
-                <button
-                  type="button"
-                  onClick={handleToggleTestMode}
-                  className="text-xs font-bold px-3 py-1 rounded-full border transition cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: config.testMode ? '#f59e0b' : 'var(--color-emerald)',
-                    color: config.testMode ? '#fbbf24' : 'var(--color-emerald)'
-                  }}
-                >
-                  {config.testMode ? t('sandboxTestMode', 'Sandbox (Test Mode)') : t('liveProduction', 'Live Production')}
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-              <div
-                onClick={() => setConfig({ ...config, activeGateway: 'stripe' })}
-                className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
-                  config.activeGateway === 'stripe' ? 'shadow-md' : 'opacity-70 hover:opacity-100'
-                }`}
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: config.activeGateway === 'stripe' ? 'var(--color-primary)' : 'var(--color-border)'
-                }}
-              >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-base font-black" style={{ color: 'var(--color-text)' }}>Stripe</span>
-                    {config.activeGateway === 'stripe' && (
-                      <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary)' }}>
-                        <Check className="h-3.5 w-3.5" />
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('stripeCardDesc', 'Accept credit cards securely via Stripe Checkout and webhooks.')}
-                  </p>
-                </div>
-              </div>
-
-              <div
-                onClick={() => setConfig({ ...config, activeGateway: 'paypal' })}
-                className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
-                  config.activeGateway === 'paypal' ? 'shadow-md' : 'opacity-70 hover:opacity-100'
-                }`}
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: config.activeGateway === 'paypal' ? 'var(--color-primary)' : 'var(--color-border)'
-                }}
-              >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-base font-black" style={{ color: 'var(--color-text)' }}>PayPal</span>
-                    {config.activeGateway === 'paypal' && (
-                      <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary)' }}>
-                        <Check className="h-3.5 w-3.5" />
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('paypalCardDesc', 'Accept digital wallet and PayPal account balance payments.')}
-                  </p>
-                </div>
-              </div>
-
-              <div
-                onClick={() => setConfig({ ...config, activeGateway: 'both' })}
-                className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
-                  config.activeGateway === 'both' ? 'shadow-md' : 'opacity-70 hover:opacity-100'
-                }`}
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: config.activeGateway === 'both' ? 'var(--color-primary)' : 'var(--color-border)'
-                }}
-              >
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-base font-black" style={{ color: 'var(--color-text)' }}>
-                      {t('multiGatewayCardTitle', 'Both Gateways')}
-                    </span>
-                    {config.activeGateway === 'both' && (
-                      <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary)' }}>
-                        <Check className="h-3.5 w-3.5" />
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('multiGatewayCardDesc', 'Enable both Stripe and PayPal checkout options simultaneously.')}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* CREDENTIAL SETTINGS */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div 
-              className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-                <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-blue-500"></div>
-                  <h3 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('stripeApiConfig', 'Stripe API Configuration')}</h3>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={config.stripe.enabled}
-                  onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, enabled: e.target.checked } })}
-                  className="w-4 h-4 rounded cursor-pointer accent-[#E05638]"
-                />
-              </div>
-
-              <div className="space-y-1.5 pb-2">
-                <label className="text-xs font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('verifyStripeKeyLabel', 'Verify Stripe Key')}
-                </label>
-                <div className="flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={handleVerifyStripeKey}
-                    disabled={verifyingStripe}
-                    className="inline-flex items-center overflow-hidden rounded-xl text-white font-bold text-xs shadow-md active:scale-[0.98] transition cursor-pointer border border-[#7a73ff]/40 disabled:opacity-50"
-                    style={{
-                      backgroundImage: 'linear-gradient(180deg, #635bff 0%, #4f46e5 100%)',
-                      boxShadow: '0 2px 5px rgba(99, 91, 255, 0.3), inset 0 1px 0 rgba(255,255,255,0.3)'
-                    }}
-                    title={t('verifyStripeKeyTooltip', 'Verify Publishable Key, Secret Key, and Webhook Secret with Stripe servers')}
-                  >
-                    <div className="px-3 py-2.5 bg-black/15 border-r border-white/20 font-black text-sm flex items-center justify-center">
-                      <ShieldCheck className="h-4 w-4 text-white" />
-                    </div>
-                    <span className="px-3.5 py-2.5 text-xs tracking-tight font-bold flex items-center gap-1.5">
-                      {verifyingStripe ? (
-                        <>
-                          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                          {t('verifyingStripeKey', 'Verifying Stripe Keys...')}
-                        </>
-                      ) : (
-                        t('verifyStripeKey', 'Verify Stripe Key')
-                      )}
-                    </span>
-                  </button>
-
-                  {(config.stripeKeysVerified && config.stripeWebhookVerified) ? (
-                    <span 
-                      className="text-[11px] font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 border shadow-xs animate-in fade-in"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-emerald)',
-                        color: 'var(--color-emerald)'
-                      }}
-                    >
-                      <CheckCircle2 className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} /> {t('keysVerifiedStatus', 'Keys & Webhook Verified')}
-                    </span>
-                  ) : config.stripeKeysVerified ? (
-                    <span 
-                      className="text-[11px] font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 border shadow-xs animate-in fade-in"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: '#f59e0b',
-                        color: '#fbbf24'
-                      }}
-                    >
-                      <Check className="h-3.5 w-3.5" style={{ color: '#fbbf24' }} /> {t('keysOnlyVerifiedStatus', 'API Keys Verified (Webhook Pending)')}
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="space-y-3 pt-1 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                {config.stripe.enabled && (
-                  <div className="space-y-2 pt-1">
-                    {config.testMode && config.stripe.secretKey && !config.stripe.secretKey.startsWith('sk_test_') && (
-                      <div 
-                        className="p-3 rounded-xl border flex items-start gap-2 text-xs font-semibold shadow-xs animate-in fade-in"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: '#f59e0b',
-                          color: '#fbbf24'
-                        }}
-                      >
-                        <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
-                        <div>
-                          <div className="font-bold">{t('testKeyMismatchTitle', 'Stripe Test Mode Key Alert')}</div>
-                          <div className="text-[11px] font-normal leading-relaxed" style={{ color: 'var(--color-text)' }}>
-                            {t('testKeyMismatchNotice', 'Sandbox Test Mode is active, but your Secret Key does not start with "sk_test_". Payments and test cards will be rejected by Stripe until valid test keys are entered.')}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {!config.testMode && config.stripe.secretKey && config.stripe.secretKey.startsWith('sk_test_') && (
-                      <div 
-                        className="p-3 rounded-xl border flex items-start gap-2 text-xs font-semibold shadow-xs animate-in fade-in"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: '#ef4444',
-                          color: '#ef4444'
-                        }}
-                      >
-                        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-red-500" />
-                        <div>
-                          <div className="font-bold">{t('liveKeyMismatchTitle', 'Live Mode Key Alert')}</div>
-                          <div className="text-[11px] font-normal leading-relaxed" style={{ color: 'var(--color-text)' }}>
-                            {t('liveKeyMismatchNotice', 'Live Production Mode is active, but your Secret Key is a test key ("sk_test_..."). Real customer credit cards will be declined.')}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {config.testMode && (
-                      <div 
-                        className="p-3.5 rounded-2xl border space-y-1.5 transition-colors shadow-xs"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)'
-                        }}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: '#fbbf24' }}>
-                            <CreditCard className="h-3.5 w-3.5" />
-                            {t('stripeTestCardGuide', 'Stripe Test Card Helper')}
-                          </span>
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/30">
-                            {t('sandboxActiveBadge', 'Sandbox Active')}
-                          </span>
-                        </div>
-                        <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                          {t('testCardInstructions', 'Use card number')} <code className="px-1.5 py-0.5 rounded font-mono font-bold text-[11px] border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>4242 4242 4242 4242</code>, {t('anyFutureExpiry', 'any future MM/YY (e.g. 12/28), and any 3-digit CVC (e.g. 123).')}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <div>
-                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('publishableKeyLabel', 'Publishable Key')}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={visibleFields['stripePublishable'] ? 'text' : 'password'}
-                      id="cfg_stripe_publishable_key"
-                      name="cfg_stripe_publishable_key"
-                      autoComplete="new-password"
-                      autoCorrect="off"
-                      spellCheck="false"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
-                      role="presentation"
-                      readOnly
-                      onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                      onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
-                      value={config.stripe.publishableKey}
-                      onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, publishableKey: e.target.value } })}
-                      placeholder="pk_test_... / pk_live_..."
-                      className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => toggleVisibility('stripePublishable')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                    >
-                      {visibleFields['stripePublishable'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('secretKeyLabel', 'Secret Key')}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={visibleFields['stripeSecret'] ? 'text' : 'password'}
-                      id="cfg_stripe_secret_key"
-                      name="cfg_stripe_secret_key"
-                      autoComplete="new-password"
-                      autoCorrect="off"
-                      spellCheck="false"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
-                      role="presentation"
-                      readOnly
-                      onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                      onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
-                      value={config.stripe.secretKey}
-                      onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, secretKey: e.target.value } })}
-                      placeholder="sk_test_... / sk_live_..."
-                      className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => toggleVisibility('stripeSecret')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                    >
-                      {visibleFields['stripeSecret'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs uppercase font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('webhookSecretLabel', 'Webhook Secret')}
-                    </label>
-                    <div className="flex items-center gap-2">
-                      {config.stripeWebhookVerified && (
-                        <span 
-                          className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border shadow-xs animate-in fade-in"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-emerald)',
-                            color: 'var(--color-emerald)'
-                          }}
-                        >
-                          <CheckCircle2 className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {t('signingSecretVerified', 'Signing Secret Verified')}
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        onClick={handleVerifyWebhookSecret}
-                        disabled={verifyingWebhook || !config.stripe.webhookSecret?.trim()}
-                        className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                        title={t('verifyWebhookSecretTooltip', 'Test Webhook Secret for HMAC-SHA256 signature compliance')}
-                      >
-                        {verifyingWebhook ? (
-                          <>
-                            <RefreshCw className="h-3 w-3 animate-spin" />
-                            <span>{t('verifyingSecret', 'Verifying...')}</span>
-                          </>
-                        ) : (
-                          <>
-                            <ShieldCheck className="h-3 w-3" />
-                            <span>{t('verifySecretBtn', 'Verify Secret')}</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="relative">
-                    <input
-                      type={visibleFields['stripeWebhook'] ? 'text' : 'password'}
-                      id="cfg_stripe_webhook_secret"
-                      name="cfg_stripe_webhook_secret"
-                      autoComplete="new-password"
-                      autoCorrect="off"
-                      spellCheck="false"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
-                      role="presentation"
-                      readOnly
-                      onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                      onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
-                      value={config.stripe.webhookSecret}
-                      onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
-                      placeholder="whsec_..."
-                      className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => toggleVisibility('stripeWebhook')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                    >
-                      {visibleFields['stripeWebhook'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* CLI & Webhook Guide Action Moved to Bottom */}
-                <div 
-                  className="pt-3 border-t flex flex-wrap items-center justify-between gap-3"
-                  style={{ borderColor: 'var(--color-border)' }}
-                >
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>
-                      {t('webhookCliSetupTitle', 'Webhook & CLI Setup Guide')}
-                    </span>
-                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('webhookCliSetupSub', 'View official Stripe CLI instructions to test and capture webhooks locally.')}
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowStripeGuideModal(true)}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs hover:border-blue-400 shrink-0"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                    title={t('viewStripeCliGuideTooltip', 'View Stripe CLI & Webhook Setup instructions')}
-                  >
-                    <Terminal className="h-3.5 w-3.5 text-amber-500" />
-                    <span>{t('cliGuideBtn', 'CLI & Webhook Guide')}</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div 
-              className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-                <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
-                  <h3 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('paypalApiConfig', 'PayPal API Configuration')}</h3>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={config.paypal.enabled}
-                  onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, enabled: e.target.checked } })}
-                  className="w-4 h-4 rounded cursor-pointer accent-[#E05638]"
-                />
-              </div>
-
-              <div className="space-y-3">
-                <div>
-                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('clientIdLabel', 'Client ID')}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={visibleFields['paypalClientId'] ? 'text' : 'password'}
-                      id="cfg_paypal_client_id"
-                      name="cfg_paypal_client_id"
-                      autoComplete="new-password"
-                      autoCorrect="off"
-                      spellCheck="false"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
-                      role="presentation"
-                      readOnly
-                      onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                      onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
-                      value={config.paypal.clientId}
-                      onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientId: e.target.value } })}
-                      placeholder="PayPal Client ID"
-                      className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => toggleVisibility('paypalClientId')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                    >
-                      {visibleFields['paypalClientId'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('clientSecretLabel', 'Client Secret')}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={visibleFields['paypalSecret'] ? 'text' : 'password'}
-                      id="cfg_paypal_secret_key"
-                      name="cfg_paypal_secret_key"
-                      autoComplete="new-password"
-                      autoCorrect="off"
-                      spellCheck="false"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
-                      role="presentation"
-                      readOnly
-                      onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                      onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
-                      value={config.paypal.clientSecret}
-                      onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientSecret: e.target.value } })}
-                      placeholder="PayPal Client Secret"
-                      className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => toggleVisibility('paypalSecret')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                    >
-                      {visibleFields['paypalSecret'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('webhookIdLabel', 'Webhook ID')}
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={visibleFields['paypalWebhook'] ? 'text' : 'password'}
-                      id="cfg_paypal_webhook_id"
-                      name="cfg_paypal_webhook_id"
-                      autoComplete="new-password"
-                      autoCorrect="off"
-                      spellCheck="false"
-                      data-lpignore="true"
-                      data-1p-ignore="true"
-                      data-bwignore="true"
-                      data-form-type="other"
-                      role="presentation"
-                      readOnly
-                      onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                      onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
-                      value={config.paypal.webhookId}
-                      onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, webhookId: e.target.value } })}
-                      placeholder="PayPal Webhook ID"
-                      className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => toggleVisibility('paypalWebhook')}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                    >
-                      {visibleFields['paypalWebhook'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={fetchData}
-              className="px-4 py-3 border font-bold text-xs rounded-2xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text-secondary)'
-              }}
-            >
-              <RefreshCw className="h-4 w-4" /> {t('resetConfigBtn', 'Reset Config')}
-            </button>
-            <button
-              type="button"
-              onClick={handleSaveSettings}
-              disabled={loading}
-              className="px-8 py-3 text-white font-bold rounded-2xl transition text-xs shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
-              style={{ backgroundColor: 'var(--color-primary)' }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-            >
-              <Save className="h-4 w-4" />
-              {loading ? t('savingSettings', 'Saving Settings...') : t('saveConfigBtn', 'Save Gateway Settings')}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* ========================================================================= */}
-      {/* ROOT LEVEL MODALS                                                         */}
-      {/* ========================================================================= */}
-
-      {/* CONFIRM PAYMENT FROM GATEWAY MODAL */}
-      {confirmingTx && (
-        <div 
-          onClick={() => !isSubmittingConfirm && setConfirmingTx(null)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <button 
-              onClick={() => !isSubmittingConfirm && setConfirmingTx(null)}
-              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            <div className="space-y-1 pr-6">
-              <h2 
-                className="text-xl font-black flex items-center gap-2"
-                style={{ color: 'var(--color-emerald)' }}
-              >
-                <ShieldCheck className="h-5 w-5" style={{ color: 'var(--color-emerald)' }} /> {t('confirmGatewayPaymentTitle', 'Confirm Gateway Payment')}
-              </h2>
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('confirmGatewayPaymentSub', 'Confirm payment amount transaction from payment gateway to become status "Succeeded".')}
-              </p>
-            </div>
-
-            <div 
-              className="p-3.5 rounded-2xl border space-y-2 transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{t('customerCol', 'Customer')}:</span>
-                <span className="font-bold" style={{ color: 'var(--color-text)' }}>
-                  {confirmingTx.customerName} ({confirmingTx.customerEmail})
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{t('planCol', 'Plan')}:</span>
-                <span className="font-bold text-[var(--color-primary)]">
-                  {confirmingTx.planName}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{t('gatewayLabel', 'Gateway')}:</span>
-                <span className="font-extrabold uppercase px-2 py-0.5 rounded text-[10px]" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
-                  {confirmingTx.gateway}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{t('currentStatusLabel', 'Current Status')}:</span>
-                <span className="font-extrabold uppercase text-[11px] text-amber-500">
-                  {confirmingTx.status}
-                </span>
-              </div>
-            </div>
-
-            {modalError && (
-              <div className="p-3 bg-red-50 border border-red-300 text-red-900 rounded-xl font-semibold flex items-center gap-2 shadow-xs">
-                <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
-                <span>{modalError}</span>
-              </div>
-            )}
-
-            <div className="space-y-4 pt-1">
-              <div>
-                <label className="block font-bold mb-1 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
-                  <span>{t('confirmedPaymentAmountLabel', 'Confirmed Payment Amount')} ({confirmingTx.currency || config.currency}) *</span>
-                  <span className="text-[10px] font-bold" style={{ color: 'var(--color-emerald)' }}>{t('matchesGatewayNote', 'Must match gateway settlement')}</span>
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                    {getCurrencySymbol(confirmingTx.currency || config.currency)}
-                  </span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={confirmAmount}
-                    onChange={(e) => setConfirmAmount(parseFloat(e.target.value) || 0)}
-                    className="payment-input w-full border rounded-xl pl-8 pr-3 py-2.5 text-xs outline-none font-black transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('gatewayTransactionIdLabel', 'Gateway Transaction ID / Payment Intent ID')}
-                </label>
-                <input
-                  type="text"
-                  placeholder={t('gatewayTxIdPlaceholder', 'e.g. pi_3N... / PAYID-... / ch_...')}
-                  value={confirmGatewayTxId}
-                  onChange={(e) => setConfirmGatewayTxId(e.target.value)}
-                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                />
-              </div>
-
-              <div 
-                className="p-3.5 rounded-2xl border space-y-2.5 shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-emerald)'
-                }}
-              >
-                <div className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    id="confirmGatewayAmountCheckbox"
-                    checked={confirmCheckbox}
-                    onChange={(e) => setConfirmCheckbox(e.target.checked)}
-                    className="mt-0.5 rounded w-4 h-4 cursor-pointer accent-[#10b981]"
-                  />
-                  <label htmlFor="confirmGatewayAmountCheckbox" className="font-semibold text-xs leading-relaxed cursor-pointer select-none" style={{ color: 'var(--color-emerald)' }}>
-                    {t('confirmPaymentGatewayNotice', 'I verify and confirm that the payment transaction amount has been settled by the payment gateway, and confirm updating status to "Succeeded".')}
-                  </label>
-                </div>
-
-                <div className="flex items-center gap-2 pt-1 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                  <input
-                    type="checkbox"
-                    id="confirmSyncPlanBox"
-                    checked={confirmSyncPlan}
-                    onChange={(e) => setConfirmSyncPlan(e.target.checked)}
-                    className="rounded w-4 h-4 cursor-pointer accent-[#E05638]"
-                  />
-                  <label htmlFor="confirmSyncPlanBox" className="font-medium text-[11px] cursor-pointer select-none" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('syncUserPlanOnConfirm', 'Update user subscription entitlement in PostgreSQL immediately upon confirmation')}
-                  </label>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                <button
-                  type="button"
-                  disabled={isSubmittingConfirm}
-                  onClick={() => setConfirmingTx(null)}
-                  className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs disabled:opacity-50"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text-secondary)'
-                  }}
-                >
-                  {t('cancel', 'Cancel')}
-                </button>
-                <button
-                  type="button"
-                  disabled={!confirmCheckbox || isSubmittingConfirm}
-                  onClick={handleConfirmPaymentSubmit}
-                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                  style={{ backgroundColor: 'var(--color-emerald)' }}
-                >
-                  {isSubmittingConfirm ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" /> {t('confirmingPaymentStatus', 'Confirming Status...')}
-                    </>
-                  ) : (
-                    <>
-                      <ShieldCheck className="h-4 w-4" style={{ color: '#ffffff' }} /> {t('confirmPaymentAmountBtn', 'Confirm Payment & Set Succeeded')}
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ADD PAYMENT MODAL */}
-      {showAddModal && (
-        <div 
-          onClick={() => setShowAddModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <button 
-              type="button"
-              onClick={() => setShowAddModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs hover:opacity-80"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            <div className="space-y-1 pr-6">
-              <h2 
-                className="text-xl font-black flex items-center gap-2"
-                style={{ color: 'var(--color-primary)' }}
-              >
-                <PlusCircle className="h-5 w-5" /> {t('addPaymentModalTitle', 'Record Payment & Assign Plan')}
-              </h2>
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('addPaymentModalSub', 'Manually record a payment transaction and immediately activate the subscription for a user.')}
-              </p>
-            </div>
-
-            {planTransitionInfo?.isRenewal && (
-              <div 
-                className="p-3.5 rounded-xl border flex items-start gap-2.5 animate-in fade-in shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-emerald)',
-                  color: 'var(--color-emerald)'
-                }}
-              >
-                <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <div className="font-bold">Subscription Renewal Notice:</div>
-                  <div className="text-[11px] leading-relaxed">
-                    {planTransitionInfo.message}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {planTransitionInfo?.isIntervalSwitch && (
-              <div 
-                className="p-3.5 rounded-2xl border flex items-start gap-2.5 animate-in fade-in shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: planTransitionInfo.isUpgrade ? 'var(--color-emerald)' : '#f59e0b',
-                  color: planTransitionInfo.isUpgrade ? 'var(--color-emerald)' : '#f59e0b'
-                }}
-              >
-                {planTransitionInfo.isUpgrade ? (
-                  <ArrowUpRight className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
-                ) : (
-                  <ArrowDownLeft className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
-                )}
-                <div className="space-y-1">
-                  <div className="font-bold flex items-center gap-1.5 text-xs">
-                    {planTransitionInfo.isUpgrade 
-                      ? `Plan Upgrade (${planTransitionInfo.fromInterval} → ${planTransitionInfo.toInterval})` 
-                      : `Plan Downgrade (${planTransitionInfo.fromInterval} → ${planTransitionInfo.toInterval})`}
-                  </div>
-                  <div className="text-[11px] leading-relaxed font-normal" style={{ color: 'var(--color-text)' }}>
-                    {planTransitionInfo.message}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {planTransitionInfo?.isPlanSwitch && (
-              <div 
-                className="p-3.5 rounded-2xl border flex items-start gap-2.5 animate-in fade-in shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'rgba(59, 130, 246, 0.4)',
-                  color: '#3b82f6'
-                }}
-              >
-                <Zap className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <div className="font-bold text-xs">{t('planChangeNotice', 'Plan Switch Notice:')}</div>
-                  <div className="text-[11px] leading-relaxed font-normal" style={{ color: 'var(--color-text)' }}>
-                    {planTransitionInfo.message}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {modalError && (
-              <div className="p-3 bg-red-50 border border-red-300 text-red-900 rounded-xl font-semibold flex items-center gap-2 shadow-xs">
-                <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
-                <span>{modalError}</span>
-              </div>
-            )}
-
-            <div className="space-y-4 pt-1">
-              <div>
-                <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                  <UserIcon className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                  {t('selectUserLabel', 'Select User Account')} ({registeredUsers.length})
-                </label>
-                {registeredUsers.length > 0 ? (
-                  <select
-                    value={selectedUserId}
-                    onChange={(e) => handleUserSelectChange(e.target.value)}
-                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold transition cursor-pointer"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    {registeredUsers.map((user) => (
-                      <option key={user.id} value={user.id} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
-                        {user.name} — {user.email} ({user.role}) [Active: {user.subscriptionPlan || 'taster'}]
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="p-2.5 rounded-xl border text-center" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                    {t('noRegisteredUsersAvailable', 'No registered users available')}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
-                  <span className="flex items-center gap-1.5">
-                    <Zap className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                    {t('selectPlanLabel', 'Select Subscription Plan')}
-                  </span>
-                  <span className="text-[10px] font-bold" style={{ color: 'var(--color-emerald)' }}>
-                    {t('onePlanPerEmailEnforced', 'Strictly 1 active plan per email enforced')}
-                  </span>
-                </label>
-                <select
-                  value={selectedPlanSlug}
-                  onChange={(e) => handlePlanSelectChange(e.target.value)}
-                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold transition cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  {availablePlans.map((plan) => (
-                    <option key={plan.id || plan.slug} value={plan.slug} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
-                      {plan.name} — {plan.priceFormatted}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* RECURRING SLIDE BUTTON */}
-              <div 
-                className="p-3.5 rounded-2xl border flex items-center justify-between transition-colors shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)'
-                }}
-              >
-                <div className="space-y-0.5">
-                  <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                    <Repeat className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                    {t('recurringSubscriptionOption', 'Recurring Subscription (Auto-Renew)')}
-                  </span>
-                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {isPaymentRecurring 
-                      ? t('recurringOnDesc', 'Auto-renews subscription at each billing cycle until canceled.') 
-                      : t('recurringOffDesc', 'One-time payment cycle. Subscription will expire at term end.')}
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={isPaymentRecurring}
-                  onClick={() => setIsPaymentRecurring(!isPaymentRecurring)}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-md ${
-                    isPaymentRecurring ? 'bg-[var(--color-emerald)]' : 'bg-slate-700'
-                  }`}
-                >
-                  <span
-                    aria-hidden="true"
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                      isPaymentRecurring ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                    {t('paymentDateLabel', 'Payment Date')}
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={paymentDate}
-                    onChange={(e) => handlePaymentDateChange(e.target.value)}
-                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-medium transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    <Calendar className="h-3.5 w-3.5 text-emerald-500" />
-                    {t('expiryDateCol', 'Expiry Date')}
-                  </label>
-                  <input
-                    type="date"
-                    value={paymentExpiryDate}
-                    onChange={(e) => setPaymentExpiryDate(e.target.value)}
-                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-medium transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('paymentAmountLabel', 'Payment Amount')} ({config.currency}) *
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                      {activeCurrencySymbol}
-                    </span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      required
-                      value={paymentAmount}
-                      onChange={(e) => setPaymentAmount(parseFloat(e.target.value) || 0)}
-                      className="payment-input w-full border rounded-xl pl-8 pr-3 py-2.5 text-xs outline-none font-bold transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('paymentGatewayLabel', 'Gateway')}</label>
-                  <select
-                    value={paymentGateway}
-                    onChange={(e) => setPaymentGateway(e.target.value as any)}
-                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold cursor-pointer transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    {allowedGateways.map((g) => (
-                      <option key={g.id} value={g.id} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
-                        {g.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('paymentStatusLabel', 'Status')}</label>
-                  <select
-                    value={paymentStatus}
-                    onChange={(e) => {
-                      const val = e.target.value as any;
-                      setPaymentStatus(val);
-                      if (val === 'canceled') {
-                        setIsPaymentRecurring(false);
-                      }
-                    }}
-                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold cursor-pointer transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    <option value="succeeded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusSucceeded', 'Succeeded')}</option>
-                    <option value="pending" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusPending', 'Pending')}</option>
-                    <option value="canceled" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusCanceled', 'Cancelled')}</option>
-                    <option value="failed" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusFailed', 'Failed')}</option>
-                    <option value="refunded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusRefunded', 'Refunded')}</option>
-                  </select>
-                </div>
-
-                {isFailed(paymentStatus) && (
-                  <div>
-                    <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('declineFailureReasonLabel', 'Decline / Failure Reason')}</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Card expired or declined"
-                      value={failureReason}
-                      onChange={(e) => setFailureReason(e.target.value)}
-                      className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-
-              {isSucceeded(paymentStatus) && paymentGateway !== 'manual' && (
-                <div 
-                  className="p-3.5 rounded-2xl border space-y-2.5 shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-emerald)'
-                  }}
-                >
-                  <div className="flex items-center gap-1.5 font-bold text-xs" style={{ color: 'var(--color-emerald)' }}>
-                    <ShieldCheck className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('gatewayVerificationRequired', 'Required Gateway Amount Confirmation')}
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-[11px] mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('gatewayTransactionIdLabel', 'Gateway Transaction ID / Payment Intent ID')}
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. pi_3N... or PAYID-..."
-                      value={addGatewayTxId}
-                      onChange={(e) => setAddGatewayTxId(e.target.value)}
-                      className="payment-input w-full border rounded-xl p-2 text-xs outline-none font-mono"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                  <div className="flex items-start gap-2 pt-1">
-                    <input
-                      type="checkbox"
-                      id="addGatewayConfirmedBox"
-                      checked={addGatewayConfirmed}
-                      onChange={(e) => setAddGatewayConfirmed(e.target.checked)}
-                      className="mt-0.5 rounded w-4 h-4 cursor-pointer accent-[#10b981]"
-                    />
-                    <label htmlFor="addGatewayConfirmedBox" className="text-xs font-semibold leading-tight cursor-pointer select-none" style={{ color: 'var(--color-emerald)' }}>
-                      {t('confirmAmountFromGatewayLabel', 'I confirm the payment amount transaction from payment gateway is verified to become "Succeeded".')}
-                    </label>
-                  </div>
-                </div>
-              )}
-
-              {isSucceeded(paymentStatus) && (
-                <div className="flex items-center gap-2 pt-1">
-                  <input
-                    type="checkbox"
-                    id="syncUserPlanBox"
-                    checked={syncUserPlan}
-                    onChange={(e) => setSyncUserPlan(e.target.checked)}
-                    className="rounded w-4 h-4 cursor-pointer accent-[#E05638]"
-                  />
-                  <label htmlFor="syncUserPlanBox" className="text-xs font-semibold cursor-pointer select-none" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('autoSyncPlanLabel', 'Automatically update user account to this plan and set active expiry')}
-                  </label>
-                </div>
-              )}
-
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text-secondary)'
-                  }}
-                >
-                  {t('cancel', 'Cancel')}
-                </button>
-                <button
-                  type="button"
-                  disabled={registeredUsers.length === 0}
-                  onClick={handleAddPaymentSubmit}
-                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                  style={{
-                    backgroundColor: 'var(--color-primary)'
-                  }}
-                >
-                  {planTransitionInfo?.isRenewal ? (
-                    <>
-                      <RotateCcw className="h-4 w-4" /> Record Renewal & Extend
-                    </>
-                  ) : planTransitionInfo?.isIntervalSwitch ? (
-                    planTransitionInfo.isUpgrade ? (
-                      <>
-                        <ArrowUpRight className="h-4 w-4" /> Upgrade to Annual & Cancel Previous
-                      </>
-                    ) : (
-                      <>
-                        <ArrowDownLeft className="h-4 w-4" /> Downgrade to Monthly & Cancel Previous
-                      </>
-                    )
-                  ) : planTransitionInfo?.isPlanSwitch ? (
-                    <>
-                      <Zap className="h-4 w-4" /> Switch Plan & Cancel Previous
-                    </>
-                  ) : (
-                    <>
-                      <PlusCircle className="h-4 w-4" /> {t('recordPaymentBtn', 'Record Payment & Activate')}
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODIFY (EDIT) PAYMENT MODAL */}
-      {editingTx && (
-        <div 
-          onClick={() => setEditingTx(null)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <button 
-              type="button"
-              onClick={() => setEditingTx(null)}
-              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs hover:opacity-80"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            <div className="space-y-1 pr-6">
-              <h2 
-                className="text-xl font-black flex items-center gap-2"
-                style={{ color: 'var(--color-primary)' }}
-              >
-                <Pencil className="h-5 w-5" /> {t('editPaymentModalTitle', 'Edit Payment & Subscription Record')}
-              </h2>
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('editPaymentModalSub', 'Update transaction details, recurring status, or expiration date for')} <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>{editingTx.customerName}</span>.
-              </p>
-            </div>
-
-            {modalError && (
-              <div className="p-3 bg-red-50 border border-red-300 text-red-900 rounded-xl font-semibold flex items-center gap-2 shadow-xs">
-                <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
-                <span>{modalError}</span>
-              </div>
-            )}
-
-            <div className="space-y-4 pt-1">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('customerNameLabel', 'Customer Name')}</label>
-                  <input
-                    type="text"
-                    required
-                    value={editCustomerName}
-                    onChange={(e) => setEditCustomerName(e.target.value)}
-                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('customerEmailLabel', 'Customer Email')}</label>
-                  <input
-                    type="email"
-                    required
-                    value={editCustomerEmail}
-                    onChange={(e) => setEditCustomerEmail(e.target.value)}
-                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('planCol', 'Plan')}</label>
-                <select
-                  value={editPlanSlug}
-                  onChange={(e) => handleEditPlanSelectChange(e.target.value)}
-                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold transition cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  <option value="" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Custom: {editPlanName}</option>
-                  {availablePlans.map((plan) => (
-                    <option key={plan.id || plan.slug} value={plan.slug} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
-                      {plan.name} — {plan.priceFormatted}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* RECURRING SLIDE BUTTON */}
-              <div 
-                className="p-3.5 rounded-2xl border flex items-center justify-between transition-colors shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)'
-                }}
-              >
-                <div className="space-y-0.5">
-                  <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                    <Repeat className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                    {t('recurringSubscriptionOption', 'Recurring Subscription (Auto-Renew)')}
-                  </span>
-                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {editIsRecurring 
-                      ? t('recurringOnDesc', 'Auto-renews subscription at each billing cycle until canceled.') 
-                      : t('recurringOffDesc', 'One-time payment cycle. Subscription will expire at term end.')}
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={editIsRecurring}
-                  onClick={() => setEditIsRecurring(!editIsRecurring)}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-md ${
-                    editIsRecurring ? 'bg-[var(--color-emerald)]' : 'bg-slate-700'
-                  }`}
-                >
-                  <span
-                    aria-hidden="true"
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                      editIsRecurring ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    <Calendar className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                    {t('dateCol', 'Date')}
-                  </label>
-                  <input
-                    type="date"
-                    value={editDate}
-                    onChange={(e) => setEditDate(e.target.value)}
-                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-medium transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    <Calendar className="h-3.5 w-3.5 text-emerald-500" />
-                    {t('expiryDateCol', 'Expiry Date')}
-                  </label>
-                  <input
-                    type="date"
-                    value={editExpiryDate}
-                    onChange={(e) => setEditExpiryDate(e.target.value)}
-                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-medium transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('paymentAmountLabel', 'Payment Amount')} ({editingTx.currency || config.currency}) *
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                      {getCurrencySymbol(editingTx.currency || config.currency)}
-                    </span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      required
-                      value={editAmount}
-                      onChange={(e) => setEditAmount(parseFloat(e.target.value) || 0)}
-                      className="payment-input w-full border rounded-xl pl-8 pr-3 py-2.5 text-xs outline-none font-bold transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('paymentGatewayLabel', 'Gateway')}</label>
-                  <select
-                    value={editGateway}
-                    onChange={(e) => setEditGateway(e.target.value as any)}
-                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold cursor-pointer transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    <option value="stripe" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayStripe', 'Stripe')}</option>
-                    <option value="paypal" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayPaypal', 'PayPal')}</option>
-                    <option value="manual" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('gatewayManual', 'Manual')}</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('paymentStatusLabel', 'Status')}</label>
-                  <select
-                    value={editStatus}
-                    onChange={(e) => {
-                      const val = e.target.value as any;
-                      setEditStatus(val);
-                      if (val === 'canceled') {
-                        setEditIsRecurring(false);
-                      }
-                    }}
-                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-bold cursor-pointer transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    <option value="succeeded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusSucceeded', 'Succeeded')}</option>
-                    <option value="pending" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusPending', 'Pending')}</option>
-                    <option value="canceled" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusCanceled', 'Cancelled')}</option>
-                    <option value="failed" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusFailed', 'Failed')}</option>
-                    <option value="refunded" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('statusRefunded', 'Refunded')}</option>
-                  </select>
-                </div>
-
-                {isFailed(editStatus) && (
-                  <div>
-                    <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('declineFailureReasonLabel', 'Decline / Failure Reason')}</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Card expired or declined"
-                      value={editFailureReason}
-                      onChange={(e) => setEditFailureReason(e.target.value)}
-                      className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-
-              {isSucceeded(editStatus) && !isSucceeded(editingTx.status) && editGateway !== 'manual' && (
-                <div 
-                  className="p-3.5 rounded-2xl border space-y-2.5 shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-emerald)'
-                  }}
-                >
-                  <div className="flex items-center gap-1.5 font-bold text-xs" style={{ color: 'var(--color-emerald)' }}>
-                    <ShieldCheck className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('gatewayVerificationRequired', 'Required Gateway Amount Confirmation')}
-                  </div>
-                  <div>
-                    <label className="block font-semibold text-[11px] mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('gatewayTransactionIdLabel', 'Gateway Transaction ID / Payment Intent ID')}
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. pi_3N... or PAYID-..."
-                      value={editGatewayTxId}
-                      onChange={(e) => setEditGatewayTxId(e.target.value)}
-                      className="payment-input w-full border rounded-xl p-2 text-xs outline-none font-mono"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                  <div className="flex items-start gap-2 pt-1">
-                    <input
-                      type="checkbox"
-                      id="editGatewayConfirmedBox"
-                      checked={editGatewayConfirmed}
-                      onChange={(e) => setEditGatewayConfirmed(e.target.checked)}
-                      className="mt-0.5 rounded w-4 h-4 cursor-pointer accent-[#10b981]"
-                    />
-                    <label htmlFor="editGatewayConfirmedBox" className="text-xs font-semibold leading-tight cursor-pointer select-none" style={{ color: 'var(--color-emerald)' }}>
-                      {t('confirmAmountFromGatewayLabel', 'I confirm the payment amount transaction from payment gateway is verified to become "Succeeded".')}
-                    </label>
-                  </div>
-                </div>
-              )}
-
-              {isSucceeded(editStatus) && editPlanSlug && (
-                <div className="flex items-center gap-2 pt-1">
-                  <input
-                    type="checkbox"
-                    id="editSyncUserPlanBox"
-                    checked={editSyncUserPlan}
-                    onChange={(e) => setEditSyncUserPlan(e.target.checked)}
-                    className="rounded w-4 h-4 cursor-pointer accent-[#E05638]"
-                  />
-                  <label htmlFor="editSyncUserPlanBox" className="text-xs font-semibold cursor-pointer select-none" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('updateUserPlanToLabel', 'Update user account plan to')} {editPlanName} {t('onePlanMaxSuffix', '(Enforces 1 plan maximum per email)')}
-                  </label>
-                </div>
-              )}
-
-              <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                <button
-                  type="button"
-                  onClick={() => setEditingTx(null)}
-                  className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text-secondary)'
-                  }}
-                >
-                  {t('cancel', 'Cancel')}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleUpdatePaymentSubmit}
-                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-                >
-                  <Save className="h-4 w-4" /> {t('saveChanges', 'Save Changes')}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* STRIPE CONNECTION & WEBHOOK SETUP GUIDE MODAL */}
-      {showStripeGuideModal && (
-        <div 
-          onClick={() => setShowStripeGuideModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <button 
-              type="button"
-              onClick={() => setShowStripeGuideModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs hover:opacity-80"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            <div className="space-y-1.5 pr-8">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-[#635bff]/15 text-[#635bff]">
-                  <Terminal className="h-5 w-5" />
-                </div>
-                <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                  {t('stripeConnectModalTitle', 'Connect Stripe & Webhooks')}
-                </h2>
-              </div>
-              <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('stripeConnectModalSub', 'To connect Stripe webhooks and test payments with your local server, follow the official recommended Stripe CLI setup below.')}
-              </p>
-            </div>
-
-            {/* Method 1: Official Stripe CLI */}
-            <div 
-              className="p-5 rounded-2xl border space-y-4"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-                <span className="font-bold text-sm flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                  <Code2 className="h-4 w-4 text-[var(--color-primary)]" />
-                  {t('method1Title', 'Method 1: Use the Official Stripe CLI (Recommended)')}
-                </span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                  {t('recommendedBadge', 'Recommended')}
-                </span>
-              </div>
-              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('method1Desc', 'The official Stripe CLI securely routes events straight to your localhost without needing to register a public URL or configure an HTTP tunnel.')}
-              </p>
-
-              {/* Step 1 */}
-              <div className="space-y-1.5">
-                <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
-                  1. {t('step1Title', 'Install the CLI:')} <span className="font-normal opacity-80">{t('step1Desc', 'Download the Stripe CLI on your system (e.g., via Homebrew on macOS):')}</span>
-                </div>
-                <div 
-                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
-                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-                >
-                  <span className="select-all">brew install stripe/stripe-cli/stripe</span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyCliCommand('brew install stripe/stripe-cli/stripe', 'cli_install')}
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer"
-                    style={{
-                      backgroundColor: copiedCliKey === 'cli_install' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
-                      borderColor: copiedCliKey === 'cli_install' ? 'var(--color-emerald)' : 'var(--color-border)',
-                      color: copiedCliKey === 'cli_install' ? '#ffffff' : 'var(--color-text)'
-                    }}
-                  >
-                    {copiedCliKey === 'cli_install' ? t('copiedBtn', 'Copied!') : t('copyBtn', 'Copy')}
-                  </button>
-                </div>
-              </div>
-
-              {/* Step 2 */}
-              <div className="space-y-1.5">
-                <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
-                  2. {t('step2Title', 'Log in:')} <span className="font-normal opacity-80">{t('step2Desc', 'Link your Stripe account by running in your terminal:')}</span>
-                </div>
-                <div 
-                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
-                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-                >
-                  <span className="select-all">stripe login</span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyCliCommand('stripe login', 'cli_login')}
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer"
-                    style={{
-                      backgroundColor: copiedCliKey === 'cli_login' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
-                      borderColor: copiedCliKey === 'cli_login' ? 'var(--color-emerald)' : 'var(--color-border)',
-                      color: copiedCliKey === 'cli_login' ? '#ffffff' : 'var(--color-text)'
-                    }}
-                  >
-                    {copiedCliKey === 'cli_login' ? t('copiedBtn', 'Copied!') : t('copyBtn', 'Copy')}
-                  </button>
-                </div>
-                <p className="text-[10px] opacity-70 italic" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('step2Note', 'Follow the pairing link provided in the terminal to authenticate your Stripe account.')}
-                </p>
-              </div>
-
-              {/* Step 3 */}
-              <div className="space-y-1.5">
-                <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
-                  3. {t('step3Title', 'Forward events:')} <span className="font-normal opacity-80">{t('step3Desc', 'Start forwarding Stripe events directly to your local endpoint:')}</span>
-                </div>
-                <div 
-                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
-                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-                >
-                  <span className="select-all truncate">
-                    stripe listen --forward-to {(webhookEndpointUrl || 'localhost:3000/api/webhooks/stripe').replace(/^https?:\/\//, '')}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyCliCommand(`stripe listen --forward-to ${(webhookEndpointUrl || 'localhost:3000/api/webhooks/stripe').replace(/^https?:\/\//, '')}`, 'cli_listen')}
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer shrink-0"
-                    style={{
-                      backgroundColor: copiedCliKey === 'cli_listen' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
-                      borderColor: copiedCliKey === 'cli_listen' ? 'var(--color-emerald)' : 'var(--color-border)',
-                      color: copiedCliKey === 'cli_listen' ? '#ffffff' : 'var(--color-text)'
-                    }}
-                  >
-                    {copiedCliKey === 'cli_listen' ? t('copiedBtn', 'Copied!') : t('copyBtn', 'Copy')}
-                  </button>
-                </div>
-              </div>
-
-              {/* Step 4 */}
-              <div className="space-y-1.5">
-                <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
-                  4. {t('step4Title', 'Capture the Secret:')} <span className="font-normal opacity-80">{t('step4Desc', 'The CLI will print a local signing secret (looks like')} <code className="font-mono font-bold text-[10px] px-1 py-0.5 rounded border">whsec_...</code>{t('step4DescAfter', '). Paste it into the Webhook Secret field below:')}</span>
-                </div>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={config.stripe.webhookSecret}
-                    onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
-                    placeholder="whsec_..."
-                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono"
-                    style={{
-                      backgroundColor: 'var(--color-card)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Method 2: Stripe Dashboard Links */}
-            <div 
-              className="p-3.5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div className="space-y-0.5">
-                <span className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
-                  {t('method2Title', 'Production / Dashboard API Keys')}
-                </span>
-                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('method2Desc', 'Retrieve your Secret Key and Publishable Key directly from your Stripe Dashboard.')}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <a
-                  href={config.testMode ? "https://dashboard.stripe.com/test/apikeys" : "https://dashboard.stripe.com/apikeys"}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-80"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-primary)'
-                  }}
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  <span>{t('openApiKeysBtn', 'Stripe API Keys')}</span>
-                </a>
-                <a
-                  href={config.testMode ? "https://dashboard.stripe.com/test/webhooks" : "https://dashboard.stripe.com/webhooks"}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-80"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-primary)'
-                  }}
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  <span>{t('openWebhooksBtn', 'Stripe Webhooks')}</span>
-                </a>
-              </div>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-              <button
-                type="button"
-                onClick={() => setShowStripeGuideModal(false)}
-                className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text-secondary)'
-                }}
-              >
-                {t('closeBtn', 'Close')}
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  setShowStripeGuideModal(false);
-                  await handleSaveSettings();
-                  await handleVerifyStripeKey();
-                }}
-                className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-              >
-                <Save className="h-4 w-4" />
-                <span>{t('saveAndConnectBtn', 'Save Settings & Verify Stripe')}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-    </div>
-  );
+export default function AdminPaymentRedirect() {
+  redirect('/admin/payment-gateway');
 }
 
 ```
@@ -29895,6 +26396,1496 @@ export default function AdminTokenSettingPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+```
+
+## File: `apps/web/src/app/admin/payment-gateway/page.tsx`
+```typescript
+'use client';
+
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import Link from 'next/link';
+import { 
+  CreditCard, Shield, CheckCircle2, AlertCircle, Save, 
+  RefreshCw, Check, Eye, EyeOff, Globe, Zap, Sliders,
+  ShieldCheck, Terminal, ExternalLink, Code2, AlertTriangle,
+  Activity, CheckCheck
+} from 'lucide-react';
+import { useTranslation } from '@/components/LanguageProvider';
+import { 
+  purgeLegacyBrowserAdminStorage, 
+  fetchServerAdminSettings, 
+  persistServerAdminSettings 
+} from '@/lib/adminSync';
+
+interface GatewayConfig {
+  activeGateway: 'stripe' | 'paypal' | 'both';
+  currency: string;
+  testMode: boolean;
+  stripeConnected?: boolean;
+  stripeKeysVerified?: boolean;
+  stripeWebhookVerified?: boolean;
+  stripe: {
+    enabled: boolean;
+    publishableKey: string;
+    secretKey: string;
+    webhookSecret: string;
+  };
+  paypal: {
+    enabled: boolean;
+    clientId: string;
+    clientSecret: string;
+    webhookId: string;
+    environment: 'sandbox' | 'live';
+  };
+}
+
+const SUPPORTED_CURRENCIES = [
+  { code: 'USD', label: 'USD - United States Dollar ($)', symbol: '$' },
+  { code: 'EUR', label: 'EUR - Euro (€)', symbol: '€' },
+  { code: 'GBP', label: 'GBP - British Pound (£)', symbol: '£' },
+  { code: 'CAD', label: 'CAD - Canadian Dollar ($)', symbol: 'CA$' },
+  { code: 'AUD', label: 'AUD - Australian Dollar ($)', symbol: 'A$' },
+  { code: 'JPY', label: 'JPY - Japanese Yen (¥)', symbol: '¥' },
+  { code: 'SGD', label: 'SGD - Singapore Dollar ($)', symbol: 'S$' },
+  { code: 'CHF', label: 'CHF - Swiss Franc (Fr)', symbol: 'Fr' },
+  { code: 'NZD', label: 'NZD - New Zealand Dollar ($)', symbol: 'NZ$' },
+  { code: 'THB', label: 'THB - Thai Baht (฿)', symbol: '฿' },
+];
+
+export default function AdminPaymentGatewayPage() {
+  const langContext = useTranslation();
+  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
+  const version = langContext?.version;
+
+  const [loading, setLoading] = useState(false);
+  const [verifyingStripe, setVerifyingStripe] = useState(false);
+  const [verifyingWebhook, setVerifyingWebhook] = useState(false);
+  const [showStripeGuideModal, setShowStripeGuideModal] = useState(false);
+  const [copiedCliKey, setCopiedCliKey] = useState<string | null>(null);
+  const [webhookEndpointUrl, setWebhookEndpointUrl] = useState('');
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+  const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
+  const [isDayMode, setIsDayMode] = useState<boolean>(false);
+
+  // Gateway Settings State
+  const [config, setConfig] = useState<GatewayConfig>({
+    activeGateway: 'stripe',
+    currency: 'USD',
+    testMode: true,
+    stripeConnected: false,
+    stripeKeysVerified: false,
+    stripeWebhookVerified: false,
+    stripe: {
+      enabled: true,
+      publishableKey: '',
+      secretKey: '',
+      webhookSecret: '',
+    },
+    paypal: {
+      enabled: false,
+      clientId: '',
+      clientSecret: '',
+      webhookId: '',
+      environment: 'sandbox',
+    },
+  });
+
+  const configRef = useRef<GatewayConfig>(config);
+  const isFetchingRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    configRef.current = config;
+  }, [config]);
+
+  useEffect(() => {
+    if (feedback) {
+      const timer = setTimeout(() => setFeedback(null), 4500);
+      return () => clearTimeout(timer);
+    }
+  }, [feedback]);
+
+  // Theme Synchronization
+  const handleModeChange = useCallback(() => {
+    try {
+      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
+      const root = typeof document !== 'undefined' ? document.documentElement : null;
+      const day = mode === 'light' || mode === 'day' || (root && root.classList.contains('light'));
+      setIsDayMode(Boolean(day));
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    handleModeChange();
+    window.addEventListener('zecratary_theme_mode_changed', handleModeChange);
+    window.addEventListener('zecratary_theme_changed', handleModeChange);
+    window.addEventListener('storage', handleModeChange);
+
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', handleModeChange);
+      window.removeEventListener('zecratary_theme_changed', handleModeChange);
+      window.removeEventListener('storage', handleModeChange);
+    };
+  }, [handleModeChange]);
+
+  const getCurrencySymbol = useCallback((currencyCode?: string) => {
+    const code = currencyCode || configRef.current?.currency || 'USD';
+    const found = SUPPORTED_CURRENCIES.find((c) => c.code.toUpperCase() === code.toUpperCase());
+    return found ? found.symbol : '$';
+  }, []);
+
+  const activeCurrencySymbol = useMemo(() => {
+    return getCurrencySymbol(config.currency);
+  }, [config.currency, getCurrencySymbol]);
+
+  const toggleVisibility = (field: string) => {
+    setVisibleFields((prev) => ({ ...prev, [field]: !prev[field] }));
+  };
+
+  const fetchData = useCallback(async () => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    purgeLegacyBrowserAdminStorage();
+    try {
+      const res = await fetch('/api/admin/payment?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.settings) {
+          const merged = { ...configRef.current, ...data.settings };
+          if (JSON.stringify(configRef.current) !== JSON.stringify(merged)) {
+            configRef.current = merged;
+            setConfig(merged);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load server payment gateway data:', e);
+    } finally {
+      isFetchingRef.current = false;
+    }
+  }, []);
+
+  const fetchDataRef = useRef(fetchData);
+  fetchDataRef.current = fetchData;
+
+  useEffect(() => {
+    document.title = `${t('paymentGatewayTitle', 'Payment Gateway')} - Admin`;
+    fetchDataRef.current();
+
+    let debounceTimer: NodeJS.Timeout | null = null;
+    const handleDebouncedSync = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchDataRef.current();
+      }, 300);
+    };
+
+    window.addEventListener('zecratary_payment_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
+
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      window.removeEventListener('zecratary_payment_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
+    };
+  }, [t, version]);
+
+  const handleCopyCliCommand = (cmd: string, key: string) => {
+    if (typeof window !== 'undefined') {
+      navigator.clipboard.writeText(cmd);
+      setCopiedCliKey(key);
+      setTimeout(() => setCopiedCliKey(null), 2500);
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setWebhookEndpointUrl(`${window.location.origin}/api/webhooks/stripe`);
+    }
+  }, []);
+
+  const handleCurrencyChange = async (newCurrency: string) => {
+    const updatedConfig: GatewayConfig = {
+      ...config,
+      currency: newCurrency,
+    };
+    setConfig(updatedConfig);
+    configRef.current = updatedConfig;
+
+    await persistServerAdminSettings({ currency: newCurrency, paymentSettings: updatedConfig });
+    try {
+      await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedConfig),
+      });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
+
+      setFeedback({
+        type: 'success',
+        msg: `Processing currency updated to ${newCurrency} (${getCurrencySymbol(newCurrency)}) and saved to server!`,
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        msg: `Failed to persist currency: ${err.message || 'Server error'}`,
+      });
+    }
+  };
+
+  const handleToggleTestMode = async () => {
+    const nextMode = !config.testMode;
+    const updatedConfig: GatewayConfig = {
+      ...config,
+      testMode: nextMode,
+      stripeKeysVerified: false,
+      stripeWebhookVerified: false,
+    };
+    setConfig(updatedConfig);
+    configRef.current = updatedConfig;
+
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'toggle_test_mode', testMode: nextMode }),
+      });
+      await persistServerAdminSettings({ paymentSettings: updatedConfig });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
+
+      setFeedback({
+        type: 'success',
+        msg: nextMode
+          ? t('sandboxTestModeEnabled', 'Sandbox (Test Mode) enabled and saved to server!')
+          : t('liveProductionModeEnabled', 'Live Production mode enabled and saved to server!'),
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        msg: err.message || 'Failed to update gateway environment.',
+      });
+    }
+  };
+
+  const handleVerifyWebhookSecret = async () => {
+    const secret = config.stripe.webhookSecret?.trim();
+    if (!secret) {
+      setFeedback({
+        type: 'error',
+        msg: t('webhookSecretRequiredToVerify', 'Please enter a Webhook Signing Secret (whsec_...) to verify.'),
+      });
+      return;
+    }
+
+    setVerifyingWebhook(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'verify_webhook_secret',
+          webhookSecret: secret,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        const updated: GatewayConfig = { 
+          ...config, 
+          stripeWebhookVerified: true 
+        };
+        setConfig(updated);
+        configRef.current = updated;
+        await persistServerAdminSettings({ paymentSettings: updated });
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        }
+        setFeedback({ 
+          type: 'success', 
+          msg: data.message || t('webhookSecretVerifiedSuccess', 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!'),
+        });
+      } else {
+        const updated: GatewayConfig = { 
+          ...config, 
+          stripeWebhookVerified: false 
+        };
+        setConfig(updated);
+        configRef.current = updated;
+        setFeedback({ 
+          type: 'error', 
+          msg: data.error || t('webhookSecretVerificationFailed', 'Webhook Secret verification failed. Must start with "whsec_" and be a valid HMAC key.'),
+        });
+      }
+    } catch (e: any) {
+      setFeedback({ 
+        type: 'error', 
+        msg: e.message || 'Failed to communicate with webhook verification endpoint.',
+      });
+    } finally {
+      setVerifyingWebhook(false);
+    }
+  };
+
+  const handleVerifyStripeKey = async () => {
+    const pKey = config.stripe.publishableKey?.trim();
+    const sKey = config.stripe.secretKey?.trim();
+    const wSecret = config.stripe.webhookSecret?.trim();
+
+    if (!pKey || !sKey || !wSecret) {
+      if (!pKey && !sKey && !wSecret) {
+        setShowStripeGuideModal(true);
+      }
+      const missing: string[] = [];
+      if (!pKey) missing.push(t('publishableKeyLabel', 'Publishable Key'));
+      if (!sKey) missing.push(t('secretKeyLabel', 'Secret Key'));
+      if (!wSecret) missing.push(t('webhookSecretLabel', 'Webhook Secret'));
+
+      setFeedback({
+        type: 'error',
+        msg: t('stripeAllThreeRequired', `Verification required: Please enter ${missing.join(', ')} to verify.`),
+      });
+      return;
+    }
+
+    setVerifyingStripe(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'verify_stripe_keys',
+          publishableKey: pKey,
+          secretKey: sKey,
+          webhookSecret: wSecret,
+          stripe: config.stripe,
+          testMode: config.testMode,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        const updated: GatewayConfig = { 
+          ...config, 
+          stripeKeysVerified: true,
+          stripeWebhookVerified: true,
+        };
+        setConfig(updated);
+        configRef.current = updated;
+        await persistServerAdminSettings({ paymentSettings: updated });
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        }
+        setFeedback({ 
+          type: 'success', 
+          msg: data.message || t('stripeKeyVerifiedSuccess', 'Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers!'),
+        });
+      } else {
+        const updated: GatewayConfig = { 
+          ...config, 
+          stripeKeysVerified: false,
+          stripeWebhookVerified: false,
+        };
+        setConfig(updated);
+        configRef.current = updated;
+        setFeedback({ 
+          type: 'error', 
+          msg: data.error || t('stripeKeyVerificationFailed', 'Stripe verification failed. Please check your Publishable Key, Secret Key, and Webhook Secret.'),
+        });
+      }
+    } catch (e: any) {
+      setFeedback({ 
+        type: 'error', 
+        msg: e.message || t('failedToVerifyStripeKeys', 'Failed to communicate with Stripe verification endpoint.'),
+      });
+    } finally {
+      setVerifyingStripe(false);
+    }
+  };
+
+  const handleSaveSettings = async (e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    setLoading(true);
+    setFeedback(null);
+
+    const updatedConfig: GatewayConfig = { ...config };
+
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedConfig),
+      });
+      const data = await res.json();
+
+      await persistServerAdminSettings({
+        paymentSettings: updatedConfig,
+        currency: updatedConfig.currency
+      });
+
+      if (data.success) {
+        setConfig(updatedConfig);
+        configRef.current = updatedConfig;
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        }
+        setFeedback({ type: 'success', msg: t('gatewaySettingsSavedSuccess', 'Payment gateway settings and currency saved successfully to server!') });
+      } else {
+        setFeedback({ type: 'error', msg: data.error || 'Failed to save gateway settings.' });
+      }
+    } catch (e: any) {
+      await persistServerAdminSettings({
+        paymentSettings: updatedConfig,
+        currency: updatedConfig.currency
+      });
+      setConfig(updatedConfig);
+      configRef.current = updatedConfig;
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
+      setFeedback({ type: 'success', msg: t('gatewaySettingsSavedSuccess', 'Payment gateway settings saved to server.') });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div 
+      className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      style={{ color: 'var(--color-text)' }}
+    >
+      <style dangerouslySetInnerHTML={{ __html: `
+        .payment-input:-webkit-autofill,
+        .payment-input:-webkit-autofill:hover,
+        .payment-input:-webkit-autofill:focus,
+        .payment-input:-webkit-autofill:active {
+          -webkit-box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
+          box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
+          -webkit-text-fill-color: var(--color-text) !important;
+          caret-color: var(--color-text) !important;
+          transition: background-color 50000s ease-in-out 0s !important;
+        }
+
+        .payment-input[type="date"],
+        input[type="date"].payment-input {
+          color-scheme: ${isDayMode ? 'light' : 'dark'};
+        }
+      `}} />
+
+      {/* HEADER & TOP NAV */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)] flex items-center gap-2">
+            <Sliders className="h-6 w-6" style={{ color: 'var(--color-primary)' }} />
+            {t('paymentGatewayTitle', 'Payment Gateway')}
+          </h1>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('paymentGatewaySubtitle', 'Configure payment processing gateways, Stripe & PayPal API credentials, webhook endpoints, and processing currencies.')}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Link
+            href="/admin/plans"
+            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <Zap className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('managePlans', 'Manage Plans')}
+          </Link>
+        </div>
+      </div>
+
+      {feedback && (
+        <div
+          className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 border shadow-xs animate-in fade-in"
+          style={{
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: feedback.type === 'success' ? 'var(--color-emerald)' : '#ef4444',
+            color: feedback.type === 'success' ? 'var(--color-emerald)' : '#ef4444'
+          }}
+        >
+          {feedback.type === 'success' ? <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} /> : <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />}
+          <span>{feedback.msg}</span>
+        </div>
+      )}
+
+      {/* GATEWAY ENGINE MONITOR SUMMARY BAR */}
+      <div
+        className="p-3 px-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs transition-colors duration-200"
+        style={{
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)'
+        }}
+      >
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-1.5 font-bold" style={{ color: 'var(--color-text)' }}>
+            <Activity className="h-4 w-4 text-emerald-500 animate-pulse" /> {t('gatewayEngine', 'Gateway Engine')}
+          </span>
+          <span 
+            className="font-extrabold uppercase px-2.5 py-0.5 rounded text-[11px] border"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            {config.activeGateway}
+          </span>
+          <span 
+            className="font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: config.testMode ? '#f59e0b' : 'var(--color-emerald)',
+              color: config.testMode ? '#fbbf24' : 'var(--color-emerald)'
+            }}
+          >
+            {config.testMode ? t('sandboxTest', 'Sandbox Test') : t('liveProduction', 'Live Production')}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-4 font-semibold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+          <div>
+            {t('currencyLabel', 'Currency:')} <span className="font-bold" style={{ color: 'var(--color-text)' }}>{config.currency} ({activeCurrencySymbol})</span>
+          </div>
+          <div>
+            {t('stripeKeysLabel', 'Stripe Keys:')}{' '}
+            <span 
+              className="font-bold" 
+              style={{ color: (config.stripeKeysVerified && config.stripeWebhookVerified) ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}
+            >
+              {(config.stripeKeysVerified && config.stripeWebhookVerified) ? t('verifiedStatus', 'Verified') : t('unverifiedStatus', 'Unverified')}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* GATEWAY SETTINGS CONTAINER */}
+      <div className="space-y-6">
+        {/* Processing Currency Card */}
+        <div 
+          className="border p-6 rounded-3xl shadow-sm transition-colors duration-200"
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)'
+          }}
+        >
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Globe className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('processingCurrencyTitle', 'Processing Currency')}
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('processingCurrencySub', 'Select the default currency for processing subscriptions and recording transactions.')}
+              </p>
+            </div>
+
+            <div className="w-full sm:w-80">
+              <select
+                value={config.currency}
+                onChange={(e) => handleCurrencyChange(e.target.value)}
+                className="payment-input w-full border rounded-xl p-3 text-xs font-bold outline-none transition cursor-pointer shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              >
+                {SUPPORTED_CURRENCIES.map((curr) => (
+                  <option key={curr.code} value={curr.code} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                    {curr.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Default Gateway Selector Card */}
+        <div 
+          className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)'
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+              <Shield className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('defaultGatewayTitle', 'Default Payment Gateway')}
+            </h2>
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>{t('environmentLabel', 'Environment:')}</label>
+              <button
+                type="button"
+                onClick={handleToggleTestMode}
+                className="text-xs font-bold px-3 py-1 rounded-full border transition cursor-pointer shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: config.testMode ? '#f59e0b' : 'var(--color-emerald)',
+                  color: config.testMode ? '#fbbf24' : 'var(--color-emerald)'
+                }}
+              >
+                {config.testMode ? t('sandboxTestMode', 'Sandbox (Test Mode)') : t('liveProduction', 'Live Production')}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+            <div
+              onClick={() => setConfig({ ...config, activeGateway: 'stripe' })}
+              className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
+                config.activeGateway === 'stripe' ? 'shadow-md' : 'opacity-70 hover:opacity-100'
+              }`}
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: config.activeGateway === 'stripe' ? 'var(--color-primary)' : 'var(--color-border)'
+              }}
+            >
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-base font-black" style={{ color: 'var(--color-text)' }}>Stripe</span>
+                  {config.activeGateway === 'stripe' && (
+                    <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary)' }}>
+                      <Check className="h-3.5 w-3.5" />
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('stripeCardDesc', 'Accept credit cards securely via Stripe Checkout and webhooks.')}
+                </p>
+              </div>
+            </div>
+
+            <div
+              onClick={() => setConfig({ ...config, activeGateway: 'paypal' })}
+              className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
+                config.activeGateway === 'paypal' ? 'shadow-md' : 'opacity-70 hover:opacity-100'
+              }`}
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: config.activeGateway === 'paypal' ? 'var(--color-primary)' : 'var(--color-border)'
+              }}
+            >
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-base font-black" style={{ color: 'var(--color-text)' }}>PayPal</span>
+                  {config.activeGateway === 'paypal' && (
+                    <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary)' }}>
+                      <Check className="h-3.5 w-3.5" />
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('paypalCardDesc', 'Accept digital wallet and PayPal account balance payments.')}
+                </p>
+              </div>
+            </div>
+
+            <div
+              onClick={() => setConfig({ ...config, activeGateway: 'both' })}
+              className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
+                config.activeGateway === 'both' ? 'shadow-md' : 'opacity-70 hover:opacity-100'
+              }`}
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: config.activeGateway === 'both' ? 'var(--color-primary)' : 'var(--color-border)'
+              }}
+            >
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-base font-black" style={{ color: 'var(--color-text)' }}>
+                    {t('multiGatewayCardTitle', 'Both Gateways')}
+                  </span>
+                  {config.activeGateway === 'both' && (
+                    <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary)' }}>
+                      <Check className="h-3.5 w-3.5" />
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('multiGatewayCardDesc', 'Enable both Stripe and PayPal checkout options simultaneously.')}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Credentials Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Stripe Config */}
+          <div 
+            className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-blue-500"></div>
+                <h3 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('stripeApiConfig', 'Stripe API Configuration')}</h3>
+              </div>
+              <input
+                type="checkbox"
+                checked={config.stripe.enabled}
+                onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, enabled: e.target.checked } })}
+                className="w-4 h-4 rounded cursor-pointer accent-[#E05638]"
+              />
+            </div>
+
+            <div className="space-y-1.5 pb-2">
+              <label className="text-xs font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('verifyStripeKeyLabel', 'Verify Stripe Key')}
+              </label>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleVerifyStripeKey}
+                  disabled={verifyingStripe}
+                  className="inline-flex items-center overflow-hidden rounded-xl text-white font-bold text-xs shadow-md active:scale-[0.98] transition cursor-pointer border border-[#7a73ff]/40 disabled:opacity-50"
+                  style={{
+                    backgroundImage: 'linear-gradient(180deg, #635bff 0%, #4f46e5 100%)',
+                    boxShadow: '0 2px 5px rgba(99, 91, 255, 0.3), inset 0 1px 0 rgba(255,255,255,0.3)'
+                  }}
+                  title={t('verifyStripeKeyTooltip', 'Verify Publishable Key, Secret Key, and Webhook Secret with Stripe servers')}
+                >
+                  <div className="px-3 py-2.5 bg-black/15 border-r border-white/20 font-black text-sm flex items-center justify-center">
+                    <ShieldCheck className="h-4 w-4 text-white" />
+                  </div>
+                  <span className="px-3.5 py-2.5 text-xs tracking-tight font-bold flex items-center gap-1.5">
+                    {verifyingStripe ? (
+                      <>
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        {t('verifyingStripeKey', 'Verifying Stripe Keys...')}
+                      </>
+                    ) : (
+                      t('verifyStripeKey', 'Verify Stripe Key')
+                    )}
+                  </span>
+                </button>
+
+                {(config.stripeKeysVerified && config.stripeWebhookVerified) ? (
+                  <span 
+                    className="text-[11px] font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 border shadow-xs animate-in fade-in"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-emerald)',
+                      color: 'var(--color-emerald)'
+                    }}
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} /> {t('keysVerifiedStatus', 'Keys & Webhook Verified')}
+                  </span>
+                ) : config.stripeKeysVerified ? (
+                  <span 
+                    className="text-[11px] font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 border shadow-xs animate-in fade-in"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: '#f59e0b',
+                      color: '#fbbf24'
+                    }}
+                  >
+                    <Check className="h-3.5 w-3.5" style={{ color: '#fbbf24' }} /> {t('keysOnlyVerifiedStatus', 'API Keys Verified (Webhook Pending)')}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="space-y-3 pt-1 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              {config.stripe.enabled && (
+                <div className="space-y-2 pt-1">
+                  {config.testMode && config.stripe.secretKey && !config.stripe.secretKey.startsWith('sk_test_') && (
+                    <div 
+                      className="p-3 rounded-xl border flex items-start gap-2 text-xs font-semibold shadow-xs animate-in fade-in"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: '#f59e0b',
+                        color: '#fbbf24'
+                      }}
+                    >
+                      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
+                      <div>
+                        <div className="font-bold">{t('testKeyMismatchTitle', 'Stripe Test Mode Key Alert')}</div>
+                        <div className="text-[11px] font-normal leading-relaxed" style={{ color: 'var(--color-text)' }}>
+                          {t('testKeyMismatchNotice', 'Sandbox Test Mode is active, but your Secret Key does not start with "sk_test_". Payments and test cards will be rejected by Stripe until valid test keys are entered.')}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {!config.testMode && config.stripe.secretKey && config.stripe.secretKey.startsWith('sk_test_') && (
+                    <div 
+                      className="p-3 rounded-xl border flex items-start gap-2 text-xs font-semibold shadow-xs animate-in fade-in"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: '#ef4444',
+                        color: '#ef4444'
+                      }}
+                    >
+                      <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-red-500" />
+                      <div>
+                        <div className="font-bold">{t('liveKeyMismatchTitle', 'Live Mode Key Alert')}</div>
+                        <div className="text-[11px] font-normal leading-relaxed" style={{ color: 'var(--color-text)' }}>
+                          {t('liveKeyMismatchNotice', 'Live Production Mode is active, but your Secret Key is a test key ("sk_test_..."). Real customer credit cards will be declined.')}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {config.testMode && (
+                    <div 
+                      className="p-3.5 rounded-2xl border space-y-1.5 transition-colors shadow-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)'
+                      }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: '#fbbf24' }}>
+                          <CreditCard className="h-3.5 w-3.5" />
+                          {t('stripeTestCardGuide', 'Stripe Test Card Helper')}
+                        </span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                          {t('sandboxActiveBadge', 'Sandbox Active')}
+                        </span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                        {t('testCardInstructions', 'Use card number')} <code className="px-1.5 py-0.5 rounded font-mono font-bold text-[11px] border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>4242 4242 4242 4242</code>, {t('anyFutureExpiry', 'any future MM/YY (e.g. 12/28), and any 3-digit CVC (e.g. 123).')}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('publishableKeyLabel', 'Publishable Key')}
+                </label>
+                <div className="relative">
+                  <input
+                    type={visibleFields['stripePublishable'] ? 'text' : 'password'}
+                    id="cfg_stripe_publishable_key"
+                    name="cfg_stripe_publishable_key"
+                    autoComplete="new-password"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    value={config.stripe.publishableKey}
+                    onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, publishableKey: e.target.value } })}
+                    placeholder="pk_test_... / pk_live_..."
+                    className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleVisibility('stripePublishable')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    {visibleFields['stripePublishable'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('secretKeyLabel', 'Secret Key')}
+                </label>
+                <div className="relative">
+                  <input
+                    type={visibleFields['stripeSecret'] ? 'text' : 'password'}
+                    id="cfg_stripe_secret_key"
+                    name="cfg_stripe_secret_key"
+                    autoComplete="new-password"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    value={config.stripe.secretKey}
+                    onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, secretKey: e.target.value } })}
+                    placeholder="sk_test_... / sk_live_..."
+                    className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleVisibility('stripeSecret')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    {visibleFields['stripeSecret'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs uppercase font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('webhookSecretLabel', 'Webhook Secret')}
+                  </label>
+                  <div className="flex items-center gap-2">
+                    {config.stripeWebhookVerified && (
+                      <span 
+                        className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border shadow-xs animate-in fade-in"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-emerald)',
+                          color: 'var(--color-emerald)'
+                        }}
+                      >
+                        <CheckCircle2 className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {t('signingSecretVerified', 'Signing Secret Verified')}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleVerifyWebhookSecret}
+                      disabled={verifyingWebhook || !config.stripe.webhookSecret?.trim()}
+                      className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={t('verifyWebhookSecretTooltip', 'Test Webhook Secret for HMAC-SHA256 signature compliance')}
+                    >
+                      {verifyingWebhook ? (
+                        <>
+                          <RefreshCw className="h-3 w-3 animate-spin" />
+                          <span>{t('verifyingSecret', 'Verifying...')}</span>
+                        </>
+                      ) : (
+                        <>
+                          <ShieldCheck className="h-3 w-3" />
+                          <span>{t('verifySecretBtn', 'Verify Secret')}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+                <div className="relative">
+                  <input
+                    type={visibleFields['stripeWebhook'] ? 'text' : 'password'}
+                    id="cfg_stripe_webhook_secret"
+                    name="cfg_stripe_webhook_secret"
+                    autoComplete="new-password"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    value={config.stripe.webhookSecret}
+                    onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
+                    placeholder="whsec_..."
+                    className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleVisibility('stripeWebhook')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    {visibleFields['stripeWebhook'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* CLI & Webhook Guide Action */}
+              <div 
+                className="pt-3 border-t flex flex-wrap items-center justify-between gap-3"
+                style={{ borderColor: 'var(--color-border)' }}
+              >
+                <div className="space-y-0.5">
+                  <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>
+                    {t('webhookCliSetupTitle', 'Webhook & CLI Setup Guide')}
+                  </span>
+                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('webhookCliSetupSub', 'View official Stripe CLI instructions to test and capture webhooks locally.')}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowStripeGuideModal(true)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs hover:border-blue-400 shrink-0"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  title={t('viewStripeCliGuideTooltip', 'View Stripe CLI & Webhook Setup instructions')}
+                >
+                  <Terminal className="h-3.5 w-3.5 text-amber-500" />
+                  <span>{t('cliGuideBtn', 'CLI & Webhook Guide')}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* PayPal Config */}
+          <div 
+            className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
+                <h3 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('paypalApiConfig', 'PayPal API Configuration')}</h3>
+              </div>
+              <input
+                type="checkbox"
+                checked={config.paypal.enabled}
+                onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, enabled: e.target.checked } })}
+                className="w-4 h-4 rounded cursor-pointer accent-[#E05638]"
+              />
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('clientIdLabel', 'Client ID')}
+                </label>
+                <div className="relative">
+                  <input
+                    type={visibleFields['paypalClientId'] ? 'text' : 'password'}
+                    id="cfg_paypal_client_id"
+                    name="cfg_paypal_client_id"
+                    autoComplete="new-password"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    value={config.paypal.clientId}
+                    onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientId: e.target.value } })}
+                    placeholder="PayPal Client ID"
+                    className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleVisibility('paypalClientId')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    {visibleFields['paypalClientId'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('clientSecretLabel', 'Client Secret')}
+                </label>
+                <div className="relative">
+                  <input
+                    type={visibleFields['paypalSecret'] ? 'text' : 'password'}
+                    id="cfg_paypal_secret_key"
+                    name="cfg_paypal_secret_key"
+                    autoComplete="new-password"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    value={config.paypal.clientSecret}
+                    onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientSecret: e.target.value } })}
+                    placeholder="PayPal Client Secret"
+                    className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleVisibility('paypalSecret')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    {visibleFields['paypalSecret'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('webhookIdLabel', 'Webhook ID')}
+                </label>
+                <div className="relative">
+                  <input
+                    type={visibleFields['paypalWebhook'] ? 'text' : 'password'}
+                    id="cfg_paypal_webhook_id"
+                    name="cfg_paypal_webhook_id"
+                    autoComplete="new-password"
+                    autoCorrect="off"
+                    spellCheck="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly
+                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    value={config.paypal.webhookId}
+                    onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, webhookId: e.target.value } })}
+                    placeholder="PayPal Webhook ID"
+                    className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleVisibility('paypalWebhook')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    {visibleFields['paypalWebhook'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Bottom Actions */}
+        <div className="flex items-center justify-end gap-3 pt-2">
+          <button
+            type="button"
+            onClick={fetchData}
+            className="px-4 py-3 border font-bold text-xs rounded-2xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-secondary)'
+            }}
+          >
+            <RefreshCw className="h-4 w-4" /> {t('resetConfigBtn', 'Reset Config')}
+          </button>
+          <button
+            type="button"
+            onClick={handleSaveSettings}
+            disabled={loading}
+            className="px-8 py-3 text-white font-bold rounded-2xl transition text-xs shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            style={{ backgroundColor: 'var(--color-primary)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+          >
+            <Save className="h-4 w-4" />
+            {loading ? t('savingSettings', 'Saving Settings...') : t('saveConfigBtn', 'Save Gateway Settings')}
+          </button>
+        </div>
+      </div>
+
+      {/* STRIPE CONNECTION & WEBHOOK SETUP GUIDE MODAL */}
+      {showStripeGuideModal && (
+        <div 
+          onClick={() => setShowStripeGuideModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <button 
+              type="button"
+              onClick={() => setShowStripeGuideModal(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs hover:opacity-80"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <Check className="h-4 w-4" />
+            </button>
+
+            <div className="space-y-1.5 pr-8">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-[#635bff]/15 text-[#635bff]">
+                  <Terminal className="h-5 w-5" />
+                </div>
+                <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                  {t('stripeConnectModalTitle', 'Connect Stripe & Webhooks')}
+                </h2>
+              </div>
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('stripeConnectModalSub', 'To connect Stripe webhooks and test payments with your local server, follow the official recommended Stripe CLI setup below.')}
+              </p>
+            </div>
+
+            {/* Method 1: Official Stripe CLI */}
+            <div 
+              className="p-5 rounded-2xl border space-y-4"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
+              }}
+            >
+              <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                <span className="font-bold text-sm flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <Code2 className="h-4 w-4 text-[var(--color-primary)]" />
+                  {t('method1Title', 'Method 1: Use the Official Stripe CLI (Recommended)')}
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                  {t('recommendedBadge', 'Recommended')}
+                </span>
+              </div>
+              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('method1Desc', 'The official Stripe CLI securely routes events straight to your localhost without needing to register a public URL or configure an HTTP tunnel.')}
+              </p>
+
+              {/* Step 1 */}
+              <div className="space-y-1.5">
+                <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                  1. {t('step1Title', 'Install the CLI:')} <span className="font-normal opacity-80">{t('step1Desc', 'Download the Stripe CLI on your system (e.g., via Homebrew on macOS):')}</span>
+                </div>
+                <div 
+                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  <span className="select-all">brew install stripe/stripe-cli/stripe</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCliCommand('brew install stripe/stripe-cli/stripe', 'cli_install')}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer"
+                    style={{
+                      backgroundColor: copiedCliKey === 'cli_install' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
+                      borderColor: copiedCliKey === 'cli_install' ? 'var(--color-emerald)' : 'var(--color-border)',
+                      color: copiedCliKey === 'cli_install' ? '#ffffff' : 'var(--color-text)'
+                    }}
+                  >
+                    {copiedCliKey === 'cli_install' ? t('copiedBtn', 'Copied!') : t('copyBtn', 'Copy')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 2 */}
+              <div className="space-y-1.5">
+                <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                  2. {t('step2Title', 'Log in:')} <span className="font-normal opacity-80">{t('step2Desc', 'Link your Stripe account by running in your terminal:')}</span>
+                </div>
+                <div 
+                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  <span className="select-all">stripe login</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCliCommand('stripe login', 'cli_login')}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer"
+                    style={{
+                      backgroundColor: copiedCliKey === 'cli_login' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
+                      borderColor: copiedCliKey === 'cli_login' ? 'var(--color-emerald)' : 'var(--color-border)',
+                      color: copiedCliKey === 'cli_login' ? '#ffffff' : 'var(--color-text)'
+                    }}
+                  >
+                    {copiedCliKey === 'cli_login' ? t('copiedBtn', 'Copied!') : t('copyBtn', 'Copy')}
+                  </button>
+                </div>
+                <p className="text-[10px] opacity-70 italic" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('step2Note', 'Follow the pairing link provided in the terminal to authenticate your Stripe account.')}
+                </p>
+              </div>
+
+              {/* Step 3 */}
+              <div className="space-y-1.5">
+                <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                  3. {t('step3Title', 'Forward events:')} <span className="font-normal opacity-80">{t('step3Desc', 'Start forwarding Stripe events directly to your local endpoint:')}</span>
+                </div>
+                <div 
+                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  <span className="select-all truncate">
+                    stripe listen --forward-to {(webhookEndpointUrl || 'localhost:3000/api/webhooks/stripe').replace(/^https?:\/\//, '')}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCliCommand(`stripe listen --forward-to ${(webhookEndpointUrl || 'localhost:3000/api/webhooks/stripe').replace(/^https?:\/\//, '')}`, 'cli_listen')}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer shrink-0"
+                    style={{
+                      backgroundColor: copiedCliKey === 'cli_listen' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
+                      borderColor: copiedCliKey === 'cli_listen' ? 'var(--color-emerald)' : 'var(--color-border)',
+                      color: copiedCliKey === 'cli_listen' ? '#ffffff' : 'var(--color-text)'
+                    }}
+                  >
+                    {copiedCliKey === 'cli_listen' ? t('copiedBtn', 'Copied!') : t('copyBtn', 'Copy')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 4 */}
+              <div className="space-y-1.5">
+                <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                  4. {t('step4Title', 'Capture the Secret:')} <span className="font-normal opacity-80">{t('step4Desc', 'The CLI will print a local signing secret (looks like')} <code className="font-mono font-bold text-[10px] px-1 py-0.5 rounded border">whsec_...</code>{t('step4DescAfter', '). Paste it into the Webhook Secret field below:')}</span>
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={config.stripe.webhookSecret}
+                    onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
+                    placeholder="whsec_..."
+                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Method 2: Stripe Dashboard Links */}
+            <div 
+              className="p-3.5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
+              }}
+            >
+              <div className="space-y-0.5">
+                <span className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                  {t('method2Title', 'Production / Dashboard API Keys')}
+                </span>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('method2Desc', 'Retrieve your Secret Key and Publishable Key directly from your Stripe Dashboard.')}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={config.testMode ? "https://dashboard.stripe.com/test/apikeys" : "https://dashboard.stripe.com/apikeys"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-80"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-primary)'
+                  }}
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  <span>{t('openApiKeysBtn', 'Stripe API Keys')}</span>
+                </a>
+                <a
+                  href={config.testMode ? "https://dashboard.stripe.com/test/webhooks" : "https://dashboard.stripe.com/webhooks"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-80"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-primary)'
+                  }}
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  <span>{t('openWebhooksBtn', 'Stripe Webhooks')}</span>
+                </a>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setShowStripeGuideModal(false)}
+                className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-secondary)'
+                }}
+              >
+                {t('closeBtn', 'Close')}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setShowStripeGuideModal(false);
+                  await handleSaveSettings();
+                  await handleVerifyStripeKey();
+                }}
+                className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                <Save className="h-4 w-4" />
+                <span>{t('saveAndConnectBtn', 'Save Settings & Verify Stripe')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
@@ -62377,15 +60368,6 @@ export default function Sidebar() {
 
                 {isAdmin && (
                   <div className="pt-2 border-t text-center" style={{ borderColor: 'var(--color-border)' }}>
-                    <Link
-                      href="/admin/notification-settings"
-                      onClick={() => setShowNotificationsMobile(false)}
-                      className="text-xs font-bold hover:underline inline-flex items-center gap-1.5"
-                      style={{ color: 'var(--color-primary)' }}
-                    >
-                      <Settings className="h-3 w-3" />
-                      <span>{t('manageNotifSettings', 'Manage Notification Settings')}</span>
-                    </Link>
                   </div>
                 )}
               </div>
@@ -63311,17 +61293,13 @@ export default function Sidebar() {
                       <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
                       {!showCollapsed && <span className="truncate whitespace-nowrap">Wallet Settings</span>}
                     </Link>
-                    <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} title={t('notificationSettings', 'Notification Settings')}>
-                      <BellRing className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">{t('notificationSettings', 'Notification Settings')}</span>}
-                    </Link>
                     <Link href="/admin/plans" className={navClass('/admin/plans')} title="Subscription Plans">
                       <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
                       {!showCollapsed && <span className="truncate whitespace-nowrap">Subscription Plans</span>}
                     </Link>
-                    <Link href="/admin/payment" className={navClass('/admin/payment')} title="Payment Gateway">
+                    <Link href="/admin/payment-gateway" className={navClass('/admin/payment-gateway')} title={t('paymentGateway') || 'Payment Gateway'}>
                       <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Payment Gateway</span>}
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">{t('paymentGateway') || 'Payment Gateway'}</span>}
                     </Link>
                     <Link href="/admin/social-login-setting" className={navClass('/admin/social-login-setting')} title="Social Login">
                       <Key className="h-4 w-4 shrink-0" style={iconStyle} />
@@ -63338,6 +61316,10 @@ export default function Sidebar() {
                     <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} title="Ingredient Category">
                       <Tag className="h-4 w-4 shrink-0" style={iconStyle} />
                       {!showCollapsed && <span className="truncate whitespace-nowrap">Ingredient Category</span>}
+                    </Link>
+                    <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} title={t('notificationSettings', 'Notification Settings')}>
+                      <BellRing className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">{t('notificationSettings', 'Notification Settings')}</span>}
                     </Link>
                     <Link href="/admin/language" className={navClass('/admin/language')} title="Language">
                       <Languages className="h-4 w-4 shrink-0" style={iconStyle} />
