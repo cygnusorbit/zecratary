@@ -58,26 +58,78 @@ export async function POST(req: Request) {
     const eventType = event.type;
     const dataObject: any = event.data.object;
 
-    // 1. Checkout Session Completed
+        // 1. Checkout Session Completed
     if (eventType === 'checkout.session.completed') {
-      const customerEmail = (dataObject.customer_email || dataObject.customer_details?.email || '').toLowerCase().trim();
+      const metadata = dataObject.metadata || {};
+      const customerEmail = (metadata.userEmail || dataObject.customer_email || dataObject.customer_details?.email || '').toLowerCase().trim();
       const customerName = dataObject.customer_details?.name || 'Customer';
       const amountTotal = (dataObject.amount_total || 0) / 100;
       const currency = (dataObject.currency || 'usd').toUpperCase();
       const txId = dataObject.id;
 
-      if (customerEmail) {
-        await query(`
-          INSERT INTO payment_transactions (
-            id, customer_name, customer_email, plan_name, plan_slug, amount,
-            currency, gateway, status, is_recurring, auto_renew, created_at, updated_at
-          ) VALUES ($1, $2, $3, 'Subscription Plan', 'nutrition-pro-monthly', $4, $5, 'stripe', 'succeeded', true, true, NOW(), NOW())
-          ON CONFLICT (id) DO UPDATE SET
-            status = 'succeeded',
-            confirmed_amount = EXCLUDED.amount,
-            confirmed_at = NOW(),
-            updated_at = NOW()
-        `, [txId, customerName, customerEmail, amountTotal, currency]).catch(() => {});
+      if (metadata.type === 'wallet_topup') {
+        const userId = metadata.userId;
+        const baseAmount = parseFloat(metadata.baseAmount || String(amountTotal));
+        const bonusCredit = parseFloat(metadata.bonusCredit || '0');
+        const totalAddition = parseFloat(metadata.totalAddition || String(baseAmount + bonusCredit));
+
+        // Idempotent check
+        const existingRes = await query(
+          `SELECT id FROM wallet_transactions WHERE gateway_tx_id = $1 AND status = 'succeeded' LIMIT 1`,
+          [txId]
+        ).catch(() => ({ rows: [] }));
+        const existingRows = Array.isArray(existingRes) ? existingRes : (existingRes?.rows || []);
+
+        if (existingRows.length === 0) {
+          const userUpdateRes = await query(
+            `UPDATE users 
+             SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW()
+             WHERE id::text = $2 OR (LOWER(email) = LOWER($3) AND $3 != '')
+             RETURNING id, email, wallet_balance`,
+            [totalAddition, String(userId || ''), customerEmail]
+          ).catch(() => ({ rows: [] }));
+
+          const uRows = Array.isArray(userUpdateRes) ? userUpdateRes : (userUpdateRes?.rows || []);
+          const updatedUser = uRows[0];
+          const newBal = updatedUser ? parseFloat(updatedUser.wallet_balance || 0) : totalAddition;
+          const finalUserId = updatedUser?.id || userId || 'user';
+
+          const wtxId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+          const desc = bonusCredit > 0
+            ? `Wallet Top-Up: +$${baseAmount.toFixed(2)} (Includes +$${bonusCredit.toFixed(2)} promotional bonus)`
+            : `Wallet Top-Up: +$${baseAmount.toFixed(2)}`;
+
+          await query(`
+            INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata)
+            VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'succeeded', $7, $8)
+            ON CONFLICT (id) DO UPDATE SET status = 'succeeded', balance_after = EXCLUDED.balance_after
+          `, [
+            wtxId, finalUserId, customerEmail, totalAddition, newBal, txId, desc,
+            JSON.stringify({ baseAmount, bonusCredit, totalAddition, gateway: 'stripe', stripeSessionId: txId })
+          ]).catch(() => {});
+
+          await query(`
+            INSERT INTO payment_transactions (
+              id, customer_name, customer_email, plan_name, plan_slug, amount,
+              currency, gateway, status, is_recurring, auto_renew, gateway_transaction_id, confirmed_amount, confirmed_at, created_at, updated_at
+            ) VALUES ($1, $2, $3, 'Store Wallet Top-Up', 'wallet_topup', $4, $5, 'stripe', 'succeeded', false, false, $6, $4, NOW(), NOW(), NOW())
+            ON CONFLICT (id) DO UPDATE SET status = 'succeeded', confirmed_amount = EXCLUDED.amount, confirmed_at = NOW(), updated_at = NOW()
+          `, [txId, customerName, customerEmail, baseAmount, currency, txId]).catch(() => {});
+        }
+      } else {
+        if (customerEmail) {
+          await query(`
+            INSERT INTO payment_transactions (
+              id, customer_name, customer_email, plan_name, plan_slug, amount,
+              currency, gateway, status, is_recurring, auto_renew, created_at, updated_at
+            ) VALUES ($1, $2, $3, 'Subscription Plan', 'nutrition-pro-monthly', $4, $5, 'stripe', 'succeeded', true, true, NOW(), NOW())
+            ON CONFLICT (id) DO UPDATE SET
+              status = 'succeeded',
+              confirmed_amount = EXCLUDED.amount,
+              confirmed_at = NOW(),
+              updated_at = NOW()
+          `, [txId, customerName, customerEmail, amountTotal, currency]).catch(() => {});
+        }
       }
     }
 
