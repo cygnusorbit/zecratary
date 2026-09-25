@@ -2402,18 +2402,8 @@
     "titlebar_image": "",
     "maintenanceMode": false,
     "paymentSettings": {
-      "activeGateway": "stripe",
-      "currency": "USD",
-      "testMode": true,
-      "stripeConnected": false,
-      "stripeKeysVerified": true,
-      "stripeWebhookVerified": true,
-      "stripe": {
-        "enabled": false,
-        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
-        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
-        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
-      },
+      "email": "admin@zecratary.com",
+      "action": "cancel_user_transactions",
       "paypal": {
         "enabled": false,
         "clientId": "",
@@ -2421,9 +2411,19 @@
         "environment": "sandbox",
         "clientSecret": ""
       },
-      "email": "admin@zecratary.com",
-      "action": "cancel_user_transactions",
-      "preserveExpiry": true
+      "stripe": {
+        "enabled": false,
+        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
+        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
+        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
+      },
+      "currency": "USD",
+      "testMode": true,
+      "activeGateway": "stripe",
+      "preserveExpiry": true,
+      "stripeConnected": false,
+      "stripeKeysVerified": true,
+      "stripeWebhookVerified": true
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -2479,7 +2479,7 @@
         "direction": "ltr",
         "isDefault": true,
         "nativeName": "English",
-        "lastUpdated": "2026-09-18T10:38:26.048Z"
+        "lastUpdated": "2026-09-25T17:17:54.187Z"
       },
       {
         "code": "es",
@@ -3759,18 +3759,8 @@
     "titlebar_image": "",
     "maintenanceMode": false,
     "paymentSettings": {
-      "activeGateway": "stripe",
-      "currency": "USD",
-      "testMode": true,
-      "stripeConnected": false,
-      "stripeKeysVerified": true,
-      "stripeWebhookVerified": true,
-      "stripe": {
-        "enabled": false,
-        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
-        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
-        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
-      },
+      "email": "admin@zecratary.com",
+      "action": "cancel_user_transactions",
       "paypal": {
         "enabled": false,
         "clientId": "",
@@ -3778,9 +3768,19 @@
         "environment": "sandbox",
         "clientSecret": ""
       },
-      "email": "admin@zecratary.com",
-      "action": "cancel_user_transactions",
-      "preserveExpiry": true
+      "stripe": {
+        "enabled": false,
+        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
+        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
+        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
+      },
+      "currency": "USD",
+      "testMode": true,
+      "activeGateway": "stripe",
+      "preserveExpiry": true,
+      "stripeConnected": false,
+      "stripeKeysVerified": true,
+      "stripeWebhookVerified": true
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -3836,7 +3836,7 @@
         "direction": "ltr",
         "isDefault": true,
         "nativeName": "English",
-        "lastUpdated": "2026-09-18T10:38:26.048Z"
+        "lastUpdated": "2026-09-25T17:17:54.187Z"
       },
       {
         "code": "es",
@@ -3891,5 +3891,5 @@
       "https://www.taste.com.au/recipes"
     ]
   },
-  "updatedAt": "2026-09-25T17:02:04.767Z"
+  "updatedAt": "2026-09-25T17:17:54.284Z"
 }
