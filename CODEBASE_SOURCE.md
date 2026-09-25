@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.7.8",
+  "version": "7.8.3",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -25,7 +25,8 @@
   "packageManager": "npm@10.8.2",
   "dependencies": {
     "next": "^16.3.5",
-    "pg": "^8.23.0"
+    "pg": "^8.23.0",
+    "stripe": "^22.6.2"
   }
 }
 
@@ -109,7 +110,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.7.8",
+  "version": "7.8.3",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -23594,7 +23595,7 @@ export default function RecipeTypeAdminPage() {
 
 ## File: `apps/web/src/app/admin/payment/page.tsx`
 ```typescript
-// Generated / Updated by AI Collaborator
+// Generated / Cleaned by AI Collaborator
 'use client';
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -23606,7 +23607,7 @@ import {
   PlusCircle, X, User as UserIcon, Activity, Calendar,
   Pencil, Trash2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
   ShieldAlert, Ban, ArrowUpRight, AlertTriangle, Repeat, RotateCcw,
-  ShieldCheck, CheckCheck, Columns3, Coins
+  ShieldCheck, CheckCheck, Columns3, Coins, Copy, Terminal, ExternalLink, Code2
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -23811,6 +23812,11 @@ export default function AdminPaymentPage() {
   const [registeredUsers, setRegisteredUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [connectingStripe, setConnectingStripe] = useState(false);
+  const [verifyingStripe, setVerifyingStripe] = useState(false);
+  const [copiedWebhook, setCopiedWebhook] = useState(false);
+  const [showStripeGuideModal, setShowStripeGuideModal] = useState(false);
+  const [copiedCliKey, setCopiedCliKey] = useState<string | null>(null);
+  const [webhookEndpointUrl, setWebhookEndpointUrl] = useState('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
@@ -23989,7 +23995,7 @@ export default function AdminPaymentPage() {
     }
   }, [feedback]);
 
-  // Clean, Non-Looping Theme Synchronization
+  // Theme Synchronization
   const handleModeChange = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -24037,7 +24043,6 @@ export default function AdminPaymentPage() {
     setVisibleFields((prev) => ({ ...prev, [field]: !prev[field] }));
   };
 
-  // Synchronize ONLY Plans with actual price (> 0) from /admin/plans
   const loadPlans = useCallback(async (currencyOverride?: string) => {
     let parsedPlans: PlanOption[] = [];
     const symbol = getCurrencySymbol(currencyOverride || configRef.current.currency);
@@ -24064,12 +24069,11 @@ export default function AdminPaymentPage() {
         const rawName = String(cfg.name || baseSlug || '').trim();
         const baseName = rawName.replace(/\s*\((Monthly|Annual|Free)\)/i, '').trim();
 
-        // Check if plan is explicitly free or has no positive pricing
         const isFreeTier = Boolean(
           cfg.isFree === true || cfg.is_free === true || cfg.free === true ||
           baseSlug === 'taster' || baseSlug === 'free'
         );
-        if (isFreeTier) return; // Do NOT add free plans into payment recording dropdown
+        if (isFreeTier) return;
 
         const tokenLimit = cfg.tokenLimit !== undefined 
           ? Number(cfg.tokenLimit) 
@@ -24078,7 +24082,6 @@ export default function AdminPaymentPage() {
         const monthlyPrice = Number(cfg.monthlyPriceDollars ?? cfg.monthly_price_dollars ?? (cfg.interval === 'MONTH' ? cfg.price : 0) ?? 0);
         const annualPrice = Number(cfg.annualPriceDollars ?? cfg.annual_price_dollars ?? (cfg.interval === 'YEAR' ? cfg.price : 0) ?? 0);
 
-        // ONLY add Monthly if explicitly priced > 0
         if (monthlyPrice > 0) {
           parsedPlans.push({
             id: cfg.monthlyPlanId || `${cfg.id || baseSlug}-monthly`,
@@ -24092,7 +24095,6 @@ export default function AdminPaymentPage() {
           });
         }
 
-        // ONLY add Annual if explicitly priced > 0
         if (annualPrice > 0) {
           parsedPlans.push({
             id: cfg.annualPlanId || `${cfg.id || baseSlug}-annual`,
@@ -24108,9 +24110,7 @@ export default function AdminPaymentPage() {
       });
     }
 
-    // Filter strictly for options with valid positive price
     const validPricedPlans = parsedPlans.filter((p) => p.priceDollars > 0 && !p.isFree);
-
     const uniquePlans: PlanOption[] = [];
     const seenSlugs = new Set<string>();
     for (const p of validPricedPlans) {
@@ -24261,11 +24261,9 @@ export default function AdminPaymentPage() {
     return registeredUsers.find((u) => u.id === selectedUserId) || null;
   }, [registeredUsers, selectedUserId]);
 
-  // Plan Transition and Exclusivity Analyzer: Enforces No Concurrent Monthly & Annual for Same Plan
   const planTransitionInfo = useMemo(() => {
     if (!showAddModal || !selectedUserId || !currentSelectedUser) return null;
 
-    // Resolve user's current active transaction plan if active in history
     const userEmailClean = (currentSelectedUser.email || '').toLowerCase().trim();
     const activeTx = transactionsRef.current.find(
       (t) => (t.customerEmail || '').toLowerCase().trim() === userEmailClean && isSucceeded(t.status)
@@ -24284,7 +24282,6 @@ export default function AdminPaymentPage() {
     const matchedChosen = availablePlans.find((p) => p.slug === chosenPlanSlug);
     const matchedActive = availablePlans.find((p) => p.slug === activePlanSlug);
 
-    // Case 1: Same Plan and Same Interval -> Subscription Renewal
     if (activePlanSlug === chosenPlanSlug && chosenPlanSlug !== 'taster' && chosenPlanSlug !== 'free') {
       const intervalName = chosenInterval === 'YEAR' ? 'Annual' : 'Monthly';
       return {
@@ -24299,7 +24296,6 @@ export default function AdminPaymentPage() {
       };
     }
 
-    // Case 2: Same Plan, Different Interval -> Mutual Exclusivity Switch (Monthly <-> Annual Upgrade or Downgrade)
     if (activeBase === chosenBase && activePlanSlug !== 'taster' && chosenPlanSlug !== 'taster' && activeInterval !== chosenInterval) {
       const isUpgrade = chosenInterval === 'YEAR' && activeInterval === 'MONTH';
       const fromIntervalName = activeInterval === 'YEAR' ? 'Annual' : 'Monthly';
@@ -24321,7 +24317,6 @@ export default function AdminPaymentPage() {
       };
     }
 
-    // Case 3: Completely Different Plan -> Plan Switch (Upgrade / Downgrade)
     if (activePlanSlug !== 'taster' && chosenPlanSlug !== 'taster' && activeBase !== chosenBase) {
       return {
         isRenewal: false,
@@ -24338,7 +24333,6 @@ export default function AdminPaymentPage() {
     return null;
   }, [showAddModal, selectedUserId, currentSelectedUser, selectedPlanSlug, availablePlans]);
 
-  // TOGGLE RECURRING HANDLER
   const handleToggleRecurring = async (tx: PaymentTransaction) => {
     const nextState = !tx.isRecurring;
     setTogglingTxId(tx.id);
@@ -24395,7 +24389,6 @@ export default function AdminPaymentPage() {
     }
   };
 
-  // TRIGGER GATEWAY REFUND HANDLER
   const handleRefundTransaction = async (tx: PaymentTransaction) => {
     const symbol = getCurrencySymbol(tx.currency || config.currency);
     const amountStr = `${symbol}${parseAmount(tx.amount).toFixed(2)}`;
@@ -24452,7 +24445,6 @@ export default function AdminPaymentPage() {
     }
   };
 
-  // OPEN CONFIRM PAYMENT FROM GATEWAY MODAL
   const handleOpenConfirmModal = (tx: PaymentTransaction) => {
     setModalError('');
     setConfirmingTx(tx);
@@ -24462,9 +24454,8 @@ export default function AdminPaymentPage() {
     setConfirmSyncPlan(true);
   };
 
-  // SUBMIT CONFIRM PAYMENT FROM GATEWAY
-  const handleConfirmPaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleConfirmPaymentSubmit = async (e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
     if (!confirmingTx) return;
     setModalError('');
 
@@ -24530,7 +24521,6 @@ export default function AdminPaymentPage() {
         }).catch(() => {});
       }
 
-      // Credit tokens associated with plan in /admin/plans
       const matchedPlan = availablePlans.find((p) => p.slug === singlePlanSlug);
       if (matchedPlan?.tokenLimit && matchedPlan.tokenLimit > 0 && targetUser) {
         await fetch('/api/tokens', {
@@ -24609,7 +24599,6 @@ export default function AdminPaymentPage() {
     const target = registeredUsers.find((u) => u.id === userId);
     if (target) {
       const userPlan = sanitizeSinglePlan(target.subscriptionPlan);
-      // Intelligently default to the user's active plan if available and has a price, or the first available plan with price
       const matched = availablePlans.find((p) => p.slug === userPlan && p.priceDollars > 0) ||
                       availablePlans.find((p) => p.slug.replace(/-(monthly|annual)$/, '') === userPlan.replace(/-(monthly|annual)$/, '') && p.priceDollars > 0) ||
                       availablePlans[0];
@@ -24621,7 +24610,6 @@ export default function AdminPaymentPage() {
     }
   };
 
-  // Sync plan and price cleanly
   const handlePlanSelectChange = (slug: string) => {
     const singleSlug = sanitizeSinglePlan(slug);
     setSelectedPlanSlug(singleSlug);
@@ -24642,7 +24630,6 @@ export default function AdminPaymentPage() {
     }
   };
 
-  // Validates selectedPlanSlug against availablePlans (strictly plans with price)
   useEffect(() => {
     if (availablePlans.length > 0) {
       const exists = availablePlans.some((p) => p.slug === selectedPlanSlug && p.priceDollars > 0);
@@ -24671,7 +24658,6 @@ export default function AdminPaymentPage() {
 
     const userCurrentPlan = targetUser ? sanitizeSinglePlan(targetUser.subscriptionPlan) : '';
     
-    // Choose active user plan if available and priced, or first available plan with price
     const matchedPlan = availablePlans.find((p) => p.slug === userCurrentPlan && p.priceDollars > 0) ||
                         availablePlans.find((p) => p.slug.replace(/-(monthly|annual)$/, '') === userCurrentPlan.replace(/-(monthly|annual)$/, '') && p.priceDollars > 0) ||
                         availablePlans[0];
@@ -24809,8 +24795,8 @@ export default function AdminPaymentPage() {
     }
   };
 
-  const handleUpdatePaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUpdatePaymentSubmit = async (e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
     if (!editingTx) return;
     setModalError('');
 
@@ -24824,7 +24810,6 @@ export default function AdminPaymentPage() {
     const singlePlanSlug = sanitizeSinglePlan(editPlanSlug);
     const cleanEmail = editCustomerEmail.trim().toLowerCase();
 
-    // Enforce gateway verification for automated processors, permit manual
     if (isSucceeded(normalizedStatus) && !isSucceeded(editingTx.status) && editGateway !== 'manual' && !editGatewayConfirmed) {
       setModalError(t('requireGatewayConfirmToUpdateSucceeded', 'Confirmation required: You must confirm the transaction amount from the payment gateway to mark status as Succeeded.'));
       return;
@@ -25011,8 +24996,8 @@ export default function AdminPaymentPage() {
     }
   };
 
-  const handleAddPaymentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddPaymentSubmit = async (e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
     setModalError('');
 
     const targetUser = registeredUsers.find((u) => u.id === selectedUserId);
@@ -25029,7 +25014,6 @@ export default function AdminPaymentPage() {
     const cleanAmount = parseAmount(paymentAmount);
     const normalizedStatus = paymentStatus.toLowerCase();
 
-    // Enforce gateway verification for automated processors, permit manual
     if (isSucceeded(normalizedStatus) && paymentGateway !== 'manual' && !addGatewayConfirmed) {
       setModalError(t('requireGatewayConfirmToAddSucceeded', 'Confirmation required: Please verify and confirm the transaction amount from the payment gateway to record as Succeeded.'));
       return;
@@ -25045,7 +25029,6 @@ export default function AdminPaymentPage() {
 
     const detectedInterval = (matchedPlan?.interval || (singlePlanSlug.includes('annual') ? 'YEAR' : 'MONTH')) as any;
 
-    // Mutual Exclusivity: Automatically CANCEL previous subscriptions when upgrading, downgrading, or switching intervals
     if (isSucceeded(normalizedStatus)) {
       const isSwitchOrUpgradeDowngrade = Boolean(
         planTransitionInfo?.isIntervalSwitch || planTransitionInfo?.isPlanSwitch
@@ -25057,7 +25040,6 @@ export default function AdminPaymentPage() {
       });
 
       for (const oldTx of existingUserActiveTxs) {
-        // If switching between Monthly & Annual or switching plans, cancel previous plan completely!
         const shouldCancelStatus = isSwitchOrUpgradeDowngrade || (oldTx.planSlug !== singlePlanSlug);
         
         const updatedOldTx: PaymentTransaction = { 
@@ -25113,7 +25095,6 @@ export default function AdminPaymentPage() {
         throw new Error(data.error || 'Failed to record transaction in database');
       }
 
-      // Update user plan entitlement in PostgreSQL
       const finalPlanToSync = (syncUserPlan && isSucceeded(normalizedStatus) && singlePlanSlug) 
         ? singlePlanSlug 
         : (targetUser.subscriptionPlan || 'taster');
@@ -25129,7 +25110,6 @@ export default function AdminPaymentPage() {
         }),
       }).catch(() => {});
 
-      // Credit tokens associated with this plan in /admin/plans
       if (isSucceeded(normalizedStatus) && matchedPlan?.tokenLimit && matchedPlan.tokenLimit > 0) {
         await fetch('/api/tokens', {
           method: 'POST',
@@ -25157,7 +25137,7 @@ export default function AdminPaymentPage() {
 
       setShowAddModal(false);
       const isRenewal = planTransitionInfo?.isRenewal;
-      const isSwitched = planTransitionInfo?.isTransition;
+      const isSwitched = planTransitionInfo?.isIntervalSwitch || planTransitionInfo?.isPlanSwitch;
       setFeedback({
         type: 'success',
         msg: isRenewal
@@ -25228,7 +25208,6 @@ export default function AdminPaymentPage() {
     );
   };
 
-  // Metrics hook evaluated safely before the return statement
   const metrics = useMemo(() => {
     const succeeded = transactions.filter((t) => isSucceeded(t.status));
     const failed = transactions.filter((t) => isFailed(t.status));
@@ -25249,7 +25228,20 @@ export default function AdminPaymentPage() {
     };
   }, [transactions]);
 
+  const handleCopyCliCommand = (cmd: string, key: string) => {
+    if (typeof window !== 'undefined') {
+      navigator.clipboard.writeText(cmd);
+      setCopiedCliKey(key);
+      setTimeout(() => setCopiedCliKey(null), 2500);
+    }
+  };
+
   const handleConnectStripe = async () => {
+    if (!config.stripe.secretKey || !config.stripe.publishableKey) {
+      setShowStripeGuideModal(true);
+      return;
+    }
+
     setConnectingStripe(true);
     setFeedback(null);
     try {
@@ -25260,35 +25252,59 @@ export default function AdminPaymentPage() {
           action: 'connect_stripe',
           secretKey: config.stripe.secretKey,
           publishableKey: config.stripe.publishableKey,
+          webhookSecret: config.stripe.webhookSecret,
+          stripe: config.stripe,
+          testMode: config.testMode,
         }),
       });
-      const data = await res.json();
-      if (data.success) {
-        if (data.url) {
-          window.open(data.url, '_blank');
-        } else {
-          const updated: GatewayConfig = { 
-            ...config, 
-            stripeConnected: true, 
-            stripe: { ...config.stripe, enabled: true } 
-          };
-          setConfig(updated);
-          configRef.current = updated;
-          await persistServerAdminSettings({ paymentSettings: updated });
-          if (typeof window !== 'undefined') {
-            window.dispatchEvent(new Event('zecratary_payment_updated'));
-            window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-          }
-          setFeedback({ type: 'success', msg: data.message || 'Stripe account connected successfully!' });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        const updated: GatewayConfig = { 
+          ...config, 
+          stripeConnected: true, 
+          stripe: { ...config.stripe, enabled: true } 
+        };
+        setConfig(updated);
+        configRef.current = updated;
+        await persistServerAdminSettings({ paymentSettings: updated });
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
         }
+        setFeedback({ 
+          type: 'success', 
+          msg: data.message || t('stripeConnectedSuccess', 'Stripe account connected and enabled successfully in PostgreSQL!') 
+        });
       } else {
-        setFeedback({ type: 'error', msg: data.error || 'Failed to connect Stripe.' });
+        setFeedback({ 
+          type: 'error', 
+          msg: data.error || t('failedToConnectStripe', 'Failed to connect Stripe.') 
+        });
       }
     } catch (e: any) {
+      setFeedback({ 
+        type: 'error', 
+        msg: e.message || t('failedToConnectStripe', 'Failed to communicate with Stripe verification endpoint.') 
+      });
+    } finally {
+      setConnectingStripe(false);
+    }
+  };
+
+  const handleDisconnectStripe = async () => {
+    setConnectingStripe(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'disconnect_stripe' }),
+      });
+      const data = await res.json().catch(() => ({}));
       const updated: GatewayConfig = { 
         ...config, 
-        stripeConnected: true, 
-        stripe: { ...config.stripe, enabled: true } 
+        stripeConnected: false,
+        stripe: { ...config.stripe, enabled: false }
       };
       setConfig(updated);
       configRef.current = updated;
@@ -25297,14 +25313,106 @@ export default function AdminPaymentPage() {
         window.dispatchEvent(new Event('zecratary_payment_updated'));
         window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
-      setFeedback({ type: 'success', msg: 'Stripe Gateway enabled and verified.' });
+      setFeedback({ 
+        type: 'success', 
+        msg: data.message || t('stripeDisconnectedSuccess', 'Stripe account disconnected successfully.') 
+      });
+    } catch (e: any) {
+      setFeedback({ type: 'error', msg: e.message || 'Failed to disconnect Stripe.' });
     } finally {
       setConnectingStripe(false);
     }
   };
 
-  const handleSaveSettings = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setWebhookEndpointUrl(`${window.location.origin}/api/webhooks/stripe`);
+    }
+  }, []);
+
+  const handleCopyWebhookUrl = () => {
+    if (typeof window !== 'undefined' && webhookEndpointUrl) {
+      navigator.clipboard.writeText(webhookEndpointUrl);
+      setCopiedWebhook(true);
+      setTimeout(() => setCopiedWebhook(false), 2500);
+    }
+  };
+
+  const handleToggleTestMode = async () => {
+    const nextMode = !config.testMode;
+    const updatedConfig: GatewayConfig = {
+      ...config,
+      testMode: nextMode,
+    };
+    setConfig(updatedConfig);
+    configRef.current = updatedConfig;
+
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'toggle_test_mode', testMode: nextMode }),
+      });
+      const data = await res.json().catch(() => ({}));
+      await persistServerAdminSettings({ paymentSettings: updatedConfig });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      }
+
+      setFeedback({
+        type: 'success',
+        msg: nextMode
+          ? t('sandboxTestModeEnabled', 'Sandbox (Test Mode) enabled and saved to server!')
+          : t('liveProductionModeEnabled', 'Live Production mode enabled and saved to server!'),
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        msg: err.message || 'Failed to update gateway environment.',
+      });
+    }
+  };
+
+  const handleVerifyStripeKeys = async () => {
+    setVerifyingStripe(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'verify_stripe_keys',
+          secretKey: config.stripe.secretKey,
+          publishableKey: config.stripe.publishableKey,
+          testMode: config.testMode,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setFeedback({
+          type: 'success',
+          msg: data.message || t('stripeKeyVerifiedSuccess', 'Stripe API keys verified successfully with Stripe servers!'),
+        });
+      } else {
+        setFeedback({
+          type: 'error',
+          msg: data.error || t('stripeKeyVerificationFailed', 'Stripe key verification failed. Please check your keys and test mode setting.'),
+        });
+      }
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        msg: err.message || 'Failed to communicate with Stripe verification endpoint.',
+      });
+    } finally {
+      setVerifyingStripe(false);
+    }
+  };
+
+  const handleSaveSettings = async (e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
     setLoading(true);
     setFeedback(null);
 
@@ -25464,7 +25572,6 @@ export default function AdminPaymentPage() {
 
       {/* TAB 1: PAYMENT HISTORY CONTAINER */}
       <div className={activeTab === 'history' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
-        {/* GATEWAY STATUS & MONITOR BAR */}
         <div
           className="p-3 px-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs transition-colors duration-200"
           style={{
@@ -25815,7 +25922,7 @@ export default function AdminPaymentPage() {
           </div>
         )}
 
-        {/* TRANSACTIONS TABLE WITH DYNAMIC VISIBLE COLUMNS */}
+        {/* TRANSACTIONS TABLE */}
         <div 
           className="border rounded-3xl overflow-hidden shadow-sm transition-colors duration-200"
           style={{
@@ -26284,7 +26391,7 @@ export default function AdminPaymentPage() {
 
       {/* TAB 2: GATEWAY SETTINGS CONTAINER */}
       <div className={activeTab === 'settings' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
-        <form onSubmit={handleSaveSettings} className="space-y-6" autoComplete="off" role="presentation">
+        <div className="space-y-6">
           <div 
             className="border p-6 rounded-3xl shadow-sm transition-colors duration-200"
             style={{
@@ -26340,7 +26447,7 @@ export default function AdminPaymentPage() {
                 <label className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>{t('environmentLabel', 'Environment:')}</label>
                 <button
                   type="button"
-                  onClick={() => setConfig({ ...config, testMode: !config.testMode })}
+                  onClick={handleToggleTestMode}
                   className="text-xs font-bold px-3 py-1 rounded-full border transition cursor-pointer shadow-xs"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -26459,22 +26566,101 @@ export default function AdminPaymentPage() {
                 <label className="text-xs font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('connectStripeBtn', 'Connect Stripe Account')}
                 </label>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <button
                     type="button"
-                    onClick={handleConnectStripe}
-                    disabled={connectingStripe}
-                    className="inline-flex items-center overflow-hidden rounded-lg bg-[#008cdd] hover:bg-[#0070e0] text-white font-bold text-xs shadow-md active:scale-[0.98] transition cursor-pointer border border-[#009bf5]/40"
+                    onClick={() => setShowStripeGuideModal(true)}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs hover:border-blue-400"
                     style={{
-                      backgroundImage: 'linear-gradient(180deg, #18a0fb 0%, #0077c8 100%)',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.3)'
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
                     }}
+                    title={t('viewStripeCliGuideTooltip', 'View Stripe CLI & Webhook Setup instructions')}
                   >
-                    <div className="px-3 py-2 bg-black/15 border-r border-white/20 font-black text-sm flex items-center justify-center">S</div>
-                    <span className="px-3.5 py-2 text-xs tracking-tight font-bold">
-                      {connectingStripe ? t('connectingStripe', 'Connecting...') : t('connectWithStripe', 'Connect with Stripe')}
-                    </span>
+                    <Terminal className="h-3.5 w-3.5 text-amber-500" />
+                    <span>{t('cliGuideBtn', 'CLI & Webhooks Guide')}</span>
                   </button>
+
+                  {!config.stripeConnected ? (
+                    <button
+                      type="button"
+                      onClick={handleConnectStripe}
+                      disabled={connectingStripe}
+                      className="inline-flex items-center overflow-hidden rounded-xl text-white font-bold text-xs shadow-md active:scale-[0.98] transition cursor-pointer border border-[#7a73ff]/40 disabled:opacity-50"
+                      style={{
+                        backgroundImage: 'linear-gradient(180deg, #635bff 0%, #4f46e5 100%)',
+                        boxShadow: '0 2px 5px rgba(99, 91, 255, 0.3), inset 0 1px 0 rgba(255,255,255,0.3)'
+                      }}
+                      title={t('connectWithStripeTooltip', 'Connect or authorize Stripe Account')}
+                    >
+                      <div className="px-3 py-2 bg-black/15 border-r border-white/20 font-black text-sm flex items-center justify-center">S</div>
+                      <span className="px-3.5 py-2 text-xs tracking-tight font-bold flex items-center gap-1.5">
+                        {connectingStripe ? (
+                          <>
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                            {t('connectingStripe', 'Connecting...')}
+                          </>
+                        ) : (
+                          t('connectWithStripe', 'Connect with Stripe')
+                        )}
+                      </span>
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleConnectStripe}
+                        disabled={connectingStripe}
+                        className="inline-flex items-center overflow-hidden rounded-xl text-white font-bold text-xs shadow-md active:scale-[0.98] transition cursor-pointer border border-[#7a73ff]/40 disabled:opacity-50"
+                        style={{
+                          backgroundImage: 'linear-gradient(180deg, #635bff 0%, #4f46e5 100%)',
+                          boxShadow: '0 2px 5px rgba(99, 91, 255, 0.3), inset 0 1px 0 rgba(255,255,255,0.3)'
+                        }}
+                        title={t('reconnectStripeTooltip', 'Re-authenticate Stripe credentials')}
+                      >
+                        <div className="px-3 py-2 bg-black/15 border-r border-white/20 font-black text-sm flex items-center justify-center">S</div>
+                        <span className="px-3.5 py-2 text-xs tracking-tight font-bold flex items-center gap-1.5">
+                          {connectingStripe ? (
+                            <>
+                              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                              {t('reconnectingStripe', 'Reconnecting...')}
+                            </>
+                          ) : (
+                            t('reconnectStripe', 'Reconnect Stripe')
+                          )}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleDisconnectStripe}
+                        disabled={connectingStripe}
+                        className="px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer hover:bg-red-500/10 hover:border-red-500 text-red-500 shadow-xs disabled:opacity-50"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
+                        }}
+                      >
+                        {t('disconnectStripe', 'Disconnect')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleVerifyStripeKeys}
+                        disabled={verifyingStripe || !config.stripe.secretKey}
+                        className="px-3 py-2 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs disabled:opacity-40 flex items-center gap-1.5"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
+                        }}
+                        title={t('verifyStripeKeysTooltip', 'Ping Stripe API to test key validity')}
+                      >
+                        {verifyingStripe ? <RefreshCw className="h-3.5 w-3.5 animate-spin text-[var(--color-primary)]" /> : <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />}
+                        <span>{verifyingStripe ? t('verifying', 'Verifying...') : t('testKeysBtn', 'Test Keys')}</span>
+                      </button>
+                    </div>
+                  )}
 
                   {config.stripeConnected && (
                     <span 
@@ -26492,6 +26678,71 @@ export default function AdminPaymentPage() {
               </div>
 
               <div className="space-y-3 pt-1 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                {config.stripe.enabled && (
+                  <div className="space-y-2 pt-1">
+                    {config.testMode && config.stripe.secretKey && !config.stripe.secretKey.startsWith('sk_test_') && (
+                      <div 
+                        className="p-3 rounded-xl border flex items-start gap-2 text-xs font-semibold shadow-xs animate-in fade-in"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: '#f59e0b',
+                          color: '#fbbf24'
+                        }}
+                      >
+                        <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
+                        <div>
+                          <div className="font-bold">{t('testKeyMismatchTitle', 'Stripe Test Mode Key Alert')}</div>
+                          <div className="text-[11px] font-normal leading-relaxed" style={{ color: 'var(--color-text)' }}>
+                            {t('testKeyMismatchNotice', 'Sandbox Test Mode is active, but your Secret Key does not start with "sk_test_". Payments and test cards will be rejected by Stripe until valid test keys are entered.')}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {!config.testMode && config.stripe.secretKey && config.stripe.secretKey.startsWith('sk_test_') && (
+                      <div 
+                        className="p-3 rounded-xl border flex items-start gap-2 text-xs font-semibold shadow-xs animate-in fade-in"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: '#ef4444',
+                          color: '#ef4444'
+                        }}
+                      >
+                        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-red-500" />
+                        <div>
+                          <div className="font-bold">{t('liveKeyMismatchTitle', 'Live Mode Key Alert')}</div>
+                          <div className="text-[11px] font-normal leading-relaxed" style={{ color: 'var(--color-text)' }}>
+                            {t('liveKeyMismatchNotice', 'Live Production Mode is active, but your Secret Key is a test key ("sk_test_..."). Real customer credit cards will be declined.')}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {config.testMode && (
+                      <div 
+                        className="p-3.5 rounded-2xl border space-y-1.5 transition-colors shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
+                        }}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: '#fbbf24' }}>
+                            <CreditCard className="h-3.5 w-3.5" />
+                            {t('stripeTestCardGuide', 'Stripe Test Card Helper')}
+                          </span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                            {t('sandboxActiveBadge', 'Sandbox Active')}
+                          </span>
+                        </div>
+                        <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                          {t('testCardInstructions', 'Use card number')} <code className="px-1.5 py-0.5 rounded font-mono font-bold text-[11px] border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>4242 4242 4242 4242</code>, {t('anyFutureExpiry', 'any future MM/YY (e.g. 12/28), and any 3-digit CVC (e.g. 123).')}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div>
                   <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                     {t('publishableKeyLabel', 'Publishable Key')}
@@ -26571,6 +26822,112 @@ export default function AdminPaymentPage() {
                     >
                       {visibleFields['stripeSecret'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
+                  </div>
+                </div>
+
+                {/* Stripe Webhook Endpoint URL & CLI Forwarding Helper Card */}
+                <div 
+                  className="p-4 rounded-2xl border space-y-3 transition-colors duration-200 shadow-xs"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs uppercase font-bold flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
+                      <Globe className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+                      {t('stripeWebhookUrlLabel', 'Stripe Webhook Endpoint URL')}
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowStripeGuideModal(true)}
+                        className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        <Terminal className="h-3 w-3" />
+                        <span>{t('viewCliMethodBtn', 'Stripe CLI Instructions')}</span>
+                      </button>
+                      <span className="text-[10px] font-extrabold px-2 py-0.5 rounded border border-blue-500/30 text-blue-400 bg-blue-500/10 uppercase tracking-wider">
+                        POST
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('stripeWebhookUrlDesc', 'Add this URL in Stripe Dashboard (Developers → Webhooks → Add an endpoint) or use the Stripe CLI command below to forward events locally.')}
+                  </p>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        readOnly
+                        value={webhookEndpointUrl || '/api/webhooks/stripe'}
+                        className="payment-input w-full border rounded-xl p-2.5 text-xs font-mono select-all outline-none transition"
+                        style={{
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleCopyWebhookUrl}
+                        className="px-3.5 py-2.5 rounded-xl border text-xs font-bold shrink-0 flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                        style={{
+                          backgroundColor: copiedWebhook ? 'var(--color-emerald)' : 'var(--color-card)',
+                          borderColor: copiedWebhook ? 'var(--color-emerald)' : 'var(--color-border)',
+                          color: copiedWebhook ? '#ffffff' : 'var(--color-text)'
+                        }}
+                        title={t('copyWebhookUrlTooltip', 'Copy Webhook URL to clipboard')}
+                      >
+                        {copiedWebhook ? (
+                          <>
+                            <Check className="h-3.5 w-3.5 text-white" />
+                            <span>{t('copiedBtn', 'Copied!')}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+                            <span>{t('copyBtn', 'Copy')}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div 
+                      className="p-2.5 rounded-xl border flex items-center justify-between gap-2"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)'
+                      }}
+                    >
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <Terminal className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                        <code className="text-[11px] font-mono truncate select-all" style={{ color: 'var(--color-text)' }}>
+                          stripe listen --forward-to {(webhookEndpointUrl || 'localhost:3000/api/webhooks/stripe').replace(/^https?:\/\//, '')}
+                        </code>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyCliCommand(`stripe listen --forward-to ${(webhookEndpointUrl || 'localhost:3000/api/webhooks/stripe').replace(/^https?:\/\//, '')}`, 'listen_inline')}
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition shrink-0 cursor-pointer"
+                        style={{
+                          backgroundColor: copiedCliKey === 'listen_inline' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
+                          borderColor: copiedCliKey === 'listen_inline' ? 'var(--color-emerald)' : 'var(--color-border)',
+                          color: copiedCliKey === 'listen_inline' ? '#ffffff' : 'var(--color-text)'
+                        }}
+                      >
+                        {copiedCliKey === 'listen_inline' ? t('copiedBtn', 'Copied!') : t('copyCommandBtn', 'Copy Command')}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="text-[10px] leading-relaxed pt-0.5 flex flex-wrap items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    <span className="font-bold">{t('recommendedEventsTitle', 'Listen to events:')}</span>
+                    <code className="px-1 py-0.5 rounded text-[10px] font-mono border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>checkout.session.completed</code>
+                    <code className="px-1 py-0.5 rounded text-[10px] font-mono border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>invoice.payment_succeeded</code>
+                    <code className="px-1 py-0.5 rounded text-[10px] font-mono border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>customer.subscription.deleted</code>
                   </div>
                 </div>
 
@@ -26778,7 +27135,8 @@ export default function AdminPaymentPage() {
               <RefreshCw className="h-4 w-4" /> {t('resetConfigBtn', 'Reset Config')}
             </button>
             <button
-              type="submit"
+              type="button"
+              onClick={handleSaveSettings}
               disabled={loading}
               className="px-8 py-3 text-white font-bold rounded-2xl transition text-xs shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary)' }}
@@ -26789,7 +27147,7 @@ export default function AdminPaymentPage() {
               {loading ? t('savingSettings', 'Saving Settings...') : t('saveConfigBtn', 'Save Gateway Settings')}
             </button>
           </div>
-        </form>
+        </div>
       </div>
 
       {/* ========================================================================= */}
@@ -26874,7 +27232,7 @@ export default function AdminPaymentPage() {
               </div>
             )}
 
-            <form onSubmit={handleConfirmPaymentSubmit} className="space-y-4 pt-1">
+            <div className="space-y-4 pt-1">
               <div>
                 <label className="block font-bold mb-1 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
                   <span>{t('confirmedPaymentAmountLabel', 'Confirmed Payment Amount')} ({confirmingTx.currency || config.currency}) *</span>
@@ -26967,8 +27325,9 @@ export default function AdminPaymentPage() {
                   {t('cancel', 'Cancel')}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
                   disabled={!confirmCheckbox || isSubmittingConfirm}
+                  onClick={handleConfirmPaymentSubmit}
                   className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{ backgroundColor: 'var(--color-emerald)' }}
                 >
@@ -26983,7 +27342,7 @@ export default function AdminPaymentPage() {
                   )}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -27099,7 +27458,7 @@ export default function AdminPaymentPage() {
               </div>
             )}
 
-            <form onSubmit={handleAddPaymentSubmit} className="space-y-4 pt-1">
+            <div className="space-y-4 pt-1">
               <div>
                 <label className="block font-bold mb-1 flex items-center gap-1.5" style={{ color: 'var(--color-text-secondary)' }}>
                   <UserIcon className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
@@ -27326,7 +27685,6 @@ export default function AdminPaymentPage() {
                 )}
               </div>
 
-              {/* GATEWAY PAYMENT AMOUNT CONFIRMATION SECTION (Automated Gateways Only) */}
               {isSucceeded(paymentStatus) && paymentGateway !== 'manual' && (
                 <div 
                   className="p-3.5 rounded-2xl border space-y-2.5 shadow-xs"
@@ -27399,8 +27757,9 @@ export default function AdminPaymentPage() {
                   {t('cancel', 'Cancel')}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
                   disabled={registeredUsers.length === 0}
+                  onClick={handleAddPaymentSubmit}
                   className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   style={{
                     backgroundColor: 'var(--color-primary)'
@@ -27431,7 +27790,7 @@ export default function AdminPaymentPage() {
                   )}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -27482,7 +27841,7 @@ export default function AdminPaymentPage() {
               </div>
             )}
 
-            <form onSubmit={handleUpdatePaymentSubmit} className="space-y-4 pt-1">
+            <div className="space-y-4 pt-1">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>{t('customerNameLabel', 'Customer Name')}</label>
@@ -27703,7 +28062,6 @@ export default function AdminPaymentPage() {
                 )}
               </div>
 
-              {/* CONFIRMATION CHECK FOR ADVANCING TO SUCCEEDED */}
               {isSucceeded(editStatus) && !isSucceeded(editingTx.status) && editGateway !== 'manual' && (
                 <div 
                   className="p-3.5 rounded-2xl border space-y-2.5 shadow-xs"
@@ -27776,7 +28134,8 @@ export default function AdminPaymentPage() {
                   {t('cancel', 'Cancel')}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={handleUpdatePaymentSubmit}
                   className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -27785,7 +28144,251 @@ export default function AdminPaymentPage() {
                   <Save className="h-4 w-4" /> {t('saveChanges', 'Save Changes')}
                 </button>
               </div>
-            </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STRIPE CONNECTION & WEBHOOK SETUP GUIDE MODAL */}
+      {showStripeGuideModal && (
+        <div 
+          onClick={() => setShowStripeGuideModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <button 
+              type="button"
+              onClick={() => setShowStripeGuideModal(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs hover:opacity-80"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <div className="space-y-1.5 pr-8">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-[#635bff]/15 text-[#635bff]">
+                  <Terminal className="h-5 w-5" />
+                </div>
+                <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                  {t('stripeConnectModalTitle', 'Connect Stripe & Webhooks')}
+                </h2>
+              </div>
+              <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('stripeConnectModalSub', 'To connect Stripe webhooks and test payments with your local server, follow the official recommended Stripe CLI setup below.')}
+              </p>
+            </div>
+
+            {/* Method 1: Official Stripe CLI */}
+            <div 
+              className="p-5 rounded-2xl border space-y-4"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
+              }}
+            >
+              <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                <span className="font-bold text-sm flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <Code2 className="h-4 w-4 text-[var(--color-primary)]" />
+                  {t('method1Title', 'Method 1: Use the Official Stripe CLI (Recommended)')}
+                </span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                  {t('recommendedBadge', 'Recommended')}
+                </span>
+              </div>
+              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('method1Desc', 'The official Stripe CLI securely routes events straight to your localhost without needing to register a public URL or configure an HTTP tunnel.')}
+              </p>
+
+              {/* Step 1 */}
+              <div className="space-y-1.5">
+                <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                  1. {t('step1Title', 'Install the CLI:')} <span className="font-normal opacity-80">{t('step1Desc', 'Download the Stripe CLI on your system (e.g., via Homebrew on macOS):')}</span>
+                </div>
+                <div 
+                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  <span className="select-all">brew install stripe/stripe-cli/stripe</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCliCommand('brew install stripe/stripe-cli/stripe', 'cli_install')}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer"
+                    style={{
+                      backgroundColor: copiedCliKey === 'cli_install' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
+                      borderColor: copiedCliKey === 'cli_install' ? 'var(--color-emerald)' : 'var(--color-border)',
+                      color: copiedCliKey === 'cli_install' ? '#ffffff' : 'var(--color-text)'
+                    }}
+                  >
+                    {copiedCliKey === 'cli_install' ? t('copiedBtn', 'Copied!') : t('copyBtn', 'Copy')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 2 */}
+              <div className="space-y-1.5">
+                <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                  2. {t('step2Title', 'Log in:')} <span className="font-normal opacity-80">{t('step2Desc', 'Link your Stripe account by running in your terminal:')}</span>
+                </div>
+                <div 
+                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  <span className="select-all">stripe login</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCliCommand('stripe login', 'cli_login')}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer"
+                    style={{
+                      backgroundColor: copiedCliKey === 'cli_login' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
+                      borderColor: copiedCliKey === 'cli_login' ? 'var(--color-emerald)' : 'var(--color-border)',
+                      color: copiedCliKey === 'cli_login' ? '#ffffff' : 'var(--color-text)'
+                    }}
+                  >
+                    {copiedCliKey === 'cli_login' ? t('copiedBtn', 'Copied!') : t('copyBtn', 'Copy')}
+                  </button>
+                </div>
+                <p className="text-[10px] opacity-70 italic" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('step2Note', 'Follow the pairing link provided in the terminal to authenticate your Stripe account.')}
+                </p>
+              </div>
+
+              {/* Step 3 */}
+              <div className="space-y-1.5">
+                <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                  3. {t('step3Title', 'Forward events:')} <span className="font-normal opacity-80">{t('step3Desc', 'Start forwarding Stripe events directly to your local endpoint:')}</span>
+                </div>
+                <div 
+                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  <span className="select-all truncate">
+                    stripe listen --forward-to {(webhookEndpointUrl || 'localhost:3000/api/webhooks/stripe').replace(/^https?:\/\//, '')}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopyCliCommand(`stripe listen --forward-to ${(webhookEndpointUrl || 'localhost:3000/api/webhooks/stripe').replace(/^https?:\/\//, '')}`, 'cli_listen')}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer shrink-0"
+                    style={{
+                      backgroundColor: copiedCliKey === 'cli_listen' ? 'var(--color-emerald)' : 'var(--color-inner-dark)',
+                      borderColor: copiedCliKey === 'cli_listen' ? 'var(--color-emerald)' : 'var(--color-border)',
+                      color: copiedCliKey === 'cli_listen' ? '#ffffff' : 'var(--color-text)'
+                    }}
+                  >
+                    {copiedCliKey === 'cli_listen' ? t('copiedBtn', 'Copied!') : t('copyBtn', 'Copy')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Step 4 */}
+              <div className="space-y-1.5">
+                <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                  4. {t('step4Title', 'Capture the Secret:')} <span className="font-normal opacity-80">{t('step4Desc', 'The CLI will print a local signing secret (looks like')} <code className="font-mono font-bold text-[10px] px-1 py-0.5 rounded border">whsec_...</code>{t('step4DescAfter', '). Paste it into the Webhook Secret field below:')}</span>
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={config.stripe.webhookSecret}
+                    onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
+                    placeholder="whsec_..."
+                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Method 2: Stripe Dashboard Links */}
+            <div 
+              className="p-3.5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
+              }}
+            >
+              <div className="space-y-0.5">
+                <span className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                  {t('method2Title', 'Production / Dashboard API Keys')}
+                </span>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('method2Desc', 'Retrieve your Secret Key and Publishable Key directly from your Stripe Dashboard.')}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={config.testMode ? "https://dashboard.stripe.com/test/apikeys" : "https://dashboard.stripe.com/apikeys"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-80"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-primary)'
+                  }}
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  <span>{t('openApiKeysBtn', 'Stripe API Keys')}</span>
+                </a>
+                <a
+                  href={config.testMode ? "https://dashboard.stripe.com/test/webhooks" : "https://dashboard.stripe.com/webhooks"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-80"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-primary)'
+                  }}
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  <span>{t('openWebhooksBtn', 'Stripe Webhooks')}</span>
+                </a>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setShowStripeGuideModal(false)}
+                className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-secondary)'
+                }}
+              >
+                {t('closeBtn', 'Close')}
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setShowStripeGuideModal(false);
+                  await handleSaveSettings();
+                  await handleVerifyStripeKeys();
+                }}
+                className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                <Save className="h-4 w-4" />
+                <span>{t('saveAndConnectBtn', 'Save Settings & Verify Stripe')}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -41454,7 +42057,7 @@ export default function BookRedirectPage() {
 
 import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Wallet,
   CreditCard,
@@ -41478,9 +42081,12 @@ import {
   Layers,
   Coins,
   Shield,
-  ExternalLink
+  ExternalLink,
+  Info,
+  RotateCw
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
+import { useTranslation } from '@/context/LanguageContext';
 
 interface WalletSettings {
   is_enabled: boolean;
@@ -41506,19 +42112,28 @@ interface WalletTx {
 }
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
-  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'AU$', JPY: '¥'
+  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'AU$', JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
 };
 
 function WalletContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const langContext = useTranslation();
+  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
+
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+  const [reconciling, setReconciling] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; msg: string } | null>(null);
 
   // Active User & Balances
   const [user, setUser] = useState<User | null>(null);
   const currentUserRef = useRef<User | null>(null);
   const [balance, setBalance] = useState<number>(0);
+
+  // Concurrency & Idempotency Guards
+  const verifyingIdRef = useRef<string | null>(null);
+  const isFetchingWalletRef = useRef<boolean>(false);
 
   // Settings
   const [settings, setSettings] = useState<WalletSettings>({
@@ -41553,13 +42168,25 @@ function WalletContent() {
     return CURRENCY_SYMBOLS[settings.currency] || '$';
   }, [settings.currency]);
 
-  // Compute Active Deposit Amount
+  // Handle Custom Amount input cleanly
+  const handleCustomAmountChange = (raw: string) => {
+    const clean = raw.replace(/[^0-9.]/g, '');
+    const parts = clean.split('.');
+    const formatted = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : clean;
+    setCustomAmount(formatted);
+    if (formatted !== '') {
+      setSelectedAmount(0);
+    }
+  };
+
+  // Compute Active Deposit Amount with strict priority for customAmount
   const activeAmount = useMemo(() => {
-    if (customAmount.trim() !== '') {
-      const parsed = parseFloat(customAmount);
+    const clean = customAmount.trim().replace(/[^0-9.]/g, '');
+    if (clean !== '') {
+      const parsed = parseFloat(clean);
       return isNaN(parsed) ? 0 : parsed;
     }
-    return selectedAmount;
+    return selectedAmount || 0;
   }, [customAmount, selectedAmount]);
 
   // Compute Tiered Bonus
@@ -41622,21 +42249,33 @@ function WalletContent() {
     }
   }, [router]);
 
-  // Fetch Wallet Data & Ledger
+  const hydrateUserRef = useRef(hydrateUser);
+  hydrateUserRef.current = hydrateUser;
+
+  // Fetch Wallet Data & Ledger with concurrency guard
   const fetchWalletData = useCallback(async (
     targetPage = page,
     targetLimit = limit,
     targetSearch = debouncedSearch,
     targetType = typeFilter
   ) => {
-    const active = currentUserRef.current || getCurrentUser();
+    let active = currentUserRef.current || getCurrentUser();
+    if (!active && typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
+        if (raw) active = JSON.parse(raw);
+      } catch (_) {}
+    }
     if (!active?.email && !active?.id) return;
 
+    if (isFetchingWalletRef.current) return;
+    isFetchingWalletRef.current = true;
     setTxLoading(true);
+
     try {
       const params = new URLSearchParams({
         email: active.email || '',
-        userId: active.id || '',
+        userId: String(active.id || ''),
         page: String(targetPage),
         limit: String(targetLimit),
         search: targetSearch,
@@ -41665,10 +42304,10 @@ function WalletContent() {
           setBalance(parseFloat(data.user.wallet_balance || 0));
         }
 
-        setTransactions(data.transactions || []);
-        setTotalCount(data.totalCount || 0);
-        setTotalPages(data.totalPages || 1);
-        setPage(data.page || 1);
+        setTransactions(Array.isArray(data.transactions) ? data.transactions : []);
+        setTotalCount(typeof data.totalCount === 'number' ? data.totalCount : parseInt(data.totalCount || '0', 10));
+        setTotalPages(typeof data.totalPages === 'number' ? data.totalPages : Math.ceil((data.totalCount || 0) / targetLimit) || 1);
+        setPage(data.page || targetPage);
 
         if (data.stats) {
           setStats({
@@ -41683,14 +42322,21 @@ function WalletContent() {
     } finally {
       setTxLoading(false);
       setLoading(false);
+      isFetchingWalletRef.current = false;
     }
   }, [page, limit, debouncedSearch, typeFilter]);
 
-  useEffect(() => {
-    hydrateUser();
-    fetchWalletData();
+  const fetchWalletRef = useRef(fetchWalletData);
+  fetchWalletRef.current = fetchWalletData;
 
-    const handleSync = () => fetchWalletData();
+  // Mount Lifecycle
+  useEffect(() => {
+    hydrateUserRef.current();
+    fetchWalletRef.current(1, limit);
+
+    const handleSync = () => {
+      fetchWalletRef.current(page, limit, debouncedSearch, typeFilter);
+    };
     window.addEventListener('zecratary_wallet_updated', handleSync);
     window.addEventListener('zecratary_wallet_settings_updated', handleSync);
 
@@ -41698,39 +42344,127 @@ function WalletContent() {
       window.removeEventListener('zecratary_wallet_updated', handleSync);
       window.removeEventListener('zecratary_wallet_settings_updated', handleSync);
     };
-  }, [hydrateUser, fetchWalletData]);
+  }, []);
 
-  // Re-fetch transactions on filter / pagination change
+  // Filter & Pagination effect
   useEffect(() => {
-    fetchWalletData(page, limit, debouncedSearch, typeFilter);
-  }, [page, limit, debouncedSearch, typeFilter, fetchWalletData]);
+    if (currentUserRef.current) {
+      fetchWalletRef.current(page, limit, debouncedSearch, typeFilter);
+    }
+  }, [page, limit, debouncedSearch, typeFilter]);
 
-  // Execute Deposit
-  const handleExecuteTopup = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Handle Stripe Return Verification on Mount
+  useEffect(() => {
+    const sessionId = searchParams.get('session_id');
+    const status = searchParams.get('status');
+
+    if (status === 'success' && sessionId) {
+      if (verifyingIdRef.current === sessionId) return;
+      verifyingIdRef.current = sessionId;
+
+      const verifyCheckout = async () => {
+        setSubmitting(true);
+        setFeedback({
+          type: 'info',
+          msg: t('verifyingStripeSession', 'Confirming Stripe Payment and synchronizing your wallet balance...'),
+        });
+
+        const active = currentUserRef.current || getCurrentUser();
+
+        try {
+          const res = await fetch('/api/wallet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'verify_stripe_session',
+              sessionId,
+              email: active?.email || '',
+              userId: String(active?.id || ''),
+            }),
+          });
+          const data = await res.json();
+
+          if (data.success) {
+            setFeedback({
+              type: 'success',
+              msg: data.message || t('topupSuccessMsg', 'Stripe checkout verified! Store credit added to your account.'),
+            });
+            if (typeof data.wallet_balance === 'number') {
+              setBalance(data.wallet_balance);
+            }
+            if (Array.isArray(data.transactions)) {
+              setTransactions(data.transactions);
+              if (typeof data.totalCount === 'number') setTotalCount(data.totalCount);
+              if (typeof data.totalPages === 'number') setTotalPages(data.totalPages);
+              if (data.stats) setStats(data.stats);
+            }
+            fetchWalletRef.current(1, limit);
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new Event('zecratary_wallet_updated'));
+              window.history.replaceState({}, '', '/wallet');
+            }
+          } else {
+            setFeedback({
+              type: 'error',
+              msg: data.error || t('topupVerifyFailed', 'Could not verify Stripe payment session.'),
+            });
+            if (typeof window !== 'undefined') {
+              window.history.replaceState({}, '', '/wallet');
+            }
+          }
+        } catch (err: any) {
+          setFeedback({
+            type: 'error',
+            msg: err.message || t('topupVerifyConnError', 'Failed to connect to verification service.'),
+          });
+          if (typeof window !== 'undefined') {
+            window.history.replaceState({}, '', '/wallet');
+          }
+        } finally {
+          setSubmitting(false);
+        }
+      };
+
+      verifyCheckout();
+    } else if (status === 'cancelled') {
+      setFeedback({
+        type: 'info',
+        msg: t('topupCancelledMsg', 'Stripe Checkout was cancelled. No charges were made to your account.'),
+      });
+      if (typeof window !== 'undefined') {
+        window.history.replaceState({}, '', '/wallet');
+      }
+    }
+  }, [searchParams, limit, t]);
+
+  // Execute Deposit or Dispatch Stripe Checkout (Zero-Form Architecture)
+  const handleExecuteTopup = async () => {
     setSubmitting(true);
     setFeedback(null);
 
-    const active = currentUserRef.current || user;
+    const active = currentUserRef.current || user || getCurrentUser();
     if (!active) {
-      setFeedback({ type: 'error', msg: 'Session expired. Please re-login.' });
+      setFeedback({ type: 'error', msg: t('sessionExpiredMsg', 'Session expired. Please re-login.') });
       setSubmitting(false);
       return;
     }
 
-    if (activeAmount < settings.min_topup) {
+    const cleanAmt = customAmount.trim().replace(/[^0-9.]/g, '');
+    const depositAmt = cleanAmt !== '' ? parseFloat(cleanAmt) : selectedAmount;
+
+    if (depositAmt < settings.min_topup) {
       setFeedback({
         type: 'error',
-        msg: `Minimum deposit allowed is ${activeCurrencySymbol}${settings.min_topup.toFixed(2)}.`,
+        msg: `${t('minDepositError', 'Minimum deposit allowed is')} ${activeCurrencySymbol}${settings.min_topup.toFixed(2)}.`,
       });
       setSubmitting(false);
       return;
     }
 
-    if (activeAmount > settings.max_topup) {
+    if (depositAmt > settings.max_topup) {
       setFeedback({
         type: 'error',
-        msg: `Maximum single deposit cap is ${activeCurrencySymbol}${settings.max_topup.toFixed(2)}.`,
+        msg: `${t('maxDepositError', 'Maximum single deposit cap is')} ${activeCurrencySymbol}${settings.max_topup.toFixed(2)}.`,
       });
       setSubmitting(false);
       return;
@@ -41741,64 +42475,142 @@ function WalletContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: active.id,
+          userId: String(active.id || ''),
           email: active.email,
-          amount: activeAmount,
+          amount: depositAmt,
           gateway: selectedGateway,
+          origin: typeof window !== 'undefined' ? window.location.origin : '',
           gatewayTxId: `gw_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
         }),
       });
 
       const data = await res.json();
       if (data.success) {
+        if (data.checkoutUrl) {
+          setFeedback({
+            type: 'info',
+            msg: t('redirectingToStripe', 'Redirecting to Stripe secure checkout...'),
+          });
+          window.location.href = data.checkoutUrl;
+          return;
+        }
+
         setFeedback({ type: 'success', msg: data.message });
-        setBalance(data.wallet_balance);
+        if (typeof data.wallet_balance === 'number') {
+          setBalance(data.wallet_balance);
+        }
+
+        if (Array.isArray(data.transactions)) {
+          setTransactions(data.transactions);
+          if (typeof data.totalCount === 'number') setTotalCount(data.totalCount);
+          if (typeof data.totalPages === 'number') setTotalPages(data.totalPages);
+          if (data.stats) setStats(data.stats);
+        }
+
         setCustomAmount('');
-        fetchWalletData(1, limit);
-        window.dispatchEvent(new Event('zecratary_wallet_updated'));
+        fetchWalletRef.current(1, limit);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_wallet_updated'));
+        }
       } else {
-        setFeedback({ type: 'error', msg: data.error || 'Top-up transaction failed.' });
+        setFeedback({ type: 'error', msg: data.error || t('topupFailed', 'Top-up transaction failed.') });
       }
     } catch (err: any) {
-      setFeedback({ type: 'error', msg: err.message || 'Payment gateway connection error.' });
+      setFeedback({ type: 'error', msg: err.message || t('gatewayConnError', 'Payment gateway connection error.') });
     } finally {
       setSubmitting(false);
     }
   };
 
-  // Badges
-  const renderWalletBadge = (type: string) => {
-    if (type === 'topup') {
+  // Reconcile unrecorded Stripe payments manually
+  const handleReconcilePayments = async () => {
+    setReconciling(true);
+    setFeedback({
+      type: 'info',
+      msg: t('reconcilingLedger', 'Scanning Stripe Payment Gateway and synchronizing unrecorded top-ups...'),
+    });
+
+    const active = currentUserRef.current || user || getCurrentUser();
+
+    try {
+      const res = await fetch('/api/wallet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'reconcile_wallet',
+          userId: String(active?.id || ''),
+          email: active?.email || '',
+        }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setFeedback({
+          type: 'success',
+          msg: data.message || t('reconcileSuccessMsg', 'Ledger is fully synchronized with Stripe.'),
+        });
+        if (typeof data.wallet_balance === 'number') {
+          setBalance(data.wallet_balance);
+        }
+        if (Array.isArray(data.transactions)) {
+          setTransactions(data.transactions);
+          if (typeof data.totalCount === 'number') setTotalCount(data.totalCount);
+          if (typeof data.totalPages === 'number') setTotalPages(data.totalPages);
+          if (data.stats) setStats(data.stats);
+        }
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_wallet_updated'));
+        }
+      } else {
+        setFeedback({
+          type: 'error',
+          msg: data.error || t('reconcileFailed', 'Failed to synchronize with Stripe.'),
+        });
+      }
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        msg: err.message || t('reconcileConnError', 'Connection error while synchronizing with Stripe.'),
+      });
+    } finally {
+      setReconciling(false);
+    }
+  };
+
+  // Safe Badge Renderer
+  const renderWalletBadge = (type?: string) => {
+    const rawType = String(type || '').toLowerCase().trim();
+    if (rawType === 'topup') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-          <ArrowUpRight className="h-3 w-3" /> Deposit Top-Up
+          <ArrowUpRight className="h-3 w-3" /> {t('badgeTopup', 'Deposit Top-Up')}
         </span>
       );
     }
-    if (type === 'token_purchase') {
+    if (rawType === 'token_purchase') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/20">
-          <Coins className="h-3 w-3" /> Token Purchase
+          <Coins className="h-3 w-3" /> {t('badgeTokenPurchase', 'Token Purchase')}
         </span>
       );
     }
-    if (type === 'plan_purchase') {
+    if (rawType === 'plan_purchase') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">
-          <Layers className="h-3 w-3" /> Plan Subscription
+          <Layers className="h-3 w-3" /> {t('badgePlanPurchase', 'Plan Subscription')}
         </span>
       );
     }
-    if (type === 'admin_adjustment') {
+    if (rawType === 'admin_adjustment') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-400 border border-blue-500/20">
-          <Shield className="h-3 w-3" /> Admin Adjustment
+          <Shield className="h-3 w-3" /> {t('badgeAdminAdjustment', 'Admin Adjustment')}
         </span>
       );
     }
     return (
       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-slate-500/10 text-slate-400 border border-slate-500/20">
-        <Activity className="h-3 w-3" /> {type.replace('_', ' ')}
+        <Activity className="h-3 w-3" /> {rawType ? rawType.replace(/_/g, ' ') : 'Operation'}
       </span>
     );
   };
@@ -41837,23 +42649,23 @@ function WalletContent() {
           <div className="space-y-2">
             <div className="flex items-center gap-2.5 text-xs font-bold uppercase tracking-wider text-[var(--color-primary,#3b82f6)]">
               <Wallet className="w-4 h-4" />
-              <span>Store Credit Wallet</span>
+              <span>{t('storeCreditWallet', 'Store Credit Wallet')}</span>
               <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                Active & Persistent
+                {t('activeAndPersistent', 'Active & Persistent')}
               </span>
             </div>
             <div className="text-4xl sm:text-5xl font-black tracking-tight flex items-baseline gap-2">
-              <span className="font-mono text-[var(--color-primary,#3b82f6)]">
+              <span className="font-mono text-[var(--color-primary,#3b82f6)]" suppressHydrationWarning>
                 {activeCurrencySymbol}{balance.toFixed(2)}
               </span>
               <span className="text-lg font-bold opacity-60 font-mono">{settings.currency}</span>
             </div>
             <p className="text-xs opacity-70">
-              Spendable across recipe purchases, meal plans, token bundles, and platform services.
+              {t('walletDesc', 'Spendable across recipe purchases, meal plans, token bundles, and platform services.')}
             </p>
           </div>
 
-          {/* Quick Metrics & Secure Settlement */}
+          {/* Quick Metrics & Settlement */}
           <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 w-full lg:w-auto">
             <div
               className="flex-1 p-4 rounded-2xl border flex items-center gap-3 shadow-inner"
@@ -41861,8 +42673,8 @@ function WalletContent() {
             >
               <ArrowUpRight className="w-6 h-6 text-emerald-400 flex-shrink-0" />
               <div>
-                <div className="text-[10px] font-bold uppercase opacity-60">Total Deposited</div>
-                <div className="text-sm font-black font-mono text-emerald-400">
+                <div className="text-[10px] font-bold uppercase opacity-60">{t('totalDeposited', 'Total Deposited')}</div>
+                <div className="text-sm font-black font-mono text-emerald-400" suppressHydrationWarning>
                   +{activeCurrencySymbol}{stats.totalDeposited.toFixed(2)}
                 </div>
               </div>
@@ -41874,8 +42686,8 @@ function WalletContent() {
             >
               <ArrowDownLeft className="w-6 h-6 text-rose-400 flex-shrink-0" />
               <div>
-                <div className="text-[10px] font-bold uppercase opacity-60">Total Spent</div>
-                <div className="text-sm font-black font-mono text-rose-400">
+                <div className="text-[10px] font-bold uppercase opacity-60">{t('totalSpent', 'Total Spent')}</div>
+                <div className="text-sm font-black font-mono text-rose-400" suppressHydrationWarning>
                   -{activeCurrencySymbol}{stats.totalSpent.toFixed(2)}
                 </div>
               </div>
@@ -41887,8 +42699,8 @@ function WalletContent() {
             >
               <ShieldCheck className="w-6 h-6 text-emerald-400 flex-shrink-0" />
               <div>
-                <div className="text-[10px] font-bold uppercase opacity-60">Settlement</div>
-                <div className="text-xs font-bold text-emerald-400">Encrypted Instant</div>
+                <div className="text-[10px] font-bold uppercase opacity-60">{t('settlement', 'Settlement')}</div>
+                <div className="text-xs font-bold text-emerald-400">{t('encryptedInstant', 'Encrypted Instant')}</div>
               </div>
             </div>
           </div>
@@ -41900,17 +42712,25 @@ function WalletContent() {
           className={`p-4 rounded-2xl border flex items-center gap-3 text-sm animate-fade-in ${
             feedback.type === 'success'
               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+              : feedback.type === 'info'
+              ? 'bg-blue-500/10 border-blue-500/30 text-blue-400'
               : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
           }`}
         >
-          {feedback.type === 'success' ? <CheckCircle2 className="w-5 h-5 flex-shrink-0" /> : <AlertCircle className="w-5 h-5 flex-shrink-0" />}
+          {feedback.type === 'success' ? (
+            <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+          ) : feedback.type === 'info' ? (
+            <Info className="w-5 h-5 flex-shrink-0" />
+          ) : (
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          )}
           <span className="font-semibold text-xs">{feedback.msg}</span>
         </div>
       )}
 
-      {/* Top-Up Section */}
-      <form onSubmit={handleExecuteTopup} className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Choose Presets / Custom & Gateway */}
+      {/* Top-Up Configuration Area (Zero-Form Architecture) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Column: Presets / Custom & Gateway */}
         <div
           className="lg:col-span-2 p-6 sm:p-7 rounded-3xl border space-y-6 shadow-md transition-colors duration-200"
           style={{ backgroundColor: 'var(--color-card, #1e293b)', borderColor: 'var(--color-border, #334155)' }}
@@ -41918,17 +42738,17 @@ function WalletContent() {
           <div>
             <h2 className="text-lg font-bold flex items-center gap-2">
               <Plus className="w-5 h-5 text-[var(--color-primary,#3b82f6)]" />
-              <span>1. Choose Top-Up Amount</span>
+              <span>{t('chooseTopupAmount', '1. Choose Top-Up Amount')}</span>
             </h2>
             <p className="text-xs opacity-60 mt-0.5">
-              Minimum deposit is {activeCurrencySymbol}{settings.min_topup.toFixed(2)} {settings.currency} (Max {activeCurrencySymbol}{settings.max_topup.toFixed(2)}).
+              {t('minDepositNotice', 'Minimum deposit is')} {activeCurrencySymbol}{settings.min_topup.toFixed(2)} {settings.currency} ({t('maxNotice', 'Max')} {activeCurrencySymbol}{settings.max_topup.toFixed(2)}).
             </p>
           </div>
 
           {/* Presets Chips */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {(settings.preset_amounts || [10, 25, 50, 100, 250]).map((amt) => {
-              const isSelected = activeAmount === amt && !customAmount;
+              const isSelected = !customAmount && selectedAmount === amt;
               let applicableBonusPercent = 0;
               if (Array.isArray(settings.bonus_rules)) {
                 for (const r of settings.bonus_rules) {
@@ -41962,7 +42782,7 @@ function WalletContent() {
                   {applicableBonusPercent > 0 && (
                     <span className="text-[10px] text-emerald-400 flex items-center gap-0.5 font-bold">
                       <Gift className="w-3 h-3" />
-                      +{applicableBonusPercent}% Bonus
+                      +{applicableBonusPercent}% {t('bonus', 'Bonus')}
                     </span>
                   )}
                 </button>
@@ -41973,39 +42793,56 @@ function WalletContent() {
           {/* Custom Amount Input */}
           <div>
             <label className="block text-xs font-semibold uppercase opacity-70 mb-2">
-              Or Enter Custom Deposit Amount ({activeCurrencySymbol})
+              {t('orEnterCustomAmount', 'Or Enter Custom Deposit Amount')} ({activeCurrencySymbol})
             </label>
             <div className="relative">
-              <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold opacity-60 font-mono">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold opacity-60 font-mono select-none">
                 {activeCurrencySymbol}
               </span>
               <input
-                type="number"
-                step="0.01"
-                min={settings.min_topup}
-                max={settings.max_topup}
-                placeholder="e.g. 75.00"
+                type="text"
+                inputMode="decimal"
+                placeholder="e.g. 5.00"
                 value={customAmount}
-                onChange={(e) => setCustomAmount(e.target.value)}
-                className="w-full pl-9 pr-4 py-3 rounded-2xl border text-base font-bold outline-none focus:border-[var(--color-primary,#3b82f6)]"
+                onChange={(e) => handleCustomAmountChange(e.target.value)}
+                onFocus={() => {
+                  if (!customAmount) {
+                    setSelectedAmount(0);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleExecuteTopup();
+                  }
+                }}
+                className="w-full pl-9 pr-4 py-3 rounded-2xl border text-base font-bold font-mono outline-none focus:border-[var(--color-primary,#3b82f6)]"
                 style={{
                   backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                  borderColor: 'var(--color-border, #334155)',
+                  borderColor: customAmount ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
                 }}
               />
             </div>
+            {customAmount && (
+              <div className="flex justify-between items-center mt-1.5 px-1 text-[11px] opacity-70 font-mono">
+                <span>Custom Amount Active:</span>
+                <span className="font-bold text-[var(--color-primary,#3b82f6)]">
+                  {activeCurrencySymbol}{activeAmount.toFixed(2)}
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Payment Gateway Picker */}
           <div>
             <label className="block text-xs font-semibold uppercase opacity-70 mb-3">
-              2. Select Payment Gateway
+              {t('selectPaymentGateway', '2. Select Payment Gateway')}
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {[
-                { id: 'stripe', label: 'Credit Card (Stripe)' },
-                { id: 'paypal', label: 'PayPal' },
-                { id: 'manual', label: 'Manual Settlement' },
+                { id: 'stripe', label: t('gatewayStripe', 'Credit Card (Stripe)') },
+                { id: 'paypal', label: t('gatewayPaypal', 'PayPal') },
+                { id: 'manual', label: t('gatewayManual', 'Manual Settlement') },
               ]
                 .filter((gw) => !settings.allowed_gateways || settings.allowed_gateways.includes(gw.id))
                 .map((gw) => {
@@ -42037,7 +42874,7 @@ function WalletContent() {
           </div>
         </div>
 
-        {/* Right Column: Deposit Summary & Action Trigger */}
+        {/* Right Column: Deposit Summary & Trigger */}
         <div
           className="p-6 sm:p-7 rounded-3xl border flex flex-col justify-between space-y-6 shadow-md transition-colors duration-200"
           style={{ backgroundColor: 'var(--color-card, #1e293b)', borderColor: 'var(--color-border, #334155)' }}
@@ -42045,25 +42882,25 @@ function WalletContent() {
           <div className="space-y-4">
             <h3 className="text-base font-bold flex items-center gap-2">
               <CreditCard className="w-5 h-5 text-[var(--color-primary,#3b82f6)]" />
-              <span>Deposit Summary</span>
+              <span>{t('depositSummary', 'Deposit Summary')}</span>
             </h3>
 
             <div className="space-y-2.5 text-sm pt-2">
               <div className="flex justify-between">
-                <span className="opacity-70 text-xs">Top-Up Base:</span>
+                <span className="opacity-70 text-xs">{t('topupBase', 'Top-Up Base:')}</span>
                 <span className="font-semibold font-mono">{activeCurrencySymbol}{activeAmount.toFixed(2)}</span>
               </div>
               {activeBonus > 0 && (
                 <div className="flex justify-between text-emerald-400">
                   <span className="flex items-center gap-1 text-xs font-semibold">
                     <Gift className="w-4 h-4" />
-                    Promotional Bonus:
+                    {t('promotionalBonus', 'Promotional Bonus:')}
                   </span>
                   <span className="font-bold font-mono">+{activeCurrencySymbol}{activeBonus.toFixed(2)}</span>
                 </div>
               )}
               <div className="flex justify-between opacity-70 text-xs">
-                <span>Selected Gateway:</span>
+                <span>{t('selectedGateway', 'Selected Gateway:')}</span>
                 <span className="uppercase font-semibold font-mono">{selectedGateway}</span>
               </div>
 
@@ -42071,7 +42908,7 @@ function WalletContent() {
                 className="border-t pt-3 flex justify-between text-base font-bold"
                 style={{ borderColor: 'var(--color-border, #334155)' }}
               >
-                <span>Total Credited:</span>
+                <span>{t('totalCredited', 'Total Credited:')}</span>
                 <span className="text-[var(--color-primary,#3b82f6)] font-mono text-lg">
                   {activeCurrencySymbol}{(activeAmount + activeBonus).toFixed(2)}
                 </span>
@@ -42080,24 +42917,28 @@ function WalletContent() {
           </div>
 
           <button
-            type="submit"
+            type="button"
+            onClick={handleExecuteTopup}
             disabled={submitting || activeAmount <= 0}
             className="w-full py-4 rounded-2xl font-bold text-sm text-white flex items-center justify-center gap-2 transition-all shadow-lg cursor-pointer disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-primary, #3b82f6)' }}
           >
             {submitting ? (
-              <RefreshCw className="w-4 h-4 animate-spin" />
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>{selectedGateway === 'stripe' ? t('redirectingStripe', 'Connecting Stripe...') : t('processingTopup', 'Processing...')}</span>
+              </>
             ) : (
               <>
-                <span>Complete Top-Up</span>
+                <span>{selectedGateway === 'stripe' ? t('checkoutWithStripe', 'Pay with Stripe Checkout') : t('completeTopup', 'Complete Top-Up')}</span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
           </button>
         </div>
-      </form>
+      </div>
 
-      {/* Integrated Wallet Transactions Ledger */}
+      {/* Wallet Transactions Ledger & Stripe Reconcile */}
       <div
         className="p-6 sm:p-7 rounded-3xl border space-y-4 shadow-md transition-colors duration-200"
         style={{ backgroundColor: 'var(--color-card, #1e293b)', borderColor: 'var(--color-border, #334155)' }}
@@ -42106,30 +42947,42 @@ function WalletContent() {
           <div className="space-y-1">
             <h3 className="text-base font-bold flex items-center gap-2">
               <History className="w-5 h-5 text-[var(--color-primary,#3b82f6)]" />
-              <span>Wallet Transactions Ledger</span>
+              <span>{t('walletLedgerTitle', 'Wallet Transactions Ledger')}</span>
             </h3>
             <p className="text-xs opacity-60">
-              Audit trail of all store credit top-ups, token bundle purchases, and administrative adjustments.
+              {t('walletLedgerSubtitle', 'Audit trail of all store credit top-ups, token bundle purchases, and administrative adjustments.')}
             </p>
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleReconcilePayments}
+              disabled={reconciling || txLoading}
+              className="text-xs font-bold px-3 py-1.5 rounded-xl border flex items-center gap-1.5 transition cursor-pointer hover:border-emerald-500 text-emerald-400 disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}
+              title={t('reconcileStripeTooltip', 'Check and reconcile any unrecorded Stripe checkout payments')}
+            >
+              <RotateCw className={`w-3.5 h-3.5 ${reconciling ? 'animate-spin' : ''}`} />
+              <span>{reconciling ? t('reconcilingBtn', 'Reconciling...') : t('reconcileStripeBtn', 'Reconcile Stripe')}</span>
+            </button>
+
             <Link
               href="/transactions?tab=wallet"
               className="text-xs font-bold px-3 py-1.5 rounded-xl border flex items-center gap-1.5 transition hover:opacity-80"
               style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}
             >
-              <span>Full Ledger</span>
+              <span>{t('fullLedger', 'Full Ledger')}</span>
               <ExternalLink className="w-3.5 h-3.5 opacity-60" />
             </Link>
 
             <button
               type="button"
-              onClick={() => fetchWalletData(page, limit)}
+              onClick={() => fetchWalletRef.current(page, limit, debouncedSearch, typeFilter)}
               disabled={txLoading}
               className="p-2 rounded-xl border flex items-center justify-center cursor-pointer transition hover:opacity-80"
               style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}
-              title="Refresh ledger"
+              title={t('refreshLedger', 'Refresh ledger')}
             >
               <RefreshCw className={`w-4 h-4 ${txLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary, #3b82f6)' }} />
             </button>
@@ -42142,7 +42995,7 @@ function WalletContent() {
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 opacity-50" />
             <input
               type="text"
-              placeholder="Search memo, gateway ID or description..."
+              placeholder={t('searchMemoPlaceholder', 'Search memo, gateway ID or description...')}
               value={searchQuery}
               onChange={(e) => {
                 setSearchQuery(e.target.value);
@@ -42164,11 +43017,11 @@ function WalletContent() {
               className="border rounded-xl px-3 py-2 text-xs font-bold outline-none cursor-pointer"
               style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}
             >
-              <option value="all">All Operations</option>
-              <option value="topup">Top-Up Deposits</option>
-              <option value="token_purchase">Token Purchases</option>
-              <option value="plan_purchase">Plan Subscriptions</option>
-              <option value="admin_adjustment">Admin Adjustments</option>
+              <option value="all">{t('allOperations', 'All Operations')}</option>
+              <option value="topup">{t('topupDeposits', 'Top-Up Deposits')}</option>
+              <option value="token_purchase">{t('tokenPurchases', 'Token Purchases')}</option>
+              <option value="plan_purchase">{t('planSubscriptions', 'Plan Subscriptions')}</option>
+              <option value="admin_adjustment">{t('adminAdjustments', 'Admin Adjustments')}</option>
             </select>
 
             <select
@@ -42187,7 +43040,7 @@ function WalletContent() {
           </div>
         </div>
 
-        {/* Responsive Table */}
+        {/* Responsive Table with Gateway Badge and Transaction Number */}
         <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border, #334155)' }}>
           <table className="w-full text-left text-xs border-collapse">
             <thead>
@@ -42195,12 +43048,12 @@ function WalletContent() {
                 className="border-b font-extrabold uppercase text-[10px] tracking-wider opacity-70"
                 style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}
               >
-                <th className="p-3.5">Operation Type</th>
-                <th className="p-3.5">Amount</th>
-                <th className="p-3.5">Balance After</th>
-                <th className="p-3.5">Gateway</th>
-                <th className="p-3.5">Description</th>
-                <th className="p-3.5">Timestamp</th>
+                <th className="p-3.5">{t('colOperationType', 'Operation Type')}</th>
+                <th className="p-3.5">{t('colAmount', 'Amount')}</th>
+                <th className="p-3.5">{t('colBalanceAfter', 'Balance After')}</th>
+                <th className="p-3.5">{t('colGateway', 'Gateway / Tx Ref')}</th>
+                <th className="p-3.5">{t('colDescription', 'Description')}</th>
+                <th className="p-3.5">{t('colTimestamp', 'Timestamp')}</th>
               </tr>
             </thead>
             <tbody className="divide-y" style={{ borderColor: 'var(--color-border, #334155)' }}>
@@ -42209,19 +43062,20 @@ function WalletContent() {
                   <td colSpan={6} className="p-8 text-center text-xs font-bold opacity-70">
                     <div className="flex items-center justify-center gap-2">
                       <RefreshCw className="h-4 w-4 animate-spin text-[var(--color-primary,#3b82f6)]" />
-                      <span>Loading wallet records...</span>
+                      <span>{t('loadingWalletRecords', 'Loading wallet records...')}</span>
                     </div>
                   </td>
                 </tr>
               ) : transactions.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="p-8 text-center text-xs font-semibold opacity-50">
-                    No wallet activity recorded matching your criteria.
+                    {t('noWalletActivity', 'No wallet activity recorded matching your criteria.')}
                   </td>
                 </tr>
               ) : (
                 transactions.map((tx) => {
                   const isNeg = Number(tx.amount) < 0;
+                  const txRef = tx.gateway_tx_id || tx.id;
                   return (
                     <tr key={tx.id} className="hover:bg-slate-500/5 transition font-medium">
                       <td className="p-3.5">{renderWalletBadge(tx.type)}</td>
@@ -42234,18 +43088,30 @@ function WalletContent() {
                         {activeCurrencySymbol}{parseFloat(tx.balance_after as any || 0).toFixed(2)}
                       </td>
                       <td className="p-3.5">
-                        <span
-                          className="uppercase text-[10px] font-mono px-2 py-0.5 rounded-md border"
-                          style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}
-                        >
-                          {tx.gateway || 'manual'}
-                        </span>
+                        <div className="flex flex-col items-start gap-1">
+                          <span
+                            className="uppercase text-[10px] font-mono font-bold px-2 py-0.5 rounded-md border tracking-wider"
+                            style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}
+                          >
+                            {tx.gateway || 'manual'}
+                          </span>
+                          {txRef && (
+                            <span
+                              className="text-[9px] font-mono opacity-60 truncate max-w-[130px] select-all cursor-copy"
+                              title={txRef}
+                            >
+                              {txRef}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="p-3.5 max-w-xs truncate text-[11px] opacity-80" title={tx.description}>
                         {tx.description || '-'}
                       </td>
                       <td className="p-3.5 font-mono text-[11px] whitespace-nowrap opacity-60">
-                        {new Date(tx.created_at).toLocaleDateString()} {new Date(tx.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        <span suppressHydrationWarning>
+                          {tx.created_at ? new Date(tx.created_at).toLocaleDateString() : '-'} {tx.created_at ? new Date(tx.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                        </span>
                       </td>
                     </tr>
                   );
@@ -42261,7 +43127,7 @@ function WalletContent() {
           style={{ borderColor: 'var(--color-border, #334155)' }}
         >
           <span className="opacity-70">
-            Showing <strong>{totalCount > 0 ? (page - 1) * limit + 1 : 0}</strong> - <strong>{Math.min(page * limit, totalCount)}</strong> of <strong>{totalCount}</strong> transactions
+            {t('showingPageInfo', 'Showing')} <strong>{totalCount > 0 ? (page - 1) * limit + 1 : 0}</strong> - <strong>{Math.min(page * limit, totalCount)}</strong> {t('ofTotal', 'of')} <strong>{totalCount}</strong> {t('transactionsLabel', 'transactions')}
           </span>
 
           <div className="flex items-center gap-1.5">
@@ -45214,105 +46080,113 @@ export async function PUT(req: NextRequest) {
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
-export const dynamic = 'force-dynamic';
-
-function normalizeTx(tx: any) {
-  if (!tx || typeof tx !== 'object') return tx;
-  const customerEmail = (tx.customer_email || tx.customerEmail || '').toLowerCase().trim();
-  const customerName = tx.customer_name || tx.customerName || 'Customer';
-  const planSlug = (tx.plan_slug || tx.planSlug || 'taster').toLowerCase().trim();
-  const planName = tx.plan_name || tx.planName || 'Plan';
-  const createdAt = tx.created_at || tx.createdAt || new Date().toISOString();
-  const expiryDate = tx.expiry_date || tx.expiryDate || null;
-  const isRecurring = tx.is_recurring !== undefined ? Boolean(tx.is_recurring) : (tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : true);
-  const recurringInterval = (tx.recurring_interval || tx.recurringInterval || (planSlug.includes('annual') || planSlug.includes('year') ? 'YEAR' : 'MONTH')).toUpperCase();
-  const autoRenew = tx.auto_renew !== undefined ? Boolean(tx.auto_renew) : (tx.autoRenew !== undefined ? Boolean(tx.autoRenew) : isRecurring);
-  const testMode = tx.test_mode !== undefined ? Boolean(tx.test_mode) : Boolean(tx.testMode);
-  const failureReason = tx.failure_reason || tx.failureReason || null;
-  const gatewayTransactionId = tx.gateway_transaction_id || tx.gatewayTransactionId || null;
-  const confirmedAmount = tx.confirmed_amount !== undefined ? tx.confirmed_amount : (tx.confirmedAmount !== undefined ? tx.confirmedAmount : null);
-  const confirmedAt = tx.confirmed_at || tx.confirmedAt || null;
-
-  return {
-    ...tx,
-    id: tx.id,
-    customerName,
-    customer_name: customerName,
-    customerEmail,
-    customer_email: customerEmail,
-    planName,
-    plan_name: planName,
-    planSlug,
-    plan_slug: planSlug,
-    amount: Number(tx.amount || 0),
-    currency: tx.currency || 'USD',
-    gateway: tx.gateway || 'stripe',
-    status: tx.status || 'succeeded',
-    testMode,
-    test_mode: testMode,
-    failureReason,
-    failure_reason: failureReason,
-    isRecurring,
-    is_recurring: isRecurring,
-    recurringInterval,
-    recurring_interval: recurringInterval,
-    autoRenew,
-    auto_renew: autoRenew,
-    createdAt,
-    created_at: createdAt,
-    expiryDate,
-    expiry_date: expiryDate,
-    gatewayTransactionId,
-    gateway_transaction_id: gatewayTransactionId,
-    confirmedAmount: confirmedAmount !== null ? Number(confirmedAmount) : null,
-    confirmed_amount: confirmedAmount !== null ? Number(confirmedAmount) : null,
-    confirmedAt,
-    confirmed_at: confirmedAt
-  };
-}
-
-async function ensureTableAndCleanDuplicates() {
+async function ensurePaymentSchema() {
   try {
     await query(`
-      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT TRUE;
-      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT TRUE;
-      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS recurring_interval VARCHAR(32) DEFAULT 'MONTH';
-      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS gateway_transaction_id VARCHAR(255);
-      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_amount NUMERIC(10, 2);
-      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        id VARCHAR(255) PRIMARY KEY,
+        customer_name TEXT,
+        customer_email TEXT,
+        plan_name TEXT,
+        plan_slug TEXT,
+        amount NUMERIC DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'USD',
+        gateway VARCHAR(50) DEFAULT 'stripe',
+        status VARCHAR(50) DEFAULT 'succeeded',
+        test_mode BOOLEAN DEFAULT false,
+        failure_reason TEXT,
+        is_recurring BOOLEAN DEFAULT true,
+        recurring_interval VARCHAR(20) DEFAULT 'MONTH',
+        auto_renew BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        expiry_date TIMESTAMPTZ,
+        gateway_transaction_id TEXT,
+        confirmed_amount NUMERIC,
+        confirmed_at TIMESTAMPTZ
+      );
+    `);
 
-      -- Sanitize historical records: Any prior transaction superseded by a newer upgrade/downgrade must be 'canceled', not 'refunded'
-      UPDATE payment_transactions p1
-      SET status = 'canceled',
-          is_recurring = FALSE,
-          auto_renew = FALSE,
-          updated_at = NOW()
-      WHERE status = 'refunded'
-        AND EXISTS (
-          SELECT 1 FROM payment_transactions p2
-          WHERE LOWER(TRIM(p2.customer_email)) = LOWER(TRIM(p1.customer_email))
-            AND p2.created_at > p1.created_at
-            AND p2.status IN ('succeeded', 'paid', 'active')
-        );
-    `).catch(() => {});
-  } catch (_) {}
+    await query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id VARCHAR(64) PRIMARY KEY DEFAULT 'primary_settings',
+        payment_settings JSONB,
+        currency VARCHAR(10) DEFAULT 'USD',
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+  } catch (e) {
+    console.warn('[Payment API] Schema check warning:', e);
+  }
+}
+
+// Direct Stripe REST API key verification
+async function verifyStripeKeyWithApi(secretKey: string) {
+  try {
+    const res = await fetch('https://api.stripe.com/v1/balance', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${secretKey.trim()}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      cache: 'no-store'
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      return {
+        valid: false,
+        error: data.error?.message || `Stripe authentication failed with status ${res.status}`
+      };
+    }
+    return { valid: true, livemode: Boolean(data.livemode) };
+  } catch (err: any) {
+    return { valid: false, error: err.message || 'Unable to connect to Stripe verification endpoint.' };
+  }
+}
+
+async function persistAdminPaymentSettings(settings: any, currency: string) {
+  try {
+    await query(
+      `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
+       VALUES ('primary_settings', $1, $2, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         payment_settings = EXCLUDED.payment_settings,
+         currency = EXCLUDED.currency,
+         updated_at = NOW()`,
+      [JSON.stringify(settings), currency]
+    );
+  } catch (_) {
+    await query(
+      `UPDATE admin_settings 
+       SET payment_settings = $1, currency = $2, updated_at = NOW() 
+       WHERE id::text IN ('primary_settings', '1')`,
+      [JSON.stringify(settings), currency]
+    ).catch(() => {});
+  }
 }
 
 export async function GET() {
-  await ensureTableAndCleanDuplicates();
   try {
-    const txRes = await query(
+    await ensurePaymentSchema();
+
+    let txRes = await query(
       `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
-    ).catch(() => ({ rows: [] }));
-    const rawList = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
-    const transactions = rawList.map(normalizeTx);
+    ).catch(async () => {
+      return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => ({ rows: [] }));
+    });
+
+    const transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
 
     let settings = null;
     try {
-      const sRes = await query(`SELECT payment_settings, currency FROM admin_settings LIMIT 1`);
+      const sRes = await query(
+        `SELECT payment_settings, currency FROM admin_settings 
+         WHERE id::text IN ('primary_settings', '1') 
+         ORDER BY updated_at DESC LIMIT 1`
+      );
       const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
       if (sRow) {
-        settings = sRow.payment_settings || sRow;
+        settings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
         if (sRow.currency && typeof settings === 'object') {
           settings.currency = sRow.currency;
         }
@@ -45330,46 +46204,192 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  await ensureTableAndCleanDuplicates();
   try {
+    await ensurePaymentSchema();
     const body = await req.json();
 
+    // 1. Stripe Connect Action - Real Stripe API validation before connecting
     if (body.action === 'connect_stripe') {
+      let currentSettings: any = {};
+      try {
+        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
+        const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (sRow?.payment_settings) {
+          currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
+        }
+      } catch (_) {}
+
+      const secretKey = String(body.secretKey || body.stripe?.secretKey || currentSettings?.stripe?.secretKey || '').trim();
+      const publishableKey = String(body.publishableKey || body.stripe?.publishableKey || currentSettings?.stripe?.publishableKey || '').trim();
+      const webhookSecret = String(body.webhookSecret || body.stripe?.webhookSecret || currentSettings?.stripe?.webhookSecret || '').trim();
+      const testMode = body.testMode !== undefined ? Boolean(body.testMode) : Boolean(currentSettings?.testMode);
+
+      if (!secretKey) {
+        return NextResponse.json({ success: false, error: 'Stripe Secret Key is required to connect.' }, { status: 400 });
+      }
+
+      // Format validation against active environment
+      if (testMode && !secretKey.startsWith('sk_test_') && !secretKey.startsWith('rk_test_')) {
+        return NextResponse.json({
+          success: false,
+          error: 'Test Mode is active, but your Secret Key does not start with "sk_test_". Test transactions will fail.'
+        }, { status: 400 });
+      }
+
+      if (!testMode && (secretKey.startsWith('sk_test_') || secretKey.startsWith('rk_test_'))) {
+        return NextResponse.json({
+          success: false,
+          error: 'Live Production mode is active, but your Secret Key is a test key ("sk_test_..."). Real charges will fail.'
+        }, { status: 400 });
+      }
+
+      // Live Stripe verification
+      const verifyRes = await verifyStripeKeyWithApi(secretKey);
+      if (!verifyRes.valid) {
+        return NextResponse.json({
+          success: false,
+          error: `Stripe API Key Verification Failed: ${verifyRes.error}`
+        }, { status: 400 });
+      }
+
+      const updatedSettings = {
+        ...currentSettings,
+        activeGateway: currentSettings?.activeGateway || 'stripe',
+        stripeConnected: true,
+        testMode,
+        stripe: {
+          ...(currentSettings?.stripe || {}),
+          enabled: true,
+          publishableKey,
+          secretKey,
+          webhookSecret,
+        }
+      };
+
+      await persistAdminPaymentSettings(updatedSettings, currentSettings?.currency || 'USD');
+
       return NextResponse.json({
         success: true,
-        message: 'Stripe Gateway enabled and verified.'
+        stripeConnected: true,
+        settings: updatedSettings,
+        message: `Stripe verified and connected successfully with Stripe API (${verifyRes.livemode ? 'Live' : 'Test Mode'})!`
       });
     }
 
-    // Add Transaction: Record payment, cancel prior active transactions with status 'canceled' (NOT 'refunded')
+    // 2. Stripe Verify Keys Diagnostic Action
+    if (body.action === 'verify_stripe_keys') {
+      const secretKey = String(body.secretKey || '').trim();
+      const testMode = Boolean(body.testMode);
+
+      if (!secretKey) {
+        return NextResponse.json({ success: false, error: 'Secret Key is empty.' }, { status: 400 });
+      }
+
+      if (testMode && !secretKey.startsWith('sk_test_') && !secretKey.startsWith('rk_test_')) {
+        return NextResponse.json({
+          success: false,
+          error: 'Key format warning: Sandbox Test Mode is active, but the key does not start with "sk_test_".'
+        }, { status: 400 });
+      }
+
+      if (!testMode && (secretKey.startsWith('sk_test_') || secretKey.startsWith('rk_test_'))) {
+        return NextResponse.json({
+          success: false,
+          error: 'Key format warning: Live Mode is active, but the key is a test key ("sk_test_...").'
+        }, { status: 400 });
+      }
+
+      const verifyRes = await verifyStripeKeyWithApi(secretKey);
+      if (!verifyRes.valid) {
+        return NextResponse.json({
+          success: false,
+          error: `Stripe API Verification Failed: ${verifyRes.error}`
+        }, { status: 400 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `Stripe API verified successfully with Stripe servers! (${verifyRes.livemode ? 'Live Production Mode' : 'Sandbox Test Mode'})`
+      });
+    }
+
+    // 3. Stripe Disconnect Action
+    if (body.action === 'disconnect_stripe') {
+      let currentSettings: any = {};
+      try {
+        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
+        const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (sRow?.payment_settings) {
+          currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
+        }
+      } catch (_) {}
+
+      const updatedSettings = {
+        ...currentSettings,
+        stripeConnected: false,
+        stripe: {
+          ...(currentSettings?.stripe || {}),
+          enabled: false
+        }
+      };
+
+      await persistAdminPaymentSettings(updatedSettings, currentSettings?.currency || 'USD');
+
+      return NextResponse.json({
+        success: true,
+        stripeConnected: false,
+        settings: updatedSettings,
+        message: 'Stripe account disconnected successfully.'
+      });
+    }
+
+    // 4. Toggle Test Mode Action
+    if (body.action === 'toggle_test_mode') {
+      let currentSettings: any = {};
+      try {
+        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
+        const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (sRow?.payment_settings) {
+          currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
+        }
+      } catch (_) {}
+
+      const updatedSettings = {
+        ...currentSettings,
+        testMode: Boolean(body.testMode)
+      };
+
+      await persistAdminPaymentSettings(updatedSettings, currentSettings?.currency || 'USD');
+      return NextResponse.json({ success: true, message: 'Test mode updated in PostgreSQL', testMode: updatedSettings.testMode });
+    }
+
+    // 5. Add Transaction
     if (body.action === 'add_transaction') {
-      const rawTx = body.transaction || body;
-      if (!rawTx) {
+      const tx = body.transaction;
+      if (!tx) {
         return NextResponse.json({ success: false, error: 'Transaction object required' }, { status: 400 });
       }
 
-      const tx = normalizeTx(rawTx);
-      const isSucceeded = tx.status === 'succeeded' || tx.status === 'paid';
-      const isFree = tx.planSlug === 'taster' || tx.planSlug === 'free' || tx.amount === 0;
+      const txId = String(tx.id || ('tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5)));
+      const customerName = String(tx.customerName || 'Customer');
+      const customerEmail = String(tx.customerEmail || '').toLowerCase().trim();
+      const planName = String(tx.planName || 'Plan');
+      const planSlug = String(tx.planSlug || 'taster');
+      const amount = Number(tx.amount || 0);
+      const currency = String(tx.currency || 'USD');
+      const gateway = String(tx.gateway || 'stripe');
+      const status = String(tx.status || 'succeeded').toLowerCase();
+      const testMode = Boolean(tx.testMode);
+      const failureReason = tx.failureReason || null;
+      const isRecurring = tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : true;
+      const recurringInterval = String(tx.recurringInterval || 'MONTH');
+      const autoRenew = tx.autoRenew !== undefined ? Boolean(tx.autoRenew) : true;
+      const createdAt = tx.createdAt ? new Date(tx.createdAt).toISOString() : new Date().toISOString();
+      const expiryDate = tx.expiryDate ? new Date(tx.expiryDate).toISOString() : null;
+      const gatewayTxId = tx.gatewayTransactionId ? String(tx.gatewayTransactionId).trim() : null;
+      const confirmedAmount = tx.confirmedAmount !== undefined ? Number(tx.confirmedAmount) : (status === 'succeeded' ? amount : null);
+      const confirmedAt = tx.confirmedAt ? new Date(tx.confirmedAt).toISOString() : (status === 'succeeded' ? new Date().toISOString() : null);
 
-      // RULE: Any upgrade or downgrade MUST label prior transactions as "canceled".
-      // "refunded" status can ONLY be done manually by admin.
-      if (tx.customerEmail && isSucceeded) {
-        await query(
-          `UPDATE payment_transactions
-           SET status = 'canceled',
-               is_recurring = FALSE,
-               auto_renew = FALSE,
-               expiry_date = NOW(),
-               updated_at = NOW()
-           WHERE LOWER(TRIM(customer_email)) = $1
-             AND id != $2
-             AND status IN ('succeeded', 'paid', 'active')`,
-          [tx.customerEmail, tx.id]
-        ).catch(() => {});
-      }
-
-      // Insert new transaction into payment_transactions
       await query(
         `INSERT INTO payment_transactions (
           id, customer_name, customer_email, plan_name, plan_slug,
@@ -45386,7 +46406,6 @@ export async function POST(req: Request) {
           currency = EXCLUDED.currency,
           gateway = EXCLUDED.gateway,
           status = EXCLUDED.status,
-          test_mode = EXCLUDED.test_mode,
           failure_reason = EXCLUDED.failure_reason,
           is_recurring = EXCLUDED.is_recurring,
           recurring_interval = EXCLUDED.recurring_interval,
@@ -45398,191 +46417,22 @@ export async function POST(req: Request) {
           confirmed_at = EXCLUDED.confirmed_at,
           updated_at = NOW()`,
         [
-          tx.id || ('tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5)),
-          tx.customerName,
-          tx.customerEmail,
-          tx.planName,
-          tx.planSlug,
-          tx.amount,
-          tx.currency,
-          tx.gateway,
-          tx.status,
-          tx.testMode,
-          tx.failureReason,
-          tx.isRecurring,
-          tx.recurringInterval,
-          tx.autoRenew,
-          tx.createdAt,
-          tx.expiryDate,
-          tx.gatewayTransactionId,
-          tx.confirmedAmount,
-          tx.confirmedAt
+          txId, customerName, customerEmail, planName, planSlug,
+          amount, currency, gateway, status, testMode, failureReason,
+          isRecurring, recurringInterval, autoRenew, createdAt,
+          expiryDate, gatewayTxId, confirmedAmount, confirmedAt
         ]
       );
 
-      // Atomically synchronize user plan in PostgreSQL users table
-      if (tx.customerEmail) {
-        if (isSucceeded && !isFree) {
-          await query(
-            `UPDATE users 
-             SET subscription_plan = $1,
-                 subscription_tier = $1,
-                 plan_slug = $1,
-                 plan_name = $2,
-                 plan_interval = $3,
-                 plan_expiry_date = $4,
-                 updated_at = NOW()
-             WHERE LOWER(TRIM(email)) = $5`,
-            [tx.planSlug, tx.planName, tx.recurringInterval, tx.expiryDate, tx.customerEmail]
-          ).catch(() => {});
-        } else if (isFree) {
-          await query(
-            `UPDATE users 
-             SET subscription_plan = 'taster',
-                 subscription_tier = 'taster',
-                 plan_slug = 'taster',
-                 plan_name = 'Taster (Free)',
-                 plan_interval = 'MONTH',
-                 plan_expiry_date = NULL,
-                 updated_at = NOW()
-             WHERE LOWER(TRIM(email)) = $1`,
-            [tx.customerEmail]
-          ).catch(() => {});
-        }
-      }
-
-      return NextResponse.json({ 
-        success: true, 
-        message: 'Transaction recorded and prior subscription cancelled successfully', 
-        transaction: tx 
-      });
+      return NextResponse.json({ success: true, message: 'Transaction recorded successfully', transaction: tx });
     }
 
-    // Cancel User Transactions (Called on upgrade/downgrade/switch): strictly set status to 'canceled'
-    if (body.action === 'cancel_user_transactions') {
-      const email = (body.email || body.customerEmail || body.customer_email || '').toLowerCase().trim();
-      const preserveExpiry = body.preserveExpiry !== undefined ? Boolean(body.preserveExpiry) : false;
-      if (email) {
-        if (preserveExpiry) {
-          await query(`
-            UPDATE payment_transactions
-            SET status = 'canceled',
-                is_recurring = FALSE,
-                auto_renew = FALSE,
-                updated_at = NOW()
-            WHERE LOWER(TRIM(customer_email)) = $1 
-              AND LOWER(status) IN ('succeeded', 'paid', 'active')
-              AND (expiry_date IS NOT NULL AND expiry_date > NOW())
-          `, [email]).catch(() => {});
-
-          await query(`
-            UPDATE payment_transactions
-            SET status = 'canceled',
-                is_recurring = FALSE,
-                auto_renew = FALSE,
-                expiry_date = NOW(),
-                updated_at = NOW()
-            WHERE LOWER(TRIM(customer_email)) = $1 
-              AND LOWER(status) IN ('succeeded', 'paid', 'active')
-              AND (expiry_date IS NULL OR expiry_date <= NOW())
-          `, [email]).catch(() => {});
-        } else {
-          await query(`
-            UPDATE payment_transactions
-            SET status = 'canceled',
-                is_recurring = FALSE,
-                auto_renew = FALSE,
-                expiry_date = NOW(),
-                updated_at = NOW()
-            WHERE LOWER(TRIM(customer_email)) = $1 
-              AND LOWER(status) IN ('succeeded', 'paid', 'active')
-          `, [email]).catch(() => {});
-        }
-        return NextResponse.json({ success: true, message: 'Prior transactions cancelled in PostgreSQL.' });
-      }
-    }
-
-    // Manual Cancel Action
-    if (body.action === 'cancel_transaction') {
-      const rawTx = body.transaction || body;
-      const txId = body.id || rawTx.id;
-      if (!txId) {
-        return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
-      }
-      const tx = normalizeTx(rawTx);
-
-      await query(
-        `UPDATE payment_transactions 
-         SET status = 'canceled', is_recurring = FALSE, auto_renew = FALSE, expiry_date = $1, updated_at = NOW()
-         WHERE id = $2`,
-        [tx.expiryDate || new Date().toISOString(), txId]
-      );
-
-      return NextResponse.json({ success: true, message: 'Subscription cancelled successfully.' });
-    }
-
-    // Manual Admin Refund Action (ONLY manually by admin)
-    if (body.action === 'refund_transaction') {
-      const rawTx = body.transaction || body;
-      const txId = body.id || rawTx.id;
-      if (!txId) {
-        return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
-      }
-      const tx = normalizeTx(rawTx);
-
-      // 1. Manually set status to 'refunded'
-      await query(
-        `UPDATE payment_transactions 
-         SET status = 'refunded', is_recurring = FALSE, auto_renew = FALSE, expiry_date = NOW(), updated_at = NOW()
-         WHERE id = $1`,
-        [txId]
-      );
-
-      // 2. Immediately revoke privileges and revert to free tier if no other active paid transaction exists
-      if (tx.customerEmail) {
-        const otherTx = await query(
-          `SELECT plan_slug, plan_name, recurring_interval, expiry_date 
-           FROM payment_transactions 
-           WHERE LOWER(TRIM(customer_email)) = $1 
-             AND status IN ('succeeded', 'paid') 
-             AND (expiry_date IS NULL OR expiry_date > NOW())
-           ORDER BY created_at DESC LIMIT 1`,
-          [tx.customerEmail]
-        ).catch(() => ({ rows: [] }));
-
-        const activeRow = Array.isArray(otherTx) ? otherTx[0] : otherTx?.rows?.[0];
-        if (activeRow) {
-          await query(
-            `UPDATE users 
-             SET subscription_plan = $1, plan_slug = $1, plan_name = $2, plan_interval = $3, plan_expiry_date = $4, updated_at = NOW()
-             WHERE LOWER(TRIM(email)) = $5`,
-            [activeRow.plan_slug, activeRow.plan_name, activeRow.recurring_interval, activeRow.expiry_date, tx.customerEmail]
-          ).catch(() => {});
-        } else {
-          await query(
-            `UPDATE users 
-             SET subscription_plan = 'taster', plan_slug = 'taster', plan_name = 'Taster (Free)', plan_interval = 'MONTH', plan_expiry_date = NULL, updated_at = NOW()
-             WHERE LOWER(TRIM(email)) = $1`,
-            [tx.customerEmail]
-          ).catch(() => {});
-        }
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: 'Payment refunded successfully by administrator.',
-        transaction: { ...tx, status: 'refunded', isRecurring: false, autoRenew: false }
-      });
-    }
-
-    // Manual Edit / Update Transaction by Admin
+    // 6. Update Transaction
     if (body.action === 'update_transaction') {
-      const rawTx = body.transaction || body;
-      if (!rawTx || !rawTx.id) {
+      const tx = body.transaction;
+      if (!tx || !tx.id) {
         return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
       }
-
-      const tx = normalizeTx(rawTx);
 
       await query(
         `UPDATE payment_transactions 
@@ -45594,121 +46444,67 @@ export async function POST(req: Request) {
          WHERE id = $18`,
         [
           tx.customerName,
-          tx.customerEmail,
+          (tx.customerEmail || '').toLowerCase().trim(),
           tx.planName,
           tx.planSlug,
-          tx.amount,
+          Number(tx.amount || 0),
           tx.currency,
           tx.gateway,
           tx.status,
-          tx.failureReason,
-          tx.isRecurring,
-          tx.recurringInterval,
-          tx.autoRenew,
+          tx.failureReason || null,
+          Boolean(tx.isRecurring),
+          tx.recurringInterval || 'MONTH',
+          Boolean(tx.autoRenew),
           tx.createdAt,
-          tx.expiryDate,
-          tx.gatewayTransactionId,
-          tx.confirmedAmount,
-          tx.confirmedAt,
+          tx.expiryDate || null,
+          tx.gatewayTransactionId || null,
+          tx.confirmedAmount !== undefined ? Number(tx.confirmedAmount) : null,
+          tx.confirmedAt || null,
           tx.id
         ]
       );
 
-      // Reconcile user plan in PostgreSQL
-      if (tx.customerEmail) {
-        if (tx.status === 'succeeded' || tx.status === 'paid') {
-          await query(
-            `UPDATE users 
-             SET subscription_plan = $1, plan_slug = $1, plan_name = $2, plan_interval = $3, plan_expiry_date = $4, updated_at = NOW()
-             WHERE LOWER(TRIM(email)) = $5`,
-            [tx.planSlug, tx.planName, tx.recurringInterval, tx.expiryDate, tx.customerEmail]
-          ).catch(() => {});
-        } else if (tx.status === 'refunded') {
-          const otherTx = await query(
-            `SELECT plan_slug, plan_name, recurring_interval, expiry_date 
-             FROM payment_transactions 
-             WHERE LOWER(TRIM(customer_email)) = $1 
-               AND status IN ('succeeded', 'paid') 
-               AND (expiry_date IS NULL OR expiry_date > NOW())
-             ORDER BY created_at DESC LIMIT 1`,
-            [tx.customerEmail]
-          ).catch(() => ({ rows: [] }));
-
-          const activeRow = Array.isArray(otherTx) ? otherTx[0] : otherTx?.rows?.[0];
-          if (activeRow) {
-            await query(
-              `UPDATE users 
-               SET subscription_plan = $1, plan_slug = $1, plan_name = $2, plan_interval = $3, plan_expiry_date = $4, updated_at = NOW()
-               WHERE LOWER(TRIM(email)) = $5`,
-              [activeRow.plan_slug, activeRow.plan_name, activeRow.recurring_interval, activeRow.expiry_date, tx.customerEmail]
-            ).catch(() => {});
-          } else {
-            await query(
-              `UPDATE users 
-               SET subscription_plan = 'taster', plan_slug = 'taster', plan_name = 'Taster (Free)', plan_interval = 'MONTH', plan_expiry_date = NULL, updated_at = NOW()
-               WHERE LOWER(TRIM(email)) = $1`,
-              [tx.customerEmail]
-            ).catch(() => {});
-          }
-        }
-      }
-
-      return NextResponse.json({ success: true, message: 'Transaction updated in database', transaction: tx });
+      return NextResponse.json({ success: true, message: 'Transaction updated', transaction: tx });
     }
 
-    // Confirm Payment
-    if (body.action === 'confirm_payment') {
-      const rawTx = body.transaction || body;
-      const txId = body.id || rawTx.id;
+    // 7. Refund / Cancel / Confirm
+    if (body.action === 'refund_transaction' || body.action === 'cancel_transaction' || body.action === 'confirm_payment') {
+      const tx = body.transaction || {};
+      const txId = body.id || tx.id;
       if (!txId) {
         return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
       }
 
-      const tx = normalizeTx(rawTx);
-
       await query(
         `UPDATE payment_transactions 
-         SET status = 'succeeded', is_recurring = $1, auto_renew = $2, expiry_date = $3,
-             confirmed_amount = $4, confirmed_at = $5, gateway_transaction_id = $6, updated_at = NOW()
-         WHERE id = $7`,
+         SET status = $1, is_recurring = $2, auto_renew = $3, expiry_date = $4,
+             confirmed_amount = $5, confirmed_at = $6, gateway_transaction_id = $7, updated_at = NOW()
+         WHERE id = $8`,
         [
-          tx.isRecurring,
-          tx.autoRenew,
-          tx.expiryDate,
-          tx.confirmedAmount,
-          tx.confirmedAt,
-          tx.gatewayTransactionId,
+          tx.status,
+          Boolean(tx.isRecurring),
+          Boolean(tx.autoRenew),
+          tx.expiryDate || null,
+          tx.confirmedAmount !== undefined ? Number(tx.confirmedAmount) : null,
+          tx.confirmedAt || null,
+          tx.gatewayTransactionId || null,
           txId
         ]
       );
 
       return NextResponse.json({ 
         success: true, 
-        message: 'Payment verified and confirmed as Succeeded',
-        transaction: { ...tx, status: 'succeeded' } 
+        message: body.action === 'refund_transaction' ? 'Transaction refunded' : body.action === 'cancel_transaction' ? 'Transaction cancelled' : 'Payment confirmed',
+        transaction: tx 
       });
     }
 
-    // Save Gateway Settings into admin_settings
+    // 8. Save Full Gateway Settings into admin_settings
     const gatewayConfig = body.paymentSettings || body;
     const currency = gatewayConfig.currency || body.currency || 'USD';
+    await persistAdminPaymentSettings(gatewayConfig, currency);
 
-    await query(
-      `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
-       VALUES (1, $1, $2, NOW())
-       ON CONFLICT (id) DO UPDATE SET
-         payment_settings = EXCLUDED.payment_settings,
-         currency = EXCLUDED.currency,
-         updated_at = NOW()`,
-      [JSON.stringify(gatewayConfig), currency]
-    ).catch(async () => {
-      await query(
-        `UPDATE admin_settings SET payment_settings = $1, currency = $2, updated_at = NOW()`,
-        [JSON.stringify(gatewayConfig), currency]
-      ).catch(() => {});
-    });
-
-    return NextResponse.json({ success: true, message: 'Gateway settings saved' });
+    return NextResponse.json({ success: true, message: 'Gateway settings saved to PostgreSQL' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -45716,6 +46512,7 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
+    await ensurePaymentSchema();
     const url = new URL(req.url);
     const id = url.searchParams.get('id');
 
@@ -52370,6 +53167,7 @@ export async function DELETE(req: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { Pool } from 'pg';
+import Stripe from 'stripe';
 
 let pool: Pool | null = null;
 function getPool() {
@@ -52381,7 +53179,14 @@ function getPool() {
   return pool;
 }
 
+let isDbInitialized = false;
+
+const ZERO_DECIMAL_CURRENCIES = new Set([
+  'BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'UGX', 'VND', 'VUV', 'XAF', 'XOF', 'XPF'
+]);
+
 async function initWalletDb() {
+  if (isDbInitialized) return;
   const client = await getPool().connect();
   try {
     await client.query(`
@@ -52413,25 +53218,190 @@ async function initWalletDb() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
 
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        id VARCHAR(255) PRIMARY KEY,
+        customer_name TEXT,
+        customer_email TEXT,
+        plan_name TEXT,
+        plan_slug TEXT,
+        amount NUMERIC DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'USD',
+        gateway VARCHAR(50) DEFAULT 'stripe',
+        status VARCHAR(50) DEFAULT 'succeeded',
+        test_mode BOOLEAN DEFAULT false,
+        failure_reason TEXT,
+        is_recurring BOOLEAN DEFAULT false,
+        recurring_interval VARCHAR(20) DEFAULT 'ONE_TIME',
+        auto_renew BOOLEAN DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        gateway_transaction_id TEXT,
+        confirmed_amount NUMERIC,
+        confirmed_at TIMESTAMPTZ
+      );
+
       ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(10,2) DEFAULT 0.00;
+
+      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);
+      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS user_email VARCHAR(255);
+      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS type VARCHAR(32) DEFAULT 'topup';
+      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS amount NUMERIC(10,2) DEFAULT 0.00;
+      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS balance_after NUMERIC(10,2) DEFAULT 0.00;
+      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS gateway VARCHAR(32) DEFAULT 'stripe';
+      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS gateway_tx_id VARCHAR(255);
+      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'succeeded';
+      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS description TEXT;
+      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';
+      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_transactions_gateway_tx_id_uniq 
+      ON wallet_transactions (gateway_tx_id) 
+      WHERE gateway_tx_id IS NOT NULL AND gateway_tx_id != '';
 
       INSERT INTO wallet_settings (id, is_enabled, currency, min_topup, max_topup, preset_amounts, bonus_rules, allowed_gateways, allow_site_purchases)
       VALUES ('current', true, 'USD', 5.00, 1000.00, '[10, 25, 50, 100, 250]', '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]', '["stripe", "paypal", "manual"]', true)
-      ON CONFLICT (id) DO NOTHING;
+      ON CONFLICT (id) DO UPDATE SET min_topup = LEAST(wallet_settings.min_topup, 5.00);
     `);
+    isDbInitialized = true;
   } catch (err) {
-    console.error('Wallet DB init error:', err);
+    console.warn('[Wallet DB init warning]:', err);
   } finally {
     client.release();
   }
+}
+
+async function getStripeCredentials(client: any) {
+  let secretKey = process.env.STRIPE_SECRET_KEY || '';
+  let publishableKey = process.env.STRIPE_PUBLISHABLE_KEY || '';
+  let currency = 'USD';
+  let testMode = true;
+
+  try {
+    const checkTable = await client.query(`
+      SELECT table_name FROM information_schema.tables WHERE table_name = 'admin_settings' LIMIT 1
+    `).catch(() => ({ rows: [] }));
+
+    if (checkTable.rows && checkTable.rows.length > 0) {
+      const res = await client.query(`SELECT * FROM admin_settings ORDER BY updated_at DESC LIMIT 1`).catch(() => ({ rows: [] }));
+      const row = res.rows?.[0];
+      if (row) {
+        const rawPs = row.payment_settings || row.paymentSettings || row.settings?.paymentSettings || row.settings?.payment_settings || row.settings;
+        let ps = rawPs;
+        if (typeof ps === 'string') {
+          try { ps = JSON.parse(ps); } catch (_) {}
+        }
+
+        if (ps) {
+          if (ps.stripe?.secretKey) secretKey = ps.stripe.secretKey;
+          else if (ps.secretKey) secretKey = ps.secretKey;
+
+          if (ps.stripe?.publishableKey) publishableKey = ps.stripe.publishableKey;
+          else if (ps.publishableKey) publishableKey = ps.publishableKey;
+
+          if (typeof ps.testMode === 'boolean') testMode = ps.testMode;
+        }
+
+        if (row.currency) currency = row.currency;
+        else if (ps?.currency) currency = ps.currency;
+      }
+    }
+  } catch (e) {
+    console.warn('[Stripe credentials lookup warning]:', e);
+  }
+
+  if (!secretKey) secretKey = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET || '';
+  if (!publishableKey) publishableKey = process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
+  if (!currency) currency = process.env.NEXT_PUBLIC_DEFAULT_CURRENCY || 'USD';
+
+  return {
+    secretKey: secretKey.trim(),
+    publishableKey: publishableKey.trim(),
+    currency: currency.toUpperCase(),
+    testMode
+  };
+}
+
+async function fetchUserLedger(client: any, user: any, email = '', userId = '', limit = 10, offset = 0, typeFilter = 'all', search = '') {
+  const targetEmail = (user?.email || email || '').toLowerCase().trim();
+  const dbUserId = user?.id ? String(user.id).trim() : '';
+  const passedUserId = userId ? String(userId).trim() : '';
+
+  const conditions: string[] = [];
+  const values: any[] = [];
+
+  const identityClauses: string[] = [];
+  if (targetEmail) {
+    values.push(targetEmail);
+    const idx = values.length;
+    identityClauses.push(`LOWER(TRIM(user_email)) = LOWER(TRIM($${idx}))`);
+    identityClauses.push(`LOWER(TRIM(COALESCE(metadata->>'userEmail', ''))) = LOWER(TRIM($${idx}))`);
+  }
+  if (dbUserId) {
+    values.push(dbUserId);
+    const idx = values.length;
+    identityClauses.push(`user_id::text = $${idx}`);
+    identityClauses.push(`COALESCE(metadata->>'userId', '') = $${idx}`);
+  }
+  if (passedUserId && passedUserId !== dbUserId) {
+    values.push(passedUserId);
+    const idx = values.length;
+    identityClauses.push(`user_id::text = $${idx}`);
+    identityClauses.push(`COALESCE(metadata->>'userId', '') = $${idx}`);
+  }
+
+  if (identityClauses.length > 0) {
+    conditions.push(`(${identityClauses.join(' OR ')})`);
+  } else {
+    return { transactions: [], totalCount: 0, stats: { totalDeposited: 0, totalSpent: 0, totalEvents: 0 } };
+  }
+
+  if (typeFilter && typeFilter !== 'all') {
+    values.push(typeFilter);
+    conditions.push(`type = $${values.length}`);
+  }
+
+  if (search) {
+    values.push(`%${search}%`);
+    const sIdx = values.length;
+    conditions.push(`(LOWER(description) LIKE $${sIdx} OR LOWER(id) LIKE $${sIdx} OR LOWER(COALESCE(gateway_tx_id, '')) LIKE $${sIdx} OR LOWER(COALESCE(gateway, '')) LIKE $${sIdx})`);
+  }
+
+  const whereSql = conditions.join(' AND ');
+
+  const countRes = await client.query(`SELECT COUNT(*) FROM wallet_transactions WHERE ${whereSql}`, values);
+  const totalCount = parseInt(countRes.rows[0]?.count || '0', 10);
+
+  const pageValues = [...values, limit, offset];
+  const rowsRes = await client.query(
+    `SELECT * FROM wallet_transactions WHERE ${whereSql} ORDER BY created_at DESC LIMIT $${pageValues.length - 1} OFFSET $${pageValues.length}`,
+    pageValues
+  );
+  const transactions = rowsRes.rows;
+
+  const statsRes = await client.query(`
+    SELECT
+      COALESCE(SUM(CASE WHEN amount > 0 AND status IN ('succeeded', 'successful', 'completed', 'paid') THEN amount ELSE 0 END), 0) as total_deposited,
+      COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_spent,
+      COUNT(*) as total_events
+    FROM wallet_transactions
+    WHERE ${whereSql} AND status IN ('succeeded', 'successful', 'completed', 'paid')
+  `, values);
+
+  const stats = {
+    totalDeposited: parseFloat(statsRes.rows[0]?.total_deposited || 0),
+    totalSpent: parseFloat(statsRes.rows[0]?.total_spent || 0),
+    totalEvents: parseInt(statsRes.rows[0]?.total_events || 0, 10),
+  };
+
+  return { transactions, totalCount, stats };
 }
 
 export async function GET(req: NextRequest) {
   try {
     await initWalletDb();
     const { searchParams } = new URL(req.url);
-    const email = searchParams.get('email')?.trim().toLowerCase();
-    const userId = searchParams.get('userId')?.trim();
+    const email = searchParams.get('email')?.trim().toLowerCase() || '';
+    const userId = searchParams.get('userId')?.trim() || '';
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.max(1, parseInt(searchParams.get('limit') || '10', 10));
     const offset = (page - 1) * limit;
@@ -52440,8 +53410,7 @@ export async function GET(req: NextRequest) {
 
     const client = await getPool().connect();
     try {
-      // 1. Fetch Wallet Settings
-      const settingsRes = await client.query('SELECT * FROM wallet_settings WHERE id = $1', ['current']);
+      const settingsRes = await client.query(`SELECT * FROM wallet_settings WHERE id = $1`, ['current']);
       const settings = settingsRes.rows[0] || {
         is_enabled: true,
         currency: 'USD',
@@ -52453,76 +53422,37 @@ export async function GET(req: NextRequest) {
         allow_site_purchases: true,
       };
 
-      // 2. Fetch User Record
       let user = null;
       let walletBalance = 0;
-      if (email || userId) {
-        let userRes;
-        if (userId) {
-          userRes = await client.query('SELECT id, email, name, wallet_balance FROM users WHERE id = $1', [userId]);
+
+      if (userId || email) {
+        let userRes = null;
+        if (userId && email) {
+          userRes = await client.query(
+            `SELECT id, email, name, wallet_balance FROM users WHERE id::text = $1 OR LOWER(email) = LOWER($2) LIMIT 1`,
+            [userId, email]
+          ).catch(() => null);
+        } else if (userId) {
+          userRes = await client.query(
+            `SELECT id, email, name, wallet_balance FROM users WHERE id::text = $1 LIMIT 1`,
+            [userId]
+          ).catch(() => null);
+        } else if (email) {
+          userRes = await client.query(
+            `SELECT id, email, name, wallet_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`,
+            [email]
+          ).catch(() => null);
         }
-        if ((!userRes || userRes.rows.length === 0) && email) {
-          userRes = await client.query('SELECT id, email, name, wallet_balance FROM users WHERE LOWER(email) = LOWER($1)', [email]);
-        }
+
         if (userRes && userRes.rows.length > 0) {
           user = userRes.rows[0];
           walletBalance = parseFloat(user.wallet_balance || 0);
         }
       }
 
-      // 3. Query User Wallet Transactions
-      let transactions: any[] = [];
-      let totalCount = 0;
-      let stats = { totalDeposited: 0, totalSpent: 0, totalEvents: 0 };
-
-      if (user || email) {
-        const targetEmail = user?.email || email;
-        const conditions: string[] = ['(LOWER(user_email) = LOWER($1) OR user_id = $2)'];
-        const values: any[] = [targetEmail, user?.id || ''];
-
-        if (typeFilter && typeFilter !== 'all') {
-          values.push(typeFilter);
-          conditions.push(`type = $${values.length}`);
-        }
-
-        if (search) {
-          values.push(`%${search}%`);
-          const sIdx = values.length;
-          conditions.push(`(LOWER(description) LIKE $${sIdx} OR LOWER(id) LIKE $${sIdx} OR LOWER(gateway_tx_id) LIKE $${sIdx} OR LOWER(gateway) LIKE $${sIdx})`);
-        }
-
-        const whereSql = conditions.join(' AND ');
-
-        // Total count
-        const countRes = await client.query(`SELECT COUNT(*) FROM wallet_transactions WHERE ${whereSql}`, values);
-        totalCount = parseInt(countRes.rows[0]?.count || '0', 10);
-
-        // Paginated rows
-        const pageValues = [...values, limit, offset];
-        const rowsRes = await client.query(
-          `SELECT * FROM wallet_transactions WHERE ${whereSql} ORDER BY created_at DESC LIMIT $${pageValues.length - 1} OFFSET $${pageValues.length}`,
-          pageValues
-        );
-        transactions = rowsRes.rows;
-
-        // KPI Aggregate Stats
-        const statsRes = await client.query(`
-          SELECT
-            COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as total_deposited,
-            COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_spent,
-            COUNT(*) as total_events
-          FROM wallet_transactions
-          WHERE LOWER(user_email) = LOWER($1) OR user_id = $2
-        `, [targetEmail, user?.id || '']);
-
-        if (statsRes.rows.length > 0) {
-          stats = {
-            totalDeposited: parseFloat(statsRes.rows[0].total_deposited || 0),
-            totalSpent: parseFloat(statsRes.rows[0].total_spent || 0),
-            totalEvents: parseInt(statsRes.rows[0].total_events || 0, 10),
-          };
-        }
-      }
+      const { transactions, totalCount, stats } = await fetchUserLedger(
+        client, user, email, userId, limit, offset, typeFilter, search
+      );
 
       return NextResponse.json({
         success: true,
@@ -52548,19 +53478,292 @@ export async function POST(req: NextRequest) {
   try {
     await initWalletDb();
     const body = await req.json();
-    const { email, userId, amount, gateway, gatewayTxId } = body;
-
-    const topupAmount = parseFloat(amount);
-    if ((!email && !userId) || isNaN(topupAmount) || topupAmount <= 0) {
-      return NextResponse.json({
-        success: false,
-        error: 'A valid user identifier and positive top-up deposit amount are required.',
-      }, { status: 400 });
-    }
+    const action = body.action || 'topup';
 
     const client = await getPool().connect();
     try {
-      const settingsRes = await client.query('SELECT * FROM wallet_settings WHERE id = $1', ['current']);
+      // -----------------------------------------------------------------------
+      // 1. ACTION: Verify Stripe Return Session
+      // -----------------------------------------------------------------------
+      if (action === 'verify_stripe_session') {
+        const sessionId = body.sessionId?.trim();
+        if (!sessionId) {
+          return NextResponse.json({ success: false, error: 'Session ID is required.' }, { status: 400 });
+        }
+
+        const { secretKey } = await getStripeCredentials(client);
+        if (!secretKey) {
+          return NextResponse.json({ success: false, error: 'Stripe Secret Key is not configured in Admin Settings.' }, { status: 400 });
+        }
+
+        const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
+        const session = await stripe.checkout.sessions.retrieve(sessionId, {
+          expand: ['payment_intent']
+        });
+
+        if (!session || session.payment_status !== 'paid') {
+          return NextResponse.json({
+            success: false,
+            error: `Stripe payment status is ${session?.payment_status || 'unpaid'}.`,
+          }, { status: 400 });
+        }
+
+        const metadata = session.metadata || {};
+        const curr = (session.currency || 'USD').toUpperCase();
+        const rawAmount = session.amount_total ? (ZERO_DECIMAL_CURRENCIES.has(curr) ? session.amount_total : session.amount_total / 100) : 0;
+        const baseAmount = parseFloat(metadata.baseAmount || String(rawAmount));
+        const bonusCredit = parseFloat(metadata.bonusCredit || '0');
+        const totalAddition = parseFloat(metadata.totalAddition || String(baseAmount + bonusCredit));
+        const targetEmail = (metadata.userEmail || body.email || session.customer_details?.email || session.customer_email || '').toLowerCase().trim();
+        const targetUserId = metadata.userId || body.userId || session.client_reference_id || '';
+        const paymentIntentId = typeof session.payment_intent === 'string'
+          ? session.payment_intent
+          : (session.payment_intent as any)?.id || '';
+
+        await client.query('BEGIN');
+        try {
+          await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`wallet_topup_${sessionId}`]);
+
+          const existingTx = await client.query(
+            `SELECT id, balance_after FROM wallet_transactions 
+             WHERE (gateway_tx_id = $1 
+                    OR ($2 != '' AND gateway_tx_id = $2)
+                    OR metadata->>'stripeSessionId' = $1 
+                    OR ($2 != '' AND metadata->>'paymentIntentId' = $2))
+               AND status = 'succeeded' 
+             LIMIT 1`,
+            [sessionId, paymentIntentId]
+          );
+
+          if (existingTx.rows.length > 0) {
+            await client.query('COMMIT');
+            const userCheck = await client.query(
+              `SELECT id, email, wallet_balance FROM users WHERE id::text = $1 OR (LOWER(email) = LOWER($2) AND $2 != '') LIMIT 1`,
+              [String(targetUserId), targetEmail]
+            );
+            const verifiedUser = userCheck.rows[0];
+            const currentBal = parseFloat(verifiedUser?.wallet_balance || existingTx.rows[0].balance_after || 0);
+
+            const ledgerData = await fetchUserLedger(client, verifiedUser, targetEmail, targetUserId, 10, 0);
+
+            return NextResponse.json({
+              success: true,
+              verified: true,
+              alreadyProcessed: true,
+              wallet_balance: currentBal,
+              transactions: ledgerData.transactions,
+              totalCount: ledgerData.totalCount,
+              totalPages: Math.ceil(ledgerData.totalCount / 10) || 1,
+              stats: ledgerData.stats,
+              message: `Deposit of $${baseAmount.toFixed(2)} is credited to your wallet.`,
+            });
+          }
+
+          let updateRes = await client.query(
+            `UPDATE users 
+             SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW()
+             WHERE id::text = $2 OR (LOWER(email) = LOWER($3) AND $3 != '')
+             RETURNING id, email, name, wallet_balance`,
+            [totalAddition, String(targetUserId), targetEmail]
+          );
+
+          if (updateRes.rows.length === 0 && targetEmail) {
+            updateRes = await client.query(
+              `UPDATE users 
+               SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW()
+               WHERE LOWER(email) = LOWER($2)
+               RETURNING id, email, name, wallet_balance`,
+              [totalAddition, targetEmail]
+            );
+          }
+
+          const updatedUser = updateRes.rows[0];
+          const newBalance = updatedUser ? parseFloat(updatedUser.wallet_balance || 0) : totalAddition;
+          const finalUserId = updatedUser ? String(updatedUser.id) : (targetUserId || 'usr_wallet');
+          const finalEmail = updatedUser?.email || targetEmail;
+
+          const wtxId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+          const desc = bonusCredit > 0
+            ? `Wallet Top-Up: +$${baseAmount.toFixed(2)} (Includes +$${bonusCredit.toFixed(2)} promotional bonus)`
+            : `Wallet Top-Up: +$${baseAmount.toFixed(2)}`;
+
+          await client.query(`
+            INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata)
+            VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'succeeded', $7, $8)
+            ON CONFLICT (id) DO NOTHING
+          `, [
+            wtxId,
+            finalUserId,
+            finalEmail,
+            totalAddition,
+            newBalance,
+            sessionId,
+            desc,
+            JSON.stringify({ 
+              baseAmount, 
+              bonusCredit, 
+              totalAddition, 
+              gateway: 'stripe', 
+              stripeSessionId: sessionId,
+              paymentIntentId,
+              userEmail: finalEmail,
+              userId: finalUserId
+            }),
+          ]);
+
+          await client.query(`
+            INSERT INTO payment_transactions (
+              id, customer_name, customer_email, plan_name, plan_slug, amount,
+              currency, gateway, status, is_recurring, auto_renew, gateway_transaction_id, confirmed_amount, confirmed_at, created_at, updated_at
+            ) VALUES ($1, $2, $3, 'Store Wallet Top-Up', 'wallet_topup', $4, $5, 'stripe', 'succeeded', false, false, $6, $4, NOW(), NOW(), NOW())
+            ON CONFLICT (id) DO UPDATE SET
+              status = 'succeeded',
+              confirmed_amount = EXCLUDED.amount,
+              confirmed_at = NOW(),
+              updated_at = NOW()
+          `, [
+            sessionId,
+            session.customer_details?.name || updatedUser?.name || 'Customer',
+            finalEmail,
+            baseAmount,
+            curr,
+            sessionId
+          ]).catch(() => {});
+
+          await client.query('COMMIT');
+
+          const ledgerData = await fetchUserLedger(client, updatedUser, finalEmail, finalUserId, 10, 0);
+
+          return NextResponse.json({
+            success: true,
+            verified: true,
+            wallet_balance: newBalance,
+            amount: totalAddition,
+            transactions: ledgerData.transactions,
+            totalCount: ledgerData.totalCount,
+            totalPages: Math.ceil(ledgerData.totalCount / 10) || 1,
+            stats: ledgerData.stats,
+            message: `Stripe Checkout completed! Added +$${baseAmount.toFixed(2)}${bonusCredit > 0 ? ` (+$${bonusCredit.toFixed(2)} bonus)` : ''} to your balance.`,
+          });
+        } catch (txErr) {
+          await client.query('ROLLBACK');
+          throw txErr;
+        }
+      }
+
+      // -----------------------------------------------------------------------
+      // 2. ACTION: Reconcile Wallet Sessions with Stripe & PostgreSQL
+      // -----------------------------------------------------------------------
+      if (action === 'reconcile_wallet') {
+        const { email, userId } = body;
+        const targetEmail = (email || '').toLowerCase().trim();
+        const targetUserId = String(userId || '');
+
+        let reconciledCount = 0;
+        const { secretKey } = await getStripeCredentials(client);
+
+        if (secretKey) {
+          try {
+            const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
+            const recentSessions = await stripe.checkout.sessions.list({ limit: 15 });
+
+            for (const s of recentSessions.data) {
+              if (s.payment_status !== 'paid') continue;
+              const meta = s.metadata || {};
+              if (meta.type !== 'wallet_topup') continue;
+
+              const sEmail = (meta.userEmail || s.customer_details?.email || s.customer_email || '').toLowerCase().trim();
+              const sUserId = String(meta.userId || s.client_reference_id || '');
+
+              const matchesUser = (targetUserId && sUserId === targetUserId) || (targetEmail && sEmail === targetEmail);
+              if (!matchesUser) continue;
+
+              const checkTx = await client.query(
+                `SELECT id FROM wallet_transactions WHERE gateway_tx_id = $1 OR metadata->>'stripeSessionId' = $1 LIMIT 1`,
+                [s.id]
+              );
+
+              if (checkTx.rows.length === 0) {
+                const sCurr = (s.currency || 'USD').toUpperCase();
+                const rawAmt = s.amount_total ? (ZERO_DECIMAL_CURRENCIES.has(sCurr) ? s.amount_total : s.amount_total / 100) : 0;
+                const bAmt = parseFloat(meta.baseAmount || String(rawAmt));
+                const bBonus = parseFloat(meta.bonusCredit || '0');
+                const bTotal = parseFloat(meta.totalAddition || String(bAmt + bBonus));
+
+                const uRes = await client.query(
+                  `UPDATE users SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW() 
+                   WHERE id::text = $2 OR (LOWER(email) = LOWER($3) AND $3 != '') RETURNING id, email, wallet_balance`,
+                  [bTotal, sUserId, sEmail]
+                );
+
+                const uRow = uRes.rows[0];
+                const newBal = uRow ? parseFloat(uRow.wallet_balance || 0) : bTotal;
+                const rTxId = `wtx_rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+                await client.query(`
+                  INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata)
+                  VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'succeeded', $7, $8)
+                  ON CONFLICT (id) DO NOTHING
+                `, [
+                  rTxId,
+                  uRow ? String(uRow.id) : (sUserId || 'usr_wallet'),
+                  uRow?.email || sEmail,
+                  bTotal,
+                  newBal,
+                  s.id,
+                  `Wallet Top-Up (Reconciled): +$${bAmt.toFixed(2)}${bBonus > 0 ? ` (+$${bBonus.toFixed(2)} bonus)` : ''}`,
+                  JSON.stringify({ baseAmount: bAmt, bonusCredit: bBonus, totalAddition: bTotal, gateway: 'stripe', stripeSessionId: s.id })
+                ]);
+
+                reconciledCount++;
+              }
+            }
+          } catch (recErr) {
+            console.warn('[Reconciliation error]:', recErr);
+          }
+        }
+
+        let userRes = null;
+        if (targetUserId || targetEmail) {
+          userRes = await client.query(
+            `SELECT id, email, name, wallet_balance FROM users WHERE id::text = $1 OR (LOWER(email) = LOWER($2) AND $2 != '') LIMIT 1`,
+            [targetUserId, targetEmail]
+          ).catch(() => null);
+        }
+
+        const user = userRes?.rows?.[0];
+        const currentBalance = parseFloat(user?.wallet_balance || 0);
+        const ledgerData = await fetchUserLedger(client, user, targetEmail, targetUserId, 10, 0);
+
+        return NextResponse.json({
+          success: true,
+          reconciledCount,
+          wallet_balance: currentBalance,
+          transactions: ledgerData.transactions,
+          totalCount: ledgerData.totalCount,
+          totalPages: Math.ceil(ledgerData.totalCount / 10) || 1,
+          stats: ledgerData.stats,
+          message: reconciledCount > 0
+            ? `Successfully recovered and credited ${reconciledCount} unrecorded Stripe top-up(s)!`
+            : 'All Stripe top-ups are synchronized with your wallet ledger.',
+        });
+      }
+
+      // -----------------------------------------------------------------------
+      // 3. ACTION: Standard Deposit / Checkout Dispatch
+      // -----------------------------------------------------------------------
+      const { email, userId, amount, gateway } = body;
+      const cleanAmtStr = String(amount ?? '').replace(/[^0-9.]/g, '');
+      const topupAmount = parseFloat(cleanAmtStr);
+
+      if ((!email && !userId) || isNaN(topupAmount) || topupAmount <= 0) {
+        return NextResponse.json({
+          success: false,
+          error: 'A valid user identifier and positive top-up deposit amount are required.',
+        }, { status: 400 });
+      }
+
+      const settingsRes = await client.query(`SELECT * FROM wallet_settings WHERE id = $1`, ['current']);
       const settings = settingsRes.rows[0] || {
         is_enabled: true,
         currency: 'USD',
@@ -52593,13 +53796,22 @@ export async function POST(req: NextRequest) {
         }, { status: 400 });
       }
 
-      // Locate user
-      let userRes;
-      if (userId) {
-        userRes = await client.query('SELECT id, email, name, wallet_balance FROM users WHERE id = $1', [userId]);
-      }
-      if ((!userRes || userRes.rows.length === 0) && email) {
-        userRes = await client.query('SELECT id, email, name, wallet_balance FROM users WHERE LOWER(email) = LOWER($1)', [email.trim()]);
+      let userRes = null;
+      if (userId && email) {
+        userRes = await client.query(
+          `SELECT id, email, name, wallet_balance FROM users WHERE id::text = $1 OR LOWER(email) = LOWER($2) LIMIT 1`,
+          [userId, email.trim()]
+        ).catch(() => null);
+      } else if (userId) {
+        userRes = await client.query(
+          `SELECT id, email, name, wallet_balance FROM users WHERE id::text = $1 LIMIT 1`,
+          [userId]
+        ).catch(() => null);
+      } else if (email) {
+        userRes = await client.query(
+          `SELECT id, email, name, wallet_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`,
+          [email.trim()]
+        ).catch(() => null);
       }
 
       if (!userRes || userRes.rows.length === 0) {
@@ -52609,7 +53821,6 @@ export async function POST(req: NextRequest) {
       const user = userRes.rows[0];
       const currentBalance = parseFloat(user.wallet_balance || 0);
 
-      // Calculate promotional bonuses
       let bonusCredit = 0;
       const rules = Array.isArray(settings.bonus_rules) ? settings.bonus_rules : [];
       for (const rule of rules) {
@@ -52624,12 +53835,85 @@ export async function POST(req: NextRequest) {
       }
 
       const totalAddition = topupAmount + bonusCredit;
+      const activeGateway = (gateway || 'stripe').toLowerCase();
+
+      // STRIPE CHECKOUT SESSION PATH
+      if (activeGateway === 'stripe') {
+        const { secretKey, currency: adminCurrency } = await getStripeCredentials(client);
+        if (!secretKey) {
+          return NextResponse.json({
+            success: false,
+            error: 'Stripe Gateway is not configured. Please configure Stripe API keys in Admin Payment Settings.',
+          }, { status: 400 });
+        }
+
+        const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
+        const currency = (settings.currency || adminCurrency || 'USD').toUpperCase();
+        
+        let origin = body.origin || req.headers.get('origin');
+        if (!origin) {
+          const referer = req.headers.get('referer');
+          if (referer) {
+            try {
+              origin = new URL(referer).origin;
+            } catch (_) {}
+          }
+        }
+        if (!origin) {
+          const host = req.headers.get('host') || 'localhost:3000';
+          const proto = req.headers.get('x-forwarded-proto') || (host.includes('localhost') ? 'http' : 'https');
+          origin = `${proto}://${host}`;
+        }
+        origin = origin.replace(/\/+$/, '');
+
+        const isZeroDecimal = ZERO_DECIMAL_CURRENCIES.has(currency);
+        const unitAmount = isZeroDecimal ? Math.round(topupAmount) : Math.round(topupAmount * 100);
+
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ['card'],
+          mode: 'payment',
+          customer_email: user.email,
+          client_reference_id: String(user.id),
+          line_items: [
+            {
+              price_data: {
+                currency: currency.toLowerCase(),
+                product_data: {
+                  name: `Store Wallet Top-Up (${currency} ${topupAmount.toFixed(2)})`,
+                  description: bonusCredit > 0
+                    ? `Includes +${currency} ${bonusCredit.toFixed(2)} promotional bonus (Total credit: ${totalAddition.toFixed(2)})`
+                    : `Store Credit Deposit for ${user.email}`,
+                },
+                unit_amount: unitAmount,
+              },
+              quantity: 1,
+            },
+          ],
+          metadata: {
+            type: 'wallet_topup',
+            userId: String(user.id),
+            userEmail: String(user.email),
+            baseAmount: String(topupAmount),
+            bonusCredit: String(bonusCredit),
+            totalAddition: String(totalAddition),
+            currency: currency,
+          },
+          success_url: `${origin}/wallet?status=success&session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${origin}/wallet?status=cancelled`,
+        });
+
+        return NextResponse.json({
+          success: true,
+          checkoutUrl: session.url,
+          sessionId: session.id,
+          message: 'Redirecting to Stripe Checkout...',
+        });
+      }
+
+      // MANUAL / CUSTOM SETTLEMENT PATH
       const newBalance = currentBalance + totalAddition;
+      await client.query(`UPDATE users SET wallet_balance = $1 WHERE id::text = $2`, [newBalance, String(user.id)]);
 
-      // Update user wallet balance
-      await client.query('UPDATE users SET wallet_balance = $1 WHERE id = $2', [newBalance, user.id]);
-
-      // Record transaction
       const txId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
       const desc = bonusCredit > 0
         ? `Wallet Top-Up: +$${topupAmount.toFixed(2)} (Includes +$${bonusCredit.toFixed(2)} promotional bonus)`
@@ -52640,23 +53924,55 @@ export async function POST(req: NextRequest) {
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       `, [
         txId,
-        user.id,
+        String(user.id),
         user.email,
         'topup',
         totalAddition,
         newBalance,
-        gateway || 'stripe',
-        gatewayTxId || `gw_${Date.now()}`,
+        activeGateway,
+        body.gatewayTxId || `gw_${Date.now()}`,
         'succeeded',
         desc,
-        JSON.stringify({ baseAmount: topupAmount, bonusCredit, gateway: gateway || 'stripe' }),
+        JSON.stringify({ 
+          baseAmount: topupAmount, 
+          bonusCredit, 
+          gateway: activeGateway,
+          userEmail: user.email,
+          userId: String(user.id)
+        }),
       ]);
+
+      await client.query(`
+        INSERT INTO payment_transactions (
+          id, customer_name, customer_email, plan_name, plan_slug, amount,
+          currency, gateway, status, is_recurring, auto_renew, gateway_transaction_id, confirmed_amount, confirmed_at, created_at, updated_at
+        ) VALUES ($1, $2, $3, 'Store Wallet Top-Up', 'wallet_topup', $4, $5, $6, 'succeeded', false, false, $7, $4, NOW(), NOW(), NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          status = 'succeeded',
+          confirmed_amount = EXCLUDED.amount,
+          confirmed_at = NOW(),
+          updated_at = NOW()
+      `, [
+        txId,
+        user.name || user.email?.split('@')[0] || 'Customer',
+        user.email,
+        topupAmount,
+        (settings.currency || 'USD').toUpperCase(),
+        activeGateway,
+        body.gatewayTxId || txId
+      ]).catch(() => {});
+
+      const ledgerData = await fetchUserLedger(client, user, user.email, String(user.id), 10, 0);
 
       return NextResponse.json({
         success: true,
         message: `Successfully topped up $${topupAmount.toFixed(2)}${bonusCredit > 0 ? ` with an extra $${bonusCredit.toFixed(2)} bonus!` : '!' }`,
         wallet_balance: newBalance,
         transactionId: txId,
+        transactions: ledgerData.transactions,
+        totalCount: ledgerData.totalCount,
+        totalPages: Math.ceil(ledgerData.totalCount / 10) || 1,
+        stats: ledgerData.stats,
       });
     } finally {
       client.release();
@@ -52800,6 +54116,212 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true, message: 'Template deleted from PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/webhooks/stripe/route.ts`
+```typescript
+import { NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+import Stripe from 'stripe';
+
+export const dynamic = 'force-dynamic';
+
+async function getStripeWebhookConfig() {
+  try {
+    const res = await query(
+      `SELECT payment_settings FROM admin_settings WHERE id = 'primary_settings' LIMIT 1`
+    );
+    const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+    let settings: any = {};
+    if (row?.payment_settings) {
+      settings = typeof row.payment_settings === 'string' 
+        ? JSON.parse(row.payment_settings) 
+        : row.payment_settings;
+    }
+
+    const secretKey = settings?.stripe?.secretKey || process.env.STRIPE_SECRET_KEY || '';
+    const webhookSecret = settings?.stripe?.webhookSecret || process.env.STRIPE_WEBHOOK_SECRET || '';
+
+    return { secretKey, webhookSecret, settings };
+  } catch (_) {
+    return {
+      secretKey: process.env.STRIPE_SECRET_KEY || '',
+      webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
+      settings: {}
+    };
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const signature = req.headers.get('stripe-signature');
+    const rawBody = await req.text();
+    const { secretKey, webhookSecret } = await getStripeWebhookConfig();
+
+    let event: Stripe.Event;
+
+    if (secretKey && webhookSecret && signature) {
+      const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
+      try {
+        event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+      } catch (err: any) {
+        console.error('[Stripe Webhook] Signature verification failed:', err.message);
+        return NextResponse.json({ error: `Webhook Error: ${err.message}` }, { status: 400 });
+      }
+    } else {
+      // Fallback parse if secret is not yet configured or in development
+      try {
+        event = JSON.parse(rawBody) as Stripe.Event;
+      } catch (_) {
+        return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
+      }
+    }
+
+    const eventType = event.type;
+    const dataObject: any = event.data.object;
+
+        // 1. Checkout Session Completed
+    if (eventType === 'checkout.session.completed') {
+      const metadata = dataObject.metadata || {};
+      const customerEmail = (metadata.userEmail || dataObject.customer_email || dataObject.customer_details?.email || '').toLowerCase().trim();
+      const customerName = dataObject.customer_details?.name || 'Customer';
+      const amountTotal = (dataObject.amount_total || 0) / 100;
+      const currency = (dataObject.currency || 'usd').toUpperCase();
+      const txId = dataObject.id;
+
+      if (metadata.type === 'wallet_topup') {
+        const userId = metadata.userId;
+        const baseAmount = parseFloat(metadata.baseAmount || String(amountTotal));
+        const bonusCredit = parseFloat(metadata.bonusCredit || '0');
+        const totalAddition = parseFloat(metadata.totalAddition || String(baseAmount + bonusCredit));
+
+        // Idempotent check
+        const existingRes = await query(
+          `SELECT id FROM wallet_transactions WHERE gateway_tx_id = $1 AND status = 'succeeded' LIMIT 1`,
+          [txId]
+        ).catch(() => ({ rows: [] }));
+        const existingRows = Array.isArray(existingRes) ? existingRes : (existingRes?.rows || []);
+
+        if (existingRows.length === 0) {
+          const userUpdateRes = await query(
+            `UPDATE users 
+             SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW()
+             WHERE id::text = $2 OR (LOWER(email) = LOWER($3) AND $3 != '')
+             RETURNING id, email, wallet_balance`,
+            [totalAddition, String(userId || ''), customerEmail]
+          ).catch(() => ({ rows: [] }));
+
+          const uRows = Array.isArray(userUpdateRes) ? userUpdateRes : (userUpdateRes?.rows || []);
+          const updatedUser = uRows[0];
+          const newBal = updatedUser ? parseFloat(updatedUser.wallet_balance || 0) : totalAddition;
+          const finalUserId = updatedUser?.id || userId || 'user';
+
+          const wtxId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+          const desc = bonusCredit > 0
+            ? `Wallet Top-Up: +$${baseAmount.toFixed(2)} (Includes +$${bonusCredit.toFixed(2)} promotional bonus)`
+            : `Wallet Top-Up: +$${baseAmount.toFixed(2)}`;
+
+          await query(`
+            INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata)
+            VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'succeeded', $7, $8)
+            ON CONFLICT (id) DO UPDATE SET status = 'succeeded', balance_after = EXCLUDED.balance_after
+          `, [
+            wtxId, finalUserId, customerEmail, totalAddition, newBal, txId, desc,
+            JSON.stringify({ baseAmount, bonusCredit, totalAddition, gateway: 'stripe', stripeSessionId: txId })
+          ]).catch(() => {});
+
+          await query(`
+            INSERT INTO payment_transactions (
+              id, customer_name, customer_email, plan_name, plan_slug, amount,
+              currency, gateway, status, is_recurring, auto_renew, gateway_transaction_id, confirmed_amount, confirmed_at, created_at, updated_at
+            ) VALUES ($1, $2, $3, 'Store Wallet Top-Up', 'wallet_topup', $4, $5, 'stripe', 'succeeded', false, false, $6, $4, NOW(), NOW(), NOW())
+            ON CONFLICT (id) DO UPDATE SET status = 'succeeded', confirmed_amount = EXCLUDED.amount, confirmed_at = NOW(), updated_at = NOW()
+          `, [txId, customerName, customerEmail, baseAmount, currency, txId]).catch(() => {});
+        }
+      } else {
+        if (customerEmail) {
+          await query(`
+            INSERT INTO payment_transactions (
+              id, customer_name, customer_email, plan_name, plan_slug, amount,
+              currency, gateway, status, is_recurring, auto_renew, created_at, updated_at
+            ) VALUES ($1, $2, $3, 'Subscription Plan', 'nutrition-pro-monthly', $4, $5, 'stripe', 'succeeded', true, true, NOW(), NOW())
+            ON CONFLICT (id) DO UPDATE SET
+              status = 'succeeded',
+              confirmed_amount = EXCLUDED.amount,
+              confirmed_at = NOW(),
+              updated_at = NOW()
+          `, [txId, customerName, customerEmail, amountTotal, currency]).catch(() => {});
+        }
+      }
+    }
+
+    // 2. Invoice Payment Succeeded (Recurring Subscription Renewal)
+    if (eventType === 'invoice.payment_succeeded') {
+      const customerEmail = (dataObject.customer_email || '').toLowerCase().trim();
+      const customerName = dataObject.customer_name || 'Customer';
+      const amountPaid = (dataObject.amount_paid || 0) / 100;
+      const currency = (dataObject.currency || 'usd').toUpperCase();
+      const txId = dataObject.id || dataObject.payment_intent || ('inv_' + Date.now());
+
+      const periodEnd = dataObject.lines?.data?.[0]?.period?.end;
+      const expiryDate = periodEnd ? new Date(periodEnd * 1000).toISOString() : null;
+
+      if (customerEmail) {
+        await query(`
+          INSERT INTO payment_transactions (
+            id, customer_name, customer_email, plan_name, amount,
+            currency, gateway, status, is_recurring, auto_renew, expiry_date,
+            confirmed_amount, confirmed_at, created_at, updated_at
+          ) VALUES ($1, $2, $3, 'Subscription Renewal', $4, $5, 'stripe', 'succeeded', true, true, $6, $4, NOW(), NOW(), NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            status = 'succeeded',
+            expiry_date = EXCLUDED.expiry_date,
+            confirmed_amount = EXCLUDED.amount,
+            confirmed_at = NOW(),
+            updated_at = NOW()
+        `, [txId, customerName, customerEmail, amountPaid, currency, expiryDate]).catch(() => {});
+
+        // Extend user expiration in users table
+        if (expiryDate) {
+          await query(`
+            UPDATE users
+            SET plan_expiry_date = $1, expiry_date = $1, updated_at = NOW()
+            WHERE LOWER(email) = $2
+          `, [expiryDate, customerEmail]).catch(() => {});
+        }
+      }
+    }
+
+    // 3. Customer Subscription Deleted (Cancellation)
+    if (eventType === 'customer.subscription.deleted') {
+      const customerId = dataObject.customer;
+      // Mark active transactions as canceled and recurring off
+      await query(`
+        UPDATE payment_transactions
+        SET status = 'canceled', is_recurring = false, auto_renew = false, updated_at = NOW()
+        WHERE gateway_transaction_id = $1 OR id = $1
+      `, [customerId]).catch(() => {});
+    }
+
+    // 4. Payment Intent Failed
+    if (eventType === 'payment_intent.payment_failed') {
+      const txId = dataObject.id;
+      const failureReason = dataObject.last_payment_error?.message || 'Payment intent declined';
+
+      await query(`
+        UPDATE payment_transactions
+        SET status = 'failed', failure_reason = $1, updated_at = NOW()
+        WHERE id = $2 OR gateway_transaction_id = $2
+      `, [failureReason, txId]).catch(() => {});
+    }
+
+    return NextResponse.json({ received: true, event: eventType });
+  } catch (err: any) {
+    console.error('[Stripe Webhook] Error:', err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
