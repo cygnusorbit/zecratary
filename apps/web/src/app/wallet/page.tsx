@@ -76,9 +76,10 @@ function WalletContent() {
   const currentUserRef = useRef<User | null>(null);
   const [balance, setBalance] = useState<number>(0);
 
-  // Concurrency & Idempotency Guards
+  // Concurrency and Idempotency Guard
   const verifyingIdRef = useRef<string | null>(null);
   const isFetchingWalletRef = useRef<boolean>(false);
+  const fetchSeqRef = useRef<number>(0);
 
   // Settings
   const [settings, setSettings] = useState<WalletSettings>({
@@ -113,7 +114,6 @@ function WalletContent() {
     return CURRENCY_SYMBOLS[settings.currency] || '$';
   }, [settings.currency]);
 
-  // Handle Custom Amount input cleanly
   const handleCustomAmountChange = (raw: string) => {
     const clean = raw.replace(/[^0-9.]/g, '');
     const parts = clean.split('.');
@@ -124,7 +124,6 @@ function WalletContent() {
     }
   };
 
-  // Compute Active Deposit Amount with strict priority for customAmount
   const activeAmount = useMemo(() => {
     const clean = customAmount.trim().replace(/[^0-9.]/g, '');
     if (clean !== '') {
@@ -134,7 +133,6 @@ function WalletContent() {
     return selectedAmount || 0;
   }, [customAmount, selectedAmount]);
 
-  // Compute Tiered Bonus
   const activeBonus = useMemo(() => {
     if (!settings.bonus_rules || !Array.isArray(settings.bonus_rules)) return 0;
     let highestBonus = 0;
@@ -149,13 +147,11 @@ function WalletContent() {
     return highestBonus;
   }, [activeAmount, settings.bonus_rules]);
 
-  // Debounce search
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Load User & Balance Hydration
   const hydrateUser = useCallback(() => {
     initAuthStorage();
     let active = getCurrentUser();
@@ -163,9 +159,7 @@ function WalletContent() {
     if (!active && typeof window !== 'undefined') {
       const savedUserStr = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
       if (savedUserStr) {
-        try {
-          active = JSON.parse(savedUserStr);
-        } catch (_) {}
+        try { active = JSON.parse(savedUserStr); } catch (_) {}
       }
     }
 
@@ -197,12 +191,12 @@ function WalletContent() {
   const hydrateUserRef = useRef(hydrateUser);
   hydrateUserRef.current = hydrateUser;
 
-  // Fetch Wallet Data & Ledger with concurrency guard
   const fetchWalletData = useCallback(async (
     targetPage = page,
     targetLimit = limit,
     targetSearch = debouncedSearch,
-    targetType = typeFilter
+    targetType = typeFilter,
+    force = false
   ) => {
     let active = currentUserRef.current || getCurrentUser();
     if (!active && typeof window !== 'undefined') {
@@ -213,8 +207,9 @@ function WalletContent() {
     }
     if (!active?.email && !active?.id) return;
 
-    if (isFetchingWalletRef.current) return;
+    if (!force && isFetchingWalletRef.current) return;
     isFetchingWalletRef.current = true;
+    const currentSeq = ++fetchSeqRef.current;
     setTxLoading(true);
 
     try {
@@ -229,6 +224,8 @@ function WalletContent() {
 
       const res = await fetch(`/api/wallet?${params.toString()}&t=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
+
+      if (currentSeq !== fetchSeqRef.current) return;
 
       if (data.success) {
         if (data.settings) {
@@ -265,9 +262,11 @@ function WalletContent() {
     } catch (err: any) {
       console.error('Failed to load wallet data:', err);
     } finally {
-      setTxLoading(false);
-      setLoading(false);
-      isFetchingWalletRef.current = false;
+      if (currentSeq === fetchSeqRef.current) {
+        setTxLoading(false);
+        setLoading(false);
+        isFetchingWalletRef.current = false;
+      }
     }
   }, [page, limit, debouncedSearch, typeFilter]);
 
@@ -277,10 +276,17 @@ function WalletContent() {
   // Mount Lifecycle
   useEffect(() => {
     hydrateUserRef.current();
-    fetchWalletRef.current(1, limit);
+
+    const incomingSessionId = searchParams.get('session_id');
+    const incomingStatus = searchParams.get('status');
+    const hasIncomingVerification = incomingStatus === 'success' && Boolean(incomingSessionId);
+
+    if (!hasIncomingVerification) {
+      fetchWalletRef.current(1, limit);
+    }
 
     const handleSync = () => {
-      fetchWalletRef.current(page, limit, debouncedSearch, typeFilter);
+      fetchWalletRef.current(page, limit, debouncedSearch, typeFilter, true);
     };
     window.addEventListener('zecratary_wallet_updated', handleSync);
     window.addEventListener('zecratary_wallet_settings_updated', handleSync);
@@ -293,6 +299,10 @@ function WalletContent() {
 
   // Filter & Pagination effect
   useEffect(() => {
+    const incomingSessionId = searchParams.get('session_id');
+    const incomingStatus = searchParams.get('status');
+    if (incomingStatus === 'success' && incomingSessionId) return;
+
     if (currentUserRef.current) {
       fetchWalletRef.current(page, limit, debouncedSearch, typeFilter);
     }
@@ -314,7 +324,13 @@ function WalletContent() {
           msg: t('verifyingStripeSession', 'Confirming Stripe Payment and synchronizing your wallet balance...'),
         });
 
-        const active = currentUserRef.current || getCurrentUser();
+        let active = currentUserRef.current || getCurrentUser();
+        if (!active && typeof window !== 'undefined') {
+          try {
+            const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
+            if (raw) active = JSON.parse(raw);
+          } catch (_) {}
+        }
 
         try {
           const res = await fetch('/api/wallet', {
@@ -337,22 +353,38 @@ function WalletContent() {
             if (typeof data.wallet_balance === 'number') {
               setBalance(data.wallet_balance);
             }
-            if (Array.isArray(data.transactions)) {
+            // Directly hydrate transactions from verification response
+            if (Array.isArray(data.transactions) && data.transactions.length > 0) {
               setTransactions(data.transactions);
               if (typeof data.totalCount === 'number') setTotalCount(data.totalCount);
               if (typeof data.totalPages === 'number') setTotalPages(data.totalPages);
               if (data.stats) setStats(data.stats);
+            } else {
+              fetchWalletRef.current(1, limit, '', 'all', true);
             }
-            fetchWalletRef.current(1, limit);
+
+            try {
+              if (typeof window !== 'undefined') {
+                const savedUserStr = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
+                if (savedUserStr) {
+                  const parsed = JSON.parse(savedUserStr);
+                  parsed.wallet_balance = data.wallet_balance;
+                  localStorage.setItem('zecratary_user', JSON.stringify(parsed));
+                }
+              }
+            } catch (_) {}
+
+            // In-place parameter cleanup without Next.js router remount
             if (typeof window !== 'undefined') {
-              window.dispatchEvent(new Event('zecratary_wallet_updated'));
               window.history.replaceState({}, '', '/wallet');
+              window.dispatchEvent(new Event('zecratary_wallet_updated'));
             }
           } else {
             setFeedback({
               type: 'error',
               msg: data.error || t('topupVerifyFailed', 'Could not verify Stripe payment session.'),
             });
+            fetchWalletRef.current(1, limit, '', 'all', true);
             if (typeof window !== 'undefined') {
               window.history.replaceState({}, '', '/wallet');
             }
@@ -362,6 +394,7 @@ function WalletContent() {
             type: 'error',
             msg: err.message || t('topupVerifyConnError', 'Failed to connect to verification service.'),
           });
+          fetchWalletRef.current(1, limit, '', 'all', true);
           if (typeof window !== 'undefined') {
             window.history.replaceState({}, '', '/wallet');
           }
@@ -382,7 +415,6 @@ function WalletContent() {
     }
   }, [searchParams, limit, t]);
 
-  // Execute Deposit or Dispatch Stripe Checkout (Zero-Form Architecture)
   const handleExecuteTopup = async () => {
     setSubmitting(true);
     setFeedback(null);
@@ -453,7 +485,7 @@ function WalletContent() {
         }
 
         setCustomAmount('');
-        fetchWalletRef.current(1, limit);
+        fetchWalletRef.current(1, limit, '', 'all', true);
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('zecratary_wallet_updated'));
         }
@@ -467,7 +499,6 @@ function WalletContent() {
     }
   };
 
-  // Reconcile unrecorded Stripe payments manually
   const handleReconcilePayments = async () => {
     setReconciling(true);
     setFeedback({
@@ -522,7 +553,6 @@ function WalletContent() {
     }
   };
 
-  // Safe Badge Renderer
   const renderWalletBadge = (type?: string) => {
     const rawType = String(type || '').toLowerCase().trim();
     if (rawType === 'topup') {
@@ -673,9 +703,8 @@ function WalletContent() {
         </div>
       )}
 
-      {/* Top-Up Configuration Area (Zero-Form Architecture) */}
+      {/* Top-Up Configuration Area */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Presets / Custom & Gateway */}
         <div
           className="lg:col-span-2 p-6 sm:p-7 rounded-3xl border space-y-6 shadow-md transition-colors duration-200"
           style={{ backgroundColor: 'var(--color-card, #1e293b)', borderColor: 'var(--color-border, #334155)' }}
@@ -690,7 +719,6 @@ function WalletContent() {
             </p>
           </div>
 
-          {/* Presets Chips */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {(settings.preset_amounts || [10, 25, 50, 100, 250]).map((amt) => {
               const isSelected = !customAmount && selectedAmount === amt;
@@ -735,7 +763,6 @@ function WalletContent() {
             })}
           </div>
 
-          {/* Custom Amount Input */}
           <div>
             <label className="block text-xs font-semibold uppercase opacity-70 mb-2">
               {t('orEnterCustomAmount', 'Or Enter Custom Deposit Amount')} ({activeCurrencySymbol})
@@ -778,7 +805,6 @@ function WalletContent() {
             )}
           </div>
 
-          {/* Payment Gateway Picker */}
           <div>
             <label className="block text-xs font-semibold uppercase opacity-70 mb-3">
               {t('selectPaymentGateway', '2. Select Payment Gateway')}
@@ -819,7 +845,6 @@ function WalletContent() {
           </div>
         </div>
 
-        {/* Right Column: Deposit Summary & Trigger */}
         <div
           className="p-6 sm:p-7 rounded-3xl border flex flex-col justify-between space-y-6 shadow-md transition-colors duration-200"
           style={{ backgroundColor: 'var(--color-card, #1e293b)', borderColor: 'var(--color-border, #334155)' }}
@@ -923,7 +948,7 @@ function WalletContent() {
 
             <button
               type="button"
-              onClick={() => fetchWalletRef.current(page, limit, debouncedSearch, typeFilter)}
+              onClick={() => fetchWalletRef.current(page, limit, debouncedSearch, typeFilter, true)}
               disabled={txLoading}
               className="p-2 rounded-xl border flex items-center justify-center cursor-pointer transition hover:opacity-80"
               style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}

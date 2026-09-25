@@ -154,6 +154,90 @@ async function getStripeCredentials(client: any) {
   };
 }
 
+// Resilient background auto-reconciliation
+async function autoReconcileUnrecordedPayments(client: any, user: any, targetEmail = '', targetUserId = '') {
+  if (!user && !targetEmail && !targetUserId) return;
+  const email = (user?.email || targetEmail || '').toLowerCase().trim();
+  const userId = user?.id ? String(user.id).trim() : (targetUserId || '').trim();
+
+  const { secretKey } = await getStripeCredentials(client);
+  if (!secretKey) return;
+
+  try {
+    const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
+    const recentSessions = await stripe.checkout.sessions.list({ limit: 12 });
+
+    for (const s of recentSessions.data) {
+      if (s.payment_status !== 'paid' && s.status !== 'complete') continue;
+      const meta = s.metadata || {};
+      const metaType = meta.type || '';
+      const metaEmail = (meta.userEmail || s.customer_email || s.customer_details?.email || '').toLowerCase().trim();
+      const metaUserId = String(meta.userId || s.client_reference_id || '').trim();
+
+      const isUserMatch = (email && metaEmail === email) || (userId && metaUserId === userId);
+      const isTopup = metaType === 'wallet_topup' || Boolean(s.success_url && s.success_url.includes('/wallet'));
+
+      if (!isUserMatch || !isTopup) continue;
+
+      const checkTx = await client.query(
+        `SELECT id FROM wallet_transactions 
+         WHERE gateway_tx_id = $1 
+            OR metadata->>'stripeSessionId' = $1 
+         LIMIT 1`,
+        [s.id]
+      );
+
+      if (checkTx.rows.length === 0) {
+        const sCurr = (s.currency || 'USD').toUpperCase();
+        const rawAmt = s.amount_total ? (ZERO_DECIMAL_CURRENCIES.has(sCurr) ? s.amount_total : s.amount_total / 100) : 0;
+        const baseAmt = parseFloat(meta.baseAmount || String(rawAmt));
+        const bonusAmt = parseFloat(meta.bonusCredit || '0');
+        const totalAmt = parseFloat(meta.totalAddition || String(baseAmt + bonusAmt));
+
+        if (totalAmt > 0) {
+          const uRes = await client.query(
+            `UPDATE users 
+             SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW() 
+             WHERE (LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '') OR (id::text = $3 AND $3 != '')
+             RETURNING id, email, wallet_balance`,
+            [totalAmt, metaEmail || email, metaUserId || userId]
+          );
+          const resolvedUser = uRes.rows[0];
+          const newBal = resolvedUser ? parseFloat(resolvedUser.wallet_balance || 0) : totalAmt;
+          const wtxId = `wtx_rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+          const desc = bonusAmt > 0
+            ? `Wallet Top-Up: +$${baseAmt.toFixed(2)} (Includes +$${bonusAmt.toFixed(2)} promotional bonus)`
+            : `Wallet Top-Up: +$${baseAmt.toFixed(2)}`;
+
+          await client.query(`
+            INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata, created_at)
+            VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'succeeded', $7, $8, NOW())
+            ON CONFLICT (id) DO NOTHING
+          `, [
+            wtxId,
+            resolvedUser ? String(resolvedUser.id) : (metaUserId || userId || 'usr_wallet'),
+            resolvedUser ? resolvedUser.email : (metaEmail || email),
+            totalAmt,
+            newBal,
+            s.id,
+            desc,
+            JSON.stringify({
+              baseAmount: baseAmt,
+              bonusCredit: bonusAmt,
+              totalAddition: totalAmt,
+              stripeSessionId: s.id,
+              reconciledFrom: 'auto_reconcile',
+              paymentIntentId: s.payment_intent
+            })
+          ]).catch(() => {});
+        }
+      }
+    }
+  } catch (recErr) {
+    console.warn('[Auto-reconcile warning]:', recErr);
+  }
+}
+
 async function fetchUserLedger(client: any, user: any, email = '', userId = '', limit = 10, offset = 0, typeFilter = 'all', search = '') {
   const targetEmail = (user?.email || email || '').toLowerCase().trim();
   const dbUserId = user?.id ? String(user.id).trim() : '';
@@ -283,6 +367,16 @@ export async function GET(req: NextRequest) {
         }
       }
 
+      // Automatically reconcile unrecorded sessions without rolling back
+      await autoReconcileUnrecordedPayments(client, user, email, userId);
+
+      if (user?.id) {
+        const balCheck = await client.query(`SELECT wallet_balance FROM users WHERE id::text = $1`, [String(user.id)]);
+        if (balCheck.rows[0]) {
+          walletBalance = parseFloat(balCheck.rows[0].wallet_balance || 0);
+        }
+      }
+
       const { transactions, totalCount, stats } = await fetchUserLedger(
         client, user, email, userId, limit, offset, typeFilter, search
       );
@@ -326,15 +420,40 @@ export async function POST(req: NextRequest) {
 
         const { secretKey } = await getStripeCredentials(client);
         if (!secretKey) {
-          return NextResponse.json({ success: false, error: 'Stripe Secret Key is not configured in Admin Settings.' }, { status: 400 });
+          return NextResponse.json({ success: false, error: 'Stripe Secret Key is not configured.' }, { status: 400 });
         }
 
         const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
-        const session = await stripe.checkout.sessions.retrieve(sessionId, {
+        let session = await stripe.checkout.sessions.retrieve(sessionId, {
           expand: ['payment_intent']
         });
 
-        if (!session || session.payment_status !== 'paid') {
+        let isPaid = session && (session.payment_status === 'paid' || session.status === 'complete');
+        let paymentIntentObj = typeof session.payment_intent === 'object' ? (session.payment_intent as any) : null;
+        if (!isPaid && paymentIntentObj && paymentIntentObj.status === 'succeeded') {
+          isPaid = true;
+        }
+
+        if (!isPaid) {
+          for (let attempt = 0; attempt < 3; attempt++) {
+            await new Promise((r) => setTimeout(r, 600));
+            session = await stripe.checkout.sessions.retrieve(sessionId, {
+              expand: ['payment_intent']
+            });
+            paymentIntentObj = typeof session.payment_intent === 'object' ? (session.payment_intent as any) : null;
+            if (
+              session &&
+              (session.payment_status === 'paid' ||
+               session.status === 'complete' ||
+               paymentIntentObj?.status === 'succeeded')
+            ) {
+              isPaid = true;
+              break;
+            }
+          }
+        }
+
+        if (!isPaid) {
           return NextResponse.json({
             success: false,
             error: `Stripe payment status is ${session?.payment_status || 'unpaid'}.`,
@@ -348,102 +467,94 @@ export async function POST(req: NextRequest) {
         const bonusCredit = parseFloat(metadata.bonusCredit || '0');
         const totalAddition = parseFloat(metadata.totalAddition || String(baseAmount + bonusCredit));
         const targetEmail = (metadata.userEmail || body.email || session.customer_details?.email || session.customer_email || '').toLowerCase().trim();
-        const targetUserId = metadata.userId || body.userId || session.client_reference_id || '';
+        const targetUserId = String(metadata.userId || body.userId || session.client_reference_id || '').trim();
         const paymentIntentId = typeof session.payment_intent === 'string'
           ? session.payment_intent
           : (session.payment_intent as any)?.id || '';
 
+        let newBalance = totalAddition;
+        let finalUserId = targetUserId;
+        let finalEmail = targetEmail;
+
+        // ISOLATED TRANSACTION FOR WALLET: Cannot be rolled back by payment_transactions
         await client.query('BEGIN');
         try {
-          await client.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`wallet_topup_${sessionId}`]);
+          await client.query(`SELECT pg_advisory_xact_lock(hashtext($1)::bigint)`, [`wallet_topup_${sessionId}`]);
 
           const existingTx = await client.query(
             `SELECT id, balance_after FROM wallet_transactions 
-             WHERE (gateway_tx_id = $1 
-                    OR ($2 != '' AND gateway_tx_id = $2)
-                    OR metadata->>'stripeSessionId' = $1 
-                    OR ($2 != '' AND metadata->>'paymentIntentId' = $2))
-               AND status = 'succeeded' 
+             WHERE gateway_tx_id = $1 
+                OR ($2 != '' AND gateway_tx_id = $2)
+                OR metadata->>'stripeSessionId' = $1 
+                OR ($2 != '' AND metadata->>'paymentIntentId' = $2)
              LIMIT 1`,
             [sessionId, paymentIntentId]
           );
 
-          if (existingTx.rows.length > 0) {
-            await client.query('COMMIT');
-            const userCheck = await client.query(
-              `SELECT id, email, wallet_balance FROM users WHERE id::text = $1 OR (LOWER(email) = LOWER($2) AND $2 != '') LIMIT 1`,
-              [String(targetUserId), targetEmail]
-            );
-            const verifiedUser = userCheck.rows[0];
-            const currentBal = parseFloat(verifiedUser?.wallet_balance || existingTx.rows[0].balance_after || 0);
-
-            const ledgerData = await fetchUserLedger(client, verifiedUser, targetEmail, targetUserId, 10, 0);
-
-            return NextResponse.json({
-              success: true,
-              verified: true,
-              alreadyProcessed: true,
-              wallet_balance: currentBal,
-              transactions: ledgerData.transactions,
-              totalCount: ledgerData.totalCount,
-              totalPages: Math.ceil(ledgerData.totalCount / 10) || 1,
-              stats: ledgerData.stats,
-              message: `Deposit of $${baseAmount.toFixed(2)} is credited to your wallet.`,
-            });
-          }
-
-          let updateRes = await client.query(
-            `UPDATE users 
-             SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW()
-             WHERE id::text = $2 OR (LOWER(email) = LOWER($3) AND $3 != '')
-             RETURNING id, email, name, wallet_balance`,
-            [totalAddition, String(targetUserId), targetEmail]
-          );
-
-          if (updateRes.rows.length === 0 && targetEmail) {
-            updateRes = await client.query(
+          if (existingTx.rows.length === 0) {
+            let updateRes = await client.query(
               `UPDATE users 
                SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW()
-               WHERE LOWER(email) = LOWER($2)
+               WHERE (id::text = $2 AND $2 != '') OR (LOWER(TRIM(email)) = LOWER(TRIM($3)) AND $3 != '')
                RETURNING id, email, name, wallet_balance`,
-              [totalAddition, targetEmail]
+              [totalAddition, targetUserId, targetEmail]
             );
+
+            if (updateRes.rows.length === 0 && targetEmail) {
+              updateRes = await client.query(
+                `UPDATE users 
+                 SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW()
+                 WHERE LOWER(TRIM(email)) = LOWER(TRIM($2))
+                 RETURNING id, email, name, wallet_balance`,
+                [totalAddition, targetEmail]
+              );
+            }
+
+            const updatedUser = updateRes.rows[0];
+            newBalance = updatedUser ? parseFloat(updatedUser.wallet_balance || 0) : totalAddition;
+            finalUserId = updatedUser ? String(updatedUser.id) : (targetUserId || 'usr_wallet');
+            finalEmail = updatedUser?.email || targetEmail || 'customer@zecratary.com';
+
+            const wtxId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+            const desc = bonusCredit > 0
+              ? `Wallet Top-Up: +$${baseAmount.toFixed(2)} (Includes +$${bonusCredit.toFixed(2)} promotional bonus)`
+              : `Wallet Top-Up: +$${baseAmount.toFixed(2)}`;
+
+            await client.query(`
+              INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata, created_at)
+              VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'succeeded', $7, $8, NOW())
+              ON CONFLICT (id) DO UPDATE SET balance_after = EXCLUDED.balance_after, status = 'succeeded'
+            `, [
+              wtxId,
+              finalUserId,
+              finalEmail,
+              totalAddition,
+              newBalance,
+              sessionId,
+              desc,
+              JSON.stringify({ 
+                baseAmount, 
+                bonusCredit, 
+                totalAddition, 
+                gateway: 'stripe', 
+                stripeSessionId: sessionId,
+                paymentIntentId,
+                userEmail: finalEmail,
+                userId: finalUserId
+              }),
+            ]);
+          } else {
+            newBalance = parseFloat(existingTx.rows[0].balance_after || 0);
           }
 
-          const updatedUser = updateRes.rows[0];
-          const newBalance = updatedUser ? parseFloat(updatedUser.wallet_balance || 0) : totalAddition;
-          const finalUserId = updatedUser ? String(updatedUser.id) : (targetUserId || 'usr_wallet');
-          const finalEmail = updatedUser?.email || targetEmail;
+          await client.query('COMMIT');
+        } catch (txErr) {
+          await client.query('ROLLBACK');
+          throw txErr;
+        }
 
-          const wtxId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-          const desc = bonusCredit > 0
-            ? `Wallet Top-Up: +$${baseAmount.toFixed(2)} (Includes +$${bonusCredit.toFixed(2)} promotional bonus)`
-            : `Wallet Top-Up: +$${baseAmount.toFixed(2)}`;
-
-          await client.query(`
-            INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata)
-            VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'succeeded', $7, $8)
-            ON CONFLICT (id) DO NOTHING
-          `, [
-            wtxId,
-            finalUserId,
-            finalEmail,
-            totalAddition,
-            newBalance,
-            sessionId,
-            desc,
-            JSON.stringify({ 
-              baseAmount, 
-              bonusCredit, 
-              totalAddition, 
-              gateway: 'stripe', 
-              stripeSessionId: sessionId,
-              paymentIntentId,
-              userEmail: finalEmail,
-              userId: finalUserId
-            }),
-          ]);
-
+        // NON-BLOCKING RECORD FOR PAYMENT_TRANSACTIONS: Safely isolated
+        try {
           await client.query(`
             INSERT INTO payment_transactions (
               id, customer_name, customer_email, plan_name, plan_slug, amount,
@@ -456,129 +567,69 @@ export async function POST(req: NextRequest) {
               updated_at = NOW()
           `, [
             sessionId,
-            session.customer_details?.name || updatedUser?.name || 'Customer',
+            session.customer_details?.name || 'Customer',
             finalEmail,
             baseAmount,
             curr,
             sessionId
-          ]).catch(() => {});
+          ]);
+        } catch (_) {}
 
-          await client.query('COMMIT');
+        const userCheck = await client.query(
+          `SELECT id, email, name, wallet_balance FROM users WHERE id::text = $1 OR (LOWER(email) = LOWER($2) AND $2 != '') LIMIT 1`,
+          [finalUserId, finalEmail]
+        );
+        const resolvedUser = userCheck.rows[0];
+        const ledgerData = await fetchUserLedger(client, resolvedUser, finalEmail, finalUserId, 10, 0);
 
-          const ledgerData = await fetchUserLedger(client, updatedUser, finalEmail, finalUserId, 10, 0);
-
-          return NextResponse.json({
-            success: true,
-            verified: true,
-            wallet_balance: newBalance,
-            amount: totalAddition,
-            transactions: ledgerData.transactions,
-            totalCount: ledgerData.totalCount,
-            totalPages: Math.ceil(ledgerData.totalCount / 10) || 1,
-            stats: ledgerData.stats,
-            message: `Stripe Checkout completed! Added +$${baseAmount.toFixed(2)}${bonusCredit > 0 ? ` (+$${bonusCredit.toFixed(2)} bonus)` : ''} to your balance.`,
-          });
-        } catch (txErr) {
-          await client.query('ROLLBACK');
-          throw txErr;
-        }
+        return NextResponse.json({
+          success: true,
+          verified: true,
+          wallet_balance: newBalance,
+          amount: totalAddition,
+          transactions: ledgerData.transactions,
+          totalCount: ledgerData.totalCount,
+          totalPages: Math.ceil(ledgerData.totalCount / 10) || 1,
+          stats: ledgerData.stats,
+          message: `Stripe Checkout completed! Added +$${baseAmount.toFixed(2)}${bonusCredit > 0 ? ` (+$${bonusCredit.toFixed(2)} bonus)` : ''} to your balance.`,
+        });
       }
 
       // -----------------------------------------------------------------------
-      // 2. ACTION: Reconcile Wallet Sessions with Stripe & PostgreSQL
+      // 2. ACTION: Reconcile Wallet Sessions
       // -----------------------------------------------------------------------
       if (action === 'reconcile_wallet') {
         const { email, userId } = body;
         const targetEmail = (email || '').toLowerCase().trim();
         const targetUserId = String(userId || '');
 
-        let reconciledCount = 0;
-        const { secretKey } = await getStripeCredentials(client);
-
-        if (secretKey) {
-          try {
-            const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
-            const recentSessions = await stripe.checkout.sessions.list({ limit: 15 });
-
-            for (const s of recentSessions.data) {
-              if (s.payment_status !== 'paid') continue;
-              const meta = s.metadata || {};
-              if (meta.type !== 'wallet_topup') continue;
-
-              const sEmail = (meta.userEmail || s.customer_details?.email || s.customer_email || '').toLowerCase().trim();
-              const sUserId = String(meta.userId || s.client_reference_id || '');
-
-              const matchesUser = (targetUserId && sUserId === targetUserId) || (targetEmail && sEmail === targetEmail);
-              if (!matchesUser) continue;
-
-              const checkTx = await client.query(
-                `SELECT id FROM wallet_transactions WHERE gateway_tx_id = $1 OR metadata->>'stripeSessionId' = $1 LIMIT 1`,
-                [s.id]
-              );
-
-              if (checkTx.rows.length === 0) {
-                const sCurr = (s.currency || 'USD').toUpperCase();
-                const rawAmt = s.amount_total ? (ZERO_DECIMAL_CURRENCIES.has(sCurr) ? s.amount_total : s.amount_total / 100) : 0;
-                const bAmt = parseFloat(meta.baseAmount || String(rawAmt));
-                const bBonus = parseFloat(meta.bonusCredit || '0');
-                const bTotal = parseFloat(meta.totalAddition || String(bAmt + bBonus));
-
-                const uRes = await client.query(
-                  `UPDATE users SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW() 
-                   WHERE id::text = $2 OR (LOWER(email) = LOWER($3) AND $3 != '') RETURNING id, email, wallet_balance`,
-                  [bTotal, sUserId, sEmail]
-                );
-
-                const uRow = uRes.rows[0];
-                const newBal = uRow ? parseFloat(uRow.wallet_balance || 0) : bTotal;
-                const rTxId = `wtx_rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-
-                await client.query(`
-                  INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata)
-                  VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'succeeded', $7, $8)
-                  ON CONFLICT (id) DO NOTHING
-                `, [
-                  rTxId,
-                  uRow ? String(uRow.id) : (sUserId || 'usr_wallet'),
-                  uRow?.email || sEmail,
-                  bTotal,
-                  newBal,
-                  s.id,
-                  `Wallet Top-Up (Reconciled): +$${bAmt.toFixed(2)}${bBonus > 0 ? ` (+$${bBonus.toFixed(2)} bonus)` : ''}`,
-                  JSON.stringify({ baseAmount: bAmt, bonusCredit: bBonus, totalAddition: bTotal, gateway: 'stripe', stripeSessionId: s.id })
-                ]);
-
-                reconciledCount++;
-              }
-            }
-          } catch (recErr) {
-            console.warn('[Reconciliation error]:', recErr);
-          }
-        }
-
-        let userRes = null;
+        let user = null;
         if (targetUserId || targetEmail) {
-          userRes = await client.query(
+          const uRes = await client.query(
             `SELECT id, email, name, wallet_balance FROM users WHERE id::text = $1 OR (LOWER(email) = LOWER($2) AND $2 != '') LIMIT 1`,
             [targetUserId, targetEmail]
           ).catch(() => null);
+          if (uRes && uRes.rows.length > 0) user = uRes.rows[0];
         }
 
-        const user = userRes?.rows?.[0];
-        const currentBalance = parseFloat(user?.wallet_balance || 0);
+        await autoReconcileUnrecordedPayments(client, user, targetEmail, targetUserId);
+
+        let currentBalance = user ? parseFloat(user.wallet_balance || 0) : 0;
+        if (user?.id) {
+          const balRes = await client.query(`SELECT wallet_balance FROM users WHERE id::text = $1`, [String(user.id)]);
+          if (balRes.rows[0]) currentBalance = parseFloat(balRes.rows[0].wallet_balance || 0);
+        }
+
         const ledgerData = await fetchUserLedger(client, user, targetEmail, targetUserId, 10, 0);
 
         return NextResponse.json({
           success: true,
-          reconciledCount,
           wallet_balance: currentBalance,
           transactions: ledgerData.transactions,
           totalCount: ledgerData.totalCount,
           totalPages: Math.ceil(ledgerData.totalCount / 10) || 1,
           stats: ledgerData.stats,
-          message: reconciledCount > 0
-            ? `Successfully recovered and credited ${reconciledCount} unrecorded Stripe top-up(s)!`
-            : 'All Stripe top-ups are synchronized with your wallet ledger.',
+          message: 'All Stripe top-ups are synchronized with your wallet ledger.',
         });
       }
 
@@ -633,17 +684,17 @@ export async function POST(req: NextRequest) {
       if (userId && email) {
         userRes = await client.query(
           `SELECT id, email, name, wallet_balance FROM users WHERE id::text = $1 OR LOWER(email) = LOWER($2) LIMIT 1`,
-          [userId, email.trim()]
+          [String(userId), String(email).trim()]
         ).catch(() => null);
       } else if (userId) {
         userRes = await client.query(
           `SELECT id, email, name, wallet_balance FROM users WHERE id::text = $1 LIMIT 1`,
-          [userId]
+          [String(userId)]
         ).catch(() => null);
       } else if (email) {
         userRes = await client.query(
           `SELECT id, email, name, wallet_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`,
-          [email.trim()]
+          [String(email).trim()]
         ).catch(() => null);
       }
 
@@ -687,9 +738,7 @@ export async function POST(req: NextRequest) {
         if (!origin) {
           const referer = req.headers.get('referer');
           if (referer) {
-            try {
-              origin = new URL(referer).origin;
-            } catch (_) {}
+            try { origin = new URL(referer).origin; } catch (_) {}
           }
         }
         if (!origin) {
@@ -753,8 +802,8 @@ export async function POST(req: NextRequest) {
         : `Wallet Top-Up: +$${topupAmount.toFixed(2)}`;
 
       await client.query(`
-        INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
       `, [
         txId,
         String(user.id),
@@ -774,26 +823,6 @@ export async function POST(req: NextRequest) {
           userId: String(user.id)
         }),
       ]);
-
-      await client.query(`
-        INSERT INTO payment_transactions (
-          id, customer_name, customer_email, plan_name, plan_slug, amount,
-          currency, gateway, status, is_recurring, auto_renew, gateway_transaction_id, confirmed_amount, confirmed_at, created_at, updated_at
-        ) VALUES ($1, $2, $3, 'Store Wallet Top-Up', 'wallet_topup', $4, $5, $6, 'succeeded', false, false, $7, $4, NOW(), NOW(), NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          status = 'succeeded',
-          confirmed_amount = EXCLUDED.amount,
-          confirmed_at = NOW(),
-          updated_at = NOW()
-      `, [
-        txId,
-        user.name || user.email?.split('@')[0] || 'Customer',
-        user.email,
-        topupAmount,
-        (settings.currency || 'USD').toUpperCase(),
-        activeGateway,
-        body.gatewayTxId || txId
-      ]).catch(() => {});
 
       const ledgerData = await fetchUserLedger(client, user, user.email, String(user.id), 10, 0);
 
