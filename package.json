@@ -1,6 +1,6 @@
 {
   "name": "zecratary-monorepo",
-  "version": "7.9.2",
+  "version": "7.9.3",
   "private": true,
   "workspaces": [
     "apps/*",

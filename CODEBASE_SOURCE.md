@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.9.2",
+  "version": "7.9.3",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -110,7 +110,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.9.2",
+  "version": "7.9.3",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -59829,7 +59829,6 @@ import {
   Plus,
   ChevronDown,
   Sparkles,
-  RefreshCw,
   CheckCircle2,
   AlertCircle,
   AlertTriangle,
@@ -59839,15 +59838,6 @@ import {
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
 import { useTranslation } from '@/components/LanguageProvider';
-
-interface TokenPackage {
-  id: string;
-  name: string;
-  tokens: number;
-  price: number;
-  badge?: string;
-  isPopular?: boolean;
-}
 
 interface InAppNotification {
   id: string;
@@ -59859,12 +59849,6 @@ interface InAppNotification {
   actionLabel?: string;
   timestamp: string;
 }
-
-const DEFAULT_FALLBACK_PACKAGES: TokenPackage[] = [
-  { id: 'pkg_starter', name: 'Starter Pack', tokens: 250, price: 9.99, badge: 'Starter' },
-  { id: 'pkg_pro', name: 'Chef Bundle', tokens: 600, price: 19.99, badge: 'Popular' },
-  { id: 'pkg_power', name: 'Master Kitchen', tokens: 1500, price: 39.99, badge: 'Best Value' }
-];
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$',
@@ -59993,23 +59977,10 @@ export default function Sidebar() {
   // SSR-deterministic token & wallet states
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
-  const [tokenName, setTokenName] = useState<string>('Foodie Token');
-  const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
-  const [showTopUpMenu, setShowTopUpMenu] = useState<boolean>(false);
-  const [showTopUpMobileMenu, setShowTopUpMobileMenu] = useState<boolean>(false);
-  const [purchasingId, setPurchasingId] = useState<string | null>(null);
-  const [topUpSuccessMsg, setTopUpSuccessMsg] = useState<string>('');
-  const [topUpErrorMsg, setTopUpErrorMsg] = useState<string>('');
 
   const [walletBalance, setWalletBalance] = useState<number>(0);
   const [walletCurrency, setWalletCurrency] = useState<string>('USD');
   const [walletSymbol, setWalletSymbol] = useState<string>('$');
-  const [walletPresets, setWalletPresets] = useState<number[]>([10, 25, 50, 100]);
-  const [showWalletTopUpMenu, setShowWalletTopUpMenu] = useState<boolean>(false);
-  const [showWalletMobileMenu, setShowWalletMobileMenu] = useState<boolean>(false);
-  const [purchasingWallet, setPurchasingWallet] = useState<boolean>(false);
-  const [walletTopUpSuccessMsg, setWalletTopUpSuccessMsg] = useState<string>('');
-  const [walletTopUpErrorMsg, setWalletTopUpErrorMsg] = useState<string>('');
 
   // Synchronized In-App Notifications State
   const [notifications, setNotifications] = useState<InAppNotification[]>([]);
@@ -60091,10 +60062,6 @@ export default function Sidebar() {
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const notifDropdownRef = useRef<HTMLDivElement>(null);
   const notifMobileDropdownRef = useRef<HTMLDivElement>(null);
-  const topUpDropdownRef = useRef<HTMLDivElement>(null);
-  const topUpMobileDropdownRef = useRef<HTMLDivElement>(null);
-  const walletDropdownRef = useRef<HTMLDivElement>(null);
-  const walletMobileDropdownRef = useRef<HTMLDivElement>(null);
 
   const [availableLanguages, setAvailableLanguages] = useState<{ code: string; name: string; flag: string }[]>([
     { code: 'en', name: 'English', flag: '🇺🇸' },
@@ -60210,12 +60177,8 @@ export default function Sidebar() {
       if (cfgRes.ok) {
         const cfgData = await cfgRes.json();
         const cfg = cfgData.settings || cfgData.config || cfgData;
-        if (cfg) {
-          if (cfg.tokenSymbol) setTokenSymbol(cfg.tokenSymbol);
-          if (cfg.tokenName) setTokenName(cfg.tokenName);
-          if (Array.isArray(cfg.packages) && cfg.packages.length > 0) {
-            setTokenPackages(cfg.packages);
-          }
+        if (cfg?.tokenSymbol) {
+          setTokenSymbol(cfg.tokenSymbol);
         }
       }
 
@@ -60298,14 +60261,9 @@ export default function Sidebar() {
               } catch (_) {}
             }
           }
-          if (data.settings) {
-            if (data.settings.currency) {
-              setWalletCurrency(data.settings.currency);
-              setWalletSymbol(CURRENCY_SYMBOLS[data.settings.currency] || '$');
-            }
-            if (Array.isArray(data.settings.preset_amounts) && data.settings.preset_amounts.length > 0) {
-              setWalletPresets(data.settings.preset_amounts.map(Number));
-            }
+          if (data.settings?.currency) {
+            setWalletCurrency(data.settings.currency);
+            setWalletSymbol(CURRENCY_SYMBOLS[data.settings.currency] || '$');
           }
         }
       }
@@ -60454,18 +60412,6 @@ export default function Sidebar() {
       if (notifMobileDropdownRef.current && !notifMobileDropdownRef.current.contains(e.target as Node)) {
         setShowNotificationsMobile(false);
       }
-      if (topUpDropdownRef.current && !topUpDropdownRef.current.contains(e.target as Node)) {
-        setShowTopUpMenu(false);
-      }
-      if (topUpMobileDropdownRef.current && !topUpMobileDropdownRef.current.contains(e.target as Node)) {
-        setShowTopUpMobileMenu(false);
-      }
-      if (walletDropdownRef.current && !walletDropdownRef.current.contains(e.target as Node)) {
-        setShowWalletTopUpMenu(false);
-      }
-      if (walletMobileDropdownRef.current && !walletMobileDropdownRef.current.contains(e.target as Node)) {
-        setShowWalletMobileMenu(false);
-      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -60529,117 +60475,7 @@ export default function Sidebar() {
     setShowProfileMenu(false);
     setShowNotifications(false);
     setShowNotificationsMobile(false);
-    setShowTopUpMenu(false);
-    setShowTopUpMobileMenu(false);
-    setShowWalletTopUpMenu(false);
-    setShowWalletMobileMenu(false);
   }, [pathname]);
-
-  const handlePurchasePackage = async (pkg: TokenPackage) => {
-    if (!pkg) return;
-    setPurchasingId(pkg.id);
-    setTopUpErrorMsg('');
-    setTopUpSuccessMsg('');
-
-    const price = Number(pkg.price) || 0;
-    if (walletBalance < price) {
-      setPurchasingId(null);
-      setTopUpErrorMsg(
-        t('insufficientWalletForTokens', `Insufficient wallet balance ($${walletBalance.toFixed(2)}). This package requires $${price.toFixed(2)}. Please top up your wallet first.`)
-      );
-      return;
-    }
-
-    try {
-      const currentUser = getCurrentUser() || user;
-      const res = await fetch('/api/tokens', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'purchase',
-          packageId: pkg.id,
-          tokens: Number(pkg.tokens),
-          price: Number(pkg.price),
-          packageName: pkg.name,
-          userEmail: currentUser?.email,
-          userId: currentUser?.id
-        })
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || data.message || 'Failed to complete token purchase');
-      }
-
-      const newBal = typeof data.balance === 'number' ? data.balance : (tokenBalance + Number(pkg.tokens));
-      setTokenBalance(newBal);
-
-      if (typeof data.newWalletBalance === 'number') {
-        setWalletBalance(data.newWalletBalance);
-      } else if (typeof data.wallet_balance === 'number') {
-        setWalletBalance(data.wallet_balance);
-      } else {
-        setWalletBalance(prev => Math.max(0, prev - price));
-      }
-
-      setTopUpSuccessMsg(
-        t('tokenPurchasedSuccess', `Successfully purchased ${pkg.name}! +${Number(pkg.tokens).toLocaleString()} ${tokenSymbol} added (${walletSymbol}${price.toFixed(2)} deducted from Wallet).`)
-      );
-
-      window.dispatchEvent(new Event('zecratary_tokens_updated'));
-      window.dispatchEvent(new Event('zecratary_token_settings_updated'));
-      window.dispatchEvent(new Event('zecratary_wallet_updated'));
-
-      setTimeout(() => {
-        setTopUpSuccessMsg('');
-      }, 4000);
-    } catch (err: any) {
-      setTopUpErrorMsg(err.message || 'Purchase failed. Please check your wallet balance.');
-    } finally {
-      setPurchasingId(null);
-    }
-  };
-
-  const handleQuickWalletTopUp = async (amountToDeposit: number) => {
-    if (!amountToDeposit || amountToDeposit <= 0) return;
-    setPurchasingWallet(true);
-    setWalletTopUpErrorMsg('');
-    setWalletTopUpSuccessMsg('');
-
-    try {
-      const currentUser = getCurrentUser() || user;
-      const userEmail = currentUser?.email || 'admin@zecratary.com';
-
-      const res = await fetch('/api/wallet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: userEmail,
-          amount: amountToDeposit,
-          gateway: 'stripe',
-          gatewayTxId: `gw_topbar_${Date.now()}`
-        })
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to top up wallet balance');
-      }
-
-      const newWalletBal = typeof data.wallet_balance === 'number' ? data.wallet_balance : (walletBalance + amountToDeposit);
-      setWalletBalance(newWalletBal);
-      setWalletTopUpSuccessMsg(data.message || `Successfully added ${walletSymbol}${amountToDeposit.toFixed(2)} to your wallet!`);
-
-      window.dispatchEvent(new Event('zecratary_wallet_updated'));
-      setTimeout(() => {
-        setWalletTopUpSuccessMsg('');
-      }, 4000);
-    } catch (err: any) {
-      setWalletTopUpErrorMsg(err.message || 'Deposit failed. Please try again.');
-    } finally {
-      setPurchasingWallet(false);
-    }
-  };
 
   const isAdmin = user && (
     user.role === 'admin' || 
@@ -60686,8 +60522,6 @@ export default function Sidebar() {
   const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
   const iconStyle = { color: 'var(--color-sidebar-icon, var(--color-primary))' };
-
-  const displayPackages = tokenPackages.length > 0 ? tokenPackages : DEFAULT_FALLBACK_PACKAGES;
 
   const renderNotificationsList = (onItemClick?: () => void) => {
     return (
@@ -60767,262 +60601,48 @@ export default function Sidebar() {
         </Link>
 
         <div className="flex items-center gap-1.5">
-          {/* Mobile Wallet Balance & Top Up */}
-          <div className="relative" ref={walletMobileDropdownRef}>
-            <button
-              type="button"
-              onClick={() => {
-                setShowWalletMobileMenu(!showWalletMobileMenu);
-                setShowTopUpMobileMenu(false);
-                setShowProfileMenu(false);
-                setShowNotificationsMobile(false);
-              }}
-              className="flex items-center gap-1 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
-              title="Wallet Balance & Top Up"
+          {/* Mobile Wallet Balance & Top Up Link Button */}
+          <div className="flex items-center rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/50">
+            <Link
+              href="/wallet"
+              className="flex items-center gap-1 px-2 py-1 text-[11px] font-mono font-bold"
+              title={t('wallet') || 'Wallet'}
             >
               <Wallet className="h-3.5 w-3.5 text-[var(--color-primary)]" />
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
                 {walletSymbol}{mounted ? walletBalance.toFixed(0) : '0'}
               </span>
-              <span className="px-1 py-0.2 rounded-md bg-[var(--color-primary)] text-white text-[9px] font-sans font-black flex items-center">
-                <Plus className="h-2 w-2 stroke-[3]" />
-              </span>
-            </button>
-
-            {/* Mobile Wallet Drawer */}
-            {showWalletMobileMenu && (
-              <div 
-                className="fixed inset-x-3 top-16 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in max-h-[82vh] overflow-y-auto"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              >
-                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2">
-                    <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
-                    <div>
-                      <h3 className="text-xs font-black uppercase tracking-wider">{t('walletTopUp') || 'Wallet Top-Up'}</h3>
-                      <p className="text-[10px] opacity-70">
-                        Balance:{' '}
-                        <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
-                          {walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'} {walletCurrency}
-                        </span>
-                      </p>
-                    </div>
-                  </div>
-                  <button 
-                    type="button"
-                    onClick={() => setShowWalletMobileMenu(false)}
-                    className="p-1 rounded-lg border border-[var(--color-border)] cursor-pointer"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-
-                {walletTopUpSuccessMsg && (
-                  <div className="p-2.5 rounded-xl border text-xs font-bold text-emerald-400 border-emerald-500/30 bg-emerald-500/10 flex items-center gap-2">
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                    <span>{walletTopUpSuccessMsg}</span>
-                  </div>
-                )}
-                {walletTopUpErrorMsg && (
-                  <div className="p-2.5 rounded-xl border text-xs font-bold text-red-400 border-red-500/30 bg-red-500/10 flex items-center gap-2">
-                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                    <span>{walletTopUpErrorMsg}</span>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <span className="text-[10px] font-black uppercase tracking-wider opacity-60">
-                    {t('quickDepositAmounts') || 'Select Deposit Amount'}
-                  </span>
-                  <div className="grid grid-cols-2 gap-2">
-                    {walletPresets.map((amt) => (
-                      <button
-                        key={amt}
-                        type="button"
-                        disabled={purchasingWallet}
-                        onClick={() => handleQuickWalletTopUp(amt)}
-                        className="p-3 rounded-2xl border flex items-center justify-between font-mono font-bold text-xs cursor-pointer active:scale-95"
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                      >
-                        <span>+{walletSymbol}{amt}</span>
-                        <span className="text-[10px] font-sans px-2 py-0.5 rounded-lg bg-[var(--color-primary)] text-white">
-                          {purchasingWallet ? <RefreshCw className="h-3 w-3 animate-spin" /> : 'Add'}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="pt-2 border-t text-center" style={{ borderColor: 'var(--color-border)' }}>
-                  <Link
-                    href="/wallet"
-                    onClick={() => setShowWalletMobileMenu(false)}
-                    className="text-xs font-bold hover:underline"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    {t('openFullWallet') || 'Go to Full Wallet Portal'}
-                  </Link>
-                </div>
-              </div>
-            )}
+            </Link>
+            <Link
+              href="/wallet"
+              className="p-1 px-1.5 rounded-lg bg-[var(--color-primary)] text-white text-[10px] font-sans font-black flex items-center justify-center hover:brightness-110 active:scale-95 transition"
+              title={t('topUpWallet') || 'Top Up Wallet'}
+              aria-label="Top Up Wallet"
+            >
+              <Plus className="h-2.5 w-2.5 stroke-[3]" />
+            </Link>
           </div>
 
-          {/* Mobile Token Balance & Top Up */}
-          <div className="relative" ref={topUpMobileDropdownRef}>
-            <button
-              type="button"
-              onClick={() => {
-                setShowTopUpMobileMenu(!showTopUpMobileMenu);
-                setShowWalletMobileMenu(false);
-                setShowProfileMenu(false);
-                setShowNotificationsMobile(false);
-              }}
-              className="flex items-center gap-1 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
+          {/* Mobile Token Balance & Top Up Link Button */}
+          <div className="flex items-center rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/50">
+            <Link
+              href="/token"
+              className="flex items-center gap-1 px-2 py-1 text-[11px] font-mono font-bold"
+              title={t('token') || 'Token'}
             >
               <Coins className="h-3.5 w-3.5 text-amber-500" />
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
                 {mounted ? tokenBalance.toLocaleString() : '0'}
               </span>
-              <span className="px-1.5 py-0.2 rounded-md bg-[var(--color-primary)] text-white text-[10px] font-sans font-black flex items-center gap-0.5">
-                <Plus className="h-2.5 w-2.5 stroke-[3]" />
-                <span>Top Up</span>
-              </span>
-            </button>
-
-            {/* Mobile Token Drawer */}
-            {showTopUpMobileMenu && (
-              <div 
-                className="fixed inset-x-3 top-16 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in max-h-[82vh] overflow-y-auto"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              >
-                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2">
-                    <Coins className="h-4 w-4 text-amber-500" />
-                    <div>
-                      <h3 className="text-xs font-black uppercase tracking-wider">{t('topUpTokens') || 'Top Up Tokens'}</h3>
-                      <p className="text-[10px] opacity-70">
-                        Balance:{' '}
-                        <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
-                          {mounted ? tokenBalance.toLocaleString() : '0'} {tokenSymbol}
-                        </span>
-                      </p>
-                    </div>
-                  </div>
-                  <button 
-                    type="button"
-                    onClick={() => setShowTopUpMobileMenu(false)}
-                    className="p-1 rounded-lg border border-[var(--color-border)] cursor-pointer"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-
-                <div className="p-2.5 rounded-2xl border flex items-center justify-between gap-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2">
-                    <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
-                    <div className="text-[11px]">
-                      <span className="opacity-70 text-[9px] uppercase font-bold block">{t('payWithWallet') || 'Wallet Balance'}:</span>
-                      <span suppressHydrationWarning className="font-mono font-bold" style={{ color: 'var(--color-emerald)' }}>
-                        {walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowTopUpMobileMenu(false);
-                      setShowWalletMobileMenu(true);
-                    }}
-                    className="px-2.5 py-1 rounded-xl text-[10px] font-extrabold text-white cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                  >
-                    +{t('topUp') || 'Top Up'}
-                  </button>
-                </div>
-
-                {topUpSuccessMsg && (
-                  <div className="p-2.5 rounded-xl border text-xs font-bold text-emerald-400 border-emerald-500/30 bg-emerald-500/10 flex items-center gap-2">
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                    <span>{topUpSuccessMsg}</span>
-                  </div>
-                )}
-                {topUpErrorMsg && (
-                  <div className="p-2.5 rounded-xl border text-xs font-bold text-red-400 border-red-500/30 bg-red-500/10 flex flex-col gap-1">
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                      <span>{topUpErrorMsg}</span>
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  {displayPackages.map((pkg) => {
-                    const price = Number(pkg.price);
-                    const canAfford = walletBalance >= price;
-                    return (
-                      <div 
-                        key={pkg.id}
-                        className={`p-3 rounded-2xl border flex items-center justify-between gap-2 ${
-                          !canAfford ? 'opacity-85 border-amber-500/30' : ''
-                        }`}
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: canAfford ? 'var(--color-border)' : 'rgba(245, 158, 11, 0.4)' }}
-                      >
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-black truncate">{pkg.name}</span>
-                            {pkg.badge && (
-                              <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded bg-amber-500/20 text-amber-500">
-                                {pkg.badge}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-xs font-mono font-bold" style={{ color: 'var(--color-emerald)' }}>
-                            +{Number(pkg.tokens).toLocaleString()} {tokenSymbol}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-xs font-mono font-black">${price.toFixed(2)}</span>
-                          {canAfford ? (
-                            <button
-                              type="button"
-                              disabled={purchasingId === pkg.id}
-                              onClick={() => handlePurchasePackage(pkg)}
-                              className="px-3 py-1.5 rounded-xl text-xs font-extrabold text-white cursor-pointer disabled:opacity-50"
-                              style={{ backgroundColor: 'var(--color-primary)' }}
-                            >
-                              {purchasingId === pkg.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : (t('buy') || 'Buy')}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowTopUpMobileMenu(false);
-                                setShowWalletMobileMenu(true);
-                              }}
-                              className="px-2.5 py-1.5 rounded-xl text-[10px] font-bold text-amber-300 border border-amber-500/40 bg-amber-500/10 cursor-pointer"
-                            >
-                              {t('topUpWalletShort') || 'Top Up'}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="pt-2 border-t text-center" style={{ borderColor: 'var(--color-border)' }}>
-                  <Link
-                    href="/subscriptions"
-                    onClick={() => setShowTopUpMobileMenu(false)}
-                    className="text-xs font-bold hover:underline"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    {t('viewSubscriptionPlans') || 'View Monthly Subscription Plans'}
-                  </Link>
-                </div>
-              </div>
-            )}
+            </Link>
+            <Link
+              href="/token"
+              className="p-1 px-1.5 rounded-lg bg-[var(--color-primary)] text-white text-[10px] font-sans font-black flex items-center justify-center hover:brightness-110 active:scale-95 transition"
+              title={t('topUpTokens') || 'Top Up Tokens'}
+              aria-label="Top Up Tokens"
+            >
+              <Plus className="h-2.5 w-2.5 stroke-[3]" />
+            </Link>
           </div>
 
           {/* Mobile Notifications Bell & Drawer */}
@@ -61031,8 +60651,6 @@ export default function Sidebar() {
               type="button"
               onClick={() => {
                 setShowNotificationsMobile(!showNotificationsMobile);
-                setShowWalletMobileMenu(false);
-                setShowTopUpMobileMenu(false);
                 setShowProfileMenu(false);
               }}
               className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
@@ -61082,11 +60700,6 @@ export default function Sidebar() {
                 </div>
 
                 {renderNotificationsList(() => setShowNotificationsMobile(false))}
-
-                {isAdmin && (
-                  <div className="pt-2 border-t text-center" style={{ borderColor: 'var(--color-border)' }}>
-                  </div>
-                )}
               </div>
             )}
           </div>
@@ -61097,8 +60710,6 @@ export default function Sidebar() {
               type="button"
               onClick={() => {
                 setShowProfileMenu(!showProfileMenu);
-                setShowTopUpMobileMenu(false);
-                setShowWalletMobileMenu(false);
                 setShowNotificationsMobile(false);
               }}
               className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer flex items-center justify-center"
@@ -61249,350 +60860,58 @@ export default function Sidebar() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* WALLET BALANCE & TOP UP WIDGET */}
-          <div className="relative flex items-center" ref={walletDropdownRef}>
-            <div className="flex items-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40">
-              <Link 
-                href="/wallet" 
-                className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
-                title={t('viewWalletBalance') || 'View Wallet Balance & History'}
-              >
-                <Wallet className="h-4 w-4 text-[var(--color-primary)] group-hover:scale-110 transition-transform" />
-                <span suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                  {walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'}
-                </span>
-                <span className="text-[10px] font-bold opacity-60 font-mono">
-                  {walletCurrency}
-                </span>
-              </Link>
+          {/* WALLET BALANCE & DIRECT TOP UP BUTTON */}
+          <div className="flex items-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40">
+            <Link 
+              href="/wallet" 
+              className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
+              title={t('viewWalletBalance') || 'View Wallet Balance & History'}
+            >
+              <Wallet className="h-4 w-4 text-[var(--color-primary)] group-hover:scale-110 transition-transform" />
+              <span suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
+                {walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'}
+              </span>
+              <span className="text-[10px] font-bold opacity-60 font-mono">
+                {walletCurrency}
+              </span>
+            </Link>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setShowWalletTopUpMenu(!showWalletTopUpMenu);
-                  setShowTopUpMenu(false);
-                  setShowNotifications(false);
-                  setShowProfileMenu(false);
-                }}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-                title={t('topUpWallet') || 'Top Up Wallet Balance'}
-                aria-label="Top Up Wallet"
-              >
-                <Plus className="h-3 w-3 stroke-[3]" />
-                <span>{t('topUp') || 'Top Up'}</span>
-                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${showWalletTopUpMenu ? 'rotate-180' : ''}`} />
-              </button>
-            </div>
-
-            {/* Wallet Quick Top Up Dropdown Menu */}
-            {showWalletTopUpMenu && (
-              <div 
-                className="absolute right-0 top-full mt-2 w-88 sm:w-96 rounded-3xl border p-4 space-y-3.5 shadow-2xl z-50 animate-in fade-in"
-                style={{ 
-                  backgroundColor: 'var(--color-card)', 
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              >
-                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
-                      <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                        {t('walletTopUp') || 'Store Wallet Top-Up'}
-                      </h3>
-                      <p className="text-[10px] opacity-70">
-                        {t('walletTopUpSubtitle') || 'Add funds for recipes, tools & tokens'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                    <span suppressHydrationWarning>{walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'}</span>
-                    <span className="text-[10px] opacity-60 font-bold">{walletCurrency}</span>
-                  </div>
-                </div>
-
-                {walletTopUpSuccessMsg && (
-                  <div 
-                    className="p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 animate-in fade-in"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
-                  >
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                    <span className="text-[11px]">{walletTopUpSuccessMsg}</span>
-                  </div>
-                )}
-
-                {walletTopUpErrorMsg && (
-                  <div 
-                    className="p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 animate-in fade-in"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: '#ef4444', color: '#ef4444' }}
-                  >
-                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                    <span className="text-[11px]">{walletTopUpErrorMsg}</span>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <span className="text-[10px] font-black uppercase tracking-wider opacity-60">
-                    {t('quickDepositAmounts') || 'Choose Deposit Amount'}
-                  </span>
-                  <div className="grid grid-cols-4 gap-2">
-                    {walletPresets.map((amt) => (
-                      <button
-                        key={amt}
-                        type="button"
-                        disabled={purchasingWallet}
-                        onClick={() => handleQuickWalletTopUp(amt)}
-                        className="py-2.5 px-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/60 text-center font-mono font-bold text-xs transition cursor-pointer active:scale-95 disabled:opacity-50"
-                      >
-                        +{walletSymbol}{amt}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="pt-2 border-t flex flex-col gap-1.5 text-[11px]" style={{ borderColor: 'var(--color-border)' }}>
-                  <Link
-                    href="/wallet"
-                    onClick={() => setShowWalletTopUpMenu(false)}
-                    className="flex items-center justify-between text-xs font-bold hover:underline"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    <span>{t('openFullWallet') || 'Go to Full Wallet Portal (Custom Amount & Methods)'}</span>
-                    <ExternalLink className="h-3 w-3" />
-                  </Link>
-                  {isAdmin && (
-                    <Link
-                      href="/admin/wallet-settings"
-                      onClick={() => setShowWalletTopUpMenu(false)}
-                      className="flex items-center justify-between text-[10px] font-semibold opacity-70 hover:opacity-100 hover:underline"
-                      style={{ color: 'var(--color-text)' }}
-                    >
-                      <span>{t('adminWalletSettings') || 'Admin: Wallet Settings & Ledger'}</span>
-                      <Settings className="h-3 w-3" />
-                    </Link>
-                  )}
-                </div>
-              </div>
-            )}
+            <Link
+              href="/wallet"
+              className="flex items-center justify-center p-1.5 px-2 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              title={t('topUpWallet') || 'Top Up Wallet Balance'}
+              aria-label="Top Up Wallet"
+            >
+              <Plus className="h-3.5 w-3.5 stroke-[3]" />
+            </Link>
           </div>
 
-          {/* TOKEN BALANCE & TOP UP WIDGET */}
-          <div className="relative flex items-center" ref={topUpDropdownRef}>
-            <div className="flex items-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40">
-              <Link 
-                href="/token" 
-                className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
-                title={t('viewTokenBalance') || 'View Token Balance & Summary'}
-              >
-                <Coins className="h-4 w-4 text-amber-500 group-hover:scale-110 transition-transform" />
-                <span suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                  {mounted ? tokenBalance.toLocaleString() : '0'}
-                </span>
-                <span className="text-xs font-bold text-amber-500 font-mono">
-                  {tokenSymbol}
-                </span>
-              </Link>
+          {/* TOKEN BALANCE & DIRECT TOP UP BUTTON */}
+          <div className="flex items-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40">
+            <Link 
+              href="/token" 
+              className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
+              title={t('viewTokenBalance') || 'View Token Balance & Summary'}
+            >
+              <Coins className="h-4 w-4 text-amber-500 group-hover:scale-110 transition-transform" />
+              <span suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
+                {mounted ? tokenBalance.toLocaleString() : '0'}
+              </span>
+              <span className="text-xs font-bold text-amber-500 font-mono">
+                {tokenSymbol}
+              </span>
+            </Link>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setShowTopUpMenu(!showTopUpMenu);
-                  setShowWalletTopUpMenu(false);
-                  setShowNotifications(false);
-                  setShowProfileMenu(false);
-                }}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-                title={t('topUpTokens') || 'Top Up Tokens'}
-                aria-label="Top Up Tokens"
-              >
-                <Plus className="h-3 w-3 stroke-[3]" />
-                <span>{t('topUp') || 'Top Up'}</span>
-                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${showTopUpMenu ? 'rotate-180' : ''}`} />
-              </button>
-            </div>
-
-            {/* Token Packages Dropdown Menu */}
-            {showTopUpMenu && (
-              <div 
-                className="absolute right-0 top-full mt-2 w-88 sm:w-96 rounded-3xl border p-4 space-y-3.5 shadow-2xl z-50 animate-in fade-in"
-                style={{ 
-                  backgroundColor: 'var(--color-card)', 
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              >
-                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
-                      <Coins className="h-4 w-4 text-amber-500" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                        {t('topUpTokens') || 'Top Up Tokens'}
-                      </h3>
-                      <p className="text-[10px] opacity-70">
-                        {t('topUpSubtitle') || 'Add tokens directly to your balance'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                    <span suppressHydrationWarning>{mounted ? tokenBalance.toLocaleString() : '0'}</span>
-                    <span className="text-amber-500 font-bold">{tokenSymbol}</span>
-                  </div>
-                </div>
-
-                <div 
-                  className="p-3 rounded-2xl border flex items-center justify-between gap-3 shadow-xs"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="p-2 rounded-xl bg-[var(--color-primary)]/10 text-[var(--color-primary)] flex-shrink-0">
-                      <Wallet className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-[10px] uppercase font-bold opacity-60">{t('paymentSource') || 'Payment Source'}: Store Wallet</div>
-                      <div suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                        {walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'} {walletCurrency}
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowTopUpMenu(false);
-                      setShowWalletTopUpMenu(true);
-                    }}
-                    className="px-3 py-1 rounded-xl text-[11px] font-extrabold text-white transition cursor-pointer flex items-center gap-1 shadow-xs hover:brightness-110 active:scale-95 flex-shrink-0"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                    title={t('topUpWallet') || 'Top Up Wallet Balance'}
-                  >
-                    <Plus className="h-3 w-3 stroke-[3]" />
-                    <span>{t('addFunds') || 'Add Funds'}</span>
-                  </button>
-                </div>
-
-                {topUpSuccessMsg && (
-                  <div 
-                    className="p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 animate-in fade-in"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
-                  >
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                    <span className="text-[11px]">{topUpSuccessMsg}</span>
-                  </div>
-                )}
-
-                {topUpErrorMsg && (
-                  <div 
-                    className="p-2.5 rounded-xl border text-xs font-bold flex flex-col gap-1.5 animate-in fade-in"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: '#ef4444', color: '#ef4444' }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                      <span className="text-[11px]">{topUpErrorMsg}</span>
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                  {displayPackages.map((pkg) => {
-                    const price = Number(pkg.price);
-                    const canAfford = walletBalance >= price;
-                    return (
-                      <div 
-                        key={pkg.id}
-                        className={`p-3 rounded-2xl border transition flex items-center justify-between gap-3 group ${
-                          !canAfford ? 'border-amber-500/30' : 'hover:border-[var(--color-primary)]/50'
-                        }`}
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: canAfford ? 'var(--color-border)' : 'rgba(245, 158, 11, 0.4)' }}
-                      >
-                        <div className="min-w-0 space-y-0.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
-                              {pkg.name}
-                            </span>
-                            {pkg.badge && (
-                              <span className="px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider rounded-md bg-amber-500/15 text-amber-500 border border-amber-500/30">
-                                {pkg.badge}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1 text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                            <span>+{Number(pkg.tokens).toLocaleString()}</span>
-                            <span className="text-amber-500 font-bold">{tokenSymbol}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
-                            ${price.toFixed(2)}
-                          </span>
-
-                          {canAfford ? (
-                            <button
-                              type="button"
-                              disabled={purchasingId === pkg.id}
-                              onClick={() => handlePurchasePackage(pkg)}
-                              className="px-3.5 py-1.5 rounded-xl text-xs font-extrabold text-white transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:brightness-110 active:scale-95 shadow-xs"
-                              style={{ backgroundColor: 'var(--color-primary)' }}
-                            >
-                              {purchasingId === pkg.id ? (
-                                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <>
-                                  <Sparkles className="h-3 w-3" />
-                                  <span>{t('buy') || 'Buy'}</span>
-                                </>
-                              )}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowTopUpMenu(false);
-                                setShowWalletTopUpMenu(true);
-                              }}
-                              className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold text-amber-300 border border-amber-500/40 bg-amber-500/10 transition flex items-center gap-1 cursor-pointer hover:bg-amber-500/20 active:scale-95 shadow-xs"
-                            >
-                              <Wallet className="h-3 w-3 text-amber-400" />
-                              <span>{t('topUpWalletShort') || 'Top Up'}</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="pt-2 border-t flex flex-col gap-1.5 text-[11px]" style={{ borderColor: 'var(--color-border)' }}>
-                  <Link
-                    href="/subscriptions"
-                    onClick={() => setShowTopUpMenu(false)}
-                    className="flex items-center justify-between text-xs font-bold hover:underline"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    <span>{t('viewSubscriptionPlans') || 'View Monthly Subscription Plans'}</span>
-                    <ExternalLink className="h-3 w-3" />
-                  </Link>
-                  {isAdmin && (
-                    <Link
-                      href="/admin/token-setting"
-                      onClick={() => setShowTopUpMenu(false)}
-                      className="flex items-center justify-between text-[10px] font-semibold opacity-70 hover:opacity-100 hover:underline"
-                      style={{ color: 'var(--color-text)' }}
-                    >
-                      <span>{t('adminManagePackages') || 'Admin: Manage Packages in /admin/token-setting'}</span>
-                      <Settings className="h-3 w-3" />
-                    </Link>
-                  )}
-                </div>
-              </div>
-            )}
+            <Link
+              href="/token"
+              className="flex items-center justify-center p-1.5 px-2 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              title={t('topUpTokens') || 'Top Up Tokens'}
+              aria-label="Top Up Tokens"
+            >
+              <Plus className="h-3.5 w-3.5 stroke-[3]" />
+            </Link>
           </div>
 
           {/* DYNAMIC DESKTOP NOTIFICATION BELL WIDGET */}
@@ -61602,8 +60921,6 @@ export default function Sidebar() {
               onClick={() => {
                 setShowNotifications(!showNotifications);
                 setShowProfileMenu(false);
-                setShowTopUpMenu(false);
-                setShowWalletTopUpMenu(false);
               }}
               className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
               aria-label="Notifications"
@@ -61670,8 +60987,6 @@ export default function Sidebar() {
               onClick={() => {
                 setShowProfileMenu(!showProfileMenu);
                 setShowNotifications(false);
-                setShowTopUpMenu(false);
-                setShowWalletTopUpMenu(false);
               }}
               className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
               aria-label="User Profile Dropdown"
