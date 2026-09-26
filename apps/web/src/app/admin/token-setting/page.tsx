@@ -96,7 +96,7 @@ export default function AdminTokenSettingPage() {
   const [txSearch, setTxSearch] = useState('');
   const [txTypeFilter, setTxTypeFilter] = useState('all');
   const [txPage, setTxPage] = useState(1);
-  const [txLimit, setTxLimit] = useState(25);
+  const [txLimit, setTxLimit] = useState(10);
   const [txTotalPages, setTxTotalPages] = useState(1);
   const [txTotalCount, setTxTotalCount] = useState(0);
   const [txStats, setTxStats] = useState<TransactionStats>({
