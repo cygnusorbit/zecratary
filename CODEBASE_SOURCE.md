@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.9.3",
+  "version": "7.9.4",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -110,7 +110,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.9.3",
+  "version": "7.9.4",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -26084,17 +26084,35 @@ export default function AdminTokenSettingPage() {
                   {t('tokenIdentityHeading', 'Token Currency Identity & Master Toggle')}
                 </h2>
               </div>
-              <label className="flex items-center gap-2 cursor-pointer text-xs font-bold">
-                <input
-                  type="checkbox"
-                  checked={isEnabled}
-                  onChange={(e) => setIsEnabled(e.target.checked)}
-                  className="rounded accent-amber-500 w-4 h-4 cursor-pointer"
-                />
-                <span style={{ color: isEnabled ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}>
+              <div className="flex items-center gap-3">
+                <span 
+                  className="text-xs font-bold select-none transition-colors duration-200"
+                  style={{ color: isEnabled ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}
+                >
                   {isEnabled ? t('tokenSystemActive', 'System Active') : t('tokenSystemDisabled', 'Bypass Consumption')}
                 </span>
-              </label>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={isEnabled}
+                  onClick={() => setIsEnabled(!isEnabled)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-xs ${
+                    isEnabled ? '' : 'bg-gray-300 dark:bg-gray-700'
+                  }`}
+                  style={{
+                    backgroundColor: isEnabled ? 'var(--color-emerald)' : undefined
+                  }}
+                  title={isEnabled ? t('disableTokenSystem', 'Disable Token System') : t('enableTokenSystem', 'Enable Token System')}
+                >
+                  <span className="sr-only">{isEnabled ? t('tokenSystemActive', 'System Active') : t('tokenSystemDisabled', 'Bypass Consumption')}</span>
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                      isEnabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
