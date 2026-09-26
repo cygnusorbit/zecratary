@@ -2,34 +2,34 @@
   "aiProvider": "gemini",
   "aiModel": "gemini-3.6-flash",
   "themeColors": {
-    "accent": "#a855f7",
     "primary": "#38bdf8",
-    "cardBorder": "#172554",
-    "accentColor": "#a855f7",
-    "sidebarIcon": "#38bdf8",
     "primaryColor": "#38bdf8",
     "primaryHover": "#0284c7",
-    "accentEmerald": "#a855f7",
-    "textSecondary": "#7dd3fc",
+    "accentEmerald": "#f755bb",
+    "accentColor": "#f755bb",
+    "accent": "#f755bb",
+    "sidebarIconColor": "#38bdf8",
+    "sidebarIcon": "#38bdf8",
+    "backgroundColor": "#020617",
     "backgroundDark": "#020617",
     "cardBackground": "#080e22",
-    "backgroundColor": "#020617",
-    "sidebarIconColor": "#38bdf8"
+    "cardBorder": "#172554",
+    "textSecondary": "#7dd3fc"
   },
   "theme_colors": {
-    "accent": "#a855f7",
     "primary": "#38bdf8",
-    "cardBorder": "#172554",
-    "accentColor": "#a855f7",
-    "sidebarIcon": "#38bdf8",
     "primaryColor": "#38bdf8",
     "primaryHover": "#0284c7",
-    "accentEmerald": "#a855f7",
-    "textSecondary": "#7dd3fc",
+    "accentEmerald": "#f755bb",
+    "accentColor": "#f755bb",
+    "accent": "#f755bb",
+    "sidebarIconColor": "#38bdf8",
+    "sidebarIcon": "#38bdf8",
+    "backgroundColor": "#020617",
     "backgroundDark": "#020617",
     "cardBackground": "#080e22",
-    "backgroundColor": "#020617",
-    "sidebarIconColor": "#38bdf8"
+    "cardBorder": "#172554",
+    "textSecondary": "#7dd3fc"
   },
   "chefAiSettings": {
     "model": "gemini-3.6-flash",
@@ -1220,36 +1220,36 @@
       "requireEmailVerification": true
     },
     "themeColors": {
-      "accent": "#a855f7",
       "primary": "#38bdf8",
-      "cardBorder": "#172554",
-      "accentColor": "#a855f7",
-      "sidebarIcon": "#38bdf8",
       "primaryColor": "#38bdf8",
       "primaryHover": "#0284c7",
-      "accentEmerald": "#a855f7",
-      "textSecondary": "#7dd3fc",
+      "accentEmerald": "#f755bb",
+      "accentColor": "#f755bb",
+      "accent": "#f755bb",
+      "sidebarIconColor": "#38bdf8",
+      "sidebarIcon": "#38bdf8",
+      "backgroundColor": "#020617",
       "backgroundDark": "#020617",
       "cardBackground": "#080e22",
-      "backgroundColor": "#020617",
-      "sidebarIconColor": "#38bdf8"
+      "cardBorder": "#172554",
+      "textSecondary": "#7dd3fc"
     },
     "faviconEmoji": "🍳",
     "faviconImage": "",
     "theme_colors": {
-      "accent": "#a855f7",
       "primary": "#38bdf8",
-      "cardBorder": "#172554",
-      "accentColor": "#a855f7",
-      "sidebarIcon": "#38bdf8",
       "primaryColor": "#38bdf8",
       "primaryHover": "#0284c7",
-      "accentEmerald": "#a855f7",
-      "textSecondary": "#7dd3fc",
+      "accentEmerald": "#f755bb",
+      "accentColor": "#f755bb",
+      "accent": "#f755bb",
+      "sidebarIconColor": "#38bdf8",
+      "sidebarIcon": "#38bdf8",
+      "backgroundColor": "#020617",
       "backgroundDark": "#020617",
       "cardBackground": "#080e22",
-      "backgroundColor": "#020617",
-      "sidebarIconColor": "#38bdf8"
+      "cardBorder": "#172554",
+      "textSecondary": "#7dd3fc"
     },
     "favicon_emoji": "🍳",
     "favicon_image": "",
@@ -2402,18 +2402,8 @@
     "titlebar_image": "",
     "maintenanceMode": false,
     "paymentSettings": {
-      "activeGateway": "stripe",
-      "currency": "USD",
-      "testMode": true,
-      "stripeConnected": false,
-      "stripeKeysVerified": false,
-      "stripeWebhookVerified": false,
-      "stripe": {
-        "enabled": true,
-        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
-        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
-        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
-      },
+      "email": "admin@zecratary.com",
+      "action": "cancel_user_transactions",
       "paypal": {
         "enabled": false,
         "clientId": "a",
@@ -2421,9 +2411,19 @@
         "environment": "sandbox",
         "clientSecret": ""
       },
-      "email": "admin@zecratary.com",
-      "action": "cancel_user_transactions",
-      "preserveExpiry": true
+      "stripe": {
+        "enabled": true,
+        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
+        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
+        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
+      },
+      "currency": "USD",
+      "testMode": true,
+      "activeGateway": "stripe",
+      "preserveExpiry": true,
+      "stripeConnected": false,
+      "stripeKeysVerified": false,
+      "stripeWebhookVerified": false
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -2577,36 +2577,36 @@
       "requireEmailVerification": true
     },
     "themeColors": {
-      "accent": "#a855f7",
       "primary": "#38bdf8",
-      "cardBorder": "#172554",
-      "accentColor": "#a855f7",
-      "sidebarIcon": "#38bdf8",
       "primaryColor": "#38bdf8",
       "primaryHover": "#0284c7",
-      "accentEmerald": "#a855f7",
-      "textSecondary": "#7dd3fc",
+      "accentEmerald": "#f755bb",
+      "accentColor": "#f755bb",
+      "accent": "#f755bb",
+      "sidebarIconColor": "#38bdf8",
+      "sidebarIcon": "#38bdf8",
+      "backgroundColor": "#020617",
       "backgroundDark": "#020617",
       "cardBackground": "#080e22",
-      "backgroundColor": "#020617",
-      "sidebarIconColor": "#38bdf8"
+      "cardBorder": "#172554",
+      "textSecondary": "#7dd3fc"
     },
     "faviconEmoji": "🍳",
     "faviconImage": "",
     "theme_colors": {
-      "accent": "#a855f7",
       "primary": "#38bdf8",
-      "cardBorder": "#172554",
-      "accentColor": "#a855f7",
-      "sidebarIcon": "#38bdf8",
       "primaryColor": "#38bdf8",
       "primaryHover": "#0284c7",
-      "accentEmerald": "#a855f7",
-      "textSecondary": "#7dd3fc",
+      "accentEmerald": "#f755bb",
+      "accentColor": "#f755bb",
+      "accent": "#f755bb",
+      "sidebarIconColor": "#38bdf8",
+      "sidebarIcon": "#38bdf8",
+      "backgroundColor": "#020617",
       "backgroundDark": "#020617",
       "cardBackground": "#080e22",
-      "backgroundColor": "#020617",
-      "sidebarIconColor": "#38bdf8"
+      "cardBorder": "#172554",
+      "textSecondary": "#7dd3fc"
     },
     "favicon_emoji": "🍳",
     "favicon_image": "",
@@ -3759,18 +3759,8 @@
     "titlebar_image": "",
     "maintenanceMode": false,
     "paymentSettings": {
-      "activeGateway": "stripe",
-      "currency": "USD",
-      "testMode": true,
-      "stripeConnected": false,
-      "stripeKeysVerified": false,
-      "stripeWebhookVerified": false,
-      "stripe": {
-        "enabled": true,
-        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
-        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
-        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
-      },
+      "email": "admin@zecratary.com",
+      "action": "cancel_user_transactions",
       "paypal": {
         "enabled": false,
         "clientId": "a",
@@ -3778,9 +3768,19 @@
         "environment": "sandbox",
         "clientSecret": ""
       },
-      "email": "admin@zecratary.com",
-      "action": "cancel_user_transactions",
-      "preserveExpiry": true
+      "stripe": {
+        "enabled": true,
+        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
+        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
+        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
+      },
+      "currency": "USD",
+      "testMode": true,
+      "activeGateway": "stripe",
+      "preserveExpiry": true,
+      "stripeConnected": false,
+      "stripeKeysVerified": false,
+      "stripeWebhookVerified": false
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -3891,5 +3891,5 @@
       "https://www.taste.com.au/recipes"
     ]
   },
-  "updatedAt": "2026-09-26T05:30:04.871Z"
+  "updatedAt": "2026-09-26T07:13:29.040Z"
 }
