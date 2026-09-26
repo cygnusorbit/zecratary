@@ -13,7 +13,6 @@ function getPool() {
 }
 
 async function ensureBillingSchema(client: any) {
-  // 1. Users table & idempotent column additions
   await client.query(`
     CREATE TABLE IF NOT EXISTS users (
       id VARCHAR(100) PRIMARY KEY,
@@ -44,10 +43,7 @@ async function ensureBillingSchema(client: any) {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS expiry_date TIMESTAMP WITH TIME ZONE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expiry_date TIMESTAMP WITH TIME ZONE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
-  `);
 
-  // 2. Payment transactions table & idempotent column additions
-  await client.query(`
     CREATE TABLE IF NOT EXISTS payment_transactions (
       id VARCHAR(100) PRIMARY KEY,
       customer_name VARCHAR(255),
@@ -67,24 +63,13 @@ async function ensureBillingSchema(client: any) {
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
 
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255);
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255);
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS plan_name VARCHAR(255);
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS plan_slug VARCHAR(100);
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS amount NUMERIC(10,2) DEFAULT 0.00;
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD';
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS gateway VARCHAR(50) DEFAULT 'wallet';
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'succeeded';
     ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_reason TEXT;
     ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT true;
     ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS recurring_interval VARCHAR(20) DEFAULT 'MONTH';
     ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT true;
     ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS expiry_date TIMESTAMP WITH TIME ZONE;
     ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
-  `);
 
-  // 3. Wallet transactions table
-  await client.query(`
     CREATE TABLE IF NOT EXISTS wallet_transactions (
       id VARCHAR(100) PRIMARY KEY,
       user_id VARCHAR(100),
@@ -100,20 +85,6 @@ async function ensureBillingSchema(client: any) {
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
 
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS user_email VARCHAR(255);
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS type VARCHAR(50) DEFAULT 'purchase';
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS amount NUMERIC(12,2) DEFAULT 0.00;
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS balance_after NUMERIC(12,2) DEFAULT 0.00;
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS gateway VARCHAR(50) DEFAULT 'wallet';
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS gateway_tx_id VARCHAR(255);
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'succeeded';
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS description TEXT;
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
-  `);
-
-  // 4. Subscription plans table with accurate PostgreSQL column names
-  await client.query(`
     CREATE TABLE IF NOT EXISTS subscription_plans (
       id VARCHAR(100) PRIMARY KEY,
       slug VARCHAR(100) UNIQUE NOT NULL,
@@ -132,26 +103,6 @@ async function ensureBillingSchema(client: any) {
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
 
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_price_dollars NUMERIC(10,2) DEFAULT 0.00;
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_price_dollars NUMERIC(10,2) DEFAULT 0.00;
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS description_monthly TEXT;
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS description_annual TEXT;
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS token_limit INTEGER DEFAULT 50000;
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_badge VARCHAR(100);
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_badge VARCHAR(100);
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS trial_badge VARCHAR(100);
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS features JSONB DEFAULT '[]'::jsonb;
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS is_free BOOLEAN DEFAULT false;
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT false;
-
-    -- Purge stray mock plans
-    DELETE FROM subscription_plans 
-    WHERE slug IN ('foodie-pro', 'master-chef') 
-       OR id IN ('plan_pro', 'plan_chef');
-  `);
-
-  // 5. Token Settings table
-  await client.query(`
     CREATE TABLE IF NOT EXISTS token_settings (
       id VARCHAR(64) PRIMARY KEY,
       token_name VARCHAR(100) DEFAULT 'Foodie Token',
@@ -161,9 +112,17 @@ async function ensureBillingSchema(client: any) {
       updated_at TIMESTAMP DEFAULT NOW()
     );
 
-    ALTER TABLE token_settings ADD COLUMN IF NOT EXISTS token_icon VARCHAR(100) DEFAULT '🪙';
-    ALTER TABLE token_settings ADD COLUMN IF NOT EXISTS token_symbol VARCHAR(20) DEFAULT '🪙';
-    ALTER TABLE token_settings ADD COLUMN IF NOT EXISTS token_name VARCHAR(100) DEFAULT 'Foodie Token';
+    CREATE TABLE IF NOT EXISTS gateway_settings (
+      id VARCHAR(100) PRIMARY KEY,
+      settings JSONB DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS wallet_settings (
+      id VARCHAR(100) PRIMARY KEY,
+      settings JSONB DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
   `);
 }
 
@@ -219,7 +178,7 @@ export async function GET(req: NextRequest) {
       };
     }
 
-    // Sync live ledger balance
+    // Live ledger balance query
     let liveWalletBalance = parseFloat(user.wallet_balance || 0);
     try {
       const wtxRes = await client.query(
@@ -238,7 +197,6 @@ export async function GET(req: NextRequest) {
     } catch (_) {}
     user.wallet_balance = liveWalletBalance;
 
-    // Fetch user transactions
     const txRes = await client.query(
       `SELECT * FROM payment_transactions 
        WHERE ($1 != '' AND LOWER(TRIM(customer_email)) = LOWER(TRIM($1))) 
@@ -247,7 +205,7 @@ export async function GET(req: NextRequest) {
       [user.email, user.id]
     );
 
-    // Auto-heal empty transaction history for active paid memberships
+    // Auto-seed initial transaction if user holds a paid plan without historical records
     if (user.subscription_plan && !['taster', 'free'].includes(user.subscription_plan.toLowerCase()) && txRes.rows.length === 0) {
       const autoTxId = `tx_init_${Date.now()}`;
       const isAnnual = user.subscription_plan.includes('annual') || user.plan_interval === 'YEAR';
@@ -278,7 +236,25 @@ export async function GET(req: NextRequest) {
       txRes.rows = updatedTx.rows;
     }
 
-    // Authoritative plans query using correct PostgreSQL columns
+    // Force amount to be a JS Number to eliminate client-side toFixed string errors
+    const sanitizedTransactions = txRes.rows.map((tx: any) => ({
+      id: String(tx.id || ''),
+      customerName: tx.customer_name || tx.customerName || user.name || '',
+      customerEmail: tx.customer_email || tx.customerEmail || user.email || '',
+      planName: tx.plan_name || tx.planName || 'Subscription Tier',
+      planSlug: tx.plan_slug || tx.planSlug || '',
+      amount: typeof tx.amount === 'number' ? tx.amount : (parseFloat(tx.amount || 0) || 0),
+      currency: (tx.currency || 'USD').toUpperCase(),
+      gateway: tx.gateway || 'wallet',
+      status: (tx.status || 'succeeded').toLowerCase(),
+      failureReason: tx.failure_reason || tx.failureReason,
+      isRecurring: Boolean(tx.is_recurring ?? tx.isRecurring ?? true),
+      recurringInterval: (tx.recurring_interval || tx.recurringInterval || 'MONTH').toUpperCase(),
+      autoRenew: Boolean(tx.auto_renew ?? tx.autoRenew ?? true),
+      expiryDate: tx.expiry_date || tx.expiryDate,
+      createdAt: tx.created_at || tx.createdAt || new Date().toISOString()
+    }));
+
     const plansRes = await client.query(`
       SELECT 
         id, 
@@ -294,14 +270,12 @@ export async function GET(req: NextRequest) {
         COALESCE(description_annual, '') AS "descriptionAnnual", 
         COALESCE(description_monthly, description_annual, '') AS "description", 
         features, 
-        COALESCE(is_free, false) AS "isFree",
-        COALESCE(is_default, false) AS "isDefault"
+        COALESCE(is_free, false) AS "isFree"
       FROM subscription_plans 
       WHERE slug NOT IN ('foodie-pro', 'master-chef')
       ORDER BY monthly_price_dollars ASC, id ASC
     `);
 
-    // Authoritative Token identity
     let tokenIdentity = {
       tokenName: 'Foodie Token',
       tokenSymbol: '🪙',
@@ -351,7 +325,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       success: true,
       user,
-      transactions: txRes.rows,
+      transactions: sanitizedTransactions,
       plans: plansRes.rows.length > 0 ? plansRes.rows : undefined,
       gatewayConfig,
       walletConfig,
@@ -371,7 +345,6 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const action = body.action;
 
-    // 1. CHANGE PLAN ATOMIC WORKFLOW
     if (action === 'change_plan') {
       const {
         email,
@@ -421,7 +394,6 @@ export async function POST(req: NextRequest) {
 
         const currentWalletBalance = parseFloat(userRecord.wallet_balance || 0);
 
-        // Deduct from Store Wallet if paid tier
         if (!isTargetFree) {
           if (currentWalletBalance < numAmount) {
             await client.query('ROLLBACK');
@@ -459,7 +431,6 @@ export async function POST(req: NextRequest) {
           expiry.setMonth(expiry.getMonth() + 1);
         }
 
-        // Cancel previous active transactions to prevent multiple concurrent plans
         await client.query(`
           UPDATE payment_transactions 
           SET status = 'canceled', 
@@ -470,7 +441,6 @@ export async function POST(req: NextRequest) {
             AND status IN ('active', 'succeeded', 'successful', 'paid')
         `, [userRecord.email, String(userRecord.id)]);
 
-        // Update full entitlements on users table
         const baseSlug = planSlug.replace(/^(preset_|plan_)/i, '').replace(/-(monthly|annual|year)$/i, '').trim();
         await client.query(`
           UPDATE users 
@@ -498,7 +468,6 @@ export async function POST(req: NextRequest) {
           userRecord.id
         ]);
 
-        // Insert new succeeded payment transaction
         const txId = `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         await client.query(`
           INSERT INTO payment_transactions (
@@ -538,7 +507,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. CANCEL AUTO-RENEW
     if (action === 'cancel_subscription') {
       const { email, transactionId } = body;
       if (transactionId) {
@@ -559,7 +527,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 3. RESUME AUTO-RENEW
     if (action === 'resume_subscription') {
       const { email, transactionId } = body;
       if (transactionId) {
