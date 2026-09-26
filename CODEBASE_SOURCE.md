@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.9.0",
+  "version": "7.9.1",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -110,7 +110,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.9.0",
+  "version": "7.9.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -53567,7 +53567,6 @@ function getPool() {
 }
 
 async function ensureBillingSchema(client: any) {
-  // 1. Users table & idempotent column additions
   await client.query(`
     CREATE TABLE IF NOT EXISTS users (
       id VARCHAR(100) PRIMARY KEY,
@@ -53598,10 +53597,7 @@ async function ensureBillingSchema(client: any) {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS expiry_date TIMESTAMP WITH TIME ZONE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expiry_date TIMESTAMP WITH TIME ZONE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
-  `);
 
-  // 2. Payment transactions table & idempotent column additions
-  await client.query(`
     CREATE TABLE IF NOT EXISTS payment_transactions (
       id VARCHAR(100) PRIMARY KEY,
       customer_name VARCHAR(255),
@@ -53621,24 +53617,13 @@ async function ensureBillingSchema(client: any) {
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
 
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255);
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255);
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS plan_name VARCHAR(255);
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS plan_slug VARCHAR(100);
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS amount NUMERIC(10,2) DEFAULT 0.00;
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD';
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS gateway VARCHAR(50) DEFAULT 'wallet';
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'succeeded';
     ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_reason TEXT;
     ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT true;
     ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS recurring_interval VARCHAR(20) DEFAULT 'MONTH';
     ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT true;
     ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS expiry_date TIMESTAMP WITH TIME ZONE;
     ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
-  `);
 
-  // 3. Wallet transactions table
-  await client.query(`
     CREATE TABLE IF NOT EXISTS wallet_transactions (
       id VARCHAR(100) PRIMARY KEY,
       user_id VARCHAR(100),
@@ -53654,20 +53639,6 @@ async function ensureBillingSchema(client: any) {
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
 
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS user_id VARCHAR(100);
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS user_email VARCHAR(255);
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS type VARCHAR(50) DEFAULT 'purchase';
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS amount NUMERIC(12,2) DEFAULT 0.00;
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS balance_after NUMERIC(12,2) DEFAULT 0.00;
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS gateway VARCHAR(50) DEFAULT 'wallet';
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS gateway_tx_id VARCHAR(255);
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'succeeded';
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS description TEXT;
-    ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
-  `);
-
-  // 4. Subscription plans table with accurate PostgreSQL column names
-  await client.query(`
     CREATE TABLE IF NOT EXISTS subscription_plans (
       id VARCHAR(100) PRIMARY KEY,
       slug VARCHAR(100) UNIQUE NOT NULL,
@@ -53686,26 +53657,6 @@ async function ensureBillingSchema(client: any) {
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     );
 
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_price_dollars NUMERIC(10,2) DEFAULT 0.00;
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_price_dollars NUMERIC(10,2) DEFAULT 0.00;
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS description_monthly TEXT;
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS description_annual TEXT;
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS token_limit INTEGER DEFAULT 50000;
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_badge VARCHAR(100);
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_badge VARCHAR(100);
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS trial_badge VARCHAR(100);
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS features JSONB DEFAULT '[]'::jsonb;
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS is_free BOOLEAN DEFAULT false;
-    ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT false;
-
-    -- Purge stray mock plans
-    DELETE FROM subscription_plans 
-    WHERE slug IN ('foodie-pro', 'master-chef') 
-       OR id IN ('plan_pro', 'plan_chef');
-  `);
-
-  // 5. Token Settings table
-  await client.query(`
     CREATE TABLE IF NOT EXISTS token_settings (
       id VARCHAR(64) PRIMARY KEY,
       token_name VARCHAR(100) DEFAULT 'Foodie Token',
@@ -53715,9 +53666,17 @@ async function ensureBillingSchema(client: any) {
       updated_at TIMESTAMP DEFAULT NOW()
     );
 
-    ALTER TABLE token_settings ADD COLUMN IF NOT EXISTS token_icon VARCHAR(100) DEFAULT '🪙';
-    ALTER TABLE token_settings ADD COLUMN IF NOT EXISTS token_symbol VARCHAR(20) DEFAULT '🪙';
-    ALTER TABLE token_settings ADD COLUMN IF NOT EXISTS token_name VARCHAR(100) DEFAULT 'Foodie Token';
+    CREATE TABLE IF NOT EXISTS gateway_settings (
+      id VARCHAR(100) PRIMARY KEY,
+      settings JSONB DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS wallet_settings (
+      id VARCHAR(100) PRIMARY KEY,
+      settings JSONB DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
   `);
 }
 
@@ -53773,7 +53732,7 @@ export async function GET(req: NextRequest) {
       };
     }
 
-    // Sync live ledger balance
+    // Live ledger balance query
     let liveWalletBalance = parseFloat(user.wallet_balance || 0);
     try {
       const wtxRes = await client.query(
@@ -53792,7 +53751,6 @@ export async function GET(req: NextRequest) {
     } catch (_) {}
     user.wallet_balance = liveWalletBalance;
 
-    // Fetch user transactions
     const txRes = await client.query(
       `SELECT * FROM payment_transactions 
        WHERE ($1 != '' AND LOWER(TRIM(customer_email)) = LOWER(TRIM($1))) 
@@ -53801,7 +53759,7 @@ export async function GET(req: NextRequest) {
       [user.email, user.id]
     );
 
-    // Auto-heal empty transaction history for active paid memberships
+    // Auto-seed initial transaction if user holds a paid plan without historical records
     if (user.subscription_plan && !['taster', 'free'].includes(user.subscription_plan.toLowerCase()) && txRes.rows.length === 0) {
       const autoTxId = `tx_init_${Date.now()}`;
       const isAnnual = user.subscription_plan.includes('annual') || user.plan_interval === 'YEAR';
@@ -53832,7 +53790,25 @@ export async function GET(req: NextRequest) {
       txRes.rows = updatedTx.rows;
     }
 
-    // Authoritative plans query using correct PostgreSQL columns
+    // Force amount to be a JS Number to eliminate client-side toFixed string errors
+    const sanitizedTransactions = txRes.rows.map((tx: any) => ({
+      id: String(tx.id || ''),
+      customerName: tx.customer_name || tx.customerName || user.name || '',
+      customerEmail: tx.customer_email || tx.customerEmail || user.email || '',
+      planName: tx.plan_name || tx.planName || 'Subscription Tier',
+      planSlug: tx.plan_slug || tx.planSlug || '',
+      amount: typeof tx.amount === 'number' ? tx.amount : (parseFloat(tx.amount || 0) || 0),
+      currency: (tx.currency || 'USD').toUpperCase(),
+      gateway: tx.gateway || 'wallet',
+      status: (tx.status || 'succeeded').toLowerCase(),
+      failureReason: tx.failure_reason || tx.failureReason,
+      isRecurring: Boolean(tx.is_recurring ?? tx.isRecurring ?? true),
+      recurringInterval: (tx.recurring_interval || tx.recurringInterval || 'MONTH').toUpperCase(),
+      autoRenew: Boolean(tx.auto_renew ?? tx.autoRenew ?? true),
+      expiryDate: tx.expiry_date || tx.expiryDate,
+      createdAt: tx.created_at || tx.createdAt || new Date().toISOString()
+    }));
+
     const plansRes = await client.query(`
       SELECT 
         id, 
@@ -53848,14 +53824,12 @@ export async function GET(req: NextRequest) {
         COALESCE(description_annual, '') AS "descriptionAnnual", 
         COALESCE(description_monthly, description_annual, '') AS "description", 
         features, 
-        COALESCE(is_free, false) AS "isFree",
-        COALESCE(is_default, false) AS "isDefault"
+        COALESCE(is_free, false) AS "isFree"
       FROM subscription_plans 
       WHERE slug NOT IN ('foodie-pro', 'master-chef')
       ORDER BY monthly_price_dollars ASC, id ASC
     `);
 
-    // Authoritative Token identity
     let tokenIdentity = {
       tokenName: 'Foodie Token',
       tokenSymbol: '🪙',
@@ -53905,7 +53879,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       success: true,
       user,
-      transactions: txRes.rows,
+      transactions: sanitizedTransactions,
       plans: plansRes.rows.length > 0 ? plansRes.rows : undefined,
       gatewayConfig,
       walletConfig,
@@ -53925,7 +53899,6 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const action = body.action;
 
-    // 1. CHANGE PLAN ATOMIC WORKFLOW
     if (action === 'change_plan') {
       const {
         email,
@@ -53975,7 +53948,6 @@ export async function POST(req: NextRequest) {
 
         const currentWalletBalance = parseFloat(userRecord.wallet_balance || 0);
 
-        // Deduct from Store Wallet if paid tier
         if (!isTargetFree) {
           if (currentWalletBalance < numAmount) {
             await client.query('ROLLBACK');
@@ -54013,7 +53985,6 @@ export async function POST(req: NextRequest) {
           expiry.setMonth(expiry.getMonth() + 1);
         }
 
-        // Cancel previous active transactions to prevent multiple concurrent plans
         await client.query(`
           UPDATE payment_transactions 
           SET status = 'canceled', 
@@ -54024,7 +53995,6 @@ export async function POST(req: NextRequest) {
             AND status IN ('active', 'succeeded', 'successful', 'paid')
         `, [userRecord.email, String(userRecord.id)]);
 
-        // Update full entitlements on users table
         const baseSlug = planSlug.replace(/^(preset_|plan_)/i, '').replace(/-(monthly|annual|year)$/i, '').trim();
         await client.query(`
           UPDATE users 
@@ -54052,7 +54022,6 @@ export async function POST(req: NextRequest) {
           userRecord.id
         ]);
 
-        // Insert new succeeded payment transaction
         const txId = `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         await client.query(`
           INSERT INTO payment_transactions (
@@ -54092,7 +54061,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. CANCEL AUTO-RENEW
     if (action === 'cancel_subscription') {
       const { email, transactionId } = body;
       if (transactionId) {
@@ -54113,7 +54081,6 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 3. RESUME AUTO-RENEW
     if (action === 'resume_subscription') {
       const { email, transactionId } = body;
       if (transactionId) {
@@ -57834,6 +57801,68 @@ interface Transaction {
   createdAt: string;
 }
 
+interface TokenIdentity {
+  tokenName: string;
+  tokenSymbol: string;
+  tokenIcon?: string;
+}
+
+/**
+ * Defensive utility to guarantee amount formatting never crashes on string/null/undefined.
+ */
+const formatAmount = (val: any): string => {
+  if (typeof val === 'number' && !isNaN(val)) {
+    return val.toFixed(2);
+  }
+  const parsed = parseFloat(val);
+  return (!isNaN(parsed) ? parsed : 0).toFixed(2);
+};
+
+/**
+ * Dynamic Token Icon renderer synchronizing directly with /admin/token-setting.
+ */
+function DynamicTokenIcon({ 
+  symbolOrIcon, 
+  className = "w-3.5 h-3.5",
+  style = {} 
+}: { 
+  symbolOrIcon?: string; 
+  className?: string; 
+  style?: React.CSSProperties 
+}) {
+  const val = (symbolOrIcon || '').trim();
+  const lower = val.toLowerCase();
+  if (lower === 'coins' || lower === 'coin') return <Coins className={className} style={style} />;
+  if (lower === 'sparkles' || lower === 'sparkle') return <Sparkles className={className} style={style} />;
+  if (lower === 'zap' || lower === 'lightning' || lower === 'flash') return <Zap className={className} style={style} />;
+
+  if (val && !/^[a-zA-Z0-9_-]{4,}$/.test(val)) {
+    return (
+      <span 
+        role="img" 
+        aria-label="token-icon"
+        className="inline-flex items-center justify-center select-none leading-none shrink-0" 
+        style={{ fontSize: '1.05em', ...style }}
+      >
+        {val}
+      </span>
+    );
+  }
+
+  if (val && val.length <= 4) {
+    return (
+      <span 
+        className="inline-flex items-center justify-center font-black text-[10px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/25 leading-none shrink-0 font-mono"
+        style={style}
+      >
+        {val}
+      </span>
+    );
+  }
+
+  return <Coins className={className} style={style} />;
+}
+
 export default function BillingPage() {
   const langContext = useTranslation();
   const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
@@ -57852,9 +57881,10 @@ export default function BillingPage() {
     currencySymbol: '$'
   });
 
-  const [tokenIdentity, setTokenIdentity] = useState<any>({
+  const [tokenIdentity, setTokenIdentity] = useState<TokenIdentity>({
     tokenName: 'Tokens',
-    tokenSymbol: '🪙'
+    tokenSymbol: '🪙',
+    tokenIcon: '🪙'
   });
 
   // Dynamic Theme Synchronization
@@ -57862,7 +57892,6 @@ export default function BillingPage() {
     const checkTheme = () => {
       if (typeof window !== 'undefined') {
         const saved = localStorage.getItem('zecratary_theme_mode');
-        // Theme variables propagate via documentElement
       }
     };
     checkTheme();
@@ -57873,6 +57902,24 @@ export default function BillingPage() {
       window.removeEventListener('zecratary_theme_updated', checkTheme);
     };
   }, []);
+
+  const normalizeTransaction = (tx: any): Transaction => ({
+    id: String(tx.id || tx.transaction_id || `tx_${Date.now()}`),
+    customerName: tx.customerName || tx.customer_name || tx.userName || '',
+    customerEmail: tx.customerEmail || tx.customer_email || tx.userEmail || '',
+    planName: tx.planName || tx.plan_name || 'Subscription Tier',
+    planSlug: tx.planSlug || tx.plan_slug || '',
+    amount: typeof tx.amount === 'number' ? tx.amount : (parseFloat(tx.amount || 0) || 0),
+    currency: (tx.currency || 'USD').toUpperCase(),
+    gateway: tx.gateway || tx.payment_method || 'wallet',
+    status: (tx.status || 'succeeded').toLowerCase(),
+    failureReason: tx.failureReason || tx.failure_reason,
+    isRecurring: Boolean(tx.isRecurring ?? tx.is_recurring ?? true),
+    recurringInterval: (tx.recurringInterval || tx.recurring_interval || 'MONTH').toUpperCase(),
+    autoRenew: Boolean(tx.autoRenew ?? tx.auto_renew ?? true),
+    expiryDate: tx.expiryDate || tx.expiry_date,
+    createdAt: tx.createdAt || tx.created_at || new Date().toISOString()
+  });
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -57907,9 +57954,16 @@ export default function BillingPage() {
         const data = await res.json();
         if (data.success) {
           setUser(data.user);
-          setTransactions(Array.isArray(data.transactions) ? data.transactions : []);
+          const rawList = Array.isArray(data.transactions) ? data.transactions : [];
+          setTransactions(rawList.map(normalizeTransaction));
           if (data.gatewayConfig) setGatewayConfig(data.gatewayConfig);
-          if (data.tokenIdentity) setTokenIdentity(data.tokenIdentity);
+          if (data.tokenIdentity) {
+            setTokenIdentity({
+              tokenName: data.tokenIdentity.tokenName || 'Tokens',
+              tokenSymbol: data.tokenIdentity.tokenSymbol || '🪙',
+              tokenIcon: data.tokenIdentity.tokenIcon || data.tokenIdentity.tokenSymbol || '🪙'
+            });
+          }
         }
       }
     } catch (err: any) {
@@ -57925,10 +57979,12 @@ export default function BillingPage() {
     window.addEventListener('zecratary_payment_updated', handleSync);
     window.addEventListener('zecratary_users_updated', handleSync);
     window.addEventListener('zecratary_wallet_updated', handleSync);
+    window.addEventListener('zecratary_token_settings_updated', handleSync);
     return () => {
       window.removeEventListener('zecratary_payment_updated', handleSync);
       window.removeEventListener('zecratary_users_updated', handleSync);
       window.removeEventListener('zecratary_wallet_updated', handleSync);
+      window.removeEventListener('zecratary_token_settings_updated', handleSync);
     };
   }, [fetchData]);
 
@@ -58243,7 +58299,7 @@ export default function BillingPage() {
                   </div>
                   <div className="font-bold text-base font-mono flex items-center gap-1" style={{ color: 'var(--color-emerald, #10b981)' }}>
                     <span>{gatewayConfig.currencySymbol || '$'}</span>
-                    <span>{Number(user?.wallet_balance || 0).toFixed(2)}</span>
+                    <span>{formatAmount(user?.wallet_balance)}</span>
                   </div>
                   <div className="text-[11px] opacity-60" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
                     {t('availableForRenewals', 'Available for automated plan renewals')}
@@ -58265,10 +58321,10 @@ export default function BillingPage() {
 
                 <div className="p-4 rounded-2xl border" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
                   <div className="flex items-center gap-2 text-xs opacity-60 font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                    <Coins className="w-3.5 h-3.5 text-amber-400" />
+                    <DynamicTokenIcon symbolOrIcon={tokenIdentity.tokenIcon || tokenIdentity.tokenSymbol} className="w-3.5 h-3.5 text-amber-400" />
                     <span>{t('tokenAllocation', 'Monthly Token Quota')}</span>
                   </div>
-                  <div className="font-bold text-base flex items-center gap-1" style={{ color: '#f59e0b' }}>
+                  <div className="font-bold text-base flex items-center gap-1.5" style={{ color: '#f59e0b' }}>
                     <span>{Number(user?.token_balance || 0).toLocaleString()}</span>
                     <span className="text-xs opacity-75">{tokenIdentity.tokenSymbol}</span>
                   </div>
@@ -58348,7 +58404,7 @@ export default function BillingPage() {
                       return (
                         <tr key={tx.id} className="hover:bg-white/[0.02] transition-colors" style={{ color: 'var(--color-text, #f8fafc)' }}>
                           <td className="px-4 py-3 font-mono text-[11px] font-bold">
-                            {tx.id.substring(0, 16)}...
+                            {tx.id?.length > 16 ? `${tx.id.substring(0, 16)}...` : (tx.id || '—')}
                           </td>
                           <td className="px-4 py-3 font-bold">
                             <span>{tx.planName}</span>
@@ -58356,8 +58412,9 @@ export default function BillingPage() {
                           <td className="px-4 py-3 uppercase font-semibold text-[11px] opacity-80">
                             {tx.recurringInterval}
                           </td>
+                          {/* CRITICAL FIX: formatAmount handles string and numbers safely */}
                           <td className="px-4 py-3 font-mono font-bold" style={{ color: 'var(--color-emerald, #10b981)' }}>
-                            {tx.currency} {tx.amount.toFixed(2)}
+                            {tx.currency} {formatAmount(tx.amount)}
                           </td>
                           <td className="px-4 py-3 uppercase text-[11px] opacity-75">
                             {tx.gateway}
@@ -58383,7 +58440,7 @@ export default function BillingPage() {
                             )}
                           </td>
                           <td className="px-4 py-3 text-[11px] opacity-75">
-                            {new Date(tx.createdAt).toLocaleDateString()}
+                            {tx.createdAt ? new Date(tx.createdAt).toLocaleDateString() : '—'}
                           </td>
                           <td className="px-4 py-3 text-right">
                             <button
@@ -58455,7 +58512,7 @@ export default function BillingPage() {
                   </div>
                   <div className="flex justify-between items-center opacity-70">
                     <span>{t('paymentDateLabel', 'Payment Date:')}</span>
-                    <span className="text-slate-200">{new Date(selectedInvoice.createdAt).toLocaleString()}</span>
+                    <span className="text-slate-200">{selectedInvoice.createdAt ? new Date(selectedInvoice.createdAt).toLocaleString() : '—'}</span>
                   </div>
                   <div className="flex justify-between items-center opacity-70">
                     <span>{t('paymentMethodLabel', 'Payment Method:')}</span>
@@ -58476,8 +58533,9 @@ export default function BillingPage() {
                       {t('subscriptionTierAccess', 'Full subscription culinary & token quota access')}
                     </div>
                   </div>
+                  {/* CRITICAL FIX: Safe formatAmount for modal total */}
                   <div className="text-xl font-black font-mono" style={{ color: 'var(--color-emerald, #10b981)' }}>
-                    {selectedInvoice.currency} {selectedInvoice.amount.toFixed(2)}
+                    {selectedInvoice.currency} {formatAmount(selectedInvoice.amount)}
                   </div>
                 </div>
               </div>
