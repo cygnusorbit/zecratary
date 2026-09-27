@@ -11,11 +11,8 @@ import {
   Search,
   CheckCircle2,
   AlertCircle,
-  ArrowUpRight,
-  UserCheck,
   Sliders,
   DollarSign,
-  Tag,
   Gift,
   Trash2,
   ChevronLeft,
@@ -100,6 +97,33 @@ export default function AdminWalletSettingsPage() {
     return fallback || '';
   }, [translate]);
 
+  // Clean, Non-Looping Theme Synchronization matching /admin/token-setting
+  const [isDayMode, setIsDayMode] = useState<boolean>(false);
+
+  const handleModeChange = useCallback(() => {
+    try {
+      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
+      const root = typeof document !== 'undefined' ? document.documentElement : null;
+      const day = mode === 'light' || mode === 'day' || (root && root.classList.contains('light'));
+      setIsDayMode(Boolean(day));
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    handleModeChange();
+    window.addEventListener('zecratary_theme_mode_changed', handleModeChange);
+    window.addEventListener('zecratary_theme_changed', handleModeChange);
+    window.addEventListener('zecratary_theme_updated', handleModeChange);
+    window.addEventListener('storage', handleModeChange);
+
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', handleModeChange);
+      window.removeEventListener('zecratary_theme_changed', handleModeChange);
+      window.removeEventListener('zecratary_theme_updated', handleModeChange);
+      window.removeEventListener('storage', handleModeChange);
+    };
+  }, [handleModeChange]);
+
   const [activeTab, setActiveTab] = useState<'settings' | 'ledger'>('settings');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -178,11 +202,6 @@ export default function AdminWalletSettingsPage() {
           }
           if (data.settings.ledger_columns && typeof data.settings.ledger_columns === 'object') {
             setVisibleColumns((prev) => ({ ...prev, ...data.settings.ledger_columns }));
-          } else if (typeof window !== 'undefined') {
-            try {
-              const savedCols = localStorage.getItem('zecratary_admin_wallet_ledger_columns');
-              if (savedCols) setVisibleColumns((prev) => ({ ...prev, ...JSON.parse(savedCols) }));
-            } catch (_) {}
           }
         }
         if (Array.isArray(data.transactions)) setTransactions(data.transactions);
@@ -343,7 +362,7 @@ export default function AdminWalletSettingsPage() {
   }, [visibleColumns]);
 
   const activeColumnCount = useMemo(() => {
-    let count = 1; // 1 for selection checkbox column
+    let count = 1;
     if (visibleColumns.customer) count++;
     if (visibleColumns.type) count++;
     if (visibleColumns.amount) count++;
@@ -359,9 +378,6 @@ export default function AdminWalletSettingsPage() {
     if (visibleColumns[key] && activeDataColumnCount <= 1) return;
     const updated = { ...visibleColumns, [key]: !visibleColumns[key] };
     setVisibleColumns(updated);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('zecratary_admin_wallet_ledger_columns', JSON.stringify(updated));
-    }
     fetch('/api/admin/wallet-settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -371,9 +387,6 @@ export default function AdminWalletSettingsPage() {
 
   const resetColumns = () => {
     setVisibleColumns(DEFAULT_COLUMNS);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('zecratary_admin_wallet_ledger_columns', JSON.stringify(DEFAULT_COLUMNS));
-    }
     fetch('/api/admin/wallet-settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -470,19 +483,52 @@ export default function AdminWalletSettingsPage() {
   return (
     <div
       className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-4 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text, #ffffff)' }}
+      style={{
+        color: 'var(--color-text)',
+        transition: 'background-color 200ms ease, color 200ms ease, border-color 200ms ease',
+      }}
     >
+      {/* Harmonized Autofill & Focus Properties matching /admin/token-setting */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        .wallet-input:-webkit-autofill,
+        .wallet-input:-webkit-autofill:hover,
+        .wallet-input:-webkit-autofill:focus,
+        .wallet-input:-webkit-autofill:active {
+          -webkit-box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
+          box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
+          -webkit-text-fill-color: var(--color-text) !important;
+          caret-color: var(--color-text) !important;
+          transition: background-color 50000s ease-in-out 0s !important;
+        }
+        .wallet-input:focus {
+          border-color: var(--color-primary) !important;
+        }
+      `}} />
+
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-[var(--color-card,#1e293b)] p-6 rounded-2xl border border-[var(--color-border,#334155)] shadow-md">
+      <div
+        className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 p-6 rounded-2xl border shadow-md transition-colors duration-200"
+        style={{
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)',
+        }}
+      >
         <div className="flex items-center gap-4">
-          <div className="p-3.5 bg-primary/10 rounded-2xl border border-primary/20 text-primary">
-            <Wallet className="w-8 h-8 text-[var(--color-primary,#3b82f6)]" />
+          <div
+            className="p-3.5 rounded-2xl border flex items-center justify-center transition-colors duration-200"
+            style={{
+              backgroundColor: 'color-mix(in srgb, var(--color-primary) 10%, transparent)',
+              borderColor: 'color-mix(in srgb, var(--color-primary) 20%, transparent)',
+              color: 'var(--color-primary)',
+            }}
+          >
+            <Wallet className="w-8 h-8" style={{ color: 'var(--color-primary)' }} />
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">
+            <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--color-text)' }}>
               {t('walletSettingsTitle', 'Wallet Settings & Balance Engine')}
             </h1>
-            <p className="text-sm opacity-70 mt-0.5">
+            <p className="text-sm opacity-70 mt-0.5" style={{ color: 'var(--color-text-secondary, var(--color-text))' }}>
               {t('walletSettingsSubtitle', 'Configure top-up limits, payment gateways, promotional bonuses, and customer store credit.')}
             </p>
           </div>
@@ -495,8 +541,8 @@ export default function AdminWalletSettingsPage() {
               setAdjEmail(users[0]?.email || '');
               setShowAdjModal(true);
             }}
-            className="px-4 py-2.5 bg-primary hover:opacity-90 text-white rounded-xl text-sm font-semibold flex items-center gap-2 transition-all shadow-sm cursor-pointer"
-            style={{ backgroundColor: 'var(--color-primary, #3b82f6)' }}
+            className="px-4 py-2.5 text-white rounded-xl text-sm font-semibold flex items-center gap-2 transition-all shadow-sm cursor-pointer hover:opacity-90"
+            style={{ backgroundColor: 'var(--color-primary)' }}
           >
             <Plus className="w-4 h-4" />
             {t('adjustBalance', 'Credit / Adjust Balance')}
@@ -505,8 +551,13 @@ export default function AdminWalletSettingsPage() {
             type="button"
             onClick={fetchData}
             disabled={loading}
-            className="p-2.5 rounded-xl border border-[var(--color-border,#334155)] hover:bg-[var(--color-inner-dark,#0f172a)] transition-all cursor-pointer"
-            title="Refresh Data"
+            className="p-2.5 rounded-xl border transition-all cursor-pointer hover:opacity-80"
+            style={{
+              borderColor: 'var(--color-border)',
+              backgroundColor: 'var(--color-inner-dark)',
+              color: 'var(--color-text)',
+            }}
+            title={t('refreshData', 'Refresh Data')}
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
@@ -527,31 +578,45 @@ export default function AdminWalletSettingsPage() {
       )}
 
       {/* Tabs */}
-      <div className="flex border-b border-[var(--color-border,#334155)] gap-3 text-sm font-medium">
+      <div
+        className="flex border-b gap-3 text-sm font-medium transition-colors duration-200"
+        style={{ borderColor: 'var(--color-border)' }}
+      >
         <button
           type="button"
           onClick={() => setActiveTab('settings')}
-          className={`pb-3 px-3 flex items-center gap-2 transition-all relative cursor-pointer ${
-            activeTab === 'settings'
-              ? 'text-primary font-semibold border-b-2 border-[var(--color-primary,#3b82f6)]'
-              : 'opacity-60 hover:opacity-100'
-          }`}
+          className="pb-3 px-3 flex items-center gap-2 transition-all relative cursor-pointer"
+          style={{
+            color: activeTab === 'settings' ? 'var(--color-primary)' : 'var(--color-text-secondary, var(--color-text))',
+            opacity: activeTab === 'settings' ? 1 : 0.7,
+            borderBottom: activeTab === 'settings' ? '2px solid var(--color-primary)' : '2px solid transparent',
+            fontWeight: activeTab === 'settings' ? 600 : 500,
+          }}
         >
-          <Settings className="w-4 h-4" />
+          <Settings className="w-4 h-4" style={{ color: activeTab === 'settings' ? 'var(--color-primary)' : undefined }} />
           {t('walletConfig', 'Configuration & Rules')}
         </button>
         <button
           type="button"
           onClick={() => setActiveTab('ledger')}
-          className={`pb-3 px-3 flex items-center gap-2 transition-all relative cursor-pointer ${
-            activeTab === 'ledger'
-              ? 'text-primary font-semibold border-b-2 border-[var(--color-primary,#3b82f6)]'
-              : 'opacity-60 hover:opacity-100'
-          }`}
+          className="pb-3 px-3 flex items-center gap-2 transition-all relative cursor-pointer"
+          style={{
+            color: activeTab === 'ledger' ? 'var(--color-primary)' : 'var(--color-text-secondary, var(--color-text))',
+            opacity: activeTab === 'ledger' ? 1 : 0.7,
+            borderBottom: activeTab === 'ledger' ? '2px solid var(--color-primary)' : '2px solid transparent',
+            fontWeight: activeTab === 'ledger' ? 600 : 500,
+          }}
         >
-          <Sliders className="w-4 h-4" />
+          <Sliders className="w-4 h-4" style={{ color: activeTab === 'ledger' ? 'var(--color-primary)' : undefined }} />
           {t('walletLedger', 'Wallet Transactions Ledger')}
-          <span className="ml-1.5 px-2 py-0.5 rounded-full text-xs bg-[var(--color-inner-dark,#0f172a)] border border-[var(--color-border,#334155)]">
+          <span
+            className="ml-1.5 px-2 py-0.5 rounded-full text-xs border"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)',
+            }}
+          >
             {transactions.length}
           </span>
         </button>
@@ -560,59 +625,144 @@ export default function AdminWalletSettingsPage() {
       {activeTab === 'settings' ? (
         <div className="space-y-6">
           {/* Section 1: Core System Parameters */}
-          <div className="bg-[var(--color-card,#1e293b)] p-6 rounded-2xl border border-[var(--color-border,#334155)] space-y-6 shadow-sm">
-            <h2 className="text-lg font-semibold flex items-center gap-2.5">
-              <ShieldCheck className="w-5 h-5 text-primary" />
+          <div
+            className="p-6 rounded-2xl border space-y-6 shadow-sm transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+            }}
+          >
+            <h2 className="text-lg font-semibold flex items-center gap-2.5" style={{ color: 'var(--color-text)' }}>
+              <ShieldCheck className="w-5 h-5" style={{ color: 'var(--color-primary)' }} />
               {t('coreParameters', 'General Wallet Controls')}
             </h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Enable Wallet Toggle */}
-              <div className="p-4 rounded-xl border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] flex items-center justify-between">
+              {/* Enable Wallet Slide Button matching /admin/token-setting */}
+              <div
+                className="p-4 rounded-xl border flex items-center justify-between transition-colors duration-200"
+                style={{
+                  borderColor: 'var(--color-border)',
+                  backgroundColor: 'var(--color-inner-dark)',
+                }}
+              >
                 <div>
-                  <div className="font-medium text-sm">{t('enableWallet', 'Enable Wallet System')}</div>
-                  <div className="text-xs opacity-60 mt-0.5">{t('enableWalletDesc', 'Allow customers to top up and hold on-site balance.')}</div>
+                  <div className="font-medium text-sm" style={{ color: 'var(--color-text)' }}>
+                    {t('enableWallet', 'Enable Wallet System')}
+                  </div>
+                  <div className="text-xs opacity-60 mt-0.5" style={{ color: 'var(--color-text-secondary, var(--color-text))' }}>
+                    {t('enableWalletDesc', 'Allow customers to top up and hold on-site balance.')}
+                  </div>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={config.is_enabled}
-                    onChange={(e) => setConfig({ ...config, is_enabled: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--color-primary,#3b82f6)]"></div>
-                </label>
+
+                <div className="flex items-center gap-3">
+                  <span
+                    className="text-xs font-semibold px-2 py-0.5 rounded-full border transition-colors"
+                    style={{
+                      backgroundColor: config.is_enabled
+                        ? 'color-mix(in srgb, var(--color-emerald, #10b981) 12%, transparent)'
+                        : 'color-mix(in srgb, var(--color-text-secondary, #64748b) 12%, transparent)',
+                      borderColor: config.is_enabled
+                        ? 'color-mix(in srgb, var(--color-emerald, #10b981) 25%, transparent)'
+                        : 'var(--color-border)',
+                      color: config.is_enabled ? 'var(--color-emerald, #10b981)' : 'var(--color-text-secondary, #64748b)'
+                    }}
+                  >
+                    {config.is_enabled ? t('systemActive', 'Enabled') : t('systemDisabled', 'Disabled')}
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={config.is_enabled}
+                    onClick={() => setConfig(prev => ({ ...prev, is_enabled: !prev.is_enabled }))}
+                    className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                    style={{
+                      backgroundColor: config.is_enabled
+                        ? 'var(--color-emerald, #10b981)'
+                        : isDayMode ? '#cbd5e1' : '#334155'
+                    }}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                        config.is_enabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
 
-              {/* Allow Site Purchases Toggle */}
-              <div className="p-4 rounded-xl border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] flex items-center justify-between">
+              {/* Allow Site Purchases Slide Button matching /admin/token-setting */}
+              <div
+                className="p-4 rounded-xl border flex items-center justify-between transition-colors duration-200"
+                style={{
+                  borderColor: 'var(--color-border)',
+                  backgroundColor: 'var(--color-inner-dark)',
+                }}
+              >
                 <div>
-                  <div className="font-medium text-sm">{t('allowSitePurchases', 'Allow Balance for Purchases')}</div>
-                  <div className="text-xs opacity-60 mt-0.5">{t('allowSitePurchasesDesc', 'Permit wallet balance to pay for platform items & recipes.')}</div>
+                  <div className="font-medium text-sm" style={{ color: 'var(--color-text)' }}>
+                    {t('allowSitePurchases', 'Allow Balance for Purchases')}
+                  </div>
+                  <div className="text-xs opacity-60 mt-0.5" style={{ color: 'var(--color-text-secondary, var(--color-text))' }}>
+                    {t('allowSitePurchasesDesc', 'Permit wallet balance to pay for platform items & recipes.')}
+                  </div>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={config.allow_site_purchases}
-                    onChange={(e) => setConfig({ ...config, allow_site_purchases: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[var(--color-primary,#3b82f6)]"></div>
-                </label>
+
+                <div className="flex items-center gap-3">
+                  <span
+                    className="text-xs font-semibold px-2 py-0.5 rounded-full border transition-colors"
+                    style={{
+                      backgroundColor: config.allow_site_purchases
+                        ? 'color-mix(in srgb, var(--color-primary) 12%, transparent)'
+                        : 'color-mix(in srgb, var(--color-text-secondary, #64748b) 12%, transparent)',
+                      borderColor: config.allow_site_purchases
+                        ? 'color-mix(in srgb, var(--color-primary) 25%, transparent)'
+                        : 'var(--color-border)',
+                      color: config.allow_site_purchases ? 'var(--color-primary)' : 'var(--color-text-secondary, #64748b)'
+                    }}
+                  >
+                    {config.allow_site_purchases ? t('allowed', 'Allowed') : t('disallowed', 'Disallowed')}
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={config.allow_site_purchases}
+                    onClick={() => setConfig(prev => ({ ...prev, allow_site_purchases: !prev.allow_site_purchases }))}
+                    className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                    style={{
+                      backgroundColor: config.allow_site_purchases
+                        ? 'var(--color-primary)'
+                        : isDayMode ? '#cbd5e1' : '#334155'
+                    }}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                        config.allow_site_purchases ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
 
               {/* Currency Selector */}
               <div>
-                <label className="block text-xs font-semibold uppercase opacity-70 mb-2">
+                <label className="block text-xs font-semibold uppercase opacity-70 mb-2" style={{ color: 'var(--color-text)' }}>
                   {t('currency', 'Wallet Currency')}
                 </label>
                 <select
                   value={config.currency}
                   onChange={(e) => setConfig({ ...config, currency: e.target.value })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] text-sm focus:outline-none focus:border-primary cursor-pointer"
+                  className="wallet-input w-full px-3.5 py-2.5 rounded-xl border text-sm focus:outline-none cursor-pointer transition-colors duration-200"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text)',
+                  }}
                 >
                   {SUPPORTED_CURRENCIES.map((curr) => (
-                    <option key={curr.code} value={curr.code}>
+                    <option key={curr.code} value={curr.code} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
                       {curr.name} ({curr.symbol})
                     </option>
                   ))}
@@ -621,7 +771,7 @@ export default function AdminWalletSettingsPage() {
 
               {/* Quick Presets Input */}
               <div>
-                <label className="block text-xs font-semibold uppercase opacity-70 mb-2">
+                <label className="block text-xs font-semibold uppercase opacity-70 mb-2" style={{ color: 'var(--color-text)' }}>
                   {t('presetTopups', 'Quick Top-Up Presets (Comma Separated)')}
                 </label>
                 <input
@@ -629,13 +779,18 @@ export default function AdminWalletSettingsPage() {
                   value={presetInput}
                   onChange={(e) => setPresetInput(e.target.value)}
                   placeholder="10, 25, 50, 100, 250"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] text-sm focus:outline-none focus:border-primary"
+                  className="wallet-input w-full px-3.5 py-2.5 rounded-xl border text-sm focus:outline-none transition-colors duration-200"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text)',
+                  }}
                 />
               </div>
 
               {/* Minimum Top-Up */}
               <div>
-                <label className="block text-xs font-semibold uppercase opacity-70 mb-2">
+                <label className="block text-xs font-semibold uppercase opacity-70 mb-2" style={{ color: 'var(--color-text)' }}>
                   {t('minTopUp', 'Minimum Top-Up Amount')} ({activeCurrencySymbol})
                 </label>
                 <input
@@ -644,13 +799,18 @@ export default function AdminWalletSettingsPage() {
                   min="0.5"
                   value={config.min_topup}
                   onChange={(e) => setConfig({ ...config, min_topup: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] text-sm focus:outline-none focus:border-primary"
+                  className="wallet-input w-full px-3.5 py-2.5 rounded-xl border text-sm focus:outline-none transition-colors duration-200"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text)',
+                  }}
                 />
               </div>
 
               {/* Maximum Top-Up */}
               <div>
-                <label className="block text-xs font-semibold uppercase opacity-70 mb-2">
+                <label className="block text-xs font-semibold uppercase opacity-70 mb-2" style={{ color: 'var(--color-text)' }}>
                   {t('maxTopUp', 'Maximum Single Top-Up Cap')} ({activeCurrencySymbol})
                 </label>
                 <input
@@ -659,21 +819,32 @@ export default function AdminWalletSettingsPage() {
                   min="1"
                   value={config.max_topup}
                   onChange={(e) => setConfig({ ...config, max_topup: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] text-sm focus:outline-none focus:border-primary"
+                  className="wallet-input w-full px-3.5 py-2.5 rounded-xl border text-sm focus:outline-none transition-colors duration-200"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text)',
+                  }}
                 />
               </div>
             </div>
           </div>
 
           {/* Section 2: Gateways & Deposit Incentives */}
-          <div className="bg-[var(--color-card,#1e293b)] p-6 rounded-2xl border border-[var(--color-border,#334155)] space-y-6 shadow-sm">
-            <h2 className="text-lg font-semibold flex items-center gap-2.5">
-              <CreditCard className="w-5 h-5 text-primary" />
+          <div
+            className="p-6 rounded-2xl border space-y-6 shadow-sm transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+            }}
+          >
+            <h2 className="text-lg font-semibold flex items-center gap-2.5" style={{ color: 'var(--color-text)' }}>
+              <CreditCard className="w-5 h-5" style={{ color: 'var(--color-primary)' }} />
               {t('gatewaysAndIncentives', 'Authorized Payment Gateways & Bonus Rules')}
             </h2>
 
             <div>
-              <label className="block text-xs font-semibold uppercase opacity-70 mb-3">
+              <label className="block text-xs font-semibold uppercase opacity-70 mb-3" style={{ color: 'var(--color-text)' }}>
                 {t('allowedGateways', 'Accepted Top-Up Gateways')}
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -687,17 +858,22 @@ export default function AdminWalletSettingsPage() {
                     <div
                       key={gw.id}
                       onClick={() => toggleGateway(gw.id)}
-                      className={`p-3.5 rounded-xl border cursor-pointer flex items-center justify-between transition-all select-none ${
-                        active
-                          ? 'border-[var(--color-primary,#3b82f6)] bg-primary/10'
-                          : 'border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] opacity-60'
-                      }`}
+                      className="p-3.5 rounded-xl border cursor-pointer flex items-center justify-between transition-all select-none"
+                      style={{
+                        borderColor: active ? 'var(--color-primary)' : 'var(--color-border)',
+                        backgroundColor: active
+                          ? 'color-mix(in srgb, var(--color-primary) 12%, transparent)'
+                          : 'var(--color-inner-dark)',
+                        opacity: active ? 1 : 0.7,
+                      }}
                     >
-                      <span className="text-sm font-medium">{gw.label}</span>
+                      <span className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>{gw.label}</span>
                       <div
-                        className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                          active ? 'bg-[var(--color-primary,#3b82f6)] border-primary' : 'border-gray-500'
-                        }`}
+                        className="w-4 h-4 rounded-full border flex items-center justify-center transition-colors"
+                        style={{
+                          backgroundColor: active ? 'var(--color-primary)' : 'transparent',
+                          borderColor: active ? 'var(--color-primary)' : 'var(--color-border)',
+                        }}
                       >
                         {active && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
                       </div>
@@ -709,7 +885,7 @@ export default function AdminWalletSettingsPage() {
 
             <div className="pt-2">
               <div className="flex items-center justify-between mb-3">
-                <label className="block text-xs font-semibold uppercase opacity-70">
+                <label className="block text-xs font-semibold uppercase opacity-70" style={{ color: 'var(--color-text)' }}>
                   {t('promotionalBonuses', 'Top-Up Bonus Incentives (Tiered Credit Rewards)')}
                 </label>
                 <button
@@ -720,7 +896,8 @@ export default function AdminWalletSettingsPage() {
                       bonus_rules: [...config.bonus_rules, { threshold: 150, bonus_percent: 15 }],
                     })
                   }
-                  className="text-xs text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                  className="text-xs hover:underline flex items-center gap-1 cursor-pointer"
+                  style={{ color: 'var(--color-primary)' }}
                 >
                   <Plus className="w-3.5 h-3.5" />
                   {t('addBonusTier', 'Add Bonus Tier')}
@@ -731,11 +908,15 @@ export default function AdminWalletSettingsPage() {
                 {config.bonus_rules.map((rule, idx) => (
                   <div
                     key={idx}
-                    className="p-3.5 rounded-xl border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] flex flex-wrap items-center gap-4 text-sm"
+                    className="p-3.5 rounded-xl border flex flex-wrap items-center gap-4 text-sm transition-colors duration-200"
+                    style={{
+                      borderColor: 'var(--color-border)',
+                      backgroundColor: 'var(--color-inner-dark)',
+                    }}
                   >
                     <div className="flex items-center gap-2">
-                      <Gift className="w-4 h-4 text-emerald-400" />
-                      <span className="opacity-70 text-xs">Deposit ≥</span>
+                      <Gift className="w-4 h-4" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                      <span className="opacity-70 text-xs" style={{ color: 'var(--color-text)' }}>Deposit ≥</span>
                       <input
                         type="number"
                         min="1"
@@ -745,11 +926,16 @@ export default function AdminWalletSettingsPage() {
                           updated[idx].threshold = parseFloat(e.target.value) || 0;
                           setConfig({ ...config, bonus_rules: updated });
                         }}
-                        className="w-24 px-2.5 py-1.5 rounded-lg border border-[var(--color-border,#334155)] bg-[var(--color-card,#1e293b)] text-xs focus:outline-none"
+                        className="wallet-input w-24 px-2.5 py-1.5 rounded-lg border text-xs focus:outline-none transition-colors"
+                        style={{
+                          borderColor: 'var(--color-border)',
+                          backgroundColor: 'var(--color-card)',
+                          color: 'var(--color-text)',
+                        }}
                       />
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="opacity-70 text-xs">Give Bonus %</span>
+                      <span className="opacity-70 text-xs" style={{ color: 'var(--color-text)' }}>Give Bonus %</span>
                       <input
                         type="number"
                         min="0"
@@ -760,9 +946,14 @@ export default function AdminWalletSettingsPage() {
                           updated[idx].bonus_percent = parseFloat(e.target.value) || 0;
                           setConfig({ ...config, bonus_rules: updated });
                         }}
-                        className="w-20 px-2.5 py-1.5 rounded-lg border border-[var(--color-border,#334155)] bg-[var(--color-card,#1e293b)] text-xs focus:outline-none"
+                        className="wallet-input w-20 px-2.5 py-1.5 rounded-lg border text-xs focus:outline-none transition-colors"
+                        style={{
+                          borderColor: 'var(--color-border)',
+                          backgroundColor: 'var(--color-card)',
+                          color: 'var(--color-text)',
+                        }}
                       />
-                      <span className="text-xs opacity-60">%</span>
+                      <span className="text-xs opacity-60" style={{ color: 'var(--color-text)' }}>%</span>
                     </div>
 
                     <button
@@ -787,8 +978,8 @@ export default function AdminWalletSettingsPage() {
               type="button"
               onClick={handleSaveSettings}
               disabled={saving}
-              className="px-6 py-3 bg-primary hover:opacity-90 text-white rounded-xl font-semibold text-sm flex items-center gap-2 transition-all shadow-md cursor-pointer disabled:opacity-50"
-              style={{ backgroundColor: 'var(--color-primary, #3b82f6)' }}
+              className="px-6 py-3 text-white rounded-xl font-semibold text-sm flex items-center gap-2 transition-all shadow-md cursor-pointer disabled:opacity-50 hover:opacity-90"
+              style={{ backgroundColor: 'var(--color-primary)' }}
             >
               {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
               {t('saveWalletSettings', 'Save Wallet Configurations')}
@@ -797,11 +988,17 @@ export default function AdminWalletSettingsPage() {
         </div>
       ) : (
         /* Section: Wallet Transactions Ledger */
-        <div className="bg-[var(--color-card,#1e293b)] p-6 rounded-2xl border border-[var(--color-border,#334155)] space-y-4 shadow-sm">
+        <div
+          className="p-6 rounded-2xl border space-y-4 shadow-sm transition-colors duration-200"
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)',
+          }}
+        >
           <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
             <div className="flex items-center gap-2 flex-1 max-w-md">
               <div className="relative flex-1">
-                <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 opacity-50" />
+                <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 opacity-50" style={{ color: 'var(--color-text)' }} />
                 <input
                   type="text"
                   placeholder={t('searchTransactions', 'Search by email, description or ID...')}
@@ -810,7 +1007,12 @@ export default function AdminWalletSettingsPage() {
                     setSearchQuery(e.target.value);
                     setPage(1);
                   }}
-                  className="w-full pl-10 pr-4 py-2 rounded-xl border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] text-sm focus:outline-none focus:border-primary"
+                  className="wallet-input w-full pl-10 pr-4 py-2 rounded-xl border text-sm focus:outline-none transition-colors"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text)',
+                  }}
                 />
               </div>
 
@@ -819,22 +1021,35 @@ export default function AdminWalletSettingsPage() {
                 <button
                   type="button"
                   onClick={() => setShowColumnMenu((prev) => !prev)}
-                  className="px-3.5 py-2 rounded-xl border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] hover:bg-[var(--color-card,#1e293b)] text-xs font-semibold flex items-center gap-2 transition cursor-pointer"
+                  className="px-3.5 py-2 rounded-xl border text-xs font-semibold flex items-center gap-2 transition cursor-pointer hover:opacity-80"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text)',
+                  }}
                   title={t('customizeColumns', 'Toggle visible columns')}
                 >
-                  <Columns3 className="w-4 h-4 text-primary" />
+                  <Columns3 className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />
                   <span>{t('columns', 'Columns')}</span>
                   <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showColumnMenu ? 'rotate-180' : ''}`} />
                 </button>
 
                 {showColumnMenu && (
-                  <div className="absolute right-0 sm:left-0 mt-2 w-56 rounded-2xl border border-[var(--color-border,#334155)] bg-[var(--color-card,#1e293b)] shadow-2xl p-3 z-30 space-y-2 animate-fade-in">
-                    <div className="flex items-center justify-between pb-2 border-b border-[var(--color-border,#334155)] text-xs font-bold">
+                  <div
+                    className="absolute right-0 sm:left-0 mt-2 w-56 rounded-2xl border shadow-2xl p-3 z-30 space-y-2 animate-fade-in"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)',
+                    }}
+                  >
+                    <div className="flex items-center justify-between pb-2 border-b text-xs font-bold" style={{ borderColor: 'var(--color-border)' }}>
                       <span>{t('toggleColumns', 'Toggle Columns')}</span>
                       <button
                         type="button"
                         onClick={resetColumns}
-                        className="text-[11px] text-primary hover:underline cursor-pointer"
+                        className="text-[11px] hover:underline cursor-pointer"
+                        style={{ color: 'var(--color-primary)' }}
                       >
                         {t('reset', 'Reset')}
                       </button>
@@ -847,16 +1062,20 @@ export default function AdminWalletSettingsPage() {
                           <label
                             key={col.key}
                             className={`flex items-center justify-between px-2 py-1.5 rounded-lg text-xs cursor-pointer select-none transition ${
-                              isLast ? 'opacity-50 cursor-not-allowed' : 'hover:bg-[var(--color-inner-dark,#0f172a)]'
+                              isLast ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-80'
                             }`}
+                            style={{
+                              backgroundColor: isChecked ? 'color-mix(in srgb, var(--color-inner-dark) 50%, transparent)' : 'transparent',
+                            }}
                           >
-                            <span>{col.label}</span>
+                            <span style={{ color: 'var(--color-text)' }}>{col.label}</span>
                             <input
                               type="checkbox"
                               checked={isChecked}
                               disabled={isLast}
                               onChange={() => toggleColumn(col.key)}
-                              className="rounded border-[var(--color-border,#334155)] cursor-pointer w-4 h-4 accent-[var(--color-primary,#3b82f6)]"
+                              className="rounded cursor-pointer w-4 h-4"
+                              style={{ accentColor: 'var(--color-primary)' }}
                             />
                           </label>
                         );
@@ -867,16 +1086,23 @@ export default function AdminWalletSettingsPage() {
               </div>
             </div>
 
-            <div className="text-xs opacity-60 self-center">
+            <div className="text-xs opacity-60 self-center" style={{ color: 'var(--color-text)' }}>
               {t('showingTotal', 'Showing')} {filteredTransactions.length} {t('records', 'transactions')}
             </div>
           </div>
 
           {/* Bulk Action Bar */}
           {selectedTxIds.length > 0 && (
-            <div className="p-3 px-4 rounded-xl border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] flex flex-wrap items-center justify-between gap-3 shadow-inner animate-fade-in">
+            <div
+              className="p-3 px-4 rounded-xl border flex flex-wrap items-center justify-between gap-3 shadow-inner animate-fade-in"
+              style={{
+                borderColor: 'var(--color-border)',
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)',
+              }}
+            >
               <div className="flex items-center gap-2 text-xs font-semibold">
-                <span className="w-2 h-2 rounded-full bg-[var(--color-primary,#3b82f6)] animate-pulse" />
+                <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: 'var(--color-primary)' }} />
                 <span>
                   {selectedTxIds.length} {t('selectedRecords', 'transaction(s) selected')}
                 </span>
@@ -885,7 +1111,12 @@ export default function AdminWalletSettingsPage() {
                 <button
                   type="button"
                   onClick={() => setSelectedTxIds([])}
-                  className="px-3 py-1.5 rounded-lg border border-[var(--color-border,#334155)] text-xs font-semibold hover:bg-[var(--color-card,#1e293b)] transition cursor-pointer"
+                  className="px-3 py-1.5 rounded-lg border text-xs font-semibold transition cursor-pointer hover:opacity-80"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-card)',
+                    color: 'var(--color-text)',
+                  }}
                 >
                   {t('clearSelection', 'Clear Selection')}
                 </button>
@@ -907,9 +1138,18 @@ export default function AdminWalletSettingsPage() {
           )}
 
           {/* Transactions Table */}
-          <div className="overflow-x-auto rounded-xl border border-[var(--color-border,#334155)]">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-[var(--color-inner-dark,#0f172a)] border-b border-[var(--color-border,#334155)] text-xs uppercase opacity-70">
+          <div
+            className="overflow-x-auto rounded-xl border transition-colors duration-200"
+            style={{ borderColor: 'var(--color-border)' }}
+          >
+            <table className="w-full text-left text-sm" style={{ color: 'var(--color-text)' }}>
+              <thead
+                className="border-b text-xs uppercase opacity-75 transition-colors"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                }}
+              >
                 <tr>
                   <th className="py-3 px-4 w-12 text-center">
                     <input
@@ -919,7 +1159,8 @@ export default function AdminWalletSettingsPage() {
                       }}
                       checked={isAllCurrentPageSelected}
                       onChange={handleToggleSelectAll}
-                      className="rounded border-[var(--color-border,#334155)] cursor-pointer w-4 h-4 accent-[var(--color-primary,#3b82f6)]"
+                      className="rounded cursor-pointer w-4 h-4"
+                      style={{ accentColor: 'var(--color-primary)' }}
                       title={t('selectAllCurrentPage', 'Select all on this page')}
                     />
                   </th>
@@ -933,7 +1174,7 @@ export default function AdminWalletSettingsPage() {
                   {visibleColumns.actions && <th className="py-3 px-4 text-center">{t('actions', 'Actions')}</th>}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[var(--color-border,#334155)]">
+              <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
                 {paginatedTransactions.length === 0 ? (
                   <tr>
                     <td colSpan={activeColumnCount} className="py-8 text-center text-sm opacity-50">
@@ -950,54 +1191,72 @@ export default function AdminWalletSettingsPage() {
                     return (
                       <tr
                         key={tx.id}
-                        className={`transition-colors ${
-                          isSelected ? 'bg-primary/5' : 'hover:bg-[var(--color-inner-dark,#0f172a)]/40'
-                        }`}
+                        className="transition-colors"
+                        style={{
+                          backgroundColor: isSelected
+                            ? 'color-mix(in srgb, var(--color-primary) 10%, transparent)'
+                            : 'transparent',
+                        }}
                       >
                         <td className="py-3 px-4 text-center">
                           <input
                             type="checkbox"
                             checked={isSelected}
                             onChange={() => handleToggleSelectOne(tx.id)}
-                            className="rounded border-[var(--color-border,#334155)] cursor-pointer w-4 h-4 accent-[var(--color-primary,#3b82f6)]"
+                            className="rounded cursor-pointer w-4 h-4"
+                            style={{ accentColor: 'var(--color-primary)' }}
                           />
                         </td>
                         {visibleColumns.customer && (
-                          <td className="py-3 px-4 font-medium">{tx.user_email}</td>
+                          <td className="py-3 px-4 font-medium" style={{ color: 'var(--color-text)' }}>{tx.user_email}</td>
                         )}
                         {visibleColumns.type && (
                           <td className="py-3 px-4">
-                            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
+                            <span
+                              className="px-2 py-0.5 rounded-full text-xs font-semibold border"
+                              style={{
+                                backgroundColor: 'color-mix(in srgb, var(--color-primary) 12%, transparent)',
+                                borderColor: 'color-mix(in srgb, var(--color-primary) 25%, transparent)',
+                                color: 'var(--color-primary)',
+                              }}
+                            >
                               {tx.type}
                             </span>
                           </td>
                         )}
                         {visibleColumns.amount && (
                           <td className="py-3 px-4 font-semibold font-mono">
-                            <span className={isNegative ? 'text-rose-400' : 'text-emerald-400'}>
+                            <span style={{ color: isNegative ? '#f43f5e' : 'var(--color-emerald, #10b981)' }}>
                               {isNegative ? '-' : '+'}{activeCurrencySymbol}{Math.abs(numAmount).toFixed(2)}
                             </span>
                           </td>
                         )}
                         {visibleColumns.balanceAfter && (
-                          <td className="py-3 px-4 opacity-80 font-mono">
+                          <td className="py-3 px-4 opacity-80 font-mono" style={{ color: 'var(--color-text)' }}>
                             {activeCurrencySymbol}{parseFloat(tx.balance_after as any || 0).toFixed(2)}
                           </td>
                         )}
                         {visibleColumns.gateway && (
                           <td className="py-3 px-4">
-                            <span className="uppercase text-xs opacity-75 font-mono px-2 py-0.5 rounded border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)]">
+                            <span
+                              className="uppercase text-xs opacity-75 font-mono px-2 py-0.5 rounded border"
+                              style={{
+                                borderColor: 'var(--color-border)',
+                                backgroundColor: 'var(--color-inner-dark)',
+                                color: 'var(--color-text)',
+                              }}
+                            >
                               {tx.gateway || 'Manual'}
                             </span>
                           </td>
                         )}
                         {visibleColumns.description && (
-                          <td className="py-3 px-4 text-xs opacity-80 max-w-xs truncate" title={tx.description}>
+                          <td className="py-3 px-4 text-xs opacity-80 max-w-xs truncate" title={tx.description} style={{ color: 'var(--color-text)' }}>
                             {tx.description}
                           </td>
                         )}
                         {visibleColumns.date && (
-                          <td className="py-3 px-4 text-xs opacity-60 whitespace-nowrap font-mono">
+                          <td className="py-3 px-4 text-xs opacity-60 whitespace-nowrap font-mono" style={{ color: 'var(--color-text)' }}>
                             {new Date(tx.created_at).toLocaleDateString()} {new Date(tx.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </td>
                         )}
@@ -1026,10 +1285,10 @@ export default function AdminWalletSettingsPage() {
             </table>
           </div>
 
-          {/* Pagination Controls (Default limit: 10) */}
+          {/* Pagination Controls */}
           <div
-            className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t text-xs"
-            style={{ borderColor: 'var(--color-border, #334155)' }}
+            className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t text-xs transition-colors duration-200"
+            style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <div className="opacity-70">
               {t('showingPageInfo', 'Showing')}{' '}
@@ -1048,12 +1307,17 @@ export default function AdminWalletSettingsPage() {
                     setLimit(parseInt(e.target.value, 10));
                     setPage(1);
                   }}
-                  className="px-2 py-1 rounded-lg border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] text-xs font-bold outline-none cursor-pointer"
+                  className="wallet-input px-2 py-1 rounded-lg border text-xs font-bold outline-none cursor-pointer transition-colors"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text)',
+                  }}
                 >
-                  <option value={10}>10</option>
-                  <option value={25}>25</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
+                  <option value={10} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>10</option>
+                  <option value={25} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>25</option>
+                  <option value={50} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>50</option>
+                  <option value={100} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>100</option>
                 </select>
               </div>
 
@@ -1062,8 +1326,13 @@ export default function AdminWalletSettingsPage() {
                   type="button"
                   disabled={page <= 1}
                   onClick={() => setPage(1)}
-                  className="p-1.5 rounded-lg border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] hover:bg-[var(--color-card,#1e293b)] disabled:opacity-30 cursor-pointer transition-colors"
-                  title="First Page"
+                  className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer transition-colors hover:opacity-80"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text)',
+                  }}
+                  title={t('firstPage', 'First Page')}
                 >
                   <ChevronsLeft className="h-4 w-4" />
                 </button>
@@ -1071,8 +1340,13 @@ export default function AdminWalletSettingsPage() {
                   type="button"
                   disabled={page <= 1}
                   onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  className="p-1.5 rounded-lg border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] hover:bg-[var(--color-card,#1e293b)] disabled:opacity-30 cursor-pointer transition-colors"
-                  title="Previous Page"
+                  className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer transition-colors hover:opacity-80"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text)',
+                  }}
+                  title={t('prevPage', 'Previous Page')}
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </button>
@@ -1082,12 +1356,12 @@ export default function AdminWalletSettingsPage() {
                     key={num}
                     type="button"
                     onClick={() => setPage(num)}
-                    className={`min-w-[28px] h-7 px-2 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
-                      page === num
-                        ? 'text-white border-[var(--color-primary,#3b82f6)]'
-                        : 'border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] hover:bg-[var(--color-card,#1e293b)]'
-                    }`}
-                    style={page === num ? { backgroundColor: 'var(--color-primary, #3b82f6)' } : undefined}
+                    className="min-w-[28px] h-7 px-2 rounded-lg text-xs font-bold border transition-colors cursor-pointer"
+                    style={{
+                      backgroundColor: page === num ? 'var(--color-primary)' : 'var(--color-inner-dark)',
+                      borderColor: page === num ? 'var(--color-primary)' : 'var(--color-border)',
+                      color: page === num ? '#ffffff' : 'var(--color-text)',
+                    }}
                   >
                     {num}
                   </button>
@@ -1097,8 +1371,13 @@ export default function AdminWalletSettingsPage() {
                   type="button"
                   disabled={page >= totalPages}
                   onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  className="p-1.5 rounded-lg border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] hover:bg-[var(--color-card,#1e293b)] disabled:opacity-30 cursor-pointer transition-colors"
-                  title="Next Page"
+                  className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer transition-colors hover:opacity-80"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text)',
+                  }}
+                  title={t('nextPage', 'Next Page')}
                 >
                   <ChevronRight className="h-4 w-4" />
                 </button>
@@ -1106,8 +1385,13 @@ export default function AdminWalletSettingsPage() {
                   type="button"
                   disabled={page >= totalPages}
                   onClick={() => setPage(totalPages)}
-                  className="p-1.5 rounded-lg border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] hover:bg-[var(--color-card,#1e293b)] disabled:opacity-30 cursor-pointer transition-colors"
-                  title="Last Page"
+                  className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer transition-colors hover:opacity-80"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text)',
+                  }}
+                  title={t('lastPage', 'Last Page')}
                 >
                   <ChevronsRight className="h-4 w-4" />
                 </button>
@@ -1117,30 +1401,42 @@ export default function AdminWalletSettingsPage() {
         </div>
       )}
 
-      {/* Manual Adjustment Modal (Form-free container) */}
+      {/* Manual Adjustment Modal */}
       {showAdjModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-[var(--color-card,#1e293b)] max-w-md w-full p-6 rounded-2xl border border-[var(--color-border,#334155)] shadow-2xl space-y-4">
-            <h3 className="text-lg font-bold flex items-center gap-2">
-              <DollarSign className="w-5 h-5 text-primary" />
+          <div
+            className="max-w-md w-full p-6 rounded-2xl border shadow-2xl space-y-4 transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)',
+            }}
+          >
+            <h3 className="text-lg font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+              <DollarSign className="w-5 h-5" style={{ color: 'var(--color-primary)' }} />
               {t('adjustWalletModal', 'Manual Balance Adjustment')}
             </h3>
-            <p className="text-xs opacity-70">
+            <p className="text-xs opacity-70" style={{ color: 'var(--color-text-secondary, var(--color-text))' }}>
               {t('adjustWalletDesc', 'Directly credit or debit a user wallet balance with full audit ledger tracking in PostgreSQL.')}
             </p>
 
             <div className="space-y-4 pt-2">
               <div>
-                <label className="block text-xs font-semibold uppercase opacity-70 mb-1">
+                <label className="block text-xs font-semibold uppercase opacity-70 mb-1" style={{ color: 'var(--color-text)' }}>
                   {t('selectCustomer', 'Target User')}
                 </label>
                 <select
                   value={adjEmail}
                   onChange={(e) => setAdjEmail(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] text-sm focus:outline-none cursor-pointer"
+                  className="wallet-input w-full px-3.5 py-2.5 rounded-xl border text-sm focus:outline-none cursor-pointer transition-colors"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text)',
+                  }}
                 >
                   {users.map((u) => (
-                    <option key={u.id} value={u.email}>
+                    <option key={u.id} value={u.email} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
                       {u.name ? `${u.name} (${u.email})` : u.email} — Balance: {activeCurrencySymbol}{parseFloat(u.wallet_balance as any || 0).toFixed(2)}
                     </option>
                   ))}
@@ -1148,7 +1444,7 @@ export default function AdminWalletSettingsPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold uppercase opacity-70 mb-1">
+                <label className="block text-xs font-semibold uppercase opacity-70 mb-1" style={{ color: 'var(--color-text)' }}>
                   {t('adjustmentAmount', 'Amount (+ to credit, - to debit)')} ({activeCurrencySymbol})
                 </label>
                 <input
@@ -1156,12 +1452,17 @@ export default function AdminWalletSettingsPage() {
                   step="0.01"
                   value={adjAmount}
                   onChange={(e) => setAdjAmount(parseFloat(e.target.value) || 0)}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] text-sm focus:outline-none"
+                  className="wallet-input w-full px-3.5 py-2.5 rounded-xl border text-sm focus:outline-none transition-colors"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text)',
+                  }}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold uppercase opacity-70 mb-1">
+                <label className="block text-xs font-semibold uppercase opacity-70 mb-1" style={{ color: 'var(--color-text)' }}>
                   {t('reason', 'Audit Memo / Reason')}
                 </label>
                 <input
@@ -1169,7 +1470,12 @@ export default function AdminWalletSettingsPage() {
                   value={adjReason}
                   onChange={(e) => setAdjReason(e.target.value)}
                   placeholder="e.g. Promotional courtesy credit"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--color-border,#334155)] bg-[var(--color-inner-dark,#0f172a)] text-sm focus:outline-none"
+                  className="wallet-input w-full px-3.5 py-2.5 rounded-xl border text-sm focus:outline-none transition-colors"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    color: 'var(--color-text)',
+                  }}
                 />
               </div>
 
@@ -1177,7 +1483,12 @@ export default function AdminWalletSettingsPage() {
                 <button
                   type="button"
                   onClick={() => setShowAdjModal(false)}
-                  className="px-4 py-2 rounded-xl border border-[var(--color-border,#334155)] text-sm hover:bg-[var(--color-inner-dark,#0f172a)] cursor-pointer"
+                  className="px-4 py-2 rounded-xl border text-sm cursor-pointer transition-colors hover:opacity-80"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'transparent',
+                    color: 'var(--color-text)',
+                  }}
                 >
                   {t('cancel', 'Cancel')}
                 </button>
@@ -1185,8 +1496,8 @@ export default function AdminWalletSettingsPage() {
                   type="button"
                   disabled={isSubmittingAdj}
                   onClick={handleExecuteAdjustment}
-                  className="px-4 py-2 bg-primary text-white rounded-xl text-sm font-semibold flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                  style={{ backgroundColor: 'var(--color-primary, #3b82f6)' }}
+                  className="px-4 py-2 text-white rounded-xl text-sm font-semibold flex items-center gap-2 cursor-pointer disabled:opacity-50 transition-all hover:opacity-90"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
                 >
                   {isSubmittingAdj ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                   {t('applyAdjustment', 'Apply Adjustment')}

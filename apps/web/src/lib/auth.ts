@@ -13,7 +13,7 @@ export interface User {
   updated_at?: string;
 }
 
-const DEFAULT_ADMIN_USER: User = {
+export const DEFAULT_ADMIN_USER: User = {
   id: 'usr_admin_1',
   email: 'admin@example.com',
   name: 'System Admin',
@@ -21,6 +21,18 @@ const DEFAULT_ADMIN_USER: User = {
   subscriptionPlan: 'nutrition-pro-monthly',
   tokenBalance: 1000
 };
+
+export const DEFAULT_USERS: User[] = [
+  DEFAULT_ADMIN_USER,
+  {
+    id: 'usr_user_demo',
+    email: 'user@example.com',
+    name: 'Sample User',
+    role: 'user',
+    subscriptionPlan: 'taster',
+    tokenBalance: 50
+  }
+];
 
 let inMemoryUser: User | null = null;
 
@@ -67,6 +79,27 @@ export function setCurrentUser(user: User | null): void {
   } catch (_) {}
 }
 
+export function syncSessionCookie(user?: User | null): void {
+  if (typeof window === 'undefined') return;
+  const targetUser = user || getCurrentUser();
+  if (targetUser) {
+    try {
+      document.cookie = `zecratary_session=${encodeURIComponent(JSON.stringify(targetUser))}; path=/; max-age=2592000; SameSite=Lax`;
+    } catch (_) {}
+  }
+}
+
+export function isSessionCookieValid(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const cookies = document.cookie.split(';');
+    const session = cookies.find((c) => c.trim().startsWith('zecratary_session='));
+    return Boolean(session && session.split('=')[1]);
+  } catch (_) {
+    return false;
+  }
+}
+
 export function isAuthenticated(): boolean {
   return getCurrentUser() !== null;
 }
@@ -90,7 +123,6 @@ export async function loginUser(
     return { success: false, user: null, error: 'Email address is required.' };
   }
 
-  // 1. Call Backend Login Route
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST',
@@ -110,6 +142,7 @@ export async function loginUser(
       };
 
       setCurrentUser(activeUser);
+      syncSessionCookie(activeUser);
 
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('zecratary_login_success', { detail: activeUser }));
@@ -127,10 +160,10 @@ export async function loginUser(
       return { success: false, user: null, error: data.error };
     }
   } catch (err: any) {
-    console.warn('[loginUser API handshake notice]:', err.message);
+    console.warn('[loginUser API notice]:', err.message);
   }
 
-  // 2. Client Fallback for Default Admin / Offline Credentials
+  // Client Fallback
   const cleanEmail = email.toLowerCase();
   const isAdmin = cleanEmail === 'admin@example.com' || cleanEmail === 'admin' || cleanEmail.includes('admin');
   
@@ -144,6 +177,7 @@ export async function loginUser(
   };
 
   setCurrentUser(fallbackUser);
+  syncSessionCookie(fallbackUser);
 
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('zecratary_login_success', { detail: fallbackUser }));
@@ -174,6 +208,7 @@ export async function registerUser(payload: { email: string; name?: string; pass
     const data = await res.json();
     if (res.ok && data.success && data.user) {
       setCurrentUser(data.user);
+      syncSessionCookie(data.user);
       return { success: true, user: data.user };
     }
     return { success: false, error: data.error || 'Registration failed' };

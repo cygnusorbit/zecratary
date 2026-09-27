@@ -25,7 +25,7 @@ import {
   persistServerAdminSettings 
 } from '@/lib/adminSync';
 
-export interface SupportedLanguage {
+interface SupportedLanguage {
   code: string;
   name: string;
   nativeName: string;
@@ -36,13 +36,13 @@ export interface SupportedLanguage {
   lastUpdated: string;
 }
 
-export interface CountryOption {
+interface CountryOption {
   name: string;
   code: string;
   flag: string;
 }
 
-export const COMMON_COUNTRIES: CountryOption[] = [
+const COMMON_COUNTRIES: CountryOption[] = [
   { name: 'United States', code: 'en', flag: '🇺🇸' },
   { name: 'United Kingdom', code: 'en', flag: '🇬🇧' },
   { name: 'Spain', code: 'es', flag: '🇪🇸' },
@@ -95,7 +95,7 @@ export const COMMON_COUNTRIES: CountryOption[] = [
   { name: 'Hong Kong', code: 'zh', flag: '🇭🇰' },
 ];
 
-export const getLanguageFlag = (code?: string, explicitFlag?: string): string => {
+const getLanguageFlag = (code?: string, explicitFlag?: string): string => {
   if (explicitFlag) return explicitFlag;
   if (!code) return '🌐';
   const c = code.toLowerCase().trim();
@@ -103,7 +103,7 @@ export const getLanguageFlag = (code?: string, explicitFlag?: string): string =>
   return match ? match.flag : '🌐';
 };
 
-export const DEFAULT_LANGUAGES: SupportedLanguage[] = [
+const DEFAULT_LANGUAGES: SupportedLanguage[] = [
   { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸', direction: 'ltr', isDefault: true, status: 'active', lastUpdated: new Date().toISOString() },
   { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸', direction: 'ltr', isDefault: false, status: 'active', lastUpdated: new Date().toISOString() },
   { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷', direction: 'ltr', isDefault: false, status: 'active', lastUpdated: new Date().toISOString() },
@@ -210,7 +210,6 @@ export default function AdminLanguagePage() {
     };
   }, [t, version, loadLanguages]);
 
-  // Persist languages list directly to server (Zero LocalStorage writes)
   const saveLanguagesList = async (updated: SupportedLanguage[]) => {
     setLanguages(updated);
     await persistServerAdminSettings({ supportedLanguages: updated });
@@ -226,7 +225,6 @@ export default function AdminLanguagePage() {
     setTimeout(() => setFeedbackMsg(''), 3000);
   };
 
-  // ADD LANGUAGE
   const handleOpenAddModal = () => {
     setLangCode('');
     setLangName('');
@@ -241,8 +239,8 @@ export default function AdminLanguagePage() {
     setShowAddModal(true);
   };
 
-  const handleAddLanguageSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddLanguageSubmit = async (e?: React.FormEvent) => {
+    if (e && e.preventDefault) e.preventDefault();
     setModalError('');
 
     const cleanCode = langCode.trim().toLowerCase();
@@ -360,8 +358,8 @@ export default function AdminLanguagePage() {
     }
   };
 
-  const handleEditLanguageSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleEditLanguageSubmit = async (e?: React.FormEvent) => {
+    if (e && e.preventDefault) e.preventDefault();
     if (!editingCode) return;
     setModalError('');
 
@@ -817,7 +815,7 @@ export default function AdminLanguagePage() {
               </div>
             )}
 
-            <form onSubmit={handleAddLanguageSubmit} className="space-y-4 pt-1">
+            <div className="space-y-4 pt-1">
               <div className="flex gap-3 items-start">
                 <div className="relative">
                   <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Flag</label>
@@ -1007,14 +1005,15 @@ export default function AdminLanguagePage() {
                   {t('cancel', 'Cancel')}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={handleAddLanguageSubmit}
                   className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
                   <Plus className="h-4 w-4" /> {t('addLanguage', 'Add Language')}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -1403,7 +1402,7 @@ export default function AdminLanguagePage() {
                 {t('cancel', 'Cancel')}
               </button>
               <button
-                type="submit"
+                type="button"
                 onClick={handleEditLanguageSubmit}
                 className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
                 style={{ backgroundColor: 'var(--color-primary)' }}
