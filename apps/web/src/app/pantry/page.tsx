@@ -35,7 +35,7 @@ export default function PantryPage() {
   const applyGlobalTheme = useCallback(() => {
     try {
       window.dispatchEvent(new Event('zecratary_theme_updated'));
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -53,14 +53,15 @@ export default function PantryPage() {
     };
   }, [applyGlobalTheme]);
 
-  const loadPantryData = useCallback((user: User | null) => {
+  const loadPantryData = useCallback(async (user: User | null) => {
     if (!user || typeof window === 'undefined') return;
 
     try {
+      const isSeeded = localStorage.getItem('zecratary_pantry_seeded') === 'true';
       const raw = localStorage.getItem('zecratary_pantry_items') || localStorage.getItem('zecratary_pantry');
       let allItems: any[] = raw ? JSON.parse(raw) : [];
 
-      if (!Array.isArray(allItems) || allItems.length === 0) {
+      if (!isSeeded && (!Array.isArray(allItems) || allItems.length === 0)) {
         allItems = [
           { 
             id: 'p_1_' + user.id, 
@@ -95,13 +96,33 @@ export default function PantryPage() {
         ];
         localStorage.setItem('zecratary_pantry_items', JSON.stringify(allItems));
         localStorage.setItem('zecratary_pantry', JSON.stringify(allItems));
+        localStorage.setItem('zecratary_pantry_seeded', 'true');
       }
 
-      const creatorItems = allItems.filter((item: any) => {
+      const creatorItems = Array.isArray(allItems) ? allItems.filter((item: any) => {
         return !item.userId || item.userId === user.id || item.createdBy === user.email;
-      });
+      }) : [];
 
       setPantryItems(creatorItems);
+
+      // Asynchronously synchronize with PostgreSQL backend
+      try {
+        const res = await fetch(`/api/pantry?userId=${encodeURIComponent(user.id)}`, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.items)) {
+            const serverItems = data.items.filter((item: any) => {
+              return !item.userId || item.userId === user.id || item.createdBy === user.email;
+            });
+            if (isSeeded || serverItems.length > 0) {
+              setPantryItems(serverItems);
+              localStorage.setItem('zecratary_pantry_items', JSON.stringify(data.items));
+              localStorage.setItem('zecratary_pantry', JSON.stringify(data.items));
+              localStorage.setItem('zecratary_pantry_seeded', 'true');
+            }
+          }
+        }
+      } catch (_) {}
     } catch (e) {
       console.error('Failed to load pantry data', e);
     }
@@ -120,7 +141,9 @@ export default function PantryPage() {
     setCurrentUser(user);
     loadPantryData(user);
 
-    const handleSync = () => {
+    const handleSync = (e: any) => {
+      // Ignore self-dispatched mutations to prevent race conditions during deletion
+      if (e?.detail?.source === 'local_pantry_mutation') return;
       const active = getCurrentUser();
       if (active) {
         setCurrentUser(active);
@@ -129,17 +152,17 @@ export default function PantryPage() {
     };
 
     window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_pantry_updated', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
+    window.addEventListener('zecratary_pantry_updated', handleSync as EventListener);
+    window.addEventListener('zecratary_auth_changed', handleSync as EventListener);
 
     return () => {
       window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_pantry_updated', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
+      window.removeEventListener('zecratary_pantry_updated', handleSync as EventListener);
+      window.removeEventListener('zecratary_auth_changed', handleSync as EventListener);
     };
   }, [loadPantryData, router, t]);
 
-  const savePantryList = (updatedCreatorItems: any[]) => {
+  const savePantryList = async (updatedCreatorItems: any[]) => {
     if (!currentUser) return;
 
     try {
@@ -153,18 +176,25 @@ export default function PantryPage() {
       const merged = [...updatedCreatorItems, ...otherUsersItems];
       localStorage.setItem('zecratary_pantry_items', JSON.stringify(merged));
       localStorage.setItem('zecratary_pantry', JSON.stringify(merged));
+      localStorage.setItem('zecratary_pantry_seeded', 'true');
 
       setPantryItems(updatedCreatorItems);
 
-      window.dispatchEvent(new Event('zecratary_pantry_updated'));
-      window.dispatchEvent(new Event('storage'));
+      // Asynchronously persist to PostgreSQL backend
+      fetch('/api/pantry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUser.id, items: updatedCreatorItems })
+      }).catch(() => {});
+
+      window.dispatchEvent(new CustomEvent('zecratary_pantry_updated', { detail: { source: 'local_pantry_mutation' } }));
     } catch (e) {
       console.error('Failed to save pantry items', e);
     }
   };
 
-  const handleAddItem = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddItem = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!itemName.trim() || !currentUser) return;
 
     const newItem = {
@@ -186,8 +216,8 @@ export default function PantryPage() {
     setShowAddModal(false);
   };
 
-  const handleUpdateItem = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUpdateItem = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!editingItem || !editingItem.name.trim() || !currentUser) return;
 
     const updated = pantryItems.map(item => 
@@ -204,19 +234,72 @@ export default function PantryPage() {
     setEditingItem(null);
   };
 
-  const handleDeleteItem = (id: string) => {
+  const handleDeleteItem = async (id: string) => {
+    if (!currentUser) return;
+
+    // 1. Optimistically update local view
     const updated = pantryItems.filter(item => item.id !== id);
-    savePantryList(updated);
-    setSelectedIds(selectedIds.filter(selectedId => selectedId !== id));
+    setPantryItems(updated);
+    setSelectedIds(prev => prev.filter(selectedId => selectedId !== id));
+
+    // 2. Synchronize localStorage
+    try {
+      const raw = localStorage.getItem('zecratary_pantry_items') || localStorage.getItem('zecratary_pantry');
+      const allItems: any[] = raw ? JSON.parse(raw) : [];
+      const merged = allItems.filter((item: any) => item.id !== id);
+      localStorage.setItem('zecratary_pantry_items', JSON.stringify(merged));
+      localStorage.setItem('zecratary_pantry', JSON.stringify(merged));
+      localStorage.setItem('zecratary_pantry_seeded', 'true');
+    } catch (_) {}
+
+    // 3. Dispatch DELETE to PostgreSQL backend
+    try {
+      await fetch(`/api/pantry?id=${encodeURIComponent(id)}&userId=${encodeURIComponent(currentUser.id)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, userId: currentUser.id })
+      });
+    } catch (err) {
+      console.error('Error deleting item from PostgreSQL:', err);
+    }
+
+    window.dispatchEvent(new CustomEvent('zecratary_pantry_updated', { detail: { source: 'local_pantry_mutation' } }));
   };
 
-  const handleDeleteSelected = () => {
-    if (selectedIds.length === 0) return;
+  const handleDeleteSelected = async () => {
+    if (selectedIds.length === 0 || !currentUser) return;
     const confirmTemplate = t('confirmDeleteSelectedIngredients') || 'Are you sure you want to delete {count} selected ingredient(s)?';
     if (!confirm(confirmTemplate.replace('{count}', String(selectedIds.length)))) return;
-    const updated = pantryItems.filter(item => !selectedIds.includes(item.id));
-    savePantryList(updated);
+
+    const idsToDelete = [...selectedIds];
+
+    // 1. Optimistically update local view
+    const updated = pantryItems.filter(item => !idsToDelete.includes(item.id));
+    setPantryItems(updated);
     setSelectedIds([]);
+
+    // 2. Synchronize localStorage
+    try {
+      const raw = localStorage.getItem('zecratary_pantry_items') || localStorage.getItem('zecratary_pantry');
+      const allItems: any[] = raw ? JSON.parse(raw) : [];
+      const merged = allItems.filter((item: any) => !idsToDelete.includes(item.id));
+      localStorage.setItem('zecratary_pantry_items', JSON.stringify(merged));
+      localStorage.setItem('zecratary_pantry', JSON.stringify(merged));
+      localStorage.setItem('zecratary_pantry_seeded', 'true');
+    } catch (_) {}
+
+    // 3. Dispatch bulk DELETE to PostgreSQL backend
+    try {
+      await fetch(`/api/pantry?userId=${encodeURIComponent(currentUser.id)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: idsToDelete, userId: currentUser.id })
+      });
+    } catch (err) {
+      console.error('Error deleting selected items from PostgreSQL:', err);
+    }
+
+    window.dispatchEvent(new CustomEvent('zecratary_pantry_updated', { detail: { source: 'local_pantry_mutation' } }));
   };
 
   const toggleSelectAll = () => {
@@ -486,7 +569,10 @@ export default function PantryPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDeleteItem(item.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteItem(item.id);
+                      }}
                       className="p-2 hover:text-red-500 transition rounded-xl border cursor-pointer shadow-xs"
                       style={{
                         backgroundColor: 'var(--color-card)',
@@ -536,7 +622,7 @@ export default function PantryPage() {
               <Plus className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('addPantryIngredientTitle') || 'Add Pantry Ingredient(s)'}
             </h2>
 
-            <form onSubmit={handleAddItem} className="space-y-4">
+            <div className="space-y-4">
               <div>
                 <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('ingredientNameLabel') || 'Ingredient Name *'}
@@ -547,6 +633,12 @@ export default function PantryPage() {
                   placeholder={t('ingredientNamePlaceholder') || 'e.g. Eggs, Olive Oil...'}
                   value={itemName}
                   onChange={(e) => setItemName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddItem();
+                    }
+                  }}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -567,6 +659,12 @@ export default function PantryPage() {
                     type="text"
                     value={itemQuantity}
                     onChange={(e) => setItemQuantity(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddItem();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -585,6 +683,12 @@ export default function PantryPage() {
                     type="text"
                     value={itemUnit}
                     onChange={(e) => setItemUnit(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddItem();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -635,6 +739,12 @@ export default function PantryPage() {
                     type="date"
                     value={expiryDate}
                     onChange={(e) => setExpiryDate(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddItem();
+                      }
+                    }}
                     className="w-full border rounded-xl pl-10 pr-3 py-3 text-sm outline-none cursor-pointer pantry-date-input transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -660,7 +770,8 @@ export default function PantryPage() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleAddItem()}
                   className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -669,7 +780,7 @@ export default function PantryPage() {
                   {t('addIngredientSubmit') || 'Add Ingredient'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -705,7 +816,7 @@ export default function PantryPage() {
               <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('editPantryIngredientTitle') || 'Edit Pantry Ingredient'}
             </h2>
 
-            <form onSubmit={handleUpdateItem} className="space-y-4">
+            <div className="space-y-4">
               <div>
                 <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('ingredientNameLabel') || 'Ingredient Name *'}
@@ -715,6 +826,12 @@ export default function PantryPage() {
                   required
                   value={editingItem.name}
                   onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleUpdateItem();
+                    }
+                  }}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -735,6 +852,12 @@ export default function PantryPage() {
                     type="text"
                     value={editingItem.quantity}
                     onChange={(e) => setEditingItem({ ...editingItem, quantity: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateItem();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -753,6 +876,12 @@ export default function PantryPage() {
                     type="text"
                     value={editingItem.unit}
                     onChange={(e) => setEditingItem({ ...editingItem, unit: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateItem();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -803,6 +932,12 @@ export default function PantryPage() {
                     type="date"
                     value={editingItem.expiryDate || ''}
                     onChange={(e) => setEditingItem({ ...editingItem, expiryDate: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateItem();
+                      }
+                    }}
                     className="w-full border rounded-xl pl-10 pr-3 py-3 text-sm outline-none cursor-pointer pantry-date-input transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -828,7 +963,8 @@ export default function PantryPage() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleUpdateItem()}
                   className="px-6 py-2.5 rounded-xl text-white font-bold transition flex items-center gap-1.5 shadow-lg cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -837,7 +973,7 @@ export default function PantryPage() {
                   <Save className="h-4 w-4" /> {t('saveChanges') || 'Save Changes'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}

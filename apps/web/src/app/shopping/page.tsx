@@ -1,6 +1,6 @@
 // Generated / Updated by AI Collaborator
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   Plus, Trash2, Check, Star, Copy, Edit3, X, Save, Search 
@@ -145,9 +145,14 @@ export default function ShoppingListPage() {
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.items)) {
-          setItems(data.items);
-          localStorage.setItem('zecratary_shopping_list', JSON.stringify(data.items));
-          localStorage.setItem('zecratary_shopping', JSON.stringify(data.items));
+          const normalized = data.items.map((i: any) => ({
+            ...i,
+            checked: Boolean(i.checked ?? i.completed),
+            completed: Boolean(i.checked ?? i.completed)
+          }));
+          setItems(normalized);
+          localStorage.setItem('zecratary_shopping_list', JSON.stringify(normalized));
+          localStorage.setItem('zecratary_shopping', JSON.stringify(normalized));
           localStorage.setItem('zecratary_shopping_seeded', 'true');
           return;
         }
@@ -174,6 +179,7 @@ export default function ShoppingListPage() {
             category: 'Produce', 
             staple: false, 
             checked: false,
+            completed: false,
             createdAt: new Date().toISOString()
           },
           { 
@@ -187,6 +193,7 @@ export default function ShoppingListPage() {
             category: 'Snacks', 
             staple: false, 
             checked: false,
+            completed: false,
             createdAt: new Date().toISOString()
           }
         ];
@@ -203,7 +210,11 @@ export default function ShoppingListPage() {
 
       const userItems = Array.isArray(allItems) ? allItems.filter((i: any) => {
         return !i.userId || i.userId === user.id || i.createdBy === user.email;
-      }) : [];
+      }).map((i: any) => ({
+        ...i,
+        checked: Boolean(i.checked ?? i.completed),
+        completed: Boolean(i.checked ?? i.completed)
+      })) : [];
 
       setItems(userItems);
     } catch (e) {
@@ -224,7 +235,9 @@ export default function ShoppingListPage() {
     setCurrentUser(user);
     loadShoppingData(user);
 
-    const handleSync = () => {
+    const handleSync = (e: any) => {
+      // Discard self-generated local mutations to prevent race conditions during toggling
+      if (e?.detail?.source === 'local_shopping_mutation') return;
       const active = getCurrentUser();
       if (active) {
         setCurrentUser(active);
@@ -233,15 +246,15 @@ export default function ShoppingListPage() {
     };
 
     window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_shopping_updated', handleSync);
-    window.addEventListener('zecratary_shopping_list_updated', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
+    window.addEventListener('zecratary_shopping_updated', handleSync as EventListener);
+    window.addEventListener('zecratary_shopping_list_updated', handleSync as EventListener);
+    window.addEventListener('zecratary_auth_changed', handleSync as EventListener);
 
     return () => {
       window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_shopping_updated', handleSync);
-      window.removeEventListener('zecratary_shopping_list_updated', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
+      window.removeEventListener('zecratary_shopping_updated', handleSync as EventListener);
+      window.removeEventListener('zecratary_shopping_list_updated', handleSync as EventListener);
+      window.removeEventListener('zecratary_auth_changed', handleSync as EventListener);
     };
   }, [loadShoppingData, router, t]);
 
@@ -263,15 +276,15 @@ export default function ShoppingListPage() {
 
       setItems(updatedUserItems);
 
-      window.dispatchEvent(new Event('zecratary_shopping_updated'));
-      window.dispatchEvent(new Event('storage'));
+      // Do NOT dispatch generic 'storage' event which re-queries the server before POST finishes
+      window.dispatchEvent(new CustomEvent('zecratary_shopping_updated', { detail: { source: 'local_shopping_mutation' } }));
     } catch (e) {
       console.error('Failed to save shopping list', e);
     }
   };
 
-  const handleAddItem = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddItem = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!itemName.trim() || !currentUser) return;
 
     const newItem = {
@@ -285,6 +298,7 @@ export default function ShoppingListPage() {
       category: itemCategory || availableCategories[0] || 'Produce',
       staple: false,
       checked: false,
+      completed: false,
       createdAt: new Date().toISOString()
     };
 
@@ -292,11 +306,18 @@ export default function ShoppingListPage() {
     saveList(updated);
 
     try {
-      await fetch('/api/shopping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify([newItem])
-      });
+      await Promise.allSettled([
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([newItem])
+        }),
+        fetch('/api/shopping-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([newItem])
+        })
+      ]);
     } catch (err) {
       console.error('Failed to persist item to PostgreSQL:', err);
     }
@@ -308,8 +329,8 @@ export default function ShoppingListPage() {
     setShowAddModal(false);
   };
 
-  const handleUpdateItem = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUpdateItem = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!editingItem || !editingItem.name.trim() || !currentUser) return;
 
     const updatedItem = {
@@ -323,11 +344,18 @@ export default function ShoppingListPage() {
     saveList(updated);
 
     try {
-      await fetch('/api/shopping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify([updatedItem])
-      });
+      await Promise.allSettled([
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([updatedItem])
+        }),
+        fetch('/api/shopping-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([updatedItem])
+        })
+      ]);
     } catch (err) {
       console.error('Failed to update item in PostgreSQL:', err);
     }
@@ -339,15 +367,26 @@ export default function ShoppingListPage() {
     const target = items.find((i) => i.id === id);
     if (!target) return;
     const nextVal = !target.checked;
-    const updated = items.map((i) => (i.id === id ? { ...i, checked: nextVal } : i));
+    const updatedItem = { ...target, checked: nextVal, completed: nextVal };
+    const updated = items.map((i) => (i.id === id ? updatedItem : i));
+    
+    // Update local state and cache synchronously without event loop
     saveList(updated);
 
+    // Persist to PostgreSQL asynchronously
     try {
-      await fetch('/api/shopping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify([{ ...target, checked: nextVal }])
-      });
+      await Promise.allSettled([
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([updatedItem])
+        }),
+        fetch('/api/shopping-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([updatedItem])
+        })
+      ]);
     } catch (_) {}
   };
 
@@ -355,15 +394,23 @@ export default function ShoppingListPage() {
     const target = items.find((i) => i.id === id);
     if (!target) return;
     const nextVal = !target.staple;
-    const updated = items.map((i) => (i.id === id ? { ...i, staple: nextVal } : i));
+    const updatedItem = { ...target, staple: nextVal };
+    const updated = items.map((i) => (i.id === id ? updatedItem : i));
     saveList(updated);
 
     try {
-      await fetch('/api/shopping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify([{ ...target, staple: nextVal }])
-      });
+      await Promise.allSettled([
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([updatedItem])
+        }),
+        fetch('/api/shopping-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([updatedItem])
+        })
+      ]);
     } catch (_) {}
   };
 
@@ -385,11 +432,20 @@ export default function ShoppingListPage() {
 
   const handleDeleteItem = async (id: string) => {
     const updated = items.filter((i) => i.id !== id);
-    saveList(updated);
+    setItems(updated);
 
     if (editingItem && editingItem.id === id) {
       setEditingItem(null);
     }
+
+    try {
+      const local = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
+      const allItems: any[] = local ? JSON.parse(local) : [];
+      const merged = allItems.filter((item: any) => item.id !== id);
+      localStorage.setItem('zecratary_shopping_list', JSON.stringify(merged));
+      localStorage.setItem('zecratary_shopping', JSON.stringify(merged));
+      localStorage.setItem('zecratary_shopping_seeded', 'true');
+    } catch (_) {}
 
     try {
       await Promise.allSettled([
@@ -407,22 +463,41 @@ export default function ShoppingListPage() {
     } catch (err) {
       console.error('Failed to delete item from PostgreSQL:', err);
     }
+
+    window.dispatchEvent(new CustomEvent('zecratary_shopping_updated', { detail: { source: 'local_shopping_mutation' } }));
   };
 
-  const allCompleted = items.length > 0 && items.every((i) => i.checked);
+  const filteredItems = useMemo(() => {
+    return items.filter((i) => {
+      const matchesSearch = !search.trim() || i.name.toLowerCase().includes(search.toLowerCase().trim());
+      const matchesStaples = !showStaplesOnly || i.staple;
+      return matchesSearch && matchesStaples;
+    });
+  }, [items, search, showStaplesOnly]);
+
+  const allFilteredCompleted = filteredItems.length > 0 && filteredItems.every((i) => i.checked);
 
   const toggleAllComplete = async () => {
-    if (items.length === 0) return;
-    const targetState = !allCompleted;
-    const updated = items.map((i) => ({ ...i, checked: targetState }));
+    if (filteredItems.length === 0) return;
+    const targetState = !allFilteredCompleted;
+    const filteredIds = new Set(filteredItems.map(i => i.id));
+    const updated = items.map((i) => filteredIds.has(i.id) ? { ...i, checked: targetState, completed: targetState } : i);
     saveList(updated);
 
+    const changedItems = updated.filter(i => filteredIds.has(i.id));
     try {
-      await fetch('/api/shopping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated)
-      });
+      await Promise.allSettled([
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(changedItems)
+        }),
+        fetch('/api/shopping-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(changedItems)
+        })
+      ]);
     } catch (_) {}
   };
 
@@ -432,7 +507,16 @@ export default function ShoppingListPage() {
 
     const completedIds = completedList.map((i) => i.id);
     const activeOnly = items.filter((i) => !i.checked);
-    saveList(activeOnly);
+    setItems(activeOnly);
+
+    try {
+      const local = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
+      const allItems: any[] = local ? JSON.parse(local) : [];
+      const merged = allItems.filter((item: any) => !completedIds.includes(item.id));
+      localStorage.setItem('zecratary_shopping_list', JSON.stringify(merged));
+      localStorage.setItem('zecratary_shopping', JSON.stringify(merged));
+      localStorage.setItem('zecratary_shopping_seeded', 'true');
+    } catch (_) {}
 
     try {
       await Promise.allSettled([
@@ -450,6 +534,8 @@ export default function ShoppingListPage() {
     } catch (err) {
       console.error('Failed to remove completed items from PostgreSQL:', err);
     }
+
+    window.dispatchEvent(new CustomEvent('zecratary_shopping_updated', { detail: { source: 'local_shopping_mutation' } }));
   };
 
   const handleCopyList = () => {
@@ -506,12 +592,6 @@ export default function ShoppingListPage() {
 
   const completedCount = items.filter((i) => i.checked).length;
 
-  const filteredItems = items.filter((i) => {
-    const matchesSearch = !search.trim() || i.name.toLowerCase().includes(search.toLowerCase().trim());
-    const matchesStaples = !showStaplesOnly || i.staple;
-    return matchesSearch && matchesStaples;
-  });
-
   const activeItems = filteredItems.filter((i) => !i.checked);
   const completedItems = filteredItems.filter((i) => i.checked);
   const categories = Array.from(new Set(activeItems.map((i) => i.category || 'Produce')));
@@ -540,17 +620,17 @@ export default function ShoppingListPage() {
           <button
             type="button"
             onClick={toggleAllComplete}
-            disabled={items.length === 0}
+            disabled={filteredItems.length === 0}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
               color: 'var(--color-emerald)'
             }}
-            title={allCompleted ? (t('deselectAllItemsTooltip') || 'Deselect all items') : (t('selectAllItemsTooltip') || 'Select all items')}
+            title={allFilteredCompleted ? (t('deselectAllItemsTooltip') || 'Deselect all items') : (t('selectAllItemsTooltip') || 'Select all items')}
           >
             <Check className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
-            <span>{allCompleted ? (t('incompleteAll') || 'Incomplete All') : (t('completeAll') || 'Complete All')}</span>
+            <span>{allFilteredCompleted ? (t('incompleteAll') || 'Incomplete All') : (t('completeAll') || 'Complete All')}</span>
           </button>
 
           {/* REMOVE COMPLETED BUTTON */}
@@ -852,7 +932,7 @@ export default function ShoppingListPage() {
               <Plus className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('addShoppingItemTitle') || 'Add Shopping Item'}
             </h2>
 
-            <form onSubmit={handleAddItem} className="space-y-4 text-xs">
+            <div className="space-y-4 text-xs">
               <div>
                 <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('itemNameLabel') || 'Item Name *'}
@@ -863,6 +943,12 @@ export default function ShoppingListPage() {
                   placeholder={t('itemNamePlaceholder') || 'e.g. lime, roasted peanuts...'}
                   value={itemName}
                   onChange={(e) => setItemName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddItem();
+                    }
+                  }}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -884,6 +970,12 @@ export default function ShoppingListPage() {
                     placeholder={t('amountQtyPlaceholder') || 'e.g. 1 or ¼'}
                     value={itemAmount}
                     onChange={(e) => setItemAmount(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddItem();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -903,6 +995,12 @@ export default function ShoppingListPage() {
                     placeholder={t('unitPlaceholder') || 'e.g. cup, tbsp, oz'}
                     value={itemUnit}
                     onChange={(e) => setItemUnit(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddItem();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -952,7 +1050,8 @@ export default function ShoppingListPage() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleAddItem()}
                   className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -961,7 +1060,7 @@ export default function ShoppingListPage() {
                   {t('addItemSubmit') || 'Add Item'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -997,7 +1096,7 @@ export default function ShoppingListPage() {
               <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('editShoppingItemTitle') || 'Edit Shopping Item'}
             </h2>
 
-            <form onSubmit={handleUpdateItem} className="space-y-4 text-xs">
+            <div className="space-y-4 text-xs">
               <div>
                 <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('itemNameLabel') || 'Item Name *'}
@@ -1007,6 +1106,12 @@ export default function ShoppingListPage() {
                   required
                   value={editingItem.name}
                   onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleUpdateItem();
+                    }
+                  }}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -1028,6 +1133,12 @@ export default function ShoppingListPage() {
                     value={editingItem.amount}
                     placeholder={t('amountQtyPlaceholder') || 'e.g. 1 or ¼'}
                     onChange={(e) => setEditingItem({ ...editingItem, amount: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateItem();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -1047,6 +1158,12 @@ export default function ShoppingListPage() {
                     value={editingItem.unit}
                     placeholder={t('unitPlaceholder') || 'e.g. cup, tbsp, oz'}
                     onChange={(e) => setEditingItem({ ...editingItem, unit: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateItem();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -1109,7 +1226,8 @@ export default function ShoppingListPage() {
                     {t('cancel') || 'Cancel'}
                   </button>
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={() => handleUpdateItem()}
                     className="px-6 py-2.5 rounded-xl text-white font-bold transition flex items-center gap-1.5 shadow-lg cursor-pointer"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                     onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -1119,7 +1237,7 @@ export default function ShoppingListPage() {
                   </button>
                 </div>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}

@@ -1,4 +1,4 @@
-// @ts-nocheck
+// Generated / Updated by AI Collaborator
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -76,6 +76,12 @@ export default function ImportPage() {
   const [fetchingTelemetry, setFetchingTelemetry] = useState(true);
   const [status, setStatus] = useState<{ type: 'success' | 'error' | 'warning'; msg: string } | null>(null);
 
+  const applySavedTheme = useCallback(() => {
+    try {
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
+    } catch (_) {}
+  }, []);
+
   const fetchTokenAndAiTelemetry = useCallback(async () => {
     try {
       const user = getCurrentUser();
@@ -136,24 +142,32 @@ export default function ImportPage() {
 
   useEffect(() => {
     document.title = `${t('importRecipeTitle', 'Import Recipe')} - Zecratary`;
+    applySavedTheme();
     syncRecipeTypes();
     fetchTokenAndAiTelemetry();
 
     const handleUpdates = () => {
       fetchTokenAndAiTelemetry();
       syncRecipeTypes();
+      applySavedTheme();
     };
 
+    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_updated', applySavedTheme);
     window.addEventListener('zecratary_users_updated', handleUpdates);
     window.addEventListener('zecratary_admin_settings_updated', handleUpdates);
     window.addEventListener('storage', handleUpdates);
 
     return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('zecratary_users_updated', handleUpdates);
       window.removeEventListener('zecratary_admin_settings_updated', handleUpdates);
       window.removeEventListener('storage', handleUpdates);
     };
-  }, [fetchTokenAndAiTelemetry, t]);
+  }, [fetchTokenAndAiTelemetry, applySavedTheme, t]);
 
   const handlePostImportSuccess = async (recipeData: any, consumedTokens: number, newBalance?: number) => {
     const user = getCurrentUser();
@@ -170,6 +184,11 @@ export default function ImportPage() {
       await persistSavedRecipe(targetUserId, recipeData, {
         createdBy: user?.email || targetUserId,
         creatorName: user?.name || 'You'
+      });
+      await fetch('/api/recipes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(recipeData)
       });
     } catch (_) {}
 
@@ -201,8 +220,8 @@ export default function ImportPage() {
     }, 850);
   };
 
-  const handleUrlImport = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUrlImport = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!url.trim()) return;
 
     if (!enableWebSearch) {
@@ -256,8 +275,8 @@ export default function ImportPage() {
     }
   };
 
-  const handleTextImport = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleTextImport = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!rawText.trim()) return;
 
     const cost = tokenCosts.text;
@@ -321,8 +340,8 @@ export default function ImportPage() {
     setPreviewUrls(previewUrls.filter((_, idx) => idx !== index));
   };
 
-  const handleImageImport = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleImageImport = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (selectedFiles.length === 0) return;
 
     const cost = tokenCosts.photo;
@@ -514,9 +533,9 @@ export default function ImportPage() {
           </div>
         )}
 
-        {/* TAB 1: URL IMPORT */}
+        {/* TAB 1: URL IMPORT (NO NATIVE FORM) */}
         {activeTab === 'url' && (
-          <form onSubmit={handleUrlImport} className="space-y-4">
+          <div className="space-y-4">
             {!enableWebSearch && (
               <div 
                 className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 text-amber-500"
@@ -538,6 +557,12 @@ export default function ImportPage() {
                 placeholder={t('recipeWebUrlPlaceholder', 'https://www.recipetineats.com/... or food blog URL')}
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleUrlImport();
+                  }
+                }}
                 className="w-full border rounded-xl px-4 py-3.5 text-sm outline-none transition font-medium disabled:opacity-50"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
@@ -550,7 +575,8 @@ export default function ImportPage() {
             </div>
 
             <button
-              type="submit"
+              type="button"
+              onClick={() => handleUrlImport()}
               disabled={loading || !url.trim() || !enableWebSearch}
               className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary)' }}
@@ -560,12 +586,12 @@ export default function ImportPage() {
                 ? t('downloadingPhotoParsingSteps', 'Parsing recipe & deducting tokens...') 
                 : `${t('importRecipeBtn', 'Import Recipe')} (${tokenCosts.url} ${tokenSymbol})`}
             </button>
-          </form>
+          </div>
         )}
 
-        {/* TAB 2: TEXT IMPORT */}
+        {/* TAB 2: TEXT IMPORT (NO NATIVE FORM) */}
         {activeTab === 'text' && (
-          <form onSubmit={handleTextImport} className="space-y-4">
+          <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
@@ -576,6 +602,12 @@ export default function ImportPage() {
                   placeholder={t('recipeTitlePlaceholder', 'e.g. Homemade Apple Cake')}
                   value={textTitle}
                   onChange={(e) => setTextTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleTextImport();
+                    }
+                  }}
                   className="w-full border rounded-xl px-4 py-3 text-sm outline-none"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -631,7 +663,8 @@ export default function ImportPage() {
             </div>
 
             <button
-              type="submit"
+              type="button"
+              onClick={() => handleTextImport()}
               disabled={loading || !rawText.trim()}
               className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary)' }}
@@ -641,12 +674,12 @@ export default function ImportPage() {
                 ? t('processingSavingRecipe', 'Processing & saving recipe...') 
                 : `${t('saveAndImportRecipe', 'Save & Import Recipe')} (${tokenCosts.text} ${tokenSymbol})`}
             </button>
-          </form>
+          </div>
         )}
 
-        {/* TAB 3: IMAGE / PHOTO IMPORT */}
+        {/* TAB 3: IMAGE / PHOTO IMPORT (NO NATIVE FORM) */}
         {activeTab === 'image' && (
-          <form onSubmit={handleImageImport} className="space-y-4">
+          <div className="space-y-4">
             <div>
               <label className="block text-xs font-bold mb-2" style={{ color: 'var(--color-text)' }}>
                 {t('recipeImagesMax5', 'Recipe Images (up to 5)')}
@@ -720,7 +753,8 @@ export default function ImportPage() {
             )}
 
             <button
-              type="submit"
+              type="button"
+              onClick={() => handleImageImport()}
               disabled={loading || selectedFiles.length === 0}
               className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary)' }}
@@ -730,7 +764,7 @@ export default function ImportPage() {
                 ? t('aiSearchingRecipeImporting', 'AI OCR analyzing & importing...') 
                 : `${t('importRecipeFromImages', 'Import Recipe from Images')} (${tokenCosts.photo} ${tokenSymbol})`}
             </button>
-          </form>
+          </div>
         )}
 
         {/* Notifications & Status Banner */}

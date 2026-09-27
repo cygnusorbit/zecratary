@@ -218,7 +218,7 @@ export default function AdminUserManagementPage() {
     }
 
     const freshPlans = parsedPlans;
-      setAvailablePlans(prev => JSON.stringify(prev) === JSON.stringify(freshPlans) ? prev : freshPlans);
+    setAvailablePlans(prev => JSON.stringify(prev) === JSON.stringify(freshPlans) ? prev : freshPlans);
   }, []);
 
   const loadUsers = useCallback(async () => {
@@ -477,8 +477,8 @@ export default function AdminUserManagementPage() {
     setShowAddModal(true);
   };
 
-  const handleAddUserSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddUserSubmit = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     setAddError('');
 
     const cleanEmail = addEmail.trim().toLowerCase();
@@ -532,7 +532,7 @@ export default function AdminUserManagementPage() {
       const data = await res.json();
       if (data.users && Array.isArray(data.users)) {
         const freshList = data.users;
-          setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
+        setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
       } else {
         setUsers(prev => [newUser, ...prev.filter(u => u.email.toLowerCase() !== cleanEmail)]);
       }
@@ -560,8 +560,8 @@ export default function AdminUserManagementPage() {
     setShowEditModal(true);
   };
 
-  const handleEditUserSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleEditUserSubmit = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!editingUserId) return;
     setEditError('');
 
@@ -616,7 +616,7 @@ export default function AdminUserManagementPage() {
       const data = await res.json();
       if (data.users && Array.isArray(data.users)) {
         const freshList = data.users;
-          setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
+        setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
       } else {
         setUsers(prev => prev.map(u => u.id === editingUserId ? updatedUser : u));
       }
@@ -1022,21 +1022,48 @@ export default function AdminUserManagementPage() {
       {showAddModal && (
         <div onClick={() => setShowAddModal(false)} className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer">
           <div onClick={(e) => e.stopPropagation()} className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-            <button onClick={() => setShowAddModal(false)} className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text-secondary)' }}><X className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setShowAddModal(false)} className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text-secondary)' }}><X className="h-4 w-4" /></button>
             <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-primary)' }}><UserPlus className="h-5 w-5" /> Add New User</h2>
             {addError && <div className="p-3 border rounded-xl font-semibold flex items-center gap-2 bg-red-500/10 border-red-500 text-red-500"><AlertCircle className="h-4 w-4 shrink-0" /><span>{addError}</span></div>}
-            <form onSubmit={handleAddUserSubmit} className="space-y-3.5">
+            <div className="space-y-3.5">
               <div>
                 <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Full Name *</label>
-                <input type="text" required placeholder="Jordan Smith" value={addName} onChange={e => setAddName(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
+                <input 
+                  type="text" 
+                  required 
+                  placeholder="Jordan Smith" 
+                  value={addName} 
+                  onChange={e => setAddName(e.target.value)} 
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddUserSubmit(); } }}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none" 
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Email Address *</label>
-                <input type="email" required placeholder="jordan@example.com" value={addEmail} onChange={e => setAddEmail(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
+                <input 
+                  type="email" 
+                  required 
+                  placeholder="jordan@example.com" 
+                  value={addEmail} 
+                  onChange={e => setAddEmail(e.target.value)} 
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddUserSubmit(); } }}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none" 
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Password *</label>
-                <input type="password" required placeholder="••••••••" value={addPassword} onChange={e => setAddPassword(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
+                <input 
+                  type="password" 
+                  required 
+                  placeholder="••••••••" 
+                  value={addPassword} 
+                  onChange={e => setAddPassword(e.target.value)} 
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddUserSubmit(); } }}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none" 
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
@@ -1051,9 +1078,9 @@ export default function AdminUserManagementPage() {
               </div>
               <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2.5 border font-bold rounded-xl text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>
-                <button type="submit" className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-primary)' }}>Create User</button>
+                <button type="button" onClick={() => handleAddUserSubmit()} className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-primary)' }}>Create User</button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -1062,21 +1089,45 @@ export default function AdminUserManagementPage() {
       {showEditModal && (
         <div onClick={() => setShowEditModal(false)} className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer">
           <div onClick={(e) => e.stopPropagation()} className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-            <button onClick={() => setShowEditModal(false)} className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text-secondary)' }}><X className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setShowEditModal(false)} className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text-secondary)' }}><X className="h-4 w-4" /></button>
             <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-primary)' }}><Edit3 className="h-5 w-5" /> Edit User & Plan</h2>
             {editError && <div className="p-3 border rounded-xl font-semibold flex items-center gap-2 bg-red-500/10 border-red-500 text-red-500"><AlertCircle className="h-4 w-4 shrink-0" /><span>{editError}</span></div>}
-            <form onSubmit={handleEditUserSubmit} className="space-y-3.5">
+            <div className="space-y-3.5">
               <div>
                 <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Full Name *</label>
-                <input type="text" required value={editName} onChange={e => setEditName(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
+                <input 
+                  type="text" 
+                  required 
+                  value={editName} 
+                  onChange={e => setEditName(e.target.value)} 
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleEditUserSubmit(); } }}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none" 
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Email Address *</label>
-                <input type="email" required value={editEmail} onChange={e => setEditEmail(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
+                <input 
+                  type="email" 
+                  required 
+                  value={editEmail} 
+                  onChange={e => setEditEmail(e.target.value)} 
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleEditUserSubmit(); } }}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none" 
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Change Password <span className="font-normal" style={{ color: 'var(--color-text-secondary)' }}>(leave blank)</span></label>
-                <input type="password" placeholder="New password..." value={editPassword} onChange={e => setEditPassword(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
+                <input 
+                  type="password" 
+                  placeholder="New password..." 
+                  value={editPassword} 
+                  onChange={e => setEditPassword(e.target.value)} 
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleEditUserSubmit(); } }}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none" 
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
@@ -1091,9 +1142,9 @@ export default function AdminUserManagementPage() {
               </div>
               <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <button type="button" onClick={() => setShowEditModal(false)} className="px-4 py-2.5 border font-bold rounded-xl text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>
-                <button type="submit" className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-primary)' }}>Save Changes</button>
+                <button type="button" onClick={() => handleEditUserSubmit()} className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-primary)' }}>Save Changes</button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}

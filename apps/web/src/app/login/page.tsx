@@ -1,3 +1,4 @@
+// Generated / Updated by AI Collaborator
 'use client';
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
@@ -364,9 +365,9 @@ function LoginForm() {
     };
   }, [verifySession]);
 
-  // 8. Credentials Submission
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // 8. Credentials Submission (Decoupled from native form)
+  const handleSubmit = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
 
@@ -561,8 +562,8 @@ function LoginForm() {
           </div>
         )}
 
-        {/* Credentials Form */}
-        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+        {/* Credentials Container (No Native Form) */}
+        <div className="space-y-4 text-xs">
           <div>
             <label 
               className="block font-bold mb-1.5 transition-colors duration-200"
@@ -582,6 +583,12 @@ function LoginForm() {
                 placeholder={t('emailPlaceholder', 'you@example.com')}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSubmit();
+                  }
+                }}
                 className="w-full border rounded-xl pl-10 pr-3 py-2.5 outline-none font-medium transition-colors duration-200"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
@@ -620,6 +627,12 @@ function LoginForm() {
                 placeholder={t('passwordPlaceholder', '••••••••••••')}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSubmit();
+                  }
+                }}
                 className="w-full border rounded-xl pl-10 pr-10 py-2.5 outline-none font-mono transition-colors duration-200"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
@@ -640,7 +653,8 @@ function LoginForm() {
           </div>
 
           <button 
-            type="submit"
+            type="button"
+            onClick={() => handleSubmit()}
             disabled={loading}
             className="w-full py-3 mt-2 rounded-xl text-xs font-bold text-white shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-primary)' }}
@@ -656,7 +670,7 @@ function LoginForm() {
               </>
             )}
           </button>
-        </form>
+        </div>
 
         {/* Dynamic Social Login Section */}
         {hasAnySocial && (

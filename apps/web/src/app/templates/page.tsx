@@ -115,10 +115,11 @@ export default function TemplatesPage() {
 
     let liveRecipes: any[] = [];
     try {
-      const rRes = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
+      const rRes = await fetch(`/api/recipes?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
       if (rRes.ok) {
         const rData = await rRes.json();
         if (Array.isArray(rData.recipes)) liveRecipes = rData.recipes;
+        else if (Array.isArray(rData)) liveRecipes = rData;
       }
     } catch (_) {}
 
@@ -402,8 +403,8 @@ export default function TemplatesPage() {
     setShowMealSubModal(true);
   };
 
-  const handleSaveMealSubModal = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveMealSubModal = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (targetDayIndex === null || !subSelectedRecipe) {
       alert(t('selectRecipeAlert') || 'Please select a recipe for this meal.');
       return;
@@ -446,8 +447,8 @@ export default function TemplatesPage() {
     setEditingMealSubId(null);
   };
 
-  const handleSaveTemplate = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveTemplate = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!templateTitle.trim()) {
       alert(t('enterTemplateTitleAlert') || 'Please enter a template title.');
       return;
@@ -535,8 +536,8 @@ export default function TemplatesPage() {
     setModalDays(updatedDays);
   };
 
-  const handleApplyTemplateToPlanner = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleApplyTemplateToPlanner = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!selectedTemplate || !applyStartDate) return;
 
     try {
@@ -567,7 +568,17 @@ export default function TemplatesPage() {
         });
       });
 
-      localStorage.setItem('zecratary_meal_plan', JSON.stringify([...currentPlan, ...newPlannedMeals]));
+      const merged = [...currentPlan, ...newPlannedMeals];
+      localStorage.setItem('zecratary_meal_plan', JSON.stringify(merged));
+
+      if (currentUser?.id) {
+        await fetch('/api/planner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: currentUser.id, meals: merged })
+        }).catch(() => {});
+      }
+
       window.dispatchEvent(new Event('zecratary_planner_updated'));
       window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
       setShowApplyModal(false);
@@ -661,6 +672,7 @@ export default function TemplatesPage() {
         </div>
 
         <button
+          type="button"
           onClick={openCreateModal}
           className="text-white font-bold text-xs px-5 py-3 rounded-2xl transition flex items-center gap-2 shadow-lg cursor-pointer"
           style={{ backgroundColor: 'var(--color-primary)' }}
@@ -775,6 +787,7 @@ export default function TemplatesPage() {
 
                 <div className="flex items-center gap-2">
                   <button
+                    type="button"
                     onClick={() => {
                       setApplyStartDate(formatDateKey(new Date()));
                       setShowApplyModal(true);
@@ -787,6 +800,7 @@ export default function TemplatesPage() {
                     <CalendarIcon className="h-4 w-4" /> {t('applyToCalendarBtn') || 'Apply to Calendar'}
                   </button>
                   <button
+                    type="button"
                     onClick={() => openEditModal(selectedTemplate)}
                     className="p-2.5 rounded-xl border transition cursor-pointer shadow-xs"
                     style={{
@@ -799,6 +813,7 @@ export default function TemplatesPage() {
                     <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                   </button>
                   <button
+                    type="button"
                     onClick={() => handleDeleteTemplate(selectedTemplate.id)}
                     className="p-2.5 rounded-xl border transition cursor-pointer hover:text-red-500 shadow-xs"
                     style={{
@@ -904,7 +919,7 @@ export default function TemplatesPage() {
         </div>
       </div>
 
-      {/* 1. CREATE / EDIT TEMPLATE MODAL */}
+      {/* 1. CREATE / EDIT TEMPLATE MODAL (NO NATIVE FORM) */}
       {showModal && (
         <div 
           onClick={() => setShowModal(false)}
@@ -920,6 +935,7 @@ export default function TemplatesPage() {
             }}
           >
             <button
+              type="button"
               onClick={() => setShowModal(false)}
               className="absolute top-4 right-4 p-2 rounded-xl transition cursor-pointer shadow-xs"
               style={{
@@ -935,7 +951,7 @@ export default function TemplatesPage() {
               {editingTemplateId ? (t('editMealTemplateTitle') || 'Edit Meal Template') : (t('createMealTemplateTitle') || 'Create Meal Template')}
             </h2>
 
-            <form onSubmit={handleSaveTemplate} className="space-y-4">
+            <div className="space-y-4">
               <div>
                 <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('templateTitleLabel') || 'Template Title *'}
@@ -946,6 +962,12 @@ export default function TemplatesPage() {
                   placeholder={t('templateTitlePlaceholder') || 'e.g. Clean Eating Week'}
                   value={templateTitle}
                   onChange={(e) => setTemplateTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveTemplate();
+                    }
+                  }}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -966,6 +988,12 @@ export default function TemplatesPage() {
                   placeholder={t('templateDescPlaceholder') || 'e.g. Healthy macro-balanced meals for high energy'}
                   value={templateDescription}
                   onChange={(e) => setTemplateDescription(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveTemplate();
+                    }
+                  }}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -1097,7 +1125,8 @@ export default function TemplatesPage() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleSaveTemplate()}
                   className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -1106,12 +1135,12 @@ export default function TemplatesPage() {
                   {t('saveTemplateBtn') || 'Save Template'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
 
-      {/* 2. ADD / EDIT MEAL SUB-MODAL */}
+      {/* 2. ADD / EDIT MEAL SUB-MODAL (NO NATIVE FORM) */}
       {showMealSubModal && targetDayIndex !== null && (
         <div 
           onClick={() => setShowMealSubModal(false)}
@@ -1127,6 +1156,7 @@ export default function TemplatesPage() {
             }}
           >
             <button 
+              type="button"
               onClick={() => setShowMealSubModal(false)} 
               className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer shadow-xs"
               style={{
@@ -1150,7 +1180,7 @@ export default function TemplatesPage() {
               </p>
             </div>
 
-            <form onSubmit={handleSaveMealSubModal} className="space-y-3.5 pt-1">
+            <div className="space-y-3.5 pt-1">
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
@@ -1191,6 +1221,12 @@ export default function TemplatesPage() {
                     type="time"
                     value={subMealTime}
                     onChange={(e) => setSubMealTime(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveMealSubModal();
+                      }
+                    }}
                     className="w-full border rounded-lg pl-9 pr-9 py-2 text-xs outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -1270,7 +1306,8 @@ export default function TemplatesPage() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleSaveMealSubModal()}
                   className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -1279,7 +1316,7 @@ export default function TemplatesPage() {
                   {editingMealSubId ? (t('saveChanges') || 'Save Changes') : (t('addMealBtn') || 'Add Meal')}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -1301,6 +1338,7 @@ export default function TemplatesPage() {
           >
             <div className="space-y-4">
               <button 
+                type="button"
                 onClick={() => setShowRecipePickerModal(false)} 
                 className="absolute top-4 right-4 p-2 rounded-xl transition cursor-pointer shadow-xs"
                 style={{
@@ -1482,7 +1520,7 @@ export default function TemplatesPage() {
         </div>
       )}
 
-      {/* 4. APPLY TEMPLATE MODAL */}
+      {/* 4. APPLY TEMPLATE MODAL (NO NATIVE FORM) */}
       {showApplyModal && selectedTemplate && (
         <div 
           onClick={() => setShowApplyModal(false)}
@@ -1498,6 +1536,7 @@ export default function TemplatesPage() {
             }}
           >
             <button
+              type="button"
               onClick={() => setShowApplyModal(false)}
               className="absolute top-4 right-4 p-2 rounded-lg transition cursor-pointer shadow-xs"
               style={{
@@ -1520,7 +1559,7 @@ export default function TemplatesPage() {
               </p>
             </div>
 
-            <form onSubmit={handleApplyTemplateToPlanner} className="space-y-4 pt-1">
+            <div className="space-y-4 pt-1">
               <div 
                 className="w-full border rounded-xl px-3.5 py-3 text-xs font-bold flex items-center gap-2"
                 style={{
@@ -1546,12 +1585,17 @@ export default function TemplatesPage() {
                     required
                     value={applyStartDate}
                     onChange={(e) => setApplyStartDate(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleApplyTemplateToPlanner();
+                      }
+                    }}
                     className="w-full border-2 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none cursor-pointer transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-primary)',
-                      color: 'var(--color-text)',
-                      colorScheme: isDayMode ? 'light' : 'dark'
+                      color: 'var(--color-text)'
                     }}
                   />
                   <CalendarIcon 
@@ -1578,7 +1622,8 @@ export default function TemplatesPage() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleApplyTemplateToPlanner()}
                   className="w-full py-2.5 px-4 text-white font-bold text-xs rounded-xl transition shadow-md cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -1587,7 +1632,7 @@ export default function TemplatesPage() {
                   {t('applyBtn') || 'Apply to Planner'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}

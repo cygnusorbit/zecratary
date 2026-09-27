@@ -356,9 +356,9 @@ export default function ProfilePage() {
     };
   }, [reloadActiveUser, fetchTokenSummary, fetchWalletSummary]);
 
-  // Update Profile Form
-  const handleUpdateProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Update Profile Action
+  const handleUpdateProfile = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     setError('');
     setSuccessMsg('');
     if (!user) return;
@@ -534,9 +534,7 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* 🚀 HIGH-VISIBILITY EXECUTIVE SUMMARY KPI BANNER                           */}
-      {/* ========================================================================= */}
+      {/* EXECUTIVE SUMMARY KPI BANNER */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-in fade-in">
         {/* KPI 1: AI Token Spendable Balance */}
         <div 
@@ -716,7 +714,7 @@ export default function ProfilePage() {
       {/* Profile Overview (Credentials, Token & Wallet Summary, Socials) */}
       <div className="space-y-6 animate-in fade-in">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left: Profile Credentials Form */}
+          {/* Left: Profile Credentials Container (No Form) */}
           <div 
             className="lg:col-span-7 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl flex flex-col justify-between"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -760,7 +758,7 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            <form onSubmit={handleUpdateProfile} className="space-y-4 text-xs" autoComplete="off">
+            <div className="space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-bold mb-1.5 opacity-80">{t('fullNameLabel', 'Full Name *')}</label>
@@ -769,6 +767,12 @@ export default function ProfilePage() {
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateProfile();
+                      }
+                    }}
                     className="w-full border rounded-xl px-3.5 py-2.5 text-sm font-bold outline-none bg-[var(--color-inner-dark)] border-[var(--color-border)]"
                   />
                 </div>
@@ -779,6 +783,12 @@ export default function ProfilePage() {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateProfile();
+                      }
+                    }}
                     className="w-full border rounded-xl px-3.5 py-2.5 text-sm font-bold outline-none bg-[var(--color-inner-dark)] border-[var(--color-border)]"
                   />
                 </div>
@@ -792,6 +802,12 @@ export default function ProfilePage() {
                     autoComplete="new-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateProfile();
+                      }
+                    }}
                     placeholder="••••••••"
                     className="w-full border rounded-xl px-3.5 py-2.5 text-sm font-bold outline-none bg-[var(--color-inner-dark)] border-[var(--color-border)]"
                   />
@@ -803,6 +819,12 @@ export default function ProfilePage() {
                     autoComplete="new-password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateProfile();
+                      }
+                    }}
                     placeholder="••••••••"
                     className="w-full border rounded-xl px-3.5 py-2.5 text-sm font-bold outline-none bg-[var(--color-inner-dark)] border-[var(--color-border)]"
                   />
@@ -829,14 +851,15 @@ export default function ProfilePage() {
                 </div>
 
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleUpdateProfile()}
                   className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
                   <Check className="h-4 w-4" /> {t('saveProfileBtn', 'Save Profile')}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
 
           {/* Right: Dual Asset Summary Cards */}

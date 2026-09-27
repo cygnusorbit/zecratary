@@ -142,8 +142,8 @@ export default function ManualRecipePage() {
     setDraggedIndex(null);
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!form.title.trim()) {
       alert(t('enterRecipeTitleAlert') || 'Please enter a recipe title.');
       setActiveTab('info');
@@ -276,7 +276,8 @@ export default function ManualRecipePage() {
           })}
         </div>
 
-        <form onSubmit={handleSave} className="space-y-6">
+        {/* CONTAINER REPLACED NATIVE FORM */}
+        <div className="space-y-6">
           {activeTab === 'info' && (
             <div className="space-y-6 animate-in fade-in">
               <div className="space-y-2">
@@ -314,6 +315,12 @@ export default function ManualRecipePage() {
                     placeholder={t('recipeTitlePlaceholder') || 'e.g. Authentic Pad Thai'}
                     value={form.title}
                     onChange={(e) => setForm({ ...form, title: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSave();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition font-bold"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -366,6 +373,12 @@ export default function ManualRecipePage() {
                       type="number"
                       value={form.servings}
                       onChange={(e) => setForm({ ...form, servings: parseInt(e.target.value) || 1 })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSave();
+                        }
+                      }}
                       className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -381,6 +394,12 @@ export default function ManualRecipePage() {
                       type="number"
                       value={form.prepTimeMinutes}
                       onChange={(e) => setForm({ ...form, prepTimeMinutes: parseInt(e.target.value) || 0 })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSave();
+                        }
+                      }}
                       className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -396,6 +415,12 @@ export default function ManualRecipePage() {
                       type="number"
                       value={form.cookTimeMinutes}
                       onChange={(e) => setForm({ ...form, cookTimeMinutes: parseInt(e.target.value) || 0 })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSave();
+                        }
+                      }}
                       className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -481,6 +506,12 @@ export default function ManualRecipePage() {
                         list[idx].amount = e.target.value;
                         setForm({ ...form, ingredients: list });
                       }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSave();
+                        }
+                      }}
                       className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
                       style={{
                         backgroundColor: 'var(--color-card)',
@@ -497,6 +528,12 @@ export default function ManualRecipePage() {
                         list[idx].unit = e.target.value;
                         setForm({ ...form, ingredients: list });
                       }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSave();
+                        }
+                      }}
                       className="w-20 border rounded-lg p-2 text-center outline-none"
                       style={{
                         backgroundColor: 'var(--color-card)',
@@ -512,6 +549,12 @@ export default function ManualRecipePage() {
                         const list = [...form.ingredients];
                         list[idx].item = e.target.value;
                         setForm({ ...form, ingredients: list });
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSave();
+                        }
                       }}
                       className="flex-1 bg-transparent border-none outline-none px-2 font-medium"
                       style={{ color: 'var(--color-text)' }}
@@ -689,7 +732,8 @@ export default function ManualRecipePage() {
                   {t('backBtn') || '← Back'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleSave()}
                   disabled={saving}
                   className="text-white font-bold px-8 py-3 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
                   style={{ backgroundColor: 'var(--color-primary)' }}
@@ -699,7 +743,7 @@ export default function ManualRecipePage() {
               </div>
             </div>
           )}
-        </form>
+        </div>
       </div>
     </div>
   );

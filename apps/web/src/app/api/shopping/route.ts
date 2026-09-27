@@ -53,6 +53,7 @@ export async function GET(req: NextRequest) {
       category: r.category || 'Produce',
       staple: Boolean(r.staple),
       checked: Boolean(r.checked),
+      completed: Boolean(r.checked),
       recipeId: r.recipe_id || null,
       recipeTitle: r.recipe_title || null,
       createdAt: r.created_at || new Date().toISOString(),
@@ -83,7 +84,7 @@ export async function POST(req: NextRequest) {
       const unit = String(item.unit || '').slice(0, 64);
       const category = String(item.category || 'Produce').slice(0, 64);
       const staple = Boolean(item.staple);
-      const checked = Boolean(item.checked || item.completed);
+      const checked = typeof item.checked !== 'undefined' ? Boolean(item.checked) : Boolean(item.completed);
       const recipeId = item.recipeId || item.recipe_id ? String(item.recipeId || item.recipe_id).slice(0, 64) : null;
       const recipeTitle = item.recipeTitle || item.recipe_title ? String(item.recipeTitle || item.recipe_title).slice(0, 255) : null;
 

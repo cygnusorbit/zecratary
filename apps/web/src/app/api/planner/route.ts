@@ -1,53 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-let cachedPool: any = null;
-
-async function getPostgresPool() {
-  if (cachedPool) return cachedPool;
-  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
-  if (!connStr) return null;
+async function ensureTable() {
   try {
-    const { Pool } = await import('pg');
-    const requiresSsl = connStr.includes('sslmode=require') || 
-                        connStr.includes('neon.tech') || 
-                        connStr.includes('supabase.co') || 
-                        process.env.NODE_ENV === 'production';
-    cachedPool = new Pool({
-      connectionString: connStr,
-      ssl: requiresSsl ? { rejectUnauthorized: false } : false
-    });
-    return cachedPool;
-  } catch (_) {
-    return null;
-  }
-}
-
-async function ensurePlannerTable(pool: any) {
-  if (!pool) return;
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS planner_meals (
-        id VARCHAR(100) PRIMARY KEY,
-        user_id VARCHAR(100),
+    await query(`
+      CREATE TABLE IF NOT EXISTS planned_meals (
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255),
         created_by VARCHAR(255),
-        creator_name VARCHAR(255),
-        title VARCHAR(255) NOT NULL,
-        description TEXT,
-        date VARCHAR(50),
-        date_str VARCHAR(50),
-        day_name VARCHAR(50),
-        meal_type VARCHAR(50) DEFAULT 'Dinner',
-        time VARCHAR(50),
-        servings INT DEFAULT 2,
-        prep_minutes INT DEFAULT 15,
-        cook_minutes INT DEFAULT 20,
-        image_url TEXT,
-        ingredients JSONB DEFAULT '[]'::jsonb,
+        date VARCHAR(64) NOT NULL,
+        recipe_id VARCHAR(255),
+        recipe_name VARCHAR(255) NOT NULL,
+        image TEXT,
+        meal_type VARCHAR(64) DEFAULT 'Dinner',
+        time VARCHAR(64) DEFAULT '',
+        is_leftover BOOLEAN DEFAULT FALSE,
         notes TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);
   } catch (_) {}
@@ -55,18 +27,38 @@ async function ensurePlannerTable(pool: any) {
 
 export async function GET(req: NextRequest) {
   try {
+    await ensureTable();
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId') || 'guest';
-    const pool = await getPostgresPool();
-    if (pool) {
-      await ensurePlannerTable(pool);
-      const res = await pool.query(
-        "SELECT * FROM planner_meals WHERE user_id = $1 OR created_by = $1 ORDER BY date ASC LIMIT 100",
-        [userId]
-      );
-      return NextResponse.json({ success: true, meals: res.rows });
+    const userId = searchParams.get('userId');
+
+    let sql = 'SELECT * FROM planned_meals WHERE 1=1';
+    const params: any[] = [];
+
+    if (userId) {
+      params.push(userId);
+      sql += ` AND (user_id = $${params.length} OR created_by = $${params.length} OR user_id IS NULL)`;
     }
-    return NextResponse.json({ success: true, meals: [] });
+
+    sql += ' ORDER BY date ASC, time ASC, created_at ASC';
+    const rows = await query(sql, params);
+
+    const formatted = rows.map((r: any) => ({
+      id: r.id,
+      userId: r.user_id,
+      createdBy: r.created_by,
+      date: r.date,
+      recipeId: r.recipe_id,
+      recipeName: r.recipe_name,
+      image: r.image,
+      mealType: r.meal_type || 'Dinner',
+      time: r.time || '',
+      isLeftover: Boolean(r.is_leftover),
+      notes: r.notes || '',
+      createdAt: r.created_at,
+      updatedAt: r.updated_at
+    }));
+
+    return NextResponse.json({ success: true, meals: formatted });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -74,50 +66,88 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureTable();
     const body = await req.json();
-    const id = body.id || `plan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const userId = body.userId || body.user_id || 'guest';
-    const email = body.createdBy || body.creator_email || 'guest';
-    const name = body.creatorName || email.split('@')[0];
-    const title = body.title || body.name || body.recipeTitle || 'Scheduled Meal';
-    const description = body.description || '';
-    const date = body.date || body.formattedDate || new Date().toISOString().split('T')[0];
-    const dateStr = body.dateStr || date;
-    const dayName = body.dayName || body.day || '';
-    const mealType = (body.mealType || body.type || 'Dinner').toUpperCase();
-    const time = body.time || '19:00';
-    const servings = Number(body.servings || 2);
-    const prep = Number(body.prepMinutes || body.prepTimeMinutes || 15);
-    const cook = Number(body.cookMinutes || body.cookTimeMinutes || 20);
-    const image = body.image || body.imageUrl || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80';
-    const ingredients = Array.isArray(body.ingredients) ? body.ingredients : [];
-    const notes = body.notes || '';
+    const userId = body.userId;
+    const meals = Array.isArray(body.meals) ? body.meals : (body.meal ? [body.meal] : []);
 
-    const pool = await getPostgresPool();
-    if (pool) {
-      await ensurePlannerTable(pool);
-      await pool.query(
-        `INSERT INTO planner_meals (
-          id, user_id, created_by, creator_name, title, description,
-          date, date_str, day_name, meal_type, time, servings,
-          prep_minutes, cook_minutes, image_url, ingredients, notes, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          title = EXCLUDED.title,
-          date = EXCLUDED.date,
-          meal_type = EXCLUDED.meal_type,
-          time = EXCLUDED.time,
-          notes = EXCLUDED.notes,
-          updated_at = NOW();`,
-        [id, userId, email, name, title, description, date, dateStr, dayName, mealType, time, servings, prep, cook, image, JSON.stringify(ingredients), notes]
-      );
+    if (userId && Array.isArray(body.meals)) {
+      const mealIds = meals.map((m: any) => m.id);
+      if (mealIds.length > 0) {
+        await query(
+          'DELETE FROM planned_meals WHERE (user_id = $1 OR created_by = $1) AND NOT (id = ANY($2::text[]))',
+          [userId, mealIds]
+        );
+      } else {
+        await query('DELETE FROM planned_meals WHERE user_id = $1 OR created_by = $1', [userId]);
+      }
     }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Meal scheduled successfully in PostgreSQL planner.',
-      meal: { id, title, date, mealType, time, servings }
-    });
+    for (const m of meals) {
+      if (!m || !m.recipeName) continue;
+      const id = String(m.id || 'plan_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
+      const targetUserId = m.userId || userId || null;
+      const createdBy = m.createdBy || userId || null;
+
+      await query(`
+        INSERT INTO planned_meals (
+          id, user_id, created_by, date, recipe_id, recipe_name, image, meal_type, time, is_leftover, notes, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          user_id = COALESCE(EXCLUDED.user_id, planned_meals.user_id),
+          created_by = COALESCE(EXCLUDED.created_by, planned_meals.created_by),
+          date = EXCLUDED.date,
+          recipe_id = EXCLUDED.recipe_id,
+          recipe_name = EXCLUDED.recipe_name,
+          image = EXCLUDED.image,
+          meal_type = EXCLUDED.meal_type,
+          time = EXCLUDED.time,
+          is_leftover = EXCLUDED.is_leftover,
+          notes = EXCLUDED.notes,
+          updated_at = NOW();
+      `, [
+        id,
+        targetUserId,
+        createdBy,
+        m.date,
+        m.recipeId || null,
+        m.recipeName,
+        m.image || null,
+        m.mealType || 'Dinner',
+        m.time || '',
+        Boolean(m.isLeftover),
+        m.notes || ''
+      ]);
+    }
+
+    return NextResponse.json({ success: true, count: meals.length });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    await ensureTable();
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+    let userId = searchParams.get('userId');
+
+    try {
+      const body = await req.json();
+      if (body) {
+        id = body.id || id;
+        userId = body.userId || userId;
+      }
+    } catch (_) {}
+
+    if (id) {
+      await query('DELETE FROM planned_meals WHERE id = $1', [id]);
+    } else if (userId) {
+      await query('DELETE FROM planned_meals WHERE user_id = $1 OR created_by = $1', [userId]);
+    }
+
+    return NextResponse.json({ success: true, message: 'Meal plan record deleted from PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

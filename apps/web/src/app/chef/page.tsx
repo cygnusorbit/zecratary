@@ -299,8 +299,8 @@ export default function ChefChatPage() {
     } catch (_) {}
   }, [getUserKey]);
 
-  const handleCreateCategory = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCreateCategory = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     const clean = newCategoryName.trim();
     if (!clean) return;
     try {
@@ -688,8 +688,8 @@ export default function ChefChatPage() {
     setSelectedAllergies(prev => prev.includes(item) ? prev.filter(a => a !== item) : [...prev, item]);
   };
 
-  const handleAddAvoid = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleAddAvoid = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     const clean = newAvoidInput.trim();
     if (!clean) return;
     if (!ingredientsToAvoid.includes(clean)) setIngredientsToAvoid([...ingredientsToAvoid, clean]);
@@ -700,8 +700,8 @@ export default function ChefChatPage() {
     setIngredientsToAvoid(ingredientsToAvoid.filter(a => a !== item));
   };
 
-  const handleAddTaste = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleAddTaste = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     const clean = newTasteInput.trim();
     if (!clean) return;
     if (!tastesList.includes(clean)) setTastesList([...tastesList, clean]);
@@ -1078,7 +1078,6 @@ export default function ChefChatPage() {
 
     const lower = textToSend.toLowerCase();
 
-    // Trigger full intake wizard if requested directly via prompt
     if (wizardStep === null && (
       lower.includes('complete meal plan intake') || 
       lower.includes('meal plan intake wizard') ||
@@ -1139,13 +1138,11 @@ export default function ChefChatPage() {
           const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
           const userKey = getUserKey(activeAuth);
 
-          // Build structured QA pairs for 100% accurate AI comprehension
           const qaSummary = wizardQuestionsList.map((q, idx) => ({
             question: q,
             answer: updatedAnswers[idx] || 'Not specified'
           }));
 
-          // Accurately parse user choices with 1-day priority
           let requestedDays = 1;
           let requestedMealTypes = ['Dinner'];
           let requestedTheme = 'Balanced Wholesome';
@@ -1157,7 +1154,6 @@ export default function ChefChatPage() {
             const a = answer.trim();
             const aLower = a.toLowerCase();
 
-            // 1. Duration
             if (/\b(how many days|number of days|duration|days to plan|how long|days would you like)\b/i.test(q) || (/\bdays?\b/i.test(q) && /\b(how many|plan for|total)\b/i.test(q))) {
               if (/\b(1|single|one|today only)\b/i.test(aLower) && !/\b(1[0-4])\b/.test(aLower)) {
                 requestedDays = 1;
@@ -1170,7 +1166,6 @@ export default function ChefChatPage() {
                 }
               }
             }
-            // 2. Meal types
             else if (/\b(meal type|meal types|which meal|types of meal|meals to include)\b/i.test(q)) {
               if (/all meals \+ snack/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
               else if (/all meals/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Lunch', 'Dinner'];
@@ -1182,15 +1177,12 @@ export default function ChefChatPage() {
               else if (/breakfast only/i.test(aLower)) requestedMealTypes = ['Breakfast'];
               else requestedMealTypes = [a];
             }
-            // 3. Start Date
             else if (/\b(when|start date|starting|start|commence|begin)\b/i.test(q)) {
               startDate = a;
             }
-            // 4. Budget
             else if (/\b(budget|cost|spend|price|financial)\b/i.test(q)) {
               requestedBudget = a;
             }
-            // 5. Themes & Preferences
             else if (/\b(theme|themes|preference|preferences|flavor|flavors|cuisine)\b/i.test(q)) {
               requestedTheme = a;
             }
@@ -1214,7 +1206,7 @@ export default function ChefChatPage() {
               userEmail: activeAuth?.email,
               preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
               pantry: enablePantryContext ? pantryIngredientsList : [],
-          enableSavedRecipeSearch
+              enableSavedRecipeSearch
             })
           });
 
@@ -1445,7 +1437,7 @@ export default function ChefChatPage() {
               backgroundColor: 'var(--color-inner-dark)',
               borderColor: 'var(--color-emerald)',
               color: 'var(--color-emerald)'
-            }}
+}}
           >
             {t('servingsLabelPref', 'Servings:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{(t('peopleSuffix', '{count} people')).replace('{count}', String(servings))}</strong>
           </span>
@@ -1594,7 +1586,7 @@ export default function ChefChatPage() {
                   key={sec.id}
                   type="button"
                   onClick={() => handleStartTopicWizard(sec)}
-                  className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-sm hover:scale-[1.02] cursor-pointer flex items-center gap-2"
+                  className="text-xs font-semibold px-3 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
                   style={{
                     backgroundColor: 'var(--color-card)',
                     borderColor: 'var(--color-border)',
@@ -1817,7 +1809,7 @@ export default function ChefChatPage() {
                     </div>
                   )}
 
-                  {/* MULTI-DAY PLAN PRESENTATION (SUPPORTS CARD, COMPACT, DETAILED MODES) */}
+                  {/* MULTI-DAY PLAN PRESENTATION */}
                   {m.plan && (
                     <div 
                       className="border rounded-3xl p-5 space-y-4 shadow-sm transition-colors duration-200"
@@ -1834,7 +1826,6 @@ export default function ChefChatPage() {
                           </h3>
                         </div>
 
-                        {/* In-Chat View Mode Switcher Pills */}
                         <div className="flex items-center gap-1.5 self-end sm:self-auto">
                           <span className="text-[10px] font-bold mr-1 hidden sm:inline" style={{ color: 'var(--color-text-secondary)' }}>
                             {m.plan.budgetPerServing ? `Budget: ${m.plan.budgetPerServing}` : '$5.00/serv'}
@@ -2082,10 +2073,8 @@ export default function ChefChatPage() {
                           ))}
                         </div>
                       )}
-
                     </div>
                   )}
-
                 </div>
 
                 {isUser && (
@@ -2322,12 +2311,18 @@ export default function ChefChatPage() {
                   </span>
                 </div>
 
-                <form onSubmit={handleCreateCategory} className="flex gap-2">
+                <div className="flex gap-2">
                   <input
                     type="text"
                     placeholder="New category name (e.g. Keto Prep, Dinners)..."
                     value={newCategoryName}
                     onChange={(e) => setNewCategoryName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleCreateCategory();
+                      }
+                    }}
                     className="flex-1 border rounded-xl px-3 py-1.5 text-xs outline-none"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -2336,14 +2331,15 @@ export default function ChefChatPage() {
                     }}
                   />
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={() => handleCreateCategory()}
                     disabled={!newCategoryName.trim()}
                     className="px-3 py-1.5 text-white font-bold text-xs rounded-xl transition cursor-pointer disabled:opacity-40 flex items-center gap-1 shadow-xs hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-emerald)' }}
                   >
                     <Plus className="h-3.5 w-3.5" /> Add
                   </button>
-                </form>
+                </div>
 
                 <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
                   <button
@@ -2705,12 +2701,18 @@ export default function ChefChatPage() {
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('ingredientsToAvoidTitle', 'Ingredients to Avoid')}
                 </label>
-                <form onSubmit={handleAddAvoid} className="flex gap-2">
+                <div className="flex gap-2">
                   <input
                     type="text"
                     placeholder={t('typeIngredientPlaceholder', 'Type an ingredient...')}
                     value={newAvoidInput}
                     onChange={(e) => setNewAvoidInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddAvoid();
+                      }
+                    }}
                     className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-sm"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -2719,13 +2721,14 @@ export default function ChefChatPage() {
                     }}
                   />
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={() => handleAddAvoid()}
                     className="px-3.5 py-2.5 text-white rounded-xl font-bold flex items-center justify-center transition cursor-pointer shadow-md hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     <Plus className="h-4 w-4" />
                   </button>
-                </form>
+                </div>
 
                 <div 
                   className="p-3 rounded-2xl border min-h-[50px] flex flex-wrap gap-2 items-center"
@@ -2767,12 +2770,18 @@ export default function ChefChatPage() {
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('tastesTitle', 'Tastes')}
                 </label>
-                <form onSubmit={handleAddTaste} className="flex gap-2">
+                <div className="flex gap-2">
                   <input
                     type="text"
                     placeholder={t('tastesPlaceholder', 'e.g. prefers larger portions, loves umami...')}
                     value={newTasteInput}
                     onChange={(e) => setNewTasteInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddTaste();
+                      }
+                    }}
                     className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-sm"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -2781,13 +2790,14 @@ export default function ChefChatPage() {
                     }}
                   />
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={() => handleAddTaste()}
                     className="px-3.5 py-2.5 text-white rounded-xl font-bold flex items-center justify-center transition cursor-pointer shadow-md hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     <Plus className="h-4 w-4" />
                   </button>
-                </form>
+                </div>
 
                 <div 
                   className="p-3 rounded-2xl border min-h-[50px] flex flex-wrap gap-2 items-center"
@@ -3090,7 +3100,7 @@ export default function ChefChatPage() {
                   <button
                     type="button"
                     onClick={() => handleOpenPlannerModal(selectedRecipeForModal)}
-                    className="px-3.5 py-1.5 rounded-xl text-white text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90"
+                    className="px-3.5 py-1.5 rounded-xl text-white text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90 animate-in fade-in"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     <CalendarPlus className="h-3.5 w-3.5" />

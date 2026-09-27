@@ -24,7 +24,7 @@ function syncIndexFile(langDir: string) {
   const importsStr = codes.map((c) => `import { ${c} } from './${c}';`).join('\n');
   const dictEntries = codes.map((c) => `  ${c},`).join('\n');
 
-  const content = `${exportsStr}\n\n${importsStr}\n\nexport const DEFAULT_DICTIONARIES: Record<string, Record<string, string>> = {\n${dictEntries}\n};\n\nexport const dictionaries = DEFAULT_DICTIONARIES;\nexport default DEFAULT_DICTIONARIES;\n`;
+  const content = `${exportsStr}\n\n${importsStr}\n\nconst DEFAULT_DICTIONARIES: Record<string, Record<string, string>> = {\n${dictEntries}\n};\n\nconst dictionaries = DEFAULT_DICTIONARIES;\nexport default DEFAULT_DICTIONARIES;\n`;
 
   fs.writeFileSync(indexPath, content, 'utf8');
 }

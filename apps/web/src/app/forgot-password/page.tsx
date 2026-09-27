@@ -1,3 +1,4 @@
+// Generated / Updated by AI Collaborator
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -38,13 +39,13 @@ export default function ForgotPasswordPage() {
       if (isDay) {
         root.classList.remove('dark');
         root.classList.add('light');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme#f8fafc';
+        if (typeof document !== 'undefined' && document.body) {
           document.body.style.color = '#0f172a';
         }
       } else {
         root.classList.remove('light');
         root.classList.add('dark');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme
+        if (typeof document !== 'undefined' && document.body) {
           document.body.style.color = '';
         }
       }
@@ -67,20 +68,20 @@ export default function ForgotPasswordPage() {
       window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
       window.removeEventListener('storage', applySavedTheme);
-      if (typeof document !== 'undefined' && document.body) { // preserved by global theme
+      if (typeof document !== 'undefined' && document.body) {
         document.body.style.color = '';
       }
     };
   }, [router, applySavedTheme]);
 
-  const handleRequestToken = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleRequestToken = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     setError('');
     setSuccess('');
 
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      setError('Please provide a valid email address.');
+      setError(t('invalidEmailPrompt') || 'Please provide a valid email address.');
       return;
     }
 
@@ -95,7 +96,7 @@ export default function ForgotPasswordPage() {
           DEFAULT_USERS.find(u => u.email.toLowerCase() === cleanEmail);
 
         if (!matched) {
-          setError('No account found with this email address.');
+          setError(t('noAccountFoundEmail') || 'No account found with this email address.');
           setLoading(false);
           return;
         }
@@ -104,65 +105,95 @@ export default function ForgotPasswordPage() {
         setGeneratedToken(simulatedToken);
         setTokenInput(simulatedToken);
 
-        setSuccess(`Reset code generated for ${cleanEmail}. Enter code to set a new password.`);
+        setSuccess((t('resetCodeGeneratedSuccess') || 'Reset code generated for {email}. Enter code to set a new password.').replace('{email}', cleanEmail));
         setStep(2);
       } catch (err: any) {
-        setError('Failed to process recovery request.');
+        setError(t('recoveryRequestFailed') || 'Failed to process recovery request.');
       } finally {
         setLoading(false);
       }
     }, 600);
   };
 
-  const handleResetPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleResetPassword = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     setError('');
     setSuccess('');
 
     if (tokenInput.trim() !== generatedToken.trim()) {
-      setError('Invalid or expired security code.');
+      setError(t('invalidSecurityCode') || 'Invalid or expired security code.');
       return;
     }
 
     if (newPassword.length < 6) {
-      setError('Password must be at least 6 characters.');
+      setError(t('passwordMinLength') || 'Password must be at least 6 characters.');
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      setError('Passwords do not match.');
+      setError(t('passwordsDoNotMatch') || 'Passwords do not match.');
       return;
     }
 
     setLoading(true);
 
-    setTimeout(() => {
-      try {
-        const rawUsers = localStorage.getItem('zecratary_users');
-        let users: User[] = rawUsers ? JSON.parse(rawUsers) : [...DEFAULT_USERS];
-        const cleanEmail = email.trim().toLowerCase();
+    try {
+      const cleanEmail = email.trim().toLowerCase();
+      const rawUsers = localStorage.getItem('zecratary_users');
+      let users: User[] = rawUsers ? JSON.parse(rawUsers) : [...DEFAULT_USERS];
 
-        const userIndex = users.findIndex(u => u.email.toLowerCase() === cleanEmail);
-        if (userIndex !== -1) {
-          users[userIndex].password = newPassword.trim();
-        } else {
-          const fallback = DEFAULT_USERS.find(u => u.email.toLowerCase() === cleanEmail);
-          if (fallback) {
-            users.push({ ...fallback, password: newPassword.trim() });
-          }
+      const userIndex = users.findIndex(u => u.email.toLowerCase() === cleanEmail);
+      let matchedUser: any = null;
+      if (userIndex !== -1) {
+        (users[userIndex] as any).password = newPassword.trim();
+        matchedUser = users[userIndex];
+      } else {
+        const fallback = DEFAULT_USERS.find(u => u.email.toLowerCase() === cleanEmail);
+        if (fallback) {
+          const updatedFallback = { ...fallback, password: newPassword.trim() };
+          users.push(updatedFallback as any);
+          matchedUser = updatedFallback;
         }
+      }
 
-        localStorage.setItem('zecratary_users', JSON.stringify(users));
+      // 1. Asynchronously persist to PostgreSQL backend
+      try {
+        await Promise.allSettled([
+          fetch('/api/admin/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: matchedUser?.id,
+              email: cleanEmail,
+              password: newPassword.trim(),
+              name: matchedUser?.name,
+              role: matchedUser?.role || 'user'
+            })
+          }),
+          fetch('/api/auth/reset-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: cleanEmail,
+              password: newPassword.trim()
+            })
+          })
+        ]);
+      } catch (_) {}
+
+      // 2. Synchronize localStorage & broadcast update
+      localStorage.setItem('zecratary_users', JSON.stringify(users));
+      if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_users_updated'));
         window.dispatchEvent(new Event('storage'));
-
-        setSuccess('Password updated successfully! Redirecting to login...');
-        setTimeout(() => router.replace('/login'), 1200);
-      } catch (err: any) {
-        setError('Failed to update password.');
-        setLoading(false);
       }
-    }, 600);
+
+      setSuccess(t('passwordUpdatedRedirect') || 'Password updated successfully! Redirecting to login...');
+      setTimeout(() => router.replace('/login'), 1200);
+    } catch (err: any) {
+      setError(t('passwordUpdateFailed') || 'Failed to update password.');
+      setLoading(false);
+    }
   };
 
   const cPageBg = isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)';
@@ -197,12 +228,14 @@ export default function ForgotPasswordPage() {
             <Key className="h-6 w-6" />
           </div>
           <h1 className="text-2xl font-black tracking-tight" style={{ color: cText }}>
-            {step === 1 ? 'Password Recovery' : 'Create New Password'}
+            {step === 1 
+              ? (t('passwordRecoveryTitle') || 'Password Recovery') 
+              : (t('createNewPasswordTitle') || 'Create New Password')}
           </h1>
           <p className="text-xs" style={{ color: cSubText }}>
             {step === 1 
-              ? 'Enter your registered email to generate a secure reset token.' 
-              : `Enter the code and create a new password for ${email}`}
+              ? (t('enterEmailTokenPrompt') || 'Enter your registered email to generate a secure reset token.') 
+              : (t('enterCodeNewPasswordPrompt') || 'Enter the code and create a new password for {email}').replace('{email}', email)}
           </p>
         </div>
 
@@ -228,11 +261,12 @@ export default function ForgotPasswordPage() {
           </div>
         )}
 
+        {/* STEP 1: REQUEST CODE CONTAINER (NO NATIVE FORM) */}
         {step === 1 ? (
-          <form onSubmit={handleRequestToken} className="space-y-4 text-xs" autoComplete="off">
+          <div className="space-y-4 text-xs">
             <div>
               <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
-                Email Address *
+                {t('emailAddressLabel') || 'Email Address'} *
               </label>
               <div className="relative">
                 <Mail className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
@@ -241,6 +275,12 @@ export default function ForgotPasswordPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleRequestToken();
+                    }
+                  }}
                   placeholder="name@example.com"
                   className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none font-mono transition shadow-inner"
                   style={{
@@ -253,20 +293,22 @@ export default function ForgotPasswordPage() {
             </div>
 
             <button
-              type="submit"
+              type="button"
+              onClick={() => handleRequestToken()}
               disabled={loading}
               className="w-full py-3 mt-2 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer hover:opacity-90 disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
             >
               {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-              Send Reset Code
+              {t('sendResetCodeBtn') || 'Send Reset Code'}
             </button>
-          </form>
+          </div>
         ) : (
-          <form onSubmit={handleResetPassword} className="space-y-3.5 text-xs" autoComplete="off">
+          /* STEP 2: RESET PASSWORD CONTAINER (NO NATIVE FORM) */
+          <div className="space-y-3.5 text-xs">
             <div>
               <label className="block font-bold mb-1" style={{ color: cLabel }}>
-                6-Digit Security Code *
+                {t('securityCodeLabel') || '6-Digit Security Code'} *
               </label>
               <input
                 type="text"
@@ -274,6 +316,12 @@ export default function ForgotPasswordPage() {
                 maxLength={6}
                 value={tokenInput}
                 onChange={(e) => setTokenInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleResetPassword();
+                  }
+                }}
                 placeholder="123456"
                 className="w-full border rounded-xl px-3.5 py-2.5 outline-none font-mono font-bold tracking-widest text-center text-sm transition shadow-inner"
                 style={{
@@ -286,7 +334,7 @@ export default function ForgotPasswordPage() {
 
             <div>
               <label className="block font-bold mb-1" style={{ color: cLabel }}>
-                New Password *
+                {t('newPasswordLabel') || 'New Password'} *
               </label>
               <div className="relative">
                 <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
@@ -295,7 +343,13 @@ export default function ForgotPasswordPage() {
                   required
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="At least 6 characters"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleResetPassword();
+                    }
+                  }}
+                  placeholder={t('passwordMinLengthPlaceholder') || 'At least 6 characters'}
                   className="w-full border rounded-xl pl-10 pr-10 py-2.5 outline-none transition shadow-inner"
                   style={{
                     backgroundColor: cInputBg,
@@ -315,7 +369,7 @@ export default function ForgotPasswordPage() {
 
             <div>
               <label className="block font-bold mb-1" style={{ color: cLabel }}>
-                Confirm New Password *
+                {t('confirmNewPasswordLabel') || 'Confirm New Password'} *
               </label>
               <div className="relative">
                 <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
@@ -324,7 +378,13 @@ export default function ForgotPasswordPage() {
                   required
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Repeat new password"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleResetPassword();
+                    }
+                  }}
+                  placeholder={t('repeatNewPasswordPlaceholder') || 'Repeat new password'}
                   className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none transition shadow-inner"
                   style={{
                     backgroundColor: cInputBg,
@@ -336,13 +396,14 @@ export default function ForgotPasswordPage() {
             </div>
 
             <button
-              type="submit"
+              type="button"
+              onClick={() => handleResetPassword()}
               disabled={loading}
               className="w-full py-3 mt-2 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer hover:opacity-90 disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
             >
               {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-              Set New Password
+              {t('setNewPasswordBtn') || 'Set New Password'}
             </button>
 
             <button
@@ -350,9 +411,9 @@ export default function ForgotPasswordPage() {
               onClick={() => setStep(1)}
               className="w-full py-2 text-slate-400 hover:text-slate-600 text-center font-bold text-[11px] cursor-pointer"
             >
-              Re-send to a different email
+              {t('resendDifferentEmail') || 'Re-send to a different email'}
             </button>
-          </form>
+          </div>
         )}
 
         <div className="text-center pt-2 border-t text-xs" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
@@ -361,7 +422,7 @@ export default function ForgotPasswordPage() {
             className="font-bold inline-flex items-center gap-1.5 hover:underline"
             style={{ color: 'var(--color-primary, #E05638)' }}
           >
-            <ArrowLeft className="h-3.5 w-3.5" /> Back to Sign In
+            <ArrowLeft className="h-3.5 w-3.5" /> {t('backToSignIn') || 'Back to Sign In'}
           </Link>
         </div>
       </div>

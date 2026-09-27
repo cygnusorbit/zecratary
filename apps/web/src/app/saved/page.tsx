@@ -279,7 +279,6 @@ export default function SavedRecipesPage() {
       setLoading(true);
       const rawRecipes = await syncUserSavedRecipes(targetUserId, user.email);
 
-      // Verify creator identity explicitly on incoming records
       const userRecipes = rawRecipes
         .filter((r: any) => {
           const rUser = String(r.user_id || r.userId || '').trim();
@@ -531,8 +530,10 @@ export default function SavedRecipesPage() {
     setShowAddToPlanModal(true);
   };
 
-  const handleSaveToCalendar = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveToCalendar = async (e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
     if (!selectedRecipe || !currentUser) return;
 
     const recName = selectedRecipe.title || selectedRecipe.name || 'Untitled Recipe';
@@ -1024,8 +1025,8 @@ export default function SavedRecipesPage() {
     } catch (_) {}
   };
 
-  const handleAddIngredientFilter = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleAddIngredientFilter = (e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
     const clean = ingredientQuery.trim();
     if (!clean) return;
     if (!selectedIngredientsList.includes(clean.toLowerCase())) {
@@ -1264,7 +1265,7 @@ export default function SavedRecipesPage() {
                     borderColor: 'var(--color-primary)'
                   }}
                 >
-                  <form onSubmit={handleAddIngredientFilter} className="flex items-center gap-2">
+                  <div className="flex items-center gap-2">
                     <div 
                       className="flex-1 border-2 rounded-xl overflow-hidden"
                       style={{
@@ -1278,18 +1279,25 @@ export default function SavedRecipesPage() {
                         placeholder={t('searchIngredientsPlaceholder') || 'Search ingredients'}
                         value={ingredientQuery}
                         onChange={(e) => setIngredientQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddIngredientFilter();
+                          }
+                        }}
                         className="w-full bg-transparent px-3 py-2 text-xs outline-none"
                         style={{ color: 'var(--color-text)' }}
                       />
                     </div>
                     <button
-                      type="submit"
+                      type="button"
+                      onClick={handleAddIngredientFilter}
                       className="text-white p-2 rounded-xl transition flex items-center justify-center font-bold text-sm shadow-md cursor-pointer shrink-0"
                       style={{ backgroundColor: 'var(--color-primary)' }}
                     >
                       <Plus className="h-4 w-4 stroke-[3]"/>
                     </button>
-                  </form>
+                  </div>
 
                   {selectedIngredientsList.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
@@ -2580,7 +2588,7 @@ export default function SavedRecipesPage() {
                           {t('cancel') || 'Cancel'}
                         </button>
                         <button
-                          type="submit"
+                          type="button"
                           onClick={handleSaveEdit}
                           className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg flex items-center gap-2 text-xs cursor-pointer"
                           style={{ backgroundColor: 'var(--color-primary)' }}
@@ -2889,7 +2897,7 @@ export default function SavedRecipesPage() {
                           {t('backBtn') || '← Back'}
                         </button>
                         <button
-                          type="submit"
+                          type="button"
                           onClick={handleSaveEdit}
                           className="text-white font-bold px-8 py-2.5 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer"
                           style={{ backgroundColor: 'var(--color-primary)' }}
@@ -3165,6 +3173,7 @@ export default function SavedRecipesPage() {
             }}
           >
             <button 
+              type="button"
               onClick={() => setShowAddToPlanModal(false)} 
               className="absolute top-4 right-4 p-2 rounded-lg transition cursor-pointer"
               style={{
@@ -3187,7 +3196,7 @@ export default function SavedRecipesPage() {
               </p>
             </div>
 
-            <form onSubmit={handleSaveToCalendar} className="space-y-4 pt-1">
+            <div className="space-y-4 pt-1">
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
@@ -3306,7 +3315,8 @@ export default function SavedRecipesPage() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={handleSaveToCalendar}
                   className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -3315,7 +3325,7 @@ export default function SavedRecipesPage() {
                   {t('addToCalendarBtn') || 'Add to Calendar'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -3343,6 +3353,7 @@ export default function SavedRecipesPage() {
                 <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t('selectOrEditItemsShopping') || 'Select or edit items to add directly to your list'}</p>
               </div>
               <button 
+                type="button"
                 onClick={() => setIsShoppingModalOpen(false)} 
                 className="cursor-pointer transition"
                 style={{ color: 'var(--color-text-secondary)' }}

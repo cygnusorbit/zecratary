@@ -195,8 +195,8 @@ export default function RecipeTypeAdminPage() {
     }
   };
 
-  const handleAddType = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddType = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     const clean = newTypeName.trim();
     if (!clean) return;
 
@@ -267,6 +267,7 @@ export default function RecipeTypeAdminPage() {
 
         <div className="flex items-center gap-2.5">
           <button
+            type="button"
             onClick={loadTypesFromServer}
             disabled={isLoading}
             className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
@@ -282,6 +283,7 @@ export default function RecipeTypeAdminPage() {
           </button>
 
           <button
+            type="button"
             onClick={handleResetDefaults}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs"
             style={{
@@ -324,6 +326,7 @@ export default function RecipeTypeAdminPage() {
             <span>{t('repositionBannerRecipeType', 'Drag items or use arrows to reorder recipe types. Click Done when finished.')}</span>
           </div>
           <button
+            type="button"
             onClick={toggleRepositionMode}
             className="px-3 py-1 text-white font-bold rounded-lg transition text-[11px] shrink-0 cursor-pointer shadow-sm"
             style={{ backgroundColor: 'var(--color-emerald)' }}
@@ -333,7 +336,7 @@ export default function RecipeTypeAdminPage() {
         </div>
       )}
 
-      {/* ADD RECIPE TYPE FORM */}
+      {/* ADD RECIPE TYPE CONTAINER (NO FORM) */}
       {!isReordering && (
         <div 
           className="border rounded-3xl p-6 shadow-sm space-y-3 transition-colors duration-200"
@@ -345,13 +348,19 @@ export default function RecipeTypeAdminPage() {
           <h2 className="text-base font-extrabold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
             <Plus className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('addNewRecipeType', 'Add New Recipe Type')}
           </h2>
-          <form onSubmit={handleAddType} className="flex flex-col sm:flex-row gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <input
               type="text"
               required
               placeholder={t('recipeTypePlaceholder', 'e.g. Soup, Salad, Curry...')}
               value={newTypeName}
               onChange={(e) => setNewTypeName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAddType();
+                }
+              }}
               className="flex-1 border rounded-xl px-4 py-3 text-sm outline-none transition"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
@@ -362,7 +371,8 @@ export default function RecipeTypeAdminPage() {
               onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
             />
             <button
-              type="submit"
+              type="button"
+              onClick={() => handleAddType()}
               className="text-white font-bold text-xs px-6 py-3 rounded-xl transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
               style={{ backgroundColor: 'var(--color-primary)' }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -370,7 +380,7 @@ export default function RecipeTypeAdminPage() {
             >
               <Plus className="h-4 w-4" /> {t('addRecipeTypeBtn', 'Add Recipe Type')}
             </button>
-          </form>
+          </div>
         </div>
       )}
 
@@ -460,6 +470,7 @@ export default function RecipeTypeAdminPage() {
                       }}
                     />
                     <button
+                      type="button"
                       onClick={() => handleSaveEdit(idx)}
                       className="p-1.5 border rounded-lg transition cursor-pointer shadow-xs"
                       style={{
@@ -472,6 +483,7 @@ export default function RecipeTypeAdminPage() {
                       <Check className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
                     </button>
                     <button
+                      type="button"
                       onClick={() => setEditingIndex(null)}
                       className="p-1.5 border rounded-lg transition cursor-pointer shadow-xs"
                       style={{
@@ -527,6 +539,7 @@ export default function RecipeTypeAdminPage() {
                     {!isReordering && (
                       <div className="flex items-center gap-1 shrink-0">
                         <button
+                          type="button"
                           onClick={() => {
                             setEditingIndex(idx);
                             setEditingValue(type);
@@ -542,6 +555,7 @@ export default function RecipeTypeAdminPage() {
                           <Edit3 className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                         </button>
                         <button
+                          type="button"
                           onClick={() => handleDeleteType(idx, type)}
                           className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shadow-xs"
                           style={{

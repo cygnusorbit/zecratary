@@ -195,8 +195,8 @@ export default function IngredientCategoryPage() {
     }
   };
 
-  const handleAddCategory = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddCategory = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     const clean = newCatName.trim();
     if (!clean) return;
 
@@ -267,6 +267,7 @@ export default function IngredientCategoryPage() {
 
         <div className="flex items-center gap-2.5">
           <button
+            type="button"
             onClick={loadCategoriesFromServer}
             disabled={isLoading}
             className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
@@ -282,6 +283,7 @@ export default function IngredientCategoryPage() {
           </button>
 
           <button
+            type="button"
             onClick={handleResetDefaults}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs"
             style={{
@@ -324,6 +326,7 @@ export default function IngredientCategoryPage() {
             <span>{t('repositionBanner', 'Drag items or use arrows to reorder ingredient categories. Click Done when finished.')}</span>
           </div>
           <button
+            type="button"
             onClick={toggleRepositionMode}
             className="px-3 py-1 text-white font-bold rounded-lg transition text-[11px] shrink-0 cursor-pointer shadow-sm"
             style={{ backgroundColor: 'var(--color-emerald)' }}
@@ -333,7 +336,7 @@ export default function IngredientCategoryPage() {
         </div>
       )}
 
-      {/* ADD CATEGORY FORM */}
+      {/* ADD CATEGORY CONTAINER (NO NATIVE FORM) */}
       {!isReordering && (
         <div 
           className="border rounded-3xl p-6 shadow-sm space-y-3 transition-colors duration-200"
@@ -345,13 +348,19 @@ export default function IngredientCategoryPage() {
           <h2 className="text-base font-extrabold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
             <Plus className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('addNewCategory', 'Add New Ingredient Category')}
           </h2>
-          <form onSubmit={handleAddCategory} className="flex flex-col sm:flex-row gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <input
               type="text"
               required
               placeholder={t('categoryPlaceholder', 'e.g. Spices, Grains, Produce...')}
               value={newCatName}
               onChange={(e) => setNewCatName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAddCategory();
+                }
+              }}
               className="flex-1 border rounded-xl px-4 py-3 text-sm outline-none transition"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
@@ -362,7 +371,8 @@ export default function IngredientCategoryPage() {
               onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
             />
             <button
-              type="submit"
+              type="button"
+              onClick={() => handleAddCategory()}
               className="text-white font-bold text-xs px-6 py-3 rounded-xl transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
               style={{ backgroundColor: 'var(--color-primary)' }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -370,7 +380,7 @@ export default function IngredientCategoryPage() {
             >
               <Plus className="h-4 w-4" /> {t('addCategoryBtn', 'Add Category')}
             </button>
-          </form>
+          </div>
         </div>
       )}
 
@@ -460,6 +470,7 @@ export default function IngredientCategoryPage() {
                       }}
                     />
                     <button
+                      type="button"
                       onClick={() => handleSaveEdit(idx)}
                       className="p-1.5 border rounded-lg transition cursor-pointer shadow-xs"
                       style={{
@@ -472,6 +483,7 @@ export default function IngredientCategoryPage() {
                       <Check className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
                     </button>
                     <button
+                      type="button"
                       onClick={() => setEditingIndex(null)}
                       className="p-1.5 border rounded-lg transition cursor-pointer shadow-xs"
                       style={{
@@ -527,6 +539,7 @@ export default function IngredientCategoryPage() {
                     {!isReordering && (
                       <div className="flex items-center gap-1 shrink-0">
                         <button
+                          type="button"
                           onClick={() => {
                             setEditingIndex(idx);
                             setEditingValue(cat);
@@ -542,6 +555,7 @@ export default function IngredientCategoryPage() {
                           <Edit3 className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                         </button>
                         <button
+                          type="button"
                           onClick={() => handleDeleteCategory(idx, cat)}
                           className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shadow-xs"
                           style={{

@@ -83,7 +83,7 @@ export default function PlannerPage() {
   const applyGlobalTheme = useCallback(() => {
     try {
       window.dispatchEvent(new Event('zecratary_theme_updated'));
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -159,7 +159,7 @@ export default function PlannerPage() {
     }
   }, []);
 
-  const loadMealPlan = useCallback((user: User | null) => {
+  const loadMealPlan = useCallback(async (user: User | null) => {
     if (typeof window === 'undefined') return;
     try {
       const localPlan = localStorage.getItem('zecratary_meal_plan');
@@ -170,27 +170,41 @@ export default function PlannerPage() {
             ? parsed.filter((m: any) => !m.userId || m.userId === user.id || m.createdBy === user.email)
             : parsed;
           setPlannedMeals(userPlans);
-          return;
         }
+      } else {
+        const systemToday = formatDateKey(new Date());
+        const defaultPlan = [
+          {
+            id: 'p_1_' + (user ? user.id : 'default'),
+            userId: user?.id,
+            createdBy: user?.email,
+            date: systemToday,
+            recipeName: 'Caesar Salad Recipe',
+            image: 'https://images.unsplash.com/photo-1550304943-4f24f54ddde9?auto=format&fit=crop&w=800&q=80',
+            mealType: 'Dinner',
+            time: '19:00',
+            isLeftover: false,
+            notes: ''
+          }
+        ];
+        setPlannedMeals(defaultPlan);
+        localStorage.setItem('zecratary_meal_plan', JSON.stringify(defaultPlan));
       }
 
-      const systemToday = formatDateKey(new Date());
-      const defaultPlan = [
-        {
-          id: 'p_1_' + (user ? user.id : 'default'),
-          userId: user?.id,
-          createdBy: user?.email,
-          date: systemToday,
-          recipeName: 'Caesar Salad Recipe',
-          image: 'https://images.unsplash.com/photo-1550304943-4f24f54ddde9?auto=format&fit=crop&w=800&q=80',
-          mealType: 'Dinner',
-          time: '19:00',
-          isLeftover: false,
-          notes: ''
-        }
-      ];
-      setPlannedMeals(defaultPlan);
-      localStorage.setItem('zecratary_meal_plan', JSON.stringify(defaultPlan));
+      // Synchronize with PostgreSQL backend
+      if (user?.id) {
+        try {
+          const res = await fetch(`/api/planner?userId=${encodeURIComponent(user.id)}`, { cache: 'no-store' });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && Array.isArray(data.meals) && data.meals.length > 0) {
+              const serverPlans = data.meals.filter((m: any) => !m.userId || m.userId === user.id || m.createdBy === user.email);
+              setPlannedMeals(serverPlans);
+              localStorage.setItem('zecratary_meal_plan', JSON.stringify(data.meals));
+            }
+          }
+        } catch (_) {}
+      }
     } catch (e) {
       console.error('Failed to load meal plan', e);
     }
@@ -205,7 +219,8 @@ export default function PlannerPage() {
     loadSavedData(user);
     loadMealPlan(user);
 
-    const handleSync = () => {
+    const handleSync = (e: any) => {
+      if (e?.detail?.source === 'local_planner_mutation') return;
       const active = getCurrentUser();
       setCurrentUser(active);
       loadSavedData(active);
@@ -215,15 +230,15 @@ export default function PlannerPage() {
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_recipes_updated', handleSync);
     window.addEventListener('zecratary_saved_recipes_updated', handleSync);
-    window.addEventListener('zecratary_planner_updated', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
+    window.addEventListener('zecratary_planner_updated', handleSync as EventListener);
+    window.addEventListener('zecratary_auth_changed', handleSync as EventListener);
 
     return () => {
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_recipes_updated', handleSync);
       window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_planner_updated', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
+      window.removeEventListener('zecratary_planner_updated', handleSync as EventListener);
+      window.removeEventListener('zecratary_auth_changed', handleSync as EventListener);
     };
   }, [loadSavedData, loadMealPlan, t, locale, version]);
 
@@ -239,9 +254,18 @@ export default function PlannerPage() {
       const merged = [...updatedUserMeals, ...otherUserMeals];
       localStorage.setItem('zecratary_meal_plan', JSON.stringify(merged));
       setPlannedMeals(updatedUserMeals);
-      window.dispatchEvent(new Event('zecratary_planner_updated'));
+
+      // Asynchronously persist to PostgreSQL backend
+      if (currentUser?.id) {
+        fetch('/api/planner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: currentUser.id, meals: merged })
+        }).catch(() => {});
+      }
+
+      window.dispatchEvent(new CustomEvent('zecratary_planner_updated', { detail: { source: 'local_planner_mutation' } }));
       window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
-      window.dispatchEvent(new Event('storage'));
     } catch (e) {
       console.error('Failed to save meal plan', e);
     }
@@ -384,8 +408,8 @@ export default function PlannerPage() {
     handleCopyDayTo(sourceDateStr, formatDateKey(d));
   };
 
-  const handleAddMealSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddMealSubmit = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!selectedRecipeObj) {
       alert(t('pleaseSelectRecipeAlert'));
       return;
@@ -407,8 +431,8 @@ export default function PlannerPage() {
     setShowAddMealModal(false);
   };
 
-  const handleEditMealSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleEditMealSubmit = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!editingMealId || !editRecipeObj) return;
 
     const updated = plannedMeals.map((m) => {
@@ -435,11 +459,19 @@ export default function PlannerPage() {
     setEditingMealId(null);
   };
 
-  const handleDeleteMeal = (id: string) => {
+  const handleDeleteMeal = async (id: string) => {
     const updated = plannedMeals.filter(m => m.id !== id);
     savePlan(updated);
     if (showEditMealModal && editingMealId === id) {
       setShowEditMealModal(false);
+    }
+
+    if (currentUser?.id) {
+      fetch(`/api/planner?id=${encodeURIComponent(id)}&userId=${encodeURIComponent(currentUser.id)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, userId: currentUser.id })
+      }).catch(() => {});
     }
   };
 
@@ -582,6 +614,7 @@ export default function PlannerPage() {
         
         <div className="flex flex-wrap items-center gap-2.5">
           <button 
+            type="button"
             onClick={() => alert(t('planWeekActivatedAlert'))}
             className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-md cursor-pointer"
             style={{ backgroundColor: 'var(--color-primary)' }}
@@ -591,6 +624,7 @@ export default function PlannerPage() {
             <CalendarIcon className="h-4 w-4" /> {t('planWeekBtn')}
           </button>
           <button 
+            type="button"
             onClick={() => alert(t('weekCopiedAlert'))}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
             style={{
@@ -614,6 +648,7 @@ export default function PlannerPage() {
             <ShoppingBag className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('shoppingListBtn')}
           </button>
           <button 
+            type="button"
             onClick={() => alert(t('shareCopiedAlert'))}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
             style={{
@@ -644,6 +679,7 @@ export default function PlannerPage() {
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <button 
+            type="button"
             onClick={() => {
               const prev = new Date(currentWeekStart.getFullYear(), currentWeekStart.getMonth(), currentWeekStart.getDate() - 7);
               setCurrentWeekStart(prev);
@@ -667,6 +703,7 @@ export default function PlannerPage() {
 
           <div className="flex items-center gap-2">
             <button 
+              type="button"
               onClick={() => {
                 const next = new Date(currentWeekStart.getFullYear(), currentWeekStart.getMonth(), currentWeekStart.getDate() + 7);
                 setCurrentWeekStart(next);
@@ -681,6 +718,7 @@ export default function PlannerPage() {
               <ChevronRight className="h-4 w-4" />
             </button>
             <button 
+              type="button"
               onClick={() => {
                 const now = new Date();
                 setCurrentWeekStart(getMondayOfWeek(now));
@@ -766,6 +804,7 @@ export default function PlannerPage() {
             <span className="text-lg">🔥</span> {t('dailyAverage')}
           </div>
           <button 
+            type="button"
             className="flex items-center gap-1.5 border font-bold text-xs px-3 py-1.5 rounded-xl transition cursor-pointer shadow-xs"
             style={{
               backgroundColor: 'var(--color-inner-dark)',
@@ -935,6 +974,7 @@ export default function PlannerPage() {
                   )}
 
                   <button
+                    type="button"
                     onClick={() => openAddModal(day.dateStr)}
                     className="border font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer"
                     style={{
@@ -963,6 +1003,7 @@ export default function PlannerPage() {
                   </div>
                   <p className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{t('nothingPlannedYet')}</p>
                   <button
+                    type="button"
                     onClick={() => openAddModal(day.dateStr)}
                     className="inline-flex items-center gap-2 border font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-xs cursor-pointer"
                     style={{
@@ -1018,6 +1059,7 @@ export default function PlannerPage() {
 
                       <div className="flex items-center gap-2 shrink-0">
                         <button
+                          type="button"
                           onClick={() => openEditModal(meal)}
                           className="p-2.5 rounded-xl border shadow-xs cursor-pointer transition"
                           style={{
@@ -1030,6 +1072,7 @@ export default function PlannerPage() {
                           <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                         </button>
                         <button
+                          type="button"
                           onClick={() => handleDeleteMeal(meal.id)}
                           className="p-2.5 rounded-xl border shadow-xs cursor-pointer transition hover:text-red-500"
                           style={{
@@ -1067,6 +1110,7 @@ export default function PlannerPage() {
             }}
           >
             <button 
+              type="button"
               onClick={() => setShowShoppingListModal(false)} 
               className="absolute top-5 right-5 p-2 rounded-xl transition cursor-pointer shadow-xs"
               style={{
@@ -1278,6 +1322,7 @@ export default function PlannerPage() {
             }}
           >
             <button 
+              type="button"
               onClick={() => setShowAddMealModal(false)} 
               className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer shadow-xs"
               style={{
@@ -1300,7 +1345,7 @@ export default function PlannerPage() {
               </p>
             </div>
 
-            <form onSubmit={handleAddMealSubmit} className="space-y-3.5 pt-1">
+            <div className="space-y-3.5 pt-1">
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
@@ -1360,6 +1405,12 @@ export default function PlannerPage() {
                     type="time"
                     value={mealTime}
                     onChange={(e) => setMealTime(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddMealSubmit();
+                      }
+                    }}
                     className="w-full border rounded-lg pl-9 pr-9 py-2 text-xs outline-none"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -1499,7 +1550,8 @@ export default function PlannerPage() {
                   {t('cancel')}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleAddMealSubmit()}
                   className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -1508,7 +1560,7 @@ export default function PlannerPage() {
                   {t('addToCalendarBtn')}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -1529,6 +1581,7 @@ export default function PlannerPage() {
             }}
           >
             <button 
+              type="button"
               onClick={() => setShowEditMealModal(false)} 
               className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer shadow-xs"
               style={{
@@ -1551,7 +1604,7 @@ export default function PlannerPage() {
               </p>
             </div>
 
-            <form onSubmit={handleEditMealSubmit} className="space-y-3.5 pt-1">
+            <div className="space-y-3.5 pt-1">
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
@@ -1563,6 +1616,12 @@ export default function PlannerPage() {
                   type="date"
                   value={editDate}
                   onChange={(e) => setEditDate(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleEditMealSubmit();
+                    }
+                  }}
                   className="w-full border rounded-lg px-3 py-2 text-xs font-semibold outline-none cursor-pointer"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -1614,6 +1673,12 @@ export default function PlannerPage() {
                     type="time"
                     value={editMealTime}
                     onChange={(e) => setEditMealTime(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleEditMealSubmit();
+                      }
+                    }}
                     className="w-full border rounded-lg pl-9 pr-9 py-2 text-xs outline-none"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -1766,7 +1831,8 @@ export default function PlannerPage() {
                     {t('cancel')}
                   </button>
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={() => handleEditMealSubmit()}
                     className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                     onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -1776,7 +1842,7 @@ export default function PlannerPage() {
                   </button>
                 </div>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -1798,6 +1864,7 @@ export default function PlannerPage() {
           >
             <div className="space-y-4">
               <button 
+                type="button"
                 onClick={() => setShowRecipePickerModal(false)} 
                 className="absolute top-4 right-4 p-2 rounded-xl transition cursor-pointer shadow-xs"
                 style={{
