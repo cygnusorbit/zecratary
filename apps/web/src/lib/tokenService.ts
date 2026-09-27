@@ -355,6 +355,147 @@ export async function grantPlanTokensOnPurchase(
   return grantMonthlyPlanTokenReward(userEmailOrId, options);
 }
 
+export async function grantUserTokens(
+  userEmailOrId: string,
+  tokens: number,
+  reason: string = 'Admin grant'
+) {
+  return grantMonthlyPlanTokenReward(userEmailOrId, { customTokens: tokens, force: true });
+}
+
+export async function purchaseTokenPackage(
+  userEmailOrIdOrPayload: string | {
+    userId?: string | null;
+    userEmail?: string | null;
+    email?: string | null;
+    packageId?: string;
+    package_id?: string;
+    tokens?: number;
+    amount?: number;
+    amountPaid?: number;
+    currency?: string;
+    gateway?: string;
+    orderId?: string;
+    description?: string;
+  },
+  packageIdOrTokens?: string | number,
+  options?: {
+    orderId?: string;
+    amountPaid?: number;
+    currency?: string;
+    gateway?: string;
+    description?: string;
+  }
+): Promise<{
+  success: boolean;
+  tokensAdded: number;
+  newBalance: number;
+  transactionId?: string;
+  error?: string;
+  user?: any;
+}> {
+  await initTokenTables();
+
+  let userIdentifier = '';
+  let pkgId = '';
+  let explicitTokens = 0;
+  let orderId = '';
+  let gateway = 'stripe';
+  let desc = '';
+
+  if (typeof userEmailOrIdOrPayload === 'object' && userEmailOrIdOrPayload !== null) {
+    userIdentifier = String(userEmailOrIdOrPayload.userId || userEmailOrIdOrPayload.userEmail || userEmailOrIdOrPayload.email || '').trim();
+    pkgId = String(userEmailOrIdOrPayload.packageId || userEmailOrIdOrPayload.package_id || '').trim();
+    explicitTokens = Number(userEmailOrIdOrPayload.tokens || 0);
+    orderId = String(userEmailOrIdOrPayload.orderId || '');
+    gateway = String(userEmailOrIdOrPayload.gateway || 'stripe');
+    desc = String(userEmailOrIdOrPayload.description || '');
+  } else {
+    userIdentifier = String(userEmailOrIdOrPayload || '').trim();
+    if (typeof packageIdOrTokens === 'number') {
+      explicitTokens = packageIdOrTokens;
+    } else if (typeof packageIdOrTokens === 'string') {
+      pkgId = packageIdOrTokens.trim();
+      const num = Number(packageIdOrTokens);
+      if (!isNaN(num) && num > 0) explicitTokens = num;
+    }
+    if (options) {
+      orderId = String(options.orderId || '');
+      gateway = String(options.gateway || 'stripe');
+      desc = String(options.description || '');
+    }
+  }
+
+  if (!userIdentifier) {
+    return { success: false, tokensAdded: 0, newBalance: 0, error: 'User identifier is required.' };
+  }
+
+  // 1. Fetch user from PostgreSQL
+  const userRows = await query(`
+    SELECT id, email, token_balance 
+    FROM users 
+    WHERE id = $1 OR LOWER(TRIM(email)) = LOWER(TRIM($2)) 
+    LIMIT 1
+  `, [userIdentifier, userIdentifier]);
+
+  if (!userRows || userRows.length === 0) {
+    return { success: false, tokensAdded: 0, newBalance: 0, error: 'User not found in database.' };
+  }
+
+  const user = userRows[0];
+  const settings = await getTokenSettings();
+
+  // 2. Resolve token amount and package name
+  let tokensToAdd = explicitTokens;
+  let packageName = 'Token Package';
+
+  if (pkgId && Array.isArray(settings.packages)) {
+    const matched = settings.packages.find((p: any) => p.id === pkgId || p.name?.toLowerCase() === pkgId.toLowerCase());
+    if (matched) {
+      tokensToAdd = Number(matched.tokens || tokensToAdd);
+      packageName = matched.name || packageName;
+    }
+  }
+
+  if (tokensToAdd <= 0) {
+    if (pkgId === 'pkg_starter') tokensToAdd = 100;
+    else if (pkgId === 'pkg_pro') tokensToAdd = 500;
+    else if (pkgId === 'pkg_buffet') tokensToAdd = 1500;
+    else tokensToAdd = 100;
+  }
+
+  // 3. Atomically update users.token_balance in PostgreSQL
+  const updateRes = await query(`
+    UPDATE users 
+    SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
+    WHERE id = $2 
+    RETURNING token_balance
+  `, [tokensToAdd, user.id]);
+
+  const newBalance = Number(updateRes[0]?.token_balance ?? (Number(user.token_balance || 0) + tokensToAdd));
+
+  // 4. Record audit ledger in token_transactions
+  const txId = 'tx_buy_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+  const txDesc = desc || `Purchased ${packageName} (+${tokensToAdd} tokens)${orderId ? ` [Order: ${orderId}]` : ''}`;
+
+  await query(`
+    INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
+    VALUES ($1, $2, $3, $4, $5, 'purchase_package', $6, NOW())
+  `, [txId, user.id, user.email, tokensToAdd, newBalance, txDesc]);
+
+  return {
+    success: true,
+    tokensAdded,
+    newBalance,
+    transactionId: txId,
+    user: {
+      id: user.id,
+      email: user.email,
+      tokenBalance: newBalance
+    }
+  };
+}
+
 export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Promise<{
   success: boolean;
   deletedCount: number;

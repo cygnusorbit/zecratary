@@ -6,7 +6,7 @@ import * as cheerio from 'cheerio';
 
 export const dynamic = 'force-dynamic';
 
-export function decodeHtmlEntities(str: string): string {
+function decodeHtmlEntities(str: string): string {
   if (!str) return '';
   return str
     .replace(/&quot;/g, '"')
@@ -91,7 +91,7 @@ async function saveImageToLocalDisk(remoteUrl: string): Promise<string> {
   }
 }
 
-export function parseIngredientString(raw: string, index: number) {
+function parseIngredientString(raw: string, index: number) {
   let text = decodeHtmlEntities(raw).replace(/^(\s*[-*•]\s*|\s*\d+[\.\)]\s*|\[\s*\]\s*)/, '').trim();
 
   const unicodeFractions: Record<string, string> = {
@@ -170,7 +170,7 @@ export function parseIngredientString(raw: string, index: number) {
   };
 }
 
-export function extractAllSteps(recipeInstructions: any): string[] {
+function extractAllSteps(recipeInstructions: any): string[] {
   if (!recipeInstructions) return [];
 
   const cleanStep = (t: any): string => {
