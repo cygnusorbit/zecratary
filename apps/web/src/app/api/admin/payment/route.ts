@@ -186,22 +186,22 @@ export async function GET() {
   try {
     await ensurePaymentSchema();
 
-    let txRes = await query(
+    let txRes: any = await query(
       `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
     ).catch(async () => {
       return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => ({ rows: [] }));
     });
 
-    const transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
+    const transactions = Array.isArray(txRes) ? txRes : ((txRes as any)?.rows || []);
 
     let settings = null;
     try {
-      const sRes = await query(
+      const sRes: any = await query(
         `SELECT payment_settings, currency FROM admin_settings 
          WHERE id::text IN ('primary_settings', '1') 
          ORDER BY updated_at DESC LIMIT 1`
       );
-      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
       if (sRow) {
         settings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
         if (sRow.currency && typeof settings === 'object') {
@@ -237,8 +237,8 @@ export async function POST(req: Request) {
 
       let currentSettings: any = {};
       try {
-        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
-        const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
+        const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
         if (sRow?.payment_settings) {
           currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
         }
@@ -265,8 +265,8 @@ export async function POST(req: Request) {
     if (body.action === 'verify_stripe_keys' || body.action === 'verify_stripe_key') {
       let currentSettings: any = {};
       try {
-        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
-        const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
+        const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
         if (sRow?.payment_settings) {
           currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
         }
@@ -315,8 +315,8 @@ export async function POST(req: Request) {
     if (body.action === 'toggle_test_mode') {
       let currentSettings: any = {};
       try {
-        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
-        const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
+        const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
         if (sRow?.payment_settings) {
           currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
         }

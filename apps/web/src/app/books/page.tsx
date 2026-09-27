@@ -66,7 +66,7 @@ const getCoverBgStyle = (color?: string) => {
   return { backgroundColor: color };
 };
 
-export const isRecipeInBook = (rec: any, bookId: string): boolean => {
+const isRecipeInBook = (rec: any, bookId: string): boolean => {
   if (!rec || !bookId) return false;
   return rec.bookId === bookId || rec.book_id === bookId;
 };

@@ -61,7 +61,7 @@ async function ensureUsersTableAndMigrate() {
     let deletedEmails = new Set<string>();
     try {
       const deletedRows = await query('SELECT LOWER(TRIM(email)) AS email FROM deleted_users');
-      const dArr = Array.isArray(deletedRows) ? deletedRows : (deletedRows?.rows || []);
+      const dArr = Array.isArray(deletedRows) ? deletedRows : ((deletedRows as any)?.rows || []);
       deletedEmails = new Set(dArr.map((r: any) => r.email));
     } catch (_) {}
 
@@ -230,10 +230,10 @@ export async function GET() {
           CASE WHEN LOWER(role) = 'admin' THEN 0 ELSE 1 END,
           created_at DESC
       `);
-      rawUsers = Array.isArray(uRes) ? uRes : (uRes?.rows || []);
+      rawUsers = Array.isArray(uRes) ? uRes : ((uRes as any)?.rows || []);
     } catch (_) {
       const fallbackRes = await query(`SELECT * FROM users ORDER BY created_at DESC`).catch(() => []);
-      rawUsers = Array.isArray(fallbackRes) ? fallbackRes : (fallbackRes?.rows || []);
+      rawUsers = Array.isArray(fallbackRes) ? fallbackRes : ((fallbackRes as any)?.rows || []);
     }
 
     // 2. Fetch latest active succeeded transactions from payment_transactions
@@ -246,7 +246,7 @@ export async function GET() {
           AND (expiry_date IS NULL OR expiry_date > NOW())
         ORDER BY created_at DESC
       `).catch(() => []);
-      rawTxs = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
+      rawTxs = Array.isArray(txRes) ? txRes : ((txRes as any)?.rows || []);
     } catch (_) {}
 
     const activeTxMap = new Map<string, any>();

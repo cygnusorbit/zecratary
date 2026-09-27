@@ -11,6 +11,8 @@ async function getPostgresPool() {
   const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
   if (!connStr) return null;
   try {
+    // @ts-ignore - pg declaration handled via custom d.ts
+
     const { Pool } = await import('pg');
     const requiresSsl = connStr.includes('sslmode=require') || 
                         connStr.includes('neon.tech') || 

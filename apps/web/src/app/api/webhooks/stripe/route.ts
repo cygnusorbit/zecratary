@@ -9,7 +9,7 @@ async function getStripeWebhookConfig() {
     const res = await query(
       `SELECT payment_settings FROM admin_settings WHERE id = 'primary_settings' LIMIT 1`
     );
-    const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+    const row = Array.isArray(res) ? res[0] : (res as any)?.rows?.[0];
     let settings: any = {};
     if (row?.payment_settings) {
       settings = typeof row.payment_settings === 'string' 
@@ -78,7 +78,7 @@ export async function POST(req: Request) {
           `SELECT id FROM wallet_transactions WHERE gateway_tx_id = $1 AND status = 'succeeded' LIMIT 1`,
           [txId]
         ).catch(() => ({ rows: [] }));
-        const existingRows = Array.isArray(existingRes) ? existingRes : (existingRes?.rows || []);
+        const existingRows = Array.isArray(existingRes) ? existingRes : ((existingRes as any)?.rows || []);
 
         if (existingRows.length === 0) {
           const userUpdateRes = await query(
@@ -89,7 +89,7 @@ export async function POST(req: Request) {
             [totalAddition, String(userId || ''), customerEmail]
           ).catch(() => ({ rows: [] }));
 
-          const uRows = Array.isArray(userUpdateRes) ? userUpdateRes : (userUpdateRes?.rows || []);
+          const uRows = Array.isArray(userUpdateRes) ? userUpdateRes : ((userUpdateRes as any)?.rows || []);
           const updatedUser = uRows[0];
           const newBal = updatedUser ? parseFloat(updatedUser.wallet_balance || 0) : totalAddition;
           const finalUserId = updatedUser?.id || userId || 'user';

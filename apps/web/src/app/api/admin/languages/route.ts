@@ -41,7 +41,7 @@ export async function GET(request: Request) {
         } else {
           const res = await client.query('SELECT lang_code, lang_name, dictionary FROM app_translations');
           const records: Record<string, any> = {};
-          res.rows.forEach(r => { records[r.lang_code] = r.dictionary; });
+          res.rows.forEach((r: any) => { records[r.lang_code] = r.dictionary; });
           return NextResponse.json({ success: true, translations: records });
         }
       } finally {

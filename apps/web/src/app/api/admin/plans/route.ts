@@ -33,7 +33,7 @@ export async function GET() {
       `SELECT * FROM subscription_plans ORDER BY monthly_price_dollars ASC, id ASC`
     ).catch(() => ({ rows: [] }));
 
-    let plans = Array.isArray(res) ? res : (res?.rows || []);
+    let plans = Array.isArray(res) ? res : ((res as any)?.rows || []);
 
     // 4. Ensure default free plan (taster) exists
     if (!plans.some((p: any) => p.slug === 'taster' || p.id === 'preset_taster')) {

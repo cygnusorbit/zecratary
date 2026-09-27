@@ -19,7 +19,7 @@ const DEFAULT_RECIPE_TYPES = [
   'Side Dish', 'Dessert', 'Snacks', 'Beverages', 'Soup', 'Salad'
 ];
 
-export function decodeHtmlEntities(str: string): string {
+function decodeHtmlEntities(str: string): string {
   if (!str) return '';
   return str
     .replace(/&quot;/g, '"')
