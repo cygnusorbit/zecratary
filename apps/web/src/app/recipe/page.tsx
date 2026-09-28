@@ -1,6 +1,7 @@
 // Generated / Updated by AI Collaborator
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -8,14 +9,16 @@ import {
   X, UploadCloud, BookmarkPlus, CalendarPlus, ShoppingCart,
   Timer, Edit3, Share2, Star, Check, Book, ChevronDown,
   Trash2, Save, Plus, ImagePlus, Users, Calendar,
-  GripVertical, CheckSquare, CheckCircle2, Type
+  GripVertical, CheckSquare, CheckCircle2, Type, RefreshCw
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { persistSavedRecipe } from '@/lib/recipeSync';
 import { getStoredCategories } from '@/lib/categories';
+import { useTranslation } from '@/components/LanguageProvider';
 
-export default function SavedRecipesPage() {
+export default function RecipePage() {
   const router = useRouter();
+  const { t } = useTranslation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [recipes, setRecipes] = useState<any[]>([]);
   const [books, setBooks] = useState<any[]>([]);
@@ -27,9 +30,10 @@ export default function SavedRecipesPage() {
   // Add to Book Dropdown State
   const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
 
-  // Add to Plan / Calendar Modal State
+  // Dynamic Add to Plan Date
+  const defaultDateStr = useMemo(() => new Date().toISOString().split('T')[0], []);
   const [showAddToPlanModal, setShowAddToPlanModal] = useState(false);
-  const [planDate, setPlanDate] = useState('2026-08-28');
+  const [planDate, setPlanDate] = useState(defaultDateStr);
   const [planMealType, setPlanMealType] = useState('Dinner');
   const [planTime, setPlanTime] = useState('');
   const [planNotes, setPlanNotes] = useState('');
@@ -55,7 +59,7 @@ export default function SavedRecipesPage() {
 
   // View States
   const [servingsMultiplier, setServingsMultiplier] = useState(1);
-  const [fontSizeScale, setFontSizeScale] = useState(80);
+  const [fontSizeScale, setFontSizeScale] = useState(100);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
   const [noteText, setNoteText] = useState('');
   const [isNoteOpen, setIsNoteOpen] = useState(false);
@@ -86,7 +90,6 @@ export default function SavedRecipesPage() {
         }
       }
 
-      // Filter only recipes belonging to the currently logged-in user
       const userRecipes = parsedRecipes.filter((r: any) => {
         return r.userId === user.id || r.createdBy === user.email;
       });
@@ -152,7 +155,6 @@ export default function SavedRecipesPage() {
       const localRecipes = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
       const allRecipes: any[] = localRecipes ? JSON.parse(localRecipes) : [];
 
-      // Retain other users' recipes
       const otherUsersRecipes = allRecipes.filter((r: any) => {
         return r.userId !== currentUser.id && r.createdBy !== currentUser.email;
       });
@@ -165,7 +167,11 @@ export default function SavedRecipesPage() {
       const activeUser = getCurrentUser();
       if (activeUser && (activeUser.id || activeUser.email)) {
         updatedUserList.forEach((r: any) => {
-          (persistSavedRecipe as any)(activeUser.id || activeUser.email, r, { action: 'save', createdBy: activeUser.email, creatorName: activeUser.name });
+          (persistSavedRecipe as any)(activeUser.id || activeUser.email, r, {
+            action: 'save',
+            createdBy: activeUser.email,
+            creatorName: activeUser.name
+          });
         });
       }
 
@@ -211,17 +217,10 @@ export default function SavedRecipesPage() {
 
     const updatedList = recipes.map(r => r.id === selectedRecipe.id ? updatedRecipe : r);
     saveAllRecipes(updatedList);
-
-    const bookTitle = books.find(b => b.id === bookId)?.title || 'Cookbook';
-    if (isRemoving) {
-      alert(`Removed "${selectedRecipe.title || selectedRecipe.name}" from "${bookTitle}"`);
-    } else {
-      alert(`Added "${selectedRecipe.title || selectedRecipe.name}" to "${bookTitle}"!`);
-    }
   };
 
   const openAddToPlanModal = () => {
-    setPlanDate('2026-08-28');
+    setPlanDate(new Date().toISOString().split('T')[0]);
     setPlanMealType('Dinner');
     setPlanTime('');
     setPlanNotes('');
@@ -264,7 +263,6 @@ export default function SavedRecipesPage() {
     window.dispatchEvent(new Event('zecratary_planner_updated'));
     window.dispatchEvent(new Event('storage'));
     setShowAddToPlanModal(false);
-    alert(`Successfully scheduled "${selectedRecipe.title || selectedRecipe.name}" in your meal plan!`);
   };
 
   const updateSelectedRecipeState = (key: string, val: any) => {
@@ -276,7 +274,7 @@ export default function SavedRecipesPage() {
   };
 
   const handleDeleteRecipe = (id: string) => {
-    if (!confirm('Are you sure you want to delete this recipe?')) return;
+    if (!confirm(t('confirmDeleteRecipe') || 'Are you sure you want to delete this recipe?')) return;
     const updated = recipes.filter(r => r.id !== id);
     saveAllRecipes(updated);
     setSelectedRecipe(null);
@@ -354,7 +352,7 @@ export default function SavedRecipesPage() {
 
   const handleSaveEdit = () => {
     if (!editForm.title.trim()) {
-      alert('Please enter a recipe title.');
+      alert(t('enterTitlePrompt') || 'Please enter a recipe title.');
       setEditTab('info');
       return;
     }
@@ -422,10 +420,8 @@ export default function SavedRecipesPage() {
 
   const handleConfirmAddToShoppingList = () => {
     const selectedItems = shoppingModalIngredients.filter(i => i.selected);
-    if (selectedItems.length === 0) {
-      alert('No ingredients selected.');
-      return;
-    }
+    if (selectedItems.length === 0) return;
+
     const local = localStorage.getItem('zecratary_shopping') || localStorage.getItem('zecratary_shopping_list');
     const current = local ? JSON.parse(local) : [];
     const formatted = selectedItems.map(i => ({
@@ -443,7 +439,6 @@ export default function SavedRecipesPage() {
     localStorage.setItem('zecratary_shopping', JSON.stringify(updated));
     localStorage.setItem('zecratary_shopping_list', JSON.stringify(updated));
     setIsShoppingModalOpen(false);
-    alert(`Added ${selectedItems.length} items to your Shopping List!`);
   };
 
   const filtered = recipes.filter(r => {
@@ -462,15 +457,26 @@ export default function SavedRecipesPage() {
   const currentTotalServings = baseServings * servingsMultiplier;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 text-slate-100 pb-16 px-4">
+    <div 
+      className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 font-sans transition-colors duration-200"
+      style={{ color: 'var(--color-text)' }}
+    >
       {/* Top Header */}
       <div className="flex items-center justify-between pt-2">
         <div>
-          <h1 className="text-3xl font-black text-[#E05638] tracking-tight">Saved Recipes</h1>
-          <p className="text-[var(--color-sidebar-icon,#10b981)] text-xs mt-1 font-semibold">Your collection of favorite recipes ({recipes.length})</p>
+          <h1 className="text-2xl sm:text-3xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+            {t('savedRecipes') || 'Saved Recipes'}
+          </h1>
+          <p className="text-xs mt-1 font-semibold" style={{ color: 'var(--color-emerald)' }}>
+            {t('yourCollectionSubtitle') || 'Your collection of favorite culinary recipes'} ({recipes.length})
+          </p>
         </div>
-        <Link className="bg-[#E05638] hover:bg-[#c94529] text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg shadow-[#E05638]/20" href="/manual">
-          <UploadCloud className="h-4 w-4"/> Create Recipe
+        <Link 
+          href="/manual"
+          className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg"
+          style={{ backgroundColor: 'var(--color-primary)' }}
+        >
+          <UploadCloud className="h-4 w-4"/> {t('createRecipe') || 'Create Recipe'}
         </Link>
       </div>
 
@@ -478,17 +484,30 @@ export default function SavedRecipesPage() {
       <div className="space-y-3">
         <div className="flex gap-3">
           <div className="relative flex-1">
-            <Search className="h-4 w-4 text-slate-500 absolute left-3.5 top-3.5"/>
+            <Search className="h-4 w-4 absolute left-3.5 top-3.5" style={{ color: 'var(--color-text-secondary)' }} />
             <input
               type="text"
-              placeholder="Search by name or ingredient..."
+              placeholder={t('searchByNameOrIngredient') || 'Search by name or ingredient...'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-[#070b13] border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white placeholder-slate-500 outline-none focus:border-[#E05638]"
+              className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none transition"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
             />
           </div>
-          <button className="border border-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 bg-[#070b13] text-[var(--color-sidebar-icon,#10b981)]">
-            <SlidersHorizontal className="h-4 w-4"/> Filter
+          <button 
+            type="button"
+            className="border font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-emerald)'
+            }}
+          >
+            <SlidersHorizontal className="h-4 w-4"/> {t('filter') || 'Filter'}
           </button>
         </div>
 
@@ -496,12 +515,14 @@ export default function SavedRecipesPage() {
           {['All', 'Favorites', 'Main Dish', 'Cooked', 'Top Rated'].map((filter) => (
             <button
               key={filter}
+              type="button"
               onClick={() => setActiveFilter(filter)}
-              className={`px-3.5 py-1.5 rounded-full font-semibold border transition ${
-                activeFilter === filter
-                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                  : 'bg-[#070b13] text-slate-400 border-slate-800 hover:text-white'
-              }`}
+              className="px-3.5 py-1.5 rounded-full font-semibold border transition cursor-pointer"
+              style={{
+                backgroundColor: activeFilter === filter ? 'rgba(16, 185, 129, 0.15)' : 'var(--color-inner-dark)',
+                borderColor: activeFilter === filter ? 'var(--color-emerald)' : 'var(--color-border)',
+                color: activeFilter === filter ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
+              }}
             >
               {filter}
             </button>
@@ -511,7 +532,9 @@ export default function SavedRecipesPage() {
 
       {/* Recipe Grid */}
       {loading ? (
-        <div className="text-slate-500 text-xs py-12 text-center">Loading recipes...</div>
+        <div className="text-xs py-12 text-center" style={{ color: 'var(--color-text-secondary)' }}>
+          {t('loadingRecipes') || 'Loading recipes...'}
+        </div>
       ) : (
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filtered.map((r) => {
@@ -527,9 +550,13 @@ export default function SavedRecipesPage() {
                   setIsBookDropdownOpen(false);
                   setIsEditing(false);
                 }}
-                className="bg-[#070b13] border border-slate-800 hover:border-slate-700 rounded-2xl overflow-hidden transition cursor-pointer group shadow-lg relative"
+                className="border rounded-2xl overflow-hidden transition cursor-pointer group shadow-sm hover:shadow-md relative"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)'
+                }}
               >
-                <div className="relative h-44 w-full bg-slate-800 overflow-hidden">
+                <div className="relative h-44 w-full overflow-hidden" style={{ backgroundColor: 'var(--color-inner-dark)' }}>
                   <img
                     src={r.imageUrl || r.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80'}
                     alt={r.title || r.name}
@@ -542,21 +569,22 @@ export default function SavedRecipesPage() {
                       onClick={(e) => toggleCooked(e, r.id)}
                       className={`p-2 rounded-full backdrop-blur-md transition shadow-md ${
                         r.isCooked 
-                          ? 'bg-emerald-600/90 hover:bg-emerald-500 text-white' 
-                          : 'bg-black/60 hover:bg-black/80 text-slate-400 hover:text-white'
+                          ? 'bg-emerald-600/90 text-white' 
+                          : 'bg-black/60 text-slate-300 hover:text-white'
                       }`}
-                      title={r.isCooked ? "Marked as Cooked (Click to undo)" : "Mark as Cooked"}
+                      title={r.isCooked ? "Marked as Cooked" : "Mark as Cooked"}
                     >
-                      <CheckCircle2 className={`h-4 w-4 ${r.isCooked ? 'text-white' : 'text-slate-300'}`}/>
+                      <CheckCircle2 className="h-4 w-4"/>
                     </button>
 
                     <button
                       type="button"
                       onClick={(e) => toggleFavorite(e, r.id)}
-                      className="p-2 bg-black/60 hover:bg-black/80 backdrop-blur-md rounded-full text-white hover:text-[#E05638] transition shadow-md"
+                      className="p-2 bg-black/60 hover:bg-black/80 backdrop-blur-md rounded-full transition shadow-md"
+                      style={{ color: r.isFavorite ? 'var(--color-primary)' : '#ffffff' }}
                       title="Favorite"
                     >
-                      <Heart className={`h-4 w-4 ${r.isFavorite ? 'fill-[#E05638] text-[#E05638]' : 'text-white'}`}/>
+                      <Heart className={`h-4 w-4 ${r.isFavorite ? 'fill-current' : ''}`}/>
                     </button>
                   </div>
 
@@ -568,11 +596,13 @@ export default function SavedRecipesPage() {
                 </div>
 
                 <div className="p-4 space-y-2">
-                  <h3 className="font-bold text-white text-base leading-snug">{r.title || r.name}</h3>
+                  <h3 className="font-bold text-base leading-snug" style={{ color: 'var(--color-text)' }}>
+                    {r.title || r.name}
+                  </h3>
                   
                   <div className="flex items-center justify-between pt-1">
                     <div className="flex items-center gap-2">
-                      <span className="bg-[#E05638] text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full">
+                      <span className="text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-primary)' }}>
                         {r.tags?.[0] || r.recipeType || 'Main Dish'}
                       </span>
 
@@ -581,13 +611,13 @@ export default function SavedRecipesPage() {
                           <Star className="h-3 w-3 fill-amber-400 text-amber-400"/> {r.rating}
                         </span>
                       ) : (
-                        <span className="flex items-center gap-1 text-slate-500 text-[11px] font-medium">
-                          <Star className="h-3 w-3 text-slate-600"/> 0
+                        <span className="flex items-center gap-1 text-[11px] font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+                          <Star className="h-3 w-3 opacity-60"/> 0
                         </span>
                       )}
                     </div>
 
-                    <span className="text-xs text-slate-400 flex items-center gap-1">
+                    <span className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
                       <Clock className="h-3 w-3"/> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
                     </span>
                   </div>
@@ -606,11 +636,13 @@ export default function SavedRecipesPage() {
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#0b0f17] border border-slate-800 rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative cursor-default"
+            className="border rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative cursor-default"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <button
+              type="button"
               onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
-              className="absolute top-4 right-4 z-30 p-2 bg-black/70 hover:bg-black text-slate-300 hover:text-white rounded-xl border border-slate-700/60 transition"
+              className="absolute top-4 right-4 z-30 p-2 bg-black/70 hover:bg-black text-slate-300 hover:text-white rounded-xl border border-slate-700/60 transition cursor-pointer"
             >
               <X className="h-5 w-5"/>
             </button>
@@ -620,13 +652,13 @@ export default function SavedRecipesPage() {
                 /* RECIPE DETAILS VIEW */
                 <div className="space-y-5 pb-6">
                   {/* Hero Banner */}
-                  <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
+                  <div className="relative h-64 sm:h-72 w-full overflow-hidden flex flex-col justify-end p-5" style={{ backgroundColor: 'var(--color-inner-dark)' }}>
                     <img
                       src={selectedRecipe.imageUrl || selectedRecipe.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80'}
                       alt={selectedRecipe.title || selectedRecipe.name}
                       className="absolute inset-0 w-full h-full object-cover"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#0b0f17] via-[#0b0f17]/60 to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/60 to-transparent" />
 
                     <div className="relative z-10 space-y-3">
                       <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
@@ -634,57 +666,62 @@ export default function SavedRecipesPage() {
                       </h2>
 
                       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-                        <span className="bg-[#111726]/90 border border-slate-700/80 text-slate-200 px-3 py-1.5 rounded-full flex items-center gap-1.5">
-                          <Clock className="h-3.5 w-3.5 text-slate-300"/> Cook: {selectedRecipe.cookTimeMinutes || 10} minutes
+                        <span className="bg-black/60 border border-white/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5">
+                          <Clock className="h-3.5 w-3.5"/> Cook: {selectedRecipe.cookTimeMinutes || 10}m
                         </span>
-                        <span className="bg-[#111726]/90 border border-slate-700/80 text-slate-200 px-3 py-1.5 rounded-full flex items-center gap-1.5">
-                          <Clock className="h-3.5 w-3.5 text-slate-300"/> Prep: {selectedRecipe.prepTimeMinutes || 30} minutes
+                        <span className="bg-black/60 border border-white/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5">
+                          <Clock className="h-3.5 w-3.5"/> Prep: {selectedRecipe.prepTimeMinutes || 30}m
                         </span>
-                        <span className="bg-[#111726]/90 border border-slate-700/80 text-slate-200 px-3 py-1.5 rounded-full flex items-center gap-1.5">
-                          <Utensils className="h-3.5 w-3.5 text-slate-300"/> {selectedRecipe.tags?.[0] || selectedRecipe.recipeType || 'Main Dish'}
+                        <span className="bg-black/60 border border-white/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5">
+                          <Utensils className="h-3.5 w-3.5"/> {selectedRecipe.tags?.[0] || selectedRecipe.recipeType || 'Main Dish'}
                         </span>
                         
                         <button
+                          type="button"
                           onClick={(e) => toggleFavorite(e, selectedRecipe.id)}
-                          className="ml-auto w-8 h-8 bg-white/95 rounded-full flex items-center justify-center text-[#E05638] shadow"
+                          className="ml-auto w-8 h-8 bg-white/95 rounded-full flex items-center justify-center shadow cursor-pointer"
+                          style={{ color: 'var(--color-primary)' }}
                         >
-                          <Heart className={`h-4 w-4 ${selectedRecipe.isFavorite ? 'fill-[#E05638] text-[#E05638]' : 'text-slate-400'}`}/>
+                          <Heart className={`h-4 w-4 ${selectedRecipe.isFavorite ? 'fill-current' : 'text-slate-400'}`}/>
                         </button>
                       </div>
                     </div>
                   </div>
 
-                  {/* Top Action Row */}
+                  {/* Action Row */}
                   <div className="px-5 grid grid-cols-3 gap-2.5">
                     <div className="relative">
                       <button
                         type="button"
                         onClick={() => setIsBookDropdownOpen(!isBookDropdownOpen)}
-                        className={`w-full border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 ${
-                          assignedBook
-                            ? 'bg-[#E05638]/20 border-[#E05638] text-[#E05638]'
-                            : 'border-[#E05638]/60 text-[#E05638] hover:bg-[#E05638]/10'
-                        }`}
+                        className="w-full border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer"
+                        style={{
+                          backgroundColor: assignedBook ? 'rgba(224, 86, 56, 0.15)' : 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
                       >
-                        <BookmarkPlus className="h-4 w-4 shrink-0 text-[#E05638]"/>
-                        <span className="truncate">
-                          {assignedBook ? assignedBook.title : 'Add to Book'}
-                        </span>
+                        <BookmarkPlus className="h-4 w-4 shrink-0"/>
+                        <span className="truncate">{assignedBook ? assignedBook.title : (t('addToBook') || 'Add to Book')}</span>
                         <ChevronDown className="h-3 w-3 shrink-0 opacity-70 ml-0.5"/>
                       </button>
 
                       {isBookDropdownOpen && (
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setIsBookDropdownOpen(false)} />
-                          <div className="absolute left-0 top-full mt-2 w-64 bg-[#0d131f] border border-slate-700/80 rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in" onClick={(e) => e.stopPropagation()}>
-                            <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 px-2.5 py-1.5 flex items-center justify-between">
-                              <span>Select Cookbook</span>
-                              <Link className="text-[var(--color-sidebar-icon,#10b981)] hover:underline" href="/books">Manage</Link>
+                          <div 
+                            className="absolute left-0 top-full mt-2 w-64 border rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in"
+                            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
+                              <span>{t('selectCookbook') || 'Select Cookbook'}</span>
+                              <Link className="hover:underline" href="/books" style={{ color: 'var(--color-emerald)' }}>Manage</Link>
                             </div>
 
                             <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
                               {books.length === 0 ? (
-                                <div className="text-xs text-slate-500 px-2.5 py-2">No cookbooks available</div>
+                                <div className="text-xs px-2.5 py-2" style={{ color: 'var(--color-text-secondary)' }}>No cookbooks available</div>
                               ) : (
                                 books.map((b) => {
                                   const isAssigned = selectedRecipe.bookId === b.id;
@@ -696,14 +733,14 @@ export default function SavedRecipesPage() {
                                         handleAssignToBook(b.id);
                                         setIsBookDropdownOpen(false);
                                       }}
-                                      className={`w-full text-left px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition ${
-                                        isAssigned
-                                          ? 'bg-[#E05638]/20 text-[#E05638] border border-[#E05638]/30'
-                                          : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
-                                      }`}
+                                      className="w-full text-left px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition cursor-pointer"
+                                      style={{
+                                        backgroundColor: isAssigned ? 'rgba(224, 86, 56, 0.15)' : 'transparent',
+                                        color: isAssigned ? 'var(--color-primary)' : 'var(--color-text)'
+                                      }}
                                     >
                                       <span className="truncate flex-1 pr-2">{b.title}</span>
-                                      {isAssigned && <Check className="h-3.5 w-3.5 text-[#E05638] shrink-0"/>}
+                                      {isAssigned && <Check className="h-3.5 w-3.5 shrink-0"/>}
                                     </button>
                                   );
                                 })
@@ -717,40 +754,53 @@ export default function SavedRecipesPage() {
                     <button
                       type="button"
                       onClick={openAddToPlanModal}
-                      className="border border-[#E05638]/60 text-[#E05638] font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 hover:bg-[#E05638]/10"
+                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
                     >
-                      <CalendarPlus className="h-4 w-4 text-[#E05638]"/> Add to Plan
+                      <CalendarPlus className="h-4 w-4"/> {t('addToPlan') || 'Add to Plan'}
                     </button>
 
                     <button
+                      type="button"
                       onClick={handleOpenShoppingModal}
-                      className="border border-[#E05638]/60 text-[#E05638] font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 hover:bg-[#E05638]/10"
+                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
                     >
-                      <ShoppingCart className="h-4 w-4 text-[#E05638]"/> Shopping List
+                      <ShoppingCart className="h-4 w-4"/> {t('shoppingList') || 'Shopping List'}
                     </button>
                   </div>
 
-                  <div className="border-t border-slate-800/80 mx-5" />
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
                   {/* Servings Stepper & Tools */}
                   <div className="px-5 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <span className="text-xs font-bold text-[#E05638] flex items-center gap-1.5">
-                        <Users className="h-4 w-4"/> Servings
+                      <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                        <Users className="h-4 w-4"/> {t('servings') || 'Servings'}
                       </span>
-                      <div className="flex items-center bg-[#070b13] border border-slate-800 rounded-lg overflow-hidden">
+                      <div className="flex items-center border rounded-lg overflow-hidden" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                         <button
+                          type="button"
                           onClick={() => setServingsMultiplier(Math.max(1, servingsMultiplier - 1))}
-                          className="px-2.5 py-1 text-slate-400 hover:text-white font-bold cursor-pointer transition hover:bg-slate-800"
+                          className="px-2.5 py-1 font-bold cursor-pointer transition hover:opacity-80"
                         >
                           -
                         </button>
-                        <span className="px-3 py-1 text-xs font-bold text-white min-w-[32px] text-center">
+                        <span className="px-3 py-1 text-xs font-bold min-w-[32px] text-center" style={{ color: 'var(--color-text)' }}>
                           {currentTotalServings}
                         </span>
                         <button
+                          type="button"
                           onClick={() => setServingsMultiplier(servingsMultiplier + 1)}
-                          className="px-2.5 py-1 text-slate-400 hover:text-white font-bold cursor-pointer transition hover:bg-slate-800"
+                          className="px-2.5 py-1 font-bold cursor-pointer transition hover:opacity-80"
                         >
                           +
                         </button>
@@ -759,35 +809,34 @@ export default function SavedRecipesPage() {
 
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => alert('Kitchen Timer set for 15 minutes!')}
-                        className="border border-[#E05638]/60 text-[#E05638] font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 hover:bg-[#E05638]/10"
-                      >
-                        <Timer className="h-3.5 w-3.5"/> Timer
-                      </button>
-                      <button
+                        type="button"
                         onClick={handleOpenEdit}
-                        className="border border-[#E05638]/60 text-[#E05638] font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 hover:bg-[#E05638]/10"
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                       >
-                        <Edit3 className="h-3.5 w-3.5"/> Edit
+                        <Edit3 className="h-3.5 w-3.5"/> {t('edit') || 'Edit'}
                       </button>
                       <button
+                        type="button"
                         onClick={() => {
-                          navigator.clipboard.writeText(window.location.href);
-                          alert('Recipe link copied!');
+                          if (typeof window !== 'undefined') navigator.clipboard.writeText(window.location.href);
                         }}
-                        className="border border-[#E05638]/60 text-[#E05638] font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 hover:bg-[#E05638]/10"
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                       >
-                        <Share2 className="h-3.5 w-3.5"/> Share Recipe
+                        <Share2 className="h-3.5 w-3.5"/> {t('share') || 'Share'}
                       </button>
                     </div>
                   </div>
 
                   {/* Description */}
-                  <div className="px-5 text-xs text-slate-300 leading-relaxed">
-                    {selectedRecipe.description}
-                  </div>
+                  {selectedRecipe.description && (
+                    <div className="px-5 text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                      {selectedRecipe.description}
+                    </div>
+                  )}
 
-                  <div className="border-t border-slate-800/80 mx-5" />
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
                   {/* Cooked Status / Star Rating / Note */}
                   <div className="px-5 space-y-3">
@@ -795,16 +844,12 @@ export default function SavedRecipesPage() {
                       <button
                         type="button"
                         onClick={() => updateSelectedRecipeState('isCooked', !selectedRecipe.isCooked)}
-                        className="flex items-center gap-2.5 text-base font-extrabold text-white group cursor-pointer select-none transition"
+                        className="flex items-center gap-2.5 text-base font-extrabold cursor-pointer select-none transition"
+                        style={{ color: 'var(--color-text)' }}
                       >
-                        <span className={selectedRecipe.isCooked ? "text-white font-extrabold tracking-tight" : "text-slate-200"}>
-                          {selectedRecipe.isCooked ? "Cooked" : "Mark as Cooked"}
-                        </span>
-                        
+                        <span>{selectedRecipe.isCooked ? "Cooked" : "Mark as Cooked"}</span>
                         <span className={`w-5 h-5 rounded-full flex items-center justify-center transition shadow-sm ${
-                          selectedRecipe.isCooked 
-                            ? 'bg-[#22c55e] text-white' 
-                            : 'border border-slate-600 bg-transparent text-transparent'
+                          selectedRecipe.isCooked ? 'bg-[#22c55e] text-white' : 'border border-slate-600 bg-transparent text-transparent'
                         }`}>
                           {selectedRecipe.isCooked && <Check className="h-3.5 w-3.5 stroke-[3]"/>}
                         </span>
@@ -818,7 +863,7 @@ export default function SavedRecipesPage() {
                             className={`h-5 w-5 cursor-pointer transition ${
                               (selectedRecipe.rating || 0) >= star
                                 ? 'fill-[#E05638] text-[#E05638]'
-                                : 'text-slate-700 hover:text-slate-500'
+                                : 'opacity-40'
                             }`}
                           />
                         ))}
@@ -829,10 +874,11 @@ export default function SavedRecipesPage() {
                       <button
                         type="button"
                         onClick={() => setIsNoteOpen(!isNoteOpen)}
-                        className="flex items-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-200 transition"
+                        className="flex items-center gap-1.5 text-xs font-medium transition cursor-pointer"
+                        style={{ color: 'var(--color-text-secondary)' }}
                       >
-                        <Edit3 className="h-3.5 w-3.5 text-slate-400"/>
-                        <span className="italic">Add a note</span>
+                        <Edit3 className="h-3.5 w-3.5"/>
+                        <span className="italic">{t('addANote') || 'Add a note'}</span>
                       </button>
 
                       {isNoteOpen && (
@@ -842,7 +888,19 @@ export default function SavedRecipesPage() {
                             placeholder="Add notes..."
                             value={noteText}
                             onChange={(e) => setNoteText(e.target.value)}
-                            className="flex-1 bg-[#070b13] border border-slate-800 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-[#E05638]"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                updateSelectedRecipeState('note', noteText);
+                                setIsNoteOpen(false);
+                              }
+                            }}
+                            className="flex-1 border rounded-xl px-3 py-2 text-xs outline-none"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
                           />
                           <button
                             type="button"
@@ -850,61 +908,48 @@ export default function SavedRecipesPage() {
                               updateSelectedRecipeState('note', noteText);
                               setIsNoteOpen(false);
                             }}
-                            className="bg-[#E05638] hover:bg-[#c94529] text-white font-bold text-xs px-3.5 py-2 rounded-xl transition"
+                            className="text-white font-bold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
                           >
                             Save
                           </button>
                         </div>
                       )}
                       {selectedRecipe.note && !isNoteOpen && (
-                        <p className="text-xs text-[var(--color-sidebar-icon,#10b981)] italic">Note: "{selectedRecipe.note}"</p>
+                        <p className="text-xs italic" style={{ color: 'var(--color-emerald)' }}>
+                          Note: "{selectedRecipe.note}"
+                        </p>
                       )}
                     </div>
                   </div>
 
-                  <div className="border-t border-slate-800/80 mx-5" />
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
-                  {/* SOURCE SECTION */}
-                  <div className="px-5 space-y-1 text-xs">
-                    <h3 className="text-xl font-black text-white">Source</h3>
-                    <div className="pt-0.5">
-                      <a
-                        href={selectedRecipe.sourceUrl || 'https://hot-thai-kitchen.com'}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-[#E05638] font-bold text-sm hover:underline inline-flex items-center gap-1"
-                      >
-                        <span className="underline">
-                          Visit {selectedRecipe.sourceUrl ? new URL(selectedRecipe.sourceUrl).hostname.replace('www.', '') : 'hot-thai-kitchen.com'}
-                        </span>
-                      </a>
-                    </div>
-                    <p className="text-[var(--color-sidebar-icon,#10b981)] italic text-[11px] font-medium">Recipe imported from external source</p>
-                  </div>
-
-                  <div className="border-t border-slate-800/80 mx-5" />
-
-                  {/* INGREDIENTS SECTION (SCALED BY SERVINGS MULTIPLIER) */}
+                  {/* INGREDIENTS SECTION */}
                   <div className="px-5 space-y-4">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xl font-black text-white">Ingredients</h3>
+                      <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>
+                        {t('ingredients') || 'Ingredients'}
+                      </h3>
                       
-                      <div className="flex items-center bg-[#070b13] border border-slate-800 rounded-lg overflow-hidden text-xs">
-                        <div className="px-2.5 py-1 text-slate-500 border-r border-slate-800/80 flex items-center justify-center">
-                          <Type className="h-3.5 w-3.5 text-[#E05638]"/>
+                      <div className="flex items-center border rounded-lg overflow-hidden text-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                        <div className="px-2.5 py-1 border-r flex items-center justify-center" style={{ borderColor: 'var(--color-border)' }}>
+                          <Type className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                         </div>
                         <button
-                          onClick={() => setFontSizeScale(Math.max(60, fontSizeScale - 10))}
-                          className="px-2.5 py-1 text-slate-400 hover:text-white font-bold"
+                          type="button"
+                          onClick={() => setFontSizeScale(Math.max(70, fontSizeScale - 10))}
+                          className="px-2.5 py-1 font-bold cursor-pointer"
                         >
                           -
                         </button>
-                        <span className="px-2.5 py-1 font-bold text-slate-200 min-w-[42px] text-center">
+                        <span className="px-2.5 py-1 font-bold min-w-[42px] text-center">
                           {fontSizeScale}%
                         </span>
                         <button
+                          type="button"
                           onClick={() => setFontSizeScale(Math.min(140, fontSizeScale + 10))}
-                          className="px-2.5 py-1 text-slate-400 hover:text-white font-bold"
+                          className="px-2.5 py-1 font-bold cursor-pointer"
                         >
                           +
                         </button>
@@ -919,14 +964,14 @@ export default function SavedRecipesPage() {
                         const name = typeof ing === 'string' ? ing : ing.item || ing.name || '';
                         return (
                           <div key={idx} className="flex items-start gap-2.5 leading-snug">
-                            <span className="w-2 h-2 rounded-full bg-[#E05638] inline-block shrink-0 mt-1.5" />
-                            <span className="text-slate-200">
+                            <span className="w-2 h-2 rounded-full inline-block shrink-0 mt-1.5" style={{ backgroundColor: 'var(--color-primary)' }} />
+                            <span>
                               {(scaledAmt !== '' || unit) && (
-                                <strong className="font-semibold text-white">
+                                <strong className="font-semibold" style={{ color: 'var(--color-text)' }}>
                                   {scaledAmt} {unit && unit !== 'Unit' ? unit : ''}{' '}
                                 </strong>
                               )}
-                              <span>{name}</span>
+                              <span style={{ color: 'var(--color-text-secondary)' }}>{name}</span>
                             </span>
                           </div>
                         );
@@ -934,11 +979,13 @@ export default function SavedRecipesPage() {
                     </div>
                   </div>
 
-                  <div className="border-t border-slate-800/80 mx-5" />
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
                   {/* INSTRUCTIONS SECTION */}
                   <div className="px-5 space-y-4">
-                    <h3 className="text-xl font-black text-white">Instructions</h3>
+                    <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>
+                      {t('instructions') || 'Instructions'}
+                    </h3>
                     
                     <div className="space-y-3.5" style={{ fontSize: `${fontSizeScale}%` }}>
                       {Array.isArray(selectedRecipe.instructions) && selectedRecipe.instructions.map((step: string, idx: number) => {
@@ -954,20 +1001,30 @@ export default function SavedRecipesPage() {
                               }
                             }}
                             className={`flex items-start gap-3 p-3 rounded-2xl border cursor-pointer transition select-none ${
-                              isDone ? 'bg-[#070b13]/50 border-slate-800/60 opacity-50' : 'bg-[#070b13] border-slate-800/80 hover:border-slate-700'
+                              isDone ? 'opacity-50' : 'hover:border-slate-600'
                             }`}
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)'
+                            }}
                           >
-                            <div className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 mt-0.5 transition ${
-                              isDone ? 'bg-[#E05638] border-[#E05638] text-white' : 'border-[#E05638]/70 bg-transparent'
-                            }`}>
+                            <div 
+                              className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 mt-0.5 transition ${
+                                isDone ? 'text-white' : 'bg-transparent'
+                              }`}
+                              style={{
+                                backgroundColor: isDone ? 'var(--color-primary)' : 'transparent',
+                                borderColor: 'var(--color-primary)'
+                              }}
+                            >
                               {isDone && <Check className="h-3 w-3 stroke-[3]"/>}
                             </div>
 
-                            <span className="font-extrabold text-[#E05638] shrink-0 text-sm">
+                            <span className="font-extrabold shrink-0 text-sm" style={{ color: 'var(--color-primary)' }}>
                               {idx + 1}.
                             </span>
 
-                            <span className={`leading-relaxed text-slate-200 flex-1 ${isDone ? 'line-through text-slate-500' : ''}`}>
+                            <span className={`leading-relaxed flex-1 ${isDone ? 'line-through opacity-60' : ''}`} style={{ color: 'var(--color-text)' }}>
                               {step}
                             </span>
                           </div>
@@ -976,34 +1033,37 @@ export default function SavedRecipesPage() {
                     </div>
                   </div>
 
-                  <div className="border-t border-slate-800/80 mx-5" />
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
-                  {/* Delete Option */}
+                  {/* Delete Button */}
                   <div className="px-5 flex items-center justify-end text-xs">
                     <button
+                      type="button"
                       onClick={() => handleDeleteRecipe(selectedRecipe.id)}
-                      className="bg-red-950/60 border border-red-500/40 text-red-400 px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 hover:bg-red-900/50"
+                      className="border border-red-500/40 text-red-400 px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 transition cursor-pointer hover:bg-red-950/20"
                     >
-                      <Trash2 className="h-3.5 w-3.5"/> Delete Recipe
+                      <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipe') || 'Delete Recipe'}
                     </button>
                   </div>
                 </div>
               ) : (
                 /* EDIT RECIPE VIEW */
                 <div className="p-6 space-y-6">
-                  <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                    <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                      <Edit3 className="h-5 w-5 text-[#E05638]"/> Edit Recipe
+                  <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                    <h3 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                      <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('editRecipe') || 'Edit Recipe'}
                     </h3>
                     <button
+                      type="button"
                       onClick={() => setIsEditing(false)}
-                      className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                      className="p-1 rounded-lg transition cursor-pointer"
+                      style={{ color: 'var(--color-text-secondary)' }}
                     >
                       <X className="h-5 w-5"/>
                     </button>
                   </div>
 
-                  <div className="flex bg-[#070b13] p-1.5 rounded-2xl border border-slate-800">
+                  <div className="flex p-1.5 rounded-2xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                     {[
                       { id: 'info', label: 'Basic Info' },
                       { id: 'ingredients', label: 'Ingredients' },
@@ -1013,93 +1073,53 @@ export default function SavedRecipesPage() {
                         key={tab.id}
                         type="button"
                         onClick={() => setEditTab(tab.id as any)}
-                        className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition ${
-                          editTab === tab.id
-                            ? 'bg-[#111726] text-white shadow-md border border-slate-700'
-                            : 'text-slate-400 hover:text-white'
+                        className={`flex-1 py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
+                          editTab === tab.id ? 'shadow-md border' : 'opacity-70 hover:opacity-100'
                         }`}
+                        style={{
+                          backgroundColor: editTab === tab.id ? 'var(--color-card)' : 'transparent',
+                          borderColor: editTab === tab.id ? 'var(--color-border)' : 'transparent',
+                          color: 'var(--color-text)'
+                        }}
                       >
                         {tab.label}
                       </button>
                     ))}
                   </div>
 
-                  {/* TAB 1: BASIC INFO */}
                   {editTab === 'info' && (
-                    <div className="space-y-5 animate-in fade-in text-xs">
-                      <div className="space-y-1.5">
-                        <label className="block font-bold text-[#E05638] uppercase tracking-wider text-[11px]">
-                          Photo
-                        </label>
-                        <label className="border-2 border-dashed border-slate-700 hover:border-[#E05638] bg-[#070b13] rounded-2xl h-44 flex flex-col items-center justify-center cursor-pointer transition relative overflow-hidden group">
-                          {editForm.imageUrl ? (
-                            <>
-                              <img
-                                src={editForm.imageUrl}
-                                alt="Recipe Preview"
-                                className="absolute inset-0 w-full h-full object-cover"
-                              />
-                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
-                                <span className="bg-[#111726]/90 border border-slate-700 text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5">
-                                  <ImagePlus className="h-4 w-4 text-[#E05638]"/> Change Photo
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    setEditForm({ ...editForm, imageUrl: '' });
-                                  }}
-                                  className="bg-red-950/90 border border-red-500/50 text-red-400 text-xs font-bold px-3 py-1.5 rounded-xl hover:bg-red-900"
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            </>
-                          ) : (
-                            <div className="text-center space-y-2">
-                              <ImagePlus className="h-8 w-8 text-slate-400 mx-auto group-hover:text-[#E05638] transition"/>
-                              <span className="text-xs font-bold text-slate-300 block">Add a photo</span>
-                            </div>
-                          )}
-                          <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-                        </label>
-                      </div>
-
+                    <div className="space-y-4 text-xs">
                       <div>
-                        <label className="block font-bold text-[#E05638] uppercase tracking-wider text-[11px] mb-1.5">
-                          Recipe Title
-                        </label>
+                        <label className="block font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>Recipe Title *</label>
                         <input
                           type="text"
                           required
                           value={editForm.title}
                           onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                          className="w-full bg-[#070b13] border border-slate-800 rounded-xl p-3 text-sm text-white placeholder-slate-600 outline-none focus:border-[#E05638]"
+                          className="w-full border rounded-xl p-3 text-sm outline-none"
+                          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                         />
                       </div>
 
                       <div>
-                        <label className="block font-bold text-[#E05638] uppercase tracking-wider text-[11px] mb-1.5">
-                          Description
-                        </label>
+                        <label className="block font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>Description</label>
                         <textarea
                           rows={3}
                           value={editForm.description}
                           onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                          className="w-full bg-[#070b13] border border-slate-800 rounded-xl p-3 text-xs text-white placeholder-slate-600 outline-none focus:border-[#E05638] resize-y leading-relaxed"
+                          className="w-full border rounded-xl p-3 text-xs outline-none resize-y"
+                          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                         />
                       </div>
 
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block font-bold text-[#E05638] uppercase tracking-wider text-[11px] mb-1.5">
-                            Recipe Type
-                          </label>
+                          <label className="block font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>Recipe Type</label>
                           <select
                             value={editForm.recipeType}
                             onChange={(e) => setEditForm({ ...editForm, recipeType: e.target.value })}
-                            className="w-full bg-[#070b13] border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-[#E05638]"
+                            className="w-full border rounded-xl p-3 text-xs outline-none"
+                            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                           >
                             <option value="Main Dish">Main Dish</option>
                             <option value="Appetizer">Appetizer</option>
@@ -1110,56 +1130,31 @@ export default function SavedRecipesPage() {
                         </div>
 
                         <div>
-                          <label className="block font-bold text-[#E05638] uppercase tracking-wider text-[11px] mb-1.5">
-                            Servings
-                          </label>
+                          <label className="block font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>Servings</label>
                           <input
                             type="number"
                             value={editForm.servings}
                             onChange={(e) => setEditForm({ ...editForm, servings: parseInt(e.target.value) || 1 })}
-                            className="w-full bg-[#070b13] border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-[#E05638]"
+                            className="w-full border rounded-xl p-3 text-xs outline-none"
+                            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                           />
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block font-bold text-[#E05638] uppercase tracking-wider text-[11px] mb-1.5">
-                            Preparation Time (mins)
-                          </label>
-                          <input
-                            type="number"
-                            value={editForm.prepTimeMinutes}
-                            onChange={(e) => setEditForm({ ...editForm, prepTimeMinutes: parseInt(e.target.value) || 0 })}
-                            className="w-full bg-[#070b13] border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-[#E05638]"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block font-bold text-[#E05638] uppercase tracking-wider text-[11px] mb-1.5">
-                            Cooking Time (mins)
-                          </label>
-                          <input
-                            type="number"
-                            value={editForm.cookTimeMinutes}
-                            onChange={(e) => setEditForm({ ...editForm, cookTimeMinutes: parseInt(e.target.value) || 0 })}
-                            className="w-full bg-[#070b13] border border-slate-800 rounded-xl p-3 text-xs text-white outline-none focus:border-[#E05638]"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="pt-4 border-t border-slate-800 flex justify-end gap-3">
+                      <div className="pt-4 border-t flex justify-end gap-3" style={{ borderColor: 'var(--color-border)' }}>
                         <button
                           type="button"
                           onClick={() => setIsEditing(false)}
-                          className="px-5 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700 transition text-xs cursor-pointer"
+                          className="px-5 py-2.5 rounded-xl border font-bold text-xs cursor-pointer"
+                          style={{ borderColor: 'var(--color-border)' }}
                         >
                           Cancel
                         </button>
                         <button
                           type="button"
                           onClick={handleSaveEdit}
-                          className="px-6 py-2.5 rounded-xl bg-[#E05638] text-white font-bold hover:bg-[#c94529] transition shadow-lg shadow-[#E05638]/20 flex items-center gap-2 text-xs cursor-pointer"
+                          className="px-6 py-2.5 rounded-xl text-white font-bold text-xs flex items-center gap-2 cursor-pointer shadow-lg"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
                         >
                           <Save className="h-4 w-4"/> Save Changes
                         </button>
@@ -1167,46 +1162,26 @@ export default function SavedRecipesPage() {
                     </div>
                   )}
 
-                  {/* TAB 2: INGREDIENTS */}
                   {editTab === 'ingredients' && (
-                    <div className="bg-[#070b13] border border-slate-800 rounded-2xl p-5 space-y-4 animate-in fade-in text-xs">
+                    <div className="space-y-4 text-xs">
                       <div className="flex justify-between items-center">
-                        <h2 className="text-sm font-bold text-white uppercase tracking-wider text-[#E05638]">Ingredients</h2>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setIsReorderingIngredients(!isReorderingIngredients)}
-                            className={`font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer ${
-                              isReorderingIngredients ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-[#111726] text-slate-200 border-slate-700'
-                            }`}
-                          >
-                            {isReorderingIngredients ? 'Done' : 'Reorder'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditForm({
-                              ...editForm,
-                              ingredients: [...editForm.ingredients, { amount: '', unit: '', item: '', category: categories[0] || 'Pantry Staples' }]
-                            })}
-                            className="bg-[#E05638] text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-[#c94529] transition cursor-pointer"
-                          >
-                            <Plus className="h-3.5 w-3.5"/> Add Ingredient
-                          </button>
-                        </div>
+                        <span className="font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>Ingredients</span>
+                        <button
+                          type="button"
+                          onClick={() => setEditForm({
+                            ...editForm,
+                            ingredients: [...editForm.ingredients, { amount: '', unit: '', item: '', category: categories[0] || 'Produce' }]
+                          })}
+                          className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                        >
+                          <Plus className="h-3.5 w-3.5"/> Add Ingredient
+                        </button>
                       </div>
 
-                      <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+                      <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
                         {editForm.ingredients.map((ing: any, idx: number) => (
-                          <div
-                            key={idx}
-                            draggable={isReorderingIngredients}
-                            onDragStart={() => handleDragStart(idx)}
-                            onDragOver={(e) => handleDragOver(e, idx, 'ingredients')}
-                            onDrop={handleDrop}
-                            className={`flex items-center gap-2 bg-[#0b0f17] p-2.5 rounded-xl border transition ${
-                              isReorderingIngredients ? 'border-emerald-500/60 cursor-grab bg-[#111928]' : 'border-slate-800'
-                            }`}
-                          >
+                          <div key={idx} className="flex items-center gap-2 p-2 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                             <input
                               type="text"
                               placeholder="Amt"
@@ -1216,7 +1191,8 @@ export default function SavedRecipesPage() {
                                 list[idx].amount = e.target.value;
                                 setEditForm({ ...editForm, ingredients: list });
                               }}
-                              className="w-16 bg-slate-900 border border-slate-800 rounded-lg p-2 text-center text-white placeholder-slate-700 font-bold outline-none"
+                              className="w-16 border rounded-lg p-2 text-center text-xs font-bold outline-none"
+                              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                             />
                             <input
                               type="text"
@@ -1227,7 +1203,8 @@ export default function SavedRecipesPage() {
                                 list[idx].unit = e.target.value;
                                 setEditForm({ ...editForm, ingredients: list });
                               }}
-                              className="w-20 bg-slate-900 border border-slate-800 rounded-lg p-2 text-center text-slate-300 placeholder-slate-700 outline-none"
+                              className="w-20 border rounded-lg p-2 text-center text-xs outline-none"
+                              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                             />
                             <input
                               type="text"
@@ -1238,146 +1215,86 @@ export default function SavedRecipesPage() {
                                 list[idx].item = e.target.value;
                                 setEditForm({ ...editForm, ingredients: list });
                               }}
-                              className="flex-1 bg-transparent border-none text-white placeholder-slate-700 outline-none px-2"
+                              className="flex-1 bg-transparent border-none text-xs outline-none px-2"
+                              style={{ color: 'var(--color-text)' }}
                             />
-                            <select
-                              value={ing.category}
-                              onChange={(e) => {
-                                const list = [...editForm.ingredients];
-                                list[idx].category = e.target.value;
-                                setEditForm({ ...editForm, ingredients: list });
-                              }}
-                              className="w-36 bg-slate-900 border border-slate-800 rounded-lg p-2 text-[11px] text-slate-300 outline-none cursor-pointer"
+                            <button
+                              type="button"
+                              onClick={() => setEditForm({
+                                ...editForm,
+                                ingredients: editForm.ingredients.filter((_: any, i: number) => i !== idx)
+                              })}
+                              className="p-1.5 text-red-400 hover:text-red-300 cursor-pointer"
                             >
-                              {categories.map((cat) => (
-                                <option key={cat} value={cat}>{cat}</option>
-                              ))}
-                            </select>
-
-                            {isReorderingIngredients ? (
-                              <div className="p-2 text-[var(--color-sidebar-icon,#10b981)] cursor-grab"><GripVertical className="h-4 w-4"/></div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setEditForm({
-                                  ...editForm,
-                                  ingredients: editForm.ingredients.filter((_: any, i: number) => i !== idx)
-                                })}
-                                className="p-2 text-red-400 hover:text-red-300 cursor-pointer"
-                              >
-                                <Trash2 className="h-4 w-4"/>
-                              </button>
-                            )}
+                              <Trash2 className="h-4 w-4"/>
+                            </button>
                           </div>
                         ))}
                       </div>
 
-                      <div className="flex justify-between pt-3">
-                        <button
-                          type="button"
-                          onClick={() => setEditTab('info')}
-                          className="bg-slate-800 text-slate-300 font-bold px-5 py-2 rounded-xl text-xs hover:bg-slate-700 transition cursor-pointer"
-                        >
+                      <div className="flex justify-between pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                        <button type="button" onClick={() => setEditTab('info')} className="border px-5 py-2 rounded-xl text-xs font-bold cursor-pointer" style={{ borderColor: 'var(--color-border)' }}>
                           ← Back
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditTab('steps')}
-                          className="bg-[#E05638] text-white font-bold px-6 py-2 rounded-xl text-xs hover:bg-[#c94529] transition shadow-md cursor-pointer"
-                        >
+                        <button type="button" onClick={() => setEditTab('steps')} className="text-white px-6 py-2 rounded-xl text-xs font-bold cursor-pointer" style={{ backgroundColor: 'var(--color-primary)' }}>
                           Next: Steps →
                         </button>
                       </div>
                     </div>
                   )}
 
-                  {/* TAB 3: STEPS */}
                   {editTab === 'steps' && (
-                    <div className="bg-[#070b13] border border-slate-800 rounded-2xl p-5 space-y-4 animate-in fade-in text-xs">
+                    <div className="space-y-4 text-xs">
                       <div className="flex justify-between items-center">
-                        <h2 className="text-sm font-bold text-white uppercase tracking-wider text-[#E05638]">Step-by-Step Instructions</h2>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setIsReorderingSteps(!isReorderingSteps)}
-                            className={`font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer ${
-                              isReorderingSteps ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-[#111726] text-slate-200 border-slate-700'
-                            }`}
-                          >
-                            {isReorderingSteps ? 'Done' : 'Reorder'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditForm({
-                              ...editForm,
-                              instructions: [...editForm.instructions, '']
-                            })}
-                            className="bg-[#E05638] text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-[#c94529] transition cursor-pointer"
-                          >
-                            <Plus className="h-3.5 w-3.5"/> Add Step
-                          </button>
-                        </div>
+                        <span className="font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>Instructions</span>
+                        <button
+                          type="button"
+                          onClick={() => setEditForm({ ...editForm, instructions: [...editForm.instructions, ''] })}
+                          className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                        >
+                          <Plus className="h-3.5 w-3.5"/> Add Step
+                        </button>
                       </div>
 
-                      <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+                      <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
                         {editForm.instructions.map((step: string, idx: number) => (
-                          <div
-                            key={idx}
-                            draggable={isReorderingSteps}
-                            onDragStart={() => handleDragStart(idx)}
-                            onDragOver={(e) => handleDragOver(e, idx, 'steps')}
-                            onDrop={handleDrop}
-                            className={`flex items-start gap-3 bg-[#0b0f17] p-3 rounded-xl border transition ${
-                              isReorderingSteps ? 'border-emerald-500/60 cursor-grab bg-[#111928]' : 'border-slate-800'
-                            }`}
-                          >
-                            <span className="w-6 h-6 rounded-full bg-[#E05638]/20 text-[#E05638] font-bold flex items-center justify-center shrink-0 mt-1">
+                          <div key={idx} className="flex items-start gap-2 p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                            <span className="w-6 h-6 rounded-full font-bold flex items-center justify-center shrink-0 mt-1" style={{ backgroundColor: 'rgba(224, 86, 56, 0.2)', color: 'var(--color-primary)' }}>
                               {idx + 1}
                             </span>
                             <textarea
                               rows={2}
-                              placeholder={`Describe step ${idx + 1}...`}
                               value={step}
                               onChange={(e) => {
                                 const list = [...editForm.instructions];
                                 list[idx] = e.target.value;
                                 setEditForm({ ...editForm, instructions: list });
                               }}
-                              className="flex-1 bg-transparent border-none text-white placeholder-slate-700 outline-none resize-y"
+                              className="flex-1 bg-transparent border-none text-xs outline-none resize-y"
+                              style={{ color: 'var(--color-text)' }}
+                              placeholder={`Step ${idx + 1}...`}
                             />
-
-                            {isReorderingSteps ? (
-                              <div className="p-2 text-[var(--color-sidebar-icon,#10b981)] cursor-grab mt-1"><GripVertical className="h-4 w-4"/></div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setEditForm({
-                                  ...editForm,
-                                  instructions: editForm.instructions.filter((_: any, i: number) => i !== idx)
-                                })}
-                                className="p-2 text-slate-500 hover:text-red-400 h-fit cursor-pointer"
-                              >
-                                <Trash2 className="h-4 w-4"/>
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => setEditForm({
+                                ...editForm,
+                                instructions: editForm.instructions.filter((_: any, i: number) => i !== idx)
+                              })}
+                              className="p-1.5 text-red-400 hover:text-red-300 cursor-pointer"
+                            >
+                              <Trash2 className="h-4 w-4"/>
+                            </button>
                           </div>
                         ))}
                       </div>
 
-                      <div className="flex justify-between pt-3">
-                        <button
-                          type="button"
-                          onClick={() => setEditTab('ingredients')}
-                          className="bg-slate-800 text-slate-300 font-bold px-5 py-2 rounded-xl text-xs hover:bg-slate-700 transition cursor-pointer"
-                        >
+                      <div className="flex justify-between pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                        <button type="button" onClick={() => setEditTab('ingredients')} className="border px-5 py-2 rounded-xl text-xs font-bold cursor-pointer" style={{ borderColor: 'var(--color-border)' }}>
                           ← Back
                         </button>
-                        <button
-                          type="button"
-                          onClick={handleSaveEdit}
-                          className="bg-[#E05638] text-white font-bold px-8 py-2.5 rounded-xl text-xs hover:bg-[#c94529] transition shadow-lg shadow-[#E05638]/20 flex items-center gap-2 cursor-pointer"
-                        >
-                          <Save className="h-4 w-4"/> Save Changes
+                        <button type="button" onClick={handleSaveEdit} className="text-white px-8 py-2.5 rounded-xl text-xs font-bold cursor-pointer shadow-lg" style={{ backgroundColor: 'var(--color-primary)' }}>
+                          <Save className="h-4 w-4 inline mr-1.5"/> Save Changes
                         </button>
                       </div>
                     </div>
@@ -1397,28 +1314,32 @@ export default function SavedRecipesPage() {
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#0f1115] border border-slate-800/90 rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default"
+            className="border rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <button 
               type="button"
               onClick={() => setShowAddToPlanModal(false)} 
-              className="absolute top-4 right-4 p-2 bg-[#1e2430] hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition cursor-pointer"
+              className="absolute top-4 right-4 p-2 rounded-lg transition cursor-pointer"
+              style={{ backgroundColor: 'var(--color-inner-dark)' }}
             >
               <X className="h-4 w-4"/>
             </button>
 
             <div className="pr-6 space-y-1">
-              <h2 className="text-xl font-black text-[#E05638] tracking-tight">Add to Calendar</h2>
-              <p className="text-xs text-slate-400 leading-snug">
+              <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+                {t('addToCalendar') || 'Add to Calendar'}
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                 Schedule {selectedRecipe.title || selectedRecipe.name} in your meal plan
               </p>
             </div>
 
             <div className="space-y-4 pt-1">
               <div>
-                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Date</label>
+                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>Date</label>
                 <div className="relative flex items-center">
-                  <Calendar className="h-4 w-4 text-[#E05638] absolute left-3.5 pointer-events-none"/>
+                  <Calendar className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-primary)' }}/>
                   <input
                     type="date"
                     required
@@ -1430,72 +1351,53 @@ export default function SavedRecipesPage() {
                         handleSaveToCalendar();
                       }
                     }}
-                    className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl pl-10 pr-3 py-2.5 text-xs text-[#E05638] font-semibold outline-none focus:border-[#E05638] cursor-pointer"
+                    className="w-full border rounded-xl pl-10 pr-3 py-2.5 text-xs font-semibold outline-none cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Meal Type</label>
-                <div className="relative flex items-center">
-                  <select
-                    value={planMealType}
-                    onChange={(e) => setPlanMealType(e.target.value)}
-                    className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-200 outline-none focus:border-[#E05638] cursor-pointer appearance-none"
-                  >
-                    <option value="Breakfast">Breakfast</option>
-                    <option value="Lunch">Lunch</option>
-                    <option value="Dinner">Dinner</option>
-                    <option value="Snack">Snack</option>
-                  </select>
-                  <ChevronDown className="h-4 w-4 text-slate-400 absolute right-3 pointer-events-none"/>
-                </div>
+                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>Meal Type</label>
+                <select
+                  value={planMealType}
+                  onChange={(e) => setPlanMealType(e.target.value)}
+                  className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                >
+                  <option value="Breakfast">Breakfast</option>
+                  <option value="Lunch">Lunch</option>
+                  <option value="Dinner">Dinner</option>
+                  <option value="Snack">Snack</option>
+                </select>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Time</label>
-                <div className="relative flex items-center">
-                  <Clock className="h-4 w-4 text-slate-400 absolute left-3.5 pointer-events-none"/>
-                  <input
-                    type="time"
-                    value={planTime}
-                    onChange={(e) => setPlanTime(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleSaveToCalendar();
-                      }
-                    }}
-                    className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl px-10 py-2.5 text-xs text-slate-200 outline-none focus:border-[#E05638]"
-                    placeholder="--:-- --"
-                  />
-                  <Clock className="h-4 w-4 text-[#E05638] absolute right-3.5 pointer-events-none"/>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-[#E05638] mb-1.5">Notes</label>
+                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>Notes</label>
                 <textarea
                   value={planNotes}
                   onChange={(e) => setPlanNotes(e.target.value)}
                   placeholder="Add any notes or reminders..."
                   rows={3}
-                  className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl p-3 text-xs text-slate-200 placeholder-slate-500 outline-none focus:border-[#E05638] resize-none"
+                  className="w-full border rounded-xl p-3 text-xs outline-none resize-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3">
+              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <button
                   type="button"
                   onClick={() => setShowAddToPlanModal(false)}
-                  className="px-5 py-2.5 rounded-xl border border-emerald-900/80 hover:bg-emerald-950/20 text-[#E05638] font-bold text-xs transition cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
+                  style={{ borderColor: 'var(--color-border)' }}
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
                   onClick={() => handleSaveToCalendar()}
-                  className="px-5 py-2.5 rounded-xl bg-[#E05638] hover:bg-[#c94529] text-white font-bold text-xs transition shadow-md cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
                 >
                   Add to Calendar
                 </button>
@@ -1505,7 +1407,7 @@ export default function SavedRecipesPage() {
         </div>
       )}
 
-      {/* SHOPPING LIST MODAL */}
+      {/* SHOPPING LIST MODAL (NO NATIVE FORM) */}
       {isShoppingModalOpen && (
         <div 
           onClick={() => setIsShoppingModalOpen(false)}
@@ -1513,23 +1415,24 @@ export default function SavedRecipesPage() {
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="bg-[#0c111d] border border-slate-800 rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl p-6 space-y-5 cursor-default"
+            className="border rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl p-6 space-y-5 cursor-default"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
               <div>
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <ShoppingCart className="h-5 w-5 text-[#E05638]"/> Add to Shopping List
+                <h3 className="text-lg font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <ShoppingCart className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> Add to Shopping List
                 </h3>
-                <p className="text-xs text-slate-400">Select or edit items to add directly to your list</p>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Select items to add directly to your shopping list</p>
               </div>
-              <button type="button" onClick={() => setIsShoppingModalOpen(false)} className="text-slate-400 hover:text-white cursor-pointer">
+              <button type="button" onClick={() => setIsShoppingModalOpen(false)} className="cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
                 <X className="h-5 w-5"/>
               </button>
             </div>
 
-            <div className="overflow-y-auto flex-1 space-y-3 pr-1 text-xs">
+            <div className="overflow-y-auto flex-1 space-y-2.5 pr-1 text-xs">
               {shoppingModalIngredients.map((ing, idx) => (
-                <div key={ing.id} className="flex items-center gap-2 bg-[#070b13] p-2.5 rounded-xl border border-slate-800">
+                <div key={ing.id} className="flex items-center gap-2 p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                   <div
                     onClick={() => {
                       const updated = [...shoppingModalIngredients];
@@ -1537,8 +1440,12 @@ export default function SavedRecipesPage() {
                       setShoppingModalIngredients(updated);
                     }}
                     className={`w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition ${
-                      ing.selected ? 'bg-[#E05638] border-[#E05638] text-white' : 'border-slate-700 bg-slate-900'
+                      ing.selected ? 'text-white' : 'border-slate-700 bg-slate-900'
                     }`}
+                    style={{
+                      backgroundColor: ing.selected ? 'var(--color-primary)' : 'transparent',
+                      borderColor: ing.selected ? 'var(--color-primary)' : 'var(--color-border)'
+                    }}
                   >
                     {ing.selected && <CheckSquare className="h-3.5 w-3.5"/>}
                   </div>
@@ -1551,8 +1458,8 @@ export default function SavedRecipesPage() {
                       updated[idx].amount = e.target.value;
                       setShoppingModalIngredients(updated);
                     }}
-                    className="w-16 bg-slate-900 border border-slate-800 rounded-lg p-2 text-center text-white font-bold outline-none"
-                    placeholder="Amt"
+                    className="w-16 border rounded-lg p-2 text-center text-xs font-bold outline-none"
+                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                   <input
                     type="text"
@@ -1562,8 +1469,8 @@ export default function SavedRecipesPage() {
                       updated[idx].unit = e.target.value;
                       setShoppingModalIngredients(updated);
                     }}
-                    className="w-20 bg-slate-900 border border-slate-800 rounded-lg p-2 text-center text-slate-300 outline-none"
-                    placeholder="Unit"
+                    className="w-20 border rounded-lg p-2 text-center text-xs outline-none"
+                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                   <input
                     type="text"
@@ -1573,38 +1480,27 @@ export default function SavedRecipesPage() {
                       updated[idx].name = e.target.value;
                       setShoppingModalIngredients(updated);
                     }}
-                    className="flex-1 bg-transparent border-none text-white outline-none px-2"
-                    placeholder="Ingredient name..."
+                    className="flex-1 bg-transparent border-none text-xs outline-none px-2"
+                    style={{ color: 'var(--color-text)' }}
                   />
-                  <select
-                    value={ing.category}
-                    onChange={(e) => {
-                      const updated = [...shoppingModalIngredients];
-                      updated[idx].category = e.target.value;
-                      setShoppingModalIngredients(updated);
-                    }}
-                    className="w-36 bg-slate-900 border border-slate-800 rounded-lg p-2 text-[11px] text-slate-300 outline-none cursor-pointer"
-                  >
-                    {categories.map((cat) => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
                 </div>
               ))}
             </div>
 
-            <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
+            <div className="pt-3 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
               <button
                 type="button"
                 onClick={() => setIsShoppingModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs cursor-pointer"
+                className="px-4 py-2 rounded-xl border text-xs font-bold cursor-pointer"
+                style={{ borderColor: 'var(--color-border)' }}
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleConfirmAddToShoppingList}
-                className="px-6 py-2 rounded-xl bg-[#E05638] text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md"
+                className="px-6 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md"
+                style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 <ShoppingCart className="h-3.5 w-3.5"/> Add Selected to List
               </button>
