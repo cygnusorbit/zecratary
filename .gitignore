@@ -12,3 +12,12 @@ apps/web/.env.local
 .env.local
 .env*.local
 *.env
+
+# Hostinger build bridge outputs
+.next
+dist
+build
+.turbo
+
+# Hostinger deployment & build artifacts
+node_modules
