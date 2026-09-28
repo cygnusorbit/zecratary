@@ -8,7 +8,10 @@
       ],
       "outputs": [
         ".next/**",
-        "dist/**"
+        "dist/**",
+        "!.next/cache/**",
+        "apps/web/.next/**",
+        "build/**"
       ]
     },
     "dev": {
