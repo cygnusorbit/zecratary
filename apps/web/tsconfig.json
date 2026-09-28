@@ -26,7 +26,8 @@
       {
         "name": "next"
       }
-    ]
+    ],
+    "downlevelIteration": true
   },
   "include": [
     "src/**/*.ts",

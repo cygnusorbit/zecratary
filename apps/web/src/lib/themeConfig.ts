@@ -49,30 +49,50 @@ export function getEffectiveThemeMode(): 'light' | 'dark' {
 /**
  * Applies typography font family dynamically across document and custom properties
  */
-export function applyGlobalFont(fontName?: string): void {
+export function applyGlobalFont(fontFamily?: string, fontSize?: string, letterSpacing?: string): void {
   if (typeof document === 'undefined') return;
-  const targetFont = fontName || memoryGlobalFont || (typeof window !== 'undefined' ? localStorage.getItem('zecratary_global_font') : null) || 'inherit';
-  
-  if (!targetFont || targetFont === 'inherit') return;
-  memoryGlobalFont = targetFont;
+  const targetFont = fontFamily || memoryGlobalFont || (typeof window !== 'undefined' ? localStorage.getItem('zecratary_global_font') : null) || 'inherit';
 
-  try {
-    const root = document.documentElement;
-    root.style.setProperty('--font-primary', targetFont);
-    root.style.setProperty('--font-family', targetFont);
-    root.style.setProperty('--font-body', targetFont);
-    root.style.fontFamily = targetFont;
+  if (targetFont && targetFont !== 'inherit') {
+    memoryGlobalFont = targetFont;
+    try {
+      const root = document.documentElement;
+      root.style.setProperty('--font-primary', targetFont);
+      root.style.setProperty('--font-family', targetFont);
+      root.style.setProperty('--font-body', targetFont);
+      root.style.fontFamily = targetFont;
 
-    if (document.body) {
-      document.body.style.fontFamily = targetFont;
-    }
+      if (document.body) {
+        document.body.style.fontFamily = targetFont;
+      }
 
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('zecratary_global_font', targetFont);
-      } catch (_) {}
-    }
-  } catch (_) {}
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('zecratary_global_font', targetFont);
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  if (fontSize) {
+    try {
+      document.documentElement.style.setProperty('--font-size-global', fontSize);
+      document.documentElement.style.setProperty('--font-size', fontSize);
+      if (document.body) {
+        document.body.style.fontSize = fontSize;
+      }
+    } catch (_) {}
+  }
+
+  if (letterSpacing) {
+    try {
+      document.documentElement.style.setProperty('--letter-spacing-global', letterSpacing);
+      document.documentElement.style.setProperty('--letter-spacing', letterSpacing);
+      if (document.body) {
+        document.body.style.letterSpacing = letterSpacing;
+      }
+    } catch (_) {}
+  }
 }
 
 export function getGlobalFont(): string | null {

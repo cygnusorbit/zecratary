@@ -432,7 +432,7 @@ export default function SubscriptionsPage() {
               });
             }
 
-            const activeTx = normalizedTxList.find((tx) => 
+            const activeTx = normalizedTxList.find((tx: any) => 
               ['active', 'succeeded', 'successful', 'paid', 'canceled'].includes(tx.status) &&
               (!tx.expiryDate || new Date(tx.expiryDate).getTime() > Date.now())
             );
@@ -563,7 +563,7 @@ export default function SubscriptionsPage() {
       if (rawAdminPlans.length > 0) {
         const parsed = rawAdminPlans.map(normalizePlan);
         const uniqueMap = new Map<string, PlanCatalog>();
-        parsed.forEach((p) => {
+        parsed.forEach((p: any) => {
           const baseKey = sanitizeSlug(p.slug || p.id);
           if (!uniqueMap.has(baseKey)) {
             uniqueMap.set(baseKey, p);
@@ -571,7 +571,7 @@ export default function SubscriptionsPage() {
         });
 
         let finalized = Array.from(uniqueMap.values());
-        const hasFreeTier = finalized.some((p) => p.isFree || sanitizeSlug(p.slug) === 'taster');
+        const hasFreeTier = finalized.some((p: any) => p.isFree || sanitizeSlug(p.slug) === 'taster');
         if (!hasFreeTier) {
           finalized.unshift(DEFAULT_FALLBACK_PLANS[0]);
         }
@@ -626,7 +626,7 @@ export default function SubscriptionsPage() {
   }, [feedback]);
 
   const activeTransaction = useMemo(() => {
-    return transactions.find((tx) => {
+    return transactions.find((tx: any) => {
       const isPaidOrActive = ['active', 'succeeded', 'successful', 'paid', 'canceled'].includes(tx.status);
       if (!isPaidOrActive) return false;
       if (!tx.expiryDate) return true;
@@ -680,10 +680,10 @@ export default function SubscriptionsPage() {
   }, [activeUserPlan, activeUserInterval, isFreeUser]);
 
   const annualDiscountPercent = useMemo(() => {
-    const paidPlans = plans.filter((p) => !p.isFree && p.monthlyPrice > 0 && p.annualPrice > 0);
+    const paidPlans = plans.filter((p: any) => !p.isFree && p.monthlyPrice > 0 && p.annualPrice > 0);
     if (paidPlans.length === 0) return 20;
-    const totalMonthly = paidPlans.reduce((sum, p) => sum + p.monthlyPrice * 12, 0);
-    const totalAnnual = paidPlans.reduce((sum, p) => sum + p.annualPrice, 0);
+    const totalMonthly = paidPlans.reduce((sum: number, p: any) => sum + p.monthlyPrice * 12, 0);
+    const totalAnnual = paidPlans.reduce((sum: number, p: any) => sum + p.annualPrice, 0);
     if (totalMonthly <= 0) return 20;
     const discount = Math.round(((totalMonthly - totalAnnual) / totalMonthly) * 100);
     return discount > 0 ? discount : 20;
@@ -875,7 +875,7 @@ export default function SubscriptionsPage() {
   const effectiveExpiry = activeTransaction?.expiryDate || user?.expiry_date;
 
   const displayActivePlanName = useMemo(() => {
-    const matched = plans.find((p) => sanitizeSlug(p.slug || p.id) === sanitizeSlug(activeUserPlan));
+    const matched = plans.find((p: any) => sanitizeSlug(p.slug || p.id) === sanitizeSlug(activeUserPlan));
     if (matched) {
       if (isFreeUser) return `${matched.name} (${t('freeLabel', 'Free')})`;
       return `${matched.name} (${activeUserInterval === 'YEAR' ? t('annualLabel', 'Annual') : t('monthlyLabel', 'Monthly')})`;
@@ -1299,7 +1299,7 @@ export default function SubscriptionsPage() {
                         {t('includedFeatures', 'Included Features:')}
                       </span>
                       <ul className="space-y-2 text-xs">
-                        {parsedFeatures.map((feat, fIdx) => (
+                        {parsedFeatures.map((feat: any, fIdx: number) => (
                           <li key={fIdx} className="flex items-start gap-2">
                             <Check className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
                             <span style={{ color: 'var(--color-text, #f8fafc)' }}>{feat}</span>
@@ -1445,7 +1445,7 @@ export default function SubscriptionsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                  {transactions.map((tx) => {
+                  {transactions.map((tx: any) => {
                     const isSucceeded = ['active', 'succeeded', 'successful', 'paid'].includes(tx.status);
                     const isCanceled = tx.status === 'canceled';
 

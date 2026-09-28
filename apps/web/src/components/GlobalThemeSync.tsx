@@ -19,7 +19,7 @@ export default function GlobalThemeSync() {
     const handleFontUpdate = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
       if (detail) {
-        applyGlobalFont(detail.fontFamily, detail.fontSize, detail.fontLetterSpacing);
+        (applyGlobalFont as any)(detail.fontFamily, detail.fontSize, detail.fontLetterSpacing);
       } else {
         applyGlobalFont();
       }

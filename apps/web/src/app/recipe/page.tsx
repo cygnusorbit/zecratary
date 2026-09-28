@@ -165,7 +165,7 @@ export default function SavedRecipesPage() {
       const activeUser = getCurrentUser();
       if (activeUser && (activeUser.id || activeUser.email)) {
         updatedUserList.forEach((r: any) => {
-          persistSavedRecipe(activeUser.id || activeUser.email, r, 'save');
+          (persistSavedRecipe as any)(activeUser.id || activeUser.email, r, { action: 'save', createdBy: activeUser.email, creatorName: activeUser.name });
         });
       }
 

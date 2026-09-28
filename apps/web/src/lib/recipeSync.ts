@@ -33,10 +33,15 @@ export async function syncUserSavedRecipes(userId: string = 'guest', email?: str
   return [];
 }
 
-export async function persistSavedRecipe(userId: string, recipeOrList: any, creatorMeta?: { createdBy?: string; creatorName?: string }): Promise<boolean> {
+export async function persistSavedRecipe(
+  userId: string,
+  recipeOrList: any,
+  options?: { createdBy?: string; creatorName?: string; [key: string]: any } | string | any
+): Promise<boolean> {
   const targetId = (userId || '').trim();
   if (!targetId) return false;
 
+  const creatorMeta: any = typeof options === 'object' && options !== null ? options : {};
   const list = Array.isArray(recipeOrList) ? recipeOrList : [recipeOrList];
 
   const payload = list.map((item: any) => ({
@@ -118,6 +123,6 @@ export async function deleteSavedRecipe(userId: string, recipeId: string): Promi
   return true;
 }
 
-export function getLocalRecipes(userId: string): any[] {
+export function getLocalRecipes(userId: string = 'guest'): any[] {
   return [];
 }

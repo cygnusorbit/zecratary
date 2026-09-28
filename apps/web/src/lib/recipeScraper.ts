@@ -97,7 +97,7 @@ export async function discoverRecipeLinksFromIndex(indexUrl: string): Promise<Di
     const discoveredMap = new Map<string, DiscoveredSlugItem>();
 
     // 1. Inspect Schema.org ItemList JSON-LD
-    const jsonLdMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+    const jsonLdMatches = Array.from(html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi));
     for (const match of jsonLdMatches) {
       try {
         const parsed = JSON.parse(match[1].trim());
@@ -131,7 +131,7 @@ export async function discoverRecipeLinksFromIndex(indexUrl: string): Promise<Di
     }
 
     // 2. Scan HTML anchor tags
-    const anchorMatches = html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi);
+    const anchorMatches = Array.from(html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi));
     for (const m of anchorMatches) {
       try {
         const rawHref = m[1].trim();
@@ -242,7 +242,7 @@ export async function scrapeRecipeFromUrl(rawUrl: string): Promise<ScrapedRecipe
     const domain = new URL(targetUrl).hostname.replace(/^www\./, '');
 
     // Search Schema.org Recipe in JSON-LD
-    const jsonLdMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+    const jsonLdMatches = Array.from(html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi));
     let recipeNode: any = null;
 
     for (const match of jsonLdMatches) {

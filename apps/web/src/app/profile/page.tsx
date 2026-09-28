@@ -21,6 +21,8 @@ interface TokenSettingIdentity {
 }
 
 interface ExtendedUser extends User {
+  password?: string;
+
   linkedProviders?: SocialProvider[];
   linked_providers?: SocialProvider[];
   provider?: string;
@@ -35,6 +37,8 @@ interface ExtendedUser extends User {
   wallet_balance?: number;
   planExpiryDate?: string;
   expiryDate?: string;
+
+  [key: string]: any;
 }
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
@@ -376,7 +380,7 @@ export default function ProfilePage() {
       ...user,
       name: name.trim(),
       email: email.trim().toLowerCase(),
-      password: password ? password : user.password,
+      password: password ? password : (user as any)?.password,
     };
 
     try {

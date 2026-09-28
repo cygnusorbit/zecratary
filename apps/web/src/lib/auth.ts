@@ -1,5 +1,7 @@
 // Generated / Maintained by AI Collaborator
 export interface User {
+  password?: string;
+
   id: string;
   email: string;
   name?: string;
@@ -11,6 +13,8 @@ export interface User {
   tokenUsage?: any;
   created_at?: string;
   updated_at?: string;
+
+  [key: string]: any;
 }
 
 export const DEFAULT_ADMIN_USER: User = {

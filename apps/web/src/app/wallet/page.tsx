@@ -31,7 +31,7 @@ import {
   RotateCw
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
-import { useTranslation } from '@/context/LanguageContext';
+import { useTranslation } from '@/components/LanguageProvider';
 
 interface WalletSettings {
   is_enabled: boolean;

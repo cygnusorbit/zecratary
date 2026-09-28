@@ -7,15 +7,14 @@ import {
   setStoredLocale as saveStoredLocale 
 } from '@/lib/i18n';
 
-interface LanguageContextType {
+export interface LanguageContextType {
   locale: string;
+  currentLanguage?: string;
+  language?: string;
   setLocale: (locale: string) => void;
+  setLanguage?: (lang: string) => void;
   t: (key: string, fallback?: string) => string;
   version: number;
-
-  currentLanguage?: string;
-  locale?: string;
-  language?: string;
   [key: string]: any;
 }
 
@@ -74,7 +73,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   }, [dict]);
 
   return (
-    <LanguageContext.Provider value={{ locale, setLocale, t, version }}>
+    <LanguageContext.Provider value={{ locale, currentLanguage: locale, language: locale, setLocale, setLanguage: setLocale, t, version }}>
       {children}
     </LanguageContext.Provider>
   );

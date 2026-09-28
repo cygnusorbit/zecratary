@@ -105,14 +105,14 @@ export function decodeGoogleCredential(credential: string): { email: string; nam
 export function executeSocialAuth(profile: SocialProfile): User {
   initAuthStorage();
   const cleanEmail = profile.email.trim().toLowerCase();
-  const rawUsers = localStorage.getItem('zecratary_users');
+  const rawUsers = typeof window !== 'undefined' ? localStorage.getItem('zecratary_users') : null;
   const users: User[] = rawUsers ? JSON.parse(rawUsers) : [];
 
-  let matchedUser = users.find((u) => u.email.toLowerCase() === cleanEmail);
+  let matchedUser: User | undefined = users.find((u) => u.email?.toLowerCase() === cleanEmail);
 
   if (!matchedUser) {
     const systemDefaultPlan = getDefaultSubscriptionPlan();
-    matchedUser = {
+    const newUser: User = {
       id: `usr_${profile.provider}_${Date.now().toString(36)}`,
       name: profile.name.trim() || `${profile.provider.toUpperCase()} User`,
       email: cleanEmail,
@@ -121,24 +121,32 @@ export function executeSocialAuth(profile: SocialProfile): User {
       subscriptionTier: systemDefaultPlan,
       createdAt: new Date().toISOString(),
       avatar: profile.avatar,
-    } as any;
-    users.unshift(matchedUser);
-    localStorage.setItem('zecratary_users', JSON.stringify(users));
+    };
+    users.unshift(newUser);
+    matchedUser = newUser;
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('zecratary_users', JSON.stringify(users));
+      } catch (_) {}
+    }
   }
 
-  setCurrentUser(matchedUser);
+  const activeUser: User = matchedUser as User;
+  setCurrentUser(activeUser);
 
   try {
     fetch('/api/admin/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(matchedUser),
+      body: JSON.stringify(activeUser),
     }).catch(() => {});
   } catch (_) {}
 
-  window.dispatchEvent(new Event('zecratary_users_updated'));
-  window.dispatchEvent(new Event('zecratary_auth_changed'));
-  window.dispatchEvent(new Event('storage'));
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('zecratary_users_updated'));
+    window.dispatchEvent(new Event('zecratary_auth_changed'));
+    window.dispatchEvent(new Event('storage'));
+  }
 
-  return matchedUser;
+  return activeUser;
 }
