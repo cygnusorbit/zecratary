@@ -2,11 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(
-  req: NextRequest, 
-  context: { params: Promise<{ provider: string }> | { provider: string } }
-) {
-  const params = await Promise.resolve(context.params);
+export async function GET(req: NextRequest, context: { params: Promise<{ provider: string }> }) {
+  const params = (await Promise.resolve(context?.params || context)) as { provider: string };
   const provider = (params?.provider || '').toLowerCase();
   const url = new URL(req.url);
   const callbackUrl = url.searchParams.get('callbackUrl') || '/profile';
