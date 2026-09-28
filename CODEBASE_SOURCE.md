@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.2",
+  "version": "8.0.4",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -113,7 +113,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.2",
+  "version": "8.0.4",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -126,7 +126,7 @@
     "@zecratary/database": "*",
     "clsx": "^2.1.1",
     "lucide-react": "^0.475.0",
-    "next": "14.2.23",
+    "next": "^16.3.6",
     "openai": "^4.85.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -136,12 +136,12 @@
   },
   "devDependencies": {
     "@types/node": "^20.17.19",
+    "@types/pg": "^8.11.0",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.5.2",
-    "typescript": "^5.7.3",
-    "@types/pg": "^8.11.0"
+    "typescript": "^5.7.3"
   }
 }
 
@@ -164,7 +164,7 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "paths": {
       "@/*": [
         "./src/*"
@@ -183,12 +183,14 @@
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
-    ".next/types/**/*.ts"
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"
   ]
 }
+
 ```
 
 ## File: `apps/web/src/middleware.ts`
@@ -42136,7 +42138,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest, { params }: { params: { provider: string } }) {
+export async function GET(req: NextRequest, context: { params: Promise<{ provider: string }> }) {
+  const params = (await Promise.resolve(context?.params || context)) as { provider: string };
   const url = new URL(req.url);
   const target = new URL(`${url.origin}/api/auth/callback`);
   url.searchParams.forEach((value, key) => target.searchParams.set(key, value));
@@ -42146,7 +42149,8 @@ export async function GET(req: NextRequest, { params }: { params: { provider: st
   return NextResponse.redirect(target.toString());
 }
 
-export async function POST(req: NextRequest, { params }: { params: { provider: string } }) {
+export async function POST(req: NextRequest, context: { params: Promise<{ provider: string }> }) {
+  const params = (await Promise.resolve(context?.params || context)) as { provider: string };
   const url = new URL(req.url);
   const form = await req.formData();
   const target = new URL(`${url.origin}/api/auth/callback`);
@@ -42390,11 +42394,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(
-  req: NextRequest, 
-  context: { params: Promise<{ provider: string }> | { provider: string } }
-) {
-  const params = await Promise.resolve(context.params);
+export async function GET(req: NextRequest, context: { params: Promise<{ provider: string }> }) {
+  const params = (await Promise.resolve(context?.params || context)) as { provider: string };
   const provider = (params?.provider || '').toLowerCase();
   const url = new URL(req.url);
   const callbackUrl = url.searchParams.get('callbackUrl') || '/profile';
