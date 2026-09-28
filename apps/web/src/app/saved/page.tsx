@@ -1,3 +1,4 @@
+// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -53,6 +54,8 @@ const GRID_CONFIG: Record<GridMode, { colsClass: string; perPage: number; label:
   }
 };
 
+const DEFAULT_RECIPE_IMAGE = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80';
+
 const isRecipeInBook = (rec: any, bookId: string): boolean => {
   if (!rec || !bookId) return false;
   return rec.bookId === bookId || rec.book_id === bookId;
@@ -86,7 +89,7 @@ export default function SavedRecipesPage() {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
 
-  // Add to Plan / Calendar Modal State (Dynamic Current Date)
+  // Add to Plan / Calendar Modal State
   const [showAddToPlanModal, setShowAddToPlanModal] = useState(false);
   const [planDate, setPlanDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [planMealType, setPlanMealType] = useState('Dinner');
@@ -142,6 +145,7 @@ export default function SavedRecipesPage() {
   } | null>(null);
 
   const audioCtxRef = useRef<any>(null);
+  const isSyncingRef = useRef<boolean>(false);
 
   const defaultBooks = [
     { id: 'book_1', title: 'Family Favorites & Weeknight Dinners', description: 'Quick and easy meals.' },
@@ -149,7 +153,6 @@ export default function SavedRecipesPage() {
     { id: 'book_3', title: 'Baking & Desserts', description: 'Sweet treats & pastries.' }
   ];
 
-  // Restore saved grid preference from localStorage
   useEffect(() => {
     try {
       const savedMode = localStorage.getItem('zecratary_saved_grid_mode') as GridMode;
@@ -279,18 +282,17 @@ export default function SavedRecipesPage() {
     return `https://${urlStr}`;
   };
 
-  const loadData = useCallback(async (user: User | null) => {
+  const loadData = useCallback(async (user: User | null, showSpinner = true) => {
     if (!user) return;
     setCategories(getStoredCategories());
     const targetUserId = (user.id || user.email || '').trim();
     if (!targetUserId) return;
 
     try {
-      setLoading(true);
+      if (showSpinner) setLoading(true);
       const rawRecipes = await syncUserSavedRecipes(targetUserId);
 
-      // Verify creator identity explicitly on incoming records
-      const userRecipes = rawRecipes
+      const userRecipes = (Array.isArray(rawRecipes) ? rawRecipes : [])
         .filter((r: any) => {
           const rUser = String(r.user_id || r.userId || '').trim();
           const rCreator = String(r.created_by || r.createdBy || '').trim();
@@ -298,6 +300,7 @@ export default function SavedRecipesPage() {
         })
         .map((r: any) => {
           const cleanType = getCleanRecipeType(r);
+          const resolvedImg = r.imageUrl || r.image || r.image_url || '';
           return {
             ...r,
             userId: targetUserId,
@@ -308,6 +311,9 @@ export default function SavedRecipesPage() {
             creator_name: r.creator_name || r.creatorName || user.name || 'You',
             recipeType: cleanType,
             category: cleanType,
+            imageUrl: resolvedImg,
+            image: resolvedImg,
+            image_url: resolvedImg,
             bookId: r.book_id || r.bookId || null,
             isFavorite: Boolean(r.is_favorite || r.isFavorite),
             is_favorite: Boolean(r.is_favorite || r.isFavorite),
@@ -353,7 +359,7 @@ export default function SavedRecipesPage() {
     } catch (e) {
       console.error('[SavedRecipesPage] Load error:', e);
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   }, []);
 
@@ -381,13 +387,14 @@ export default function SavedRecipesPage() {
       return;
     }
     setCurrentUser(user);
-    loadData(user);
+    loadData(user, true);
 
     const handleSync = () => {
+      if (isSyncingRef.current) return;
       const activeUser = getCurrentUser();
       if (activeUser) {
         setCurrentUser(activeUser);
-        loadData(activeUser);
+        loadData(activeUser, false);
       }
     };
 
@@ -408,41 +415,53 @@ export default function SavedRecipesPage() {
     };
   }, [loadData, router, t]);
 
+  // Unified persistence function: POST /api/recipes/saved exclusively
   const saveAllRecipes = (updatedUserList: any[]) => {
     if (!currentUser) return;
     const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
 
-    const updatedWithId = updatedUserList.map(r => ({
-      ...r,
-      userId: targetUserId,
-      user_id: targetUserId,
-      createdBy: r.createdBy || r.created_by || currentUser.email || targetUserId,
-      created_by: r.createdBy || r.created_by || currentUser.email || targetUserId,
-      creatorName: r.creatorName || r.creator_name || currentUser.name || 'You',
-      creator_name: r.creatorName || r.creator_name || currentUser.name || 'You',
-      bookId: r.bookId || r.book_id || null,
-      book_id: r.bookId || r.book_id || null,
-      isFavorite: Boolean(r.isFavorite ?? r.is_favorite),
-      is_favorite: Boolean(r.isFavorite ?? r.is_favorite),
-      isCooked: Boolean(r.isCooked ?? r.is_cooked),
-      is_cooked: Boolean(r.isCooked ?? r.is_cooked),
-      rating: Number(r.rating) || 0,
-      note: r.note || '',
-      sourceUrl: r.sourceUrl || r.source_url || '',
-      source_url: r.sourceUrl || r.source_url || ''
-    }));
+    const updatedWithId = updatedUserList.map(r => {
+      const resolvedImg = r.imageUrl || r.image || r.image_url || '';
+      return {
+        ...r,
+        userId: targetUserId,
+        user_id: targetUserId,
+        createdBy: r.createdBy || r.created_by || currentUser.email || targetUserId,
+        created_by: r.createdBy || r.created_by || currentUser.email || targetUserId,
+        creatorName: r.creatorName || r.creator_name || currentUser.name || 'You',
+        creator_name: r.creatorName || r.creator_name || currentUser.name || 'You',
+        imageUrl: resolvedImg,
+        image: resolvedImg,
+        image_url: resolvedImg,
+        bookId: r.bookId || r.book_id || null,
+        book_id: r.bookId || r.book_id || null,
+        isFavorite: Boolean(r.isFavorite ?? r.is_favorite),
+        is_favorite: Boolean(r.isFavorite ?? r.is_favorite),
+        isCooked: Boolean(r.isCooked ?? r.is_cooked),
+        is_cooked: Boolean(r.isCooked ?? r.is_cooked),
+        rating: Number(r.rating) || 0,
+        note: r.note || '',
+        sourceUrl: r.sourceUrl || r.source_url || '',
+        source_url: r.sourceUrl || r.source_url || ''
+      };
+    });
 
     setRecipes(updatedWithId);
 
+    isSyncingRef.current = true;
     persistSavedRecipe(targetUserId, updatedWithId, {
       createdBy: currentUser.email || targetUserId,
       creatorName: currentUser.name || 'You'
     }).then(() => {
+      setTimeout(() => {
+        isSyncingRef.current = false;
+      }, 400);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
       }
     }).catch((err) => {
-      console.error('[SavedRecipesPage] Error saving recipes:', err);
+      isSyncingRef.current = false;
+      console.error('[SavedRecipesPage] Error saving recipes via POST:', err);
     });
 
     const updatedBooks = books.map((b: any) => ({
@@ -452,7 +471,7 @@ export default function SavedRecipesPage() {
     setBooks(updatedBooks);
   };
 
-  const toggleFavorite = async (e: React.MouseEvent, id: string) => {
+  const toggleFavorite = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     const target = recipes.find(r => r.id === id);
     if (!target) return;
@@ -462,22 +481,13 @@ export default function SavedRecipesPage() {
     setRecipes(updated);
 
     if (selectedRecipe?.id === id) {
-      setSelectedRecipe({ ...selectedRecipe, isFavorite: newFav, is_favorite: newFav });
+      setSelectedRecipe((prev: any) => prev ? { ...prev, isFavorite: newFav, is_favorite: newFav } : null);
     }
 
     saveAllRecipes(updated);
-
-    try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, isFavorite: newFav, is_favorite: newFav })
-      });
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-    } catch (_) {}
   };
 
-  const toggleCooked = async (e: React.MouseEvent, id: string) => {
+  const toggleCooked = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     const target = recipes.find(r => r.id === id);
     if (!target) return;
@@ -487,22 +497,13 @@ export default function SavedRecipesPage() {
     setRecipes(updated);
 
     if (selectedRecipe?.id === id) {
-      setSelectedRecipe({ ...selectedRecipe, isCooked: newCooked, is_cooked: newCooked });
+      setSelectedRecipe((prev: any) => prev ? { ...prev, isCooked: newCooked, is_cooked: newCooked } : null);
     }
 
     saveAllRecipes(updated);
-
-    try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, isCooked: newCooked, is_cooked: newCooked })
-      });
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-    } catch (_) {}
   };
 
-  const handleAssignToBook = async (bookId: string) => {
+  const handleAssignToBook = (bookId: string) => {
     if (!selectedRecipe) return;
     const isRemoving = isRecipeInBook(selectedRecipe, bookId);
     const targetBookId = isRemoving ? null : bookId;
@@ -516,20 +517,7 @@ export default function SavedRecipesPage() {
 
     const updatedRecipes = recipes.map(r => r.id === selectedRecipe.id ? updatedRecipe : r);
     setRecipes(updatedRecipes);
-
-    try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selectedRecipe.id, bookId: targetBookId, book_id: targetBookId })
-      });
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-      window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
-      window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
-      window.dispatchEvent(new Event('storage'));
-    } catch (err) {
-      console.error('Error assigning recipe to book:', err);
-    }
+    saveAllRecipes(updatedRecipes);
   };
 
   const openAddToPlanModal = () => {
@@ -545,7 +533,7 @@ export default function SavedRecipesPage() {
     if (!selectedRecipe || !currentUser) return;
 
     const recName = selectedRecipe.title || selectedRecipe.name || 'Untitled Recipe';
-    const recImage = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80';
+    const recImage = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || DEFAULT_RECIPE_IMAGE;
     const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
 
     const newPlanItem = {
@@ -594,11 +582,6 @@ export default function SavedRecipesPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newPlanItem)
-        }),
-        fetch('/api/meal-plan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newPlanItem)
         })
       ]);
     } catch (_) {}
@@ -616,7 +599,7 @@ export default function SavedRecipesPage() {
     alert(alertMsg);
   };
 
-  const updateSelectedRecipeState = async (key: string, val: any) => {
+  const updateSelectedRecipeState = (key: string, val: any) => {
     if (!selectedRecipe) return;
     const updatedRec = { ...selectedRecipe, [key]: val };
     if (key === 'isFavorite') updatedRec.is_favorite = val;
@@ -626,15 +609,6 @@ export default function SavedRecipesPage() {
     setSelectedRecipe(updatedRec);
     const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
     saveAllRecipes(updatedList);
-
-    try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selectedRecipe.id, [key]: val })
-      });
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-    } catch (_) {}
   };
 
   const handleDeleteRecipe = async (id: string) => {
@@ -643,11 +617,6 @@ export default function SavedRecipesPage() {
     try {
       await Promise.allSettled([
         fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { 
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id })
-        }),
-        fetch(`/api/saved-recipes?id=${encodeURIComponent(id)}`, { 
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id })
@@ -749,6 +718,8 @@ export default function SavedRecipesPage() {
     }
     if (!Array.isArray(rawIngredients)) rawIngredients = [];
 
+    const currentImg = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || '';
+
     setEditForm({
       title: selectedRecipe.title || selectedRecipe.name || '',
       description: selectedRecipe.description || '',
@@ -757,7 +728,7 @@ export default function SavedRecipesPage() {
       servings: selectedRecipe.servings || 4,
       prepTimeMinutes: selectedRecipe.prepTimeMinutes || 30,
       cookTimeMinutes: selectedRecipe.cookTimeMinutes || 10,
-      imageUrl: selectedRecipe.imageUrl || selectedRecipe.image || '',
+      imageUrl: currentImg,
       ingredients: rawIngredients.length > 0
         ? rawIngredients.map((ing: any) => ({
             amount: typeof ing === 'string' ? '' : ing.amount || ing.quantity || '',
@@ -785,10 +756,14 @@ export default function SavedRecipesPage() {
 
     const cleanType = getCleanRecipeType(editForm);
     const targetUserId = currentUser?.id || currentUser?.email || 'usr_admin_1';
+    const resolvedImg = editForm.imageUrl || editForm.image || editForm.image_url || selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || '';
 
     const updatedRec = {
       ...selectedRecipe,
       ...editForm,
+      imageUrl: resolvedImg,
+      image: resolvedImg,
+      image_url: resolvedImg,
       userId: targetUserId,
       user_id: targetUserId,
       createdBy: selectedRecipe.createdBy || currentUser?.email || targetUserId,
@@ -1098,7 +1073,6 @@ export default function SavedRecipesPage() {
     });
   }, [recipes, search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime]);
 
-  // Reset current page when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime, gridMode]);
@@ -1139,7 +1113,7 @@ export default function SavedRecipesPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* 3x3, 4x4, 5x5 Toggle View */}
+          {/* 3x3, 4x4, 5x5 Grid Switcher */}
           <div 
             className="flex items-center p-1 rounded-xl border shadow-xs"
             style={{
@@ -1248,7 +1222,7 @@ export default function SavedRecipesPage() {
               <span>{t('favorites') || 'Favorites'}</span>
             </button>
 
-            {/* Ingredients Popover Filter (NO FORM) */}
+            {/* Ingredients Popover Filter */}
             <div className="relative" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -1327,7 +1301,7 @@ export default function SavedRecipesPage() {
                           <button
                             type="button"
                             onClick={() => handleRemoveIngredientFilter(ing)}
-                            className="text-slate-400 hover:text-red-500"
+                            className="text-slate-400 hover:text-red-500 cursor-pointer"
                           >
                             <X className="h-3 w-3"/>
                           </button>
@@ -1617,6 +1591,7 @@ export default function SavedRecipesPage() {
             const cardBook = books.find(b => b.id === (r.bookId || r.book_id));
             const cardTypeBadge = getCleanRecipeType(r);
             const cfg = GRID_CONFIG[gridMode];
+            const displayImg = r.imageUrl || r.image || r.image_url || DEFAULT_RECIPE_IMAGE;
 
             return (
               <div
@@ -1638,12 +1613,21 @@ export default function SavedRecipesPage() {
                 <div>
                   <div className={`relative ${cfg.imgHeight} w-full overflow-hidden`} style={{ backgroundColor: 'var(--color-inner-dark)' }}>
                     <img
-                      src={r.imageUrl || r.image || '/uploads/recipes/default.jpg'}
+                      src={displayImg}
                       alt={r.title || r.name}
+                      referrerPolicy="no-referrer"
+                      crossOrigin="anonymous"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (!target.dataset.failed) {
+                          target.dataset.failed = 'true';
+                          target.src = DEFAULT_RECIPE_IMAGE;
+                        }
+                      }}
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                     />
                     
-                    {/* Card Action Buttons */}
+                    {/* Card Action Buttons (Direct POST trigger) */}
                     <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
@@ -1711,7 +1695,6 @@ export default function SavedRecipesPage() {
                       {cardTypeBadge}
                     </span>
 
-                    {/* Creator Tag Badge */}
                     <span 
                       className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 border"
                       style={{
@@ -1833,6 +1816,7 @@ export default function SavedRecipesPage() {
             }}
           >
             <button
+              type="button"
               onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
               className="absolute top-4 right-4 z-30 p-2 rounded-xl border transition cursor-pointer shadow-md"
               style={{
@@ -1849,8 +1833,17 @@ export default function SavedRecipesPage() {
                 <div className="space-y-5 pb-6">
                   <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
                     <img
-                      src={selectedRecipe.imageUrl || selectedRecipe.image || '/uploads/recipes/default.jpg'}
+                      src={selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || DEFAULT_RECIPE_IMAGE}
                       alt={selectedRecipe.title || selectedRecipe.name}
+                      referrerPolicy="no-referrer"
+                      crossOrigin="anonymous"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (!target.dataset.failed) {
+                          target.dataset.failed = 'true';
+                          target.src = DEFAULT_RECIPE_IMAGE;
+                        }
+                      }}
                       className="absolute inset-0 w-full h-full object-cover"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
@@ -1898,7 +1891,6 @@ export default function SavedRecipesPage() {
                           <span className="font-bold">{recipeCategoryBadge}</span>
                         </span>
 
-                        {/* Creator Tag in Modal */}
                         <span 
                           className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
                           style={{
@@ -1913,7 +1905,6 @@ export default function SavedRecipesPage() {
                           </span>
                         </span>
                         
-                        {/* Modal Header Favorite Button */}
                         <button
                           type="button"
                           onClick={(e) => toggleFavorite(e, selectedRecipe.id)}
@@ -1931,7 +1922,7 @@ export default function SavedRecipesPage() {
                     </div>
                   </div>
 
-                  {/* 3 CORE ACTION BUTTONS */}
+                  {/* 3 Core Action Buttons */}
                   <div className="px-5 grid grid-cols-3 gap-2.5">
                     <div className="relative">
                       <button
@@ -2054,6 +2045,7 @@ export default function SavedRecipesPage() {
                         }}
                       >
                         <button
+                          type="button"
                           onClick={() => setServingsMultiplier(Math.max(1, servingsMultiplier - 1))}
                           className="px-2.5 py-1 font-bold cursor-pointer transition"
                           style={{ color: 'var(--color-text-secondary)' }}
@@ -2064,6 +2056,7 @@ export default function SavedRecipesPage() {
                           {currentTotalServings}
                         </span>
                         <button
+                          type="button"
                           onClick={() => setServingsMultiplier(servingsMultiplier + 1)}
                           className="px-2.5 py-1 font-bold cursor-pointer transition"
                           style={{ color: 'var(--color-text-secondary)' }}
@@ -2087,6 +2080,7 @@ export default function SavedRecipesPage() {
                         <Timer className="h-3.5 w-3.5"/> {t('timerBtn') || 'Timer'}
                       </button>
                       <button
+                        type="button"
                         onClick={handleOpenEdit}
                         className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
                         style={{
@@ -2098,6 +2092,7 @@ export default function SavedRecipesPage() {
                         <Edit3 className="h-3.5 w-3.5"/> {t('editBtn') || 'Edit'}
                       </button>
                       <button
+                        type="button"
                         onClick={() => {
                           navigator.clipboard.writeText(window.location.href);
                           alert(t('recipeLinkCopiedAlert') || 'Recipe link copied!');
@@ -2234,6 +2229,7 @@ export default function SavedRecipesPage() {
                           <Type className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/>
                         </div>
                         <button
+                          type="button"
                           onClick={() => setFontSizeScale(Math.max(60, fontSizeScale - 10))}
                           className="px-2.5 py-1 font-bold cursor-pointer"
                           style={{ color: 'var(--color-text-secondary)' }}
@@ -2244,6 +2240,7 @@ export default function SavedRecipesPage() {
                           {fontSizeScale}%
                         </span>
                         <button
+                          type="button"
                           onClick={() => setFontSizeScale(Math.min(140, fontSizeScale + 10))}
                           className="px-2.5 py-1 font-bold cursor-pointer"
                           style={{ color: 'var(--color-text-secondary)' }}
@@ -2344,6 +2341,7 @@ export default function SavedRecipesPage() {
                   {/* MODAL FOOTER */}
                   <div className="px-5 flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
                     <button
+                      type="button"
                       onClick={() => handleDeleteRecipe(selectedRecipe.id)}
                       className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
                       style={{
@@ -2399,6 +2397,7 @@ export default function SavedRecipesPage() {
                       <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('editRecipeTitle') || 'Edit Recipe'}
                     </h3>
                     <button
+                      type="button"
                       onClick={() => setIsEditing(false)}
                       className="p-1 rounded-lg transition cursor-pointer"
                       style={{ color: 'var(--color-text-secondary)' }}
@@ -2460,6 +2459,15 @@ export default function SavedRecipesPage() {
                               <img
                                 src={editForm.imageUrl}
                                 alt="Recipe Preview"
+                                referrerPolicy="no-referrer"
+                                crossOrigin="anonymous"
+                                onError={(e) => {
+                                  const target = e.currentTarget;
+                                  if (!target.dataset.failed) {
+                                    target.dataset.failed = 'true';
+                                    target.src = DEFAULT_RECIPE_IMAGE;
+                                  }
+                                }}
                                 className="absolute inset-0 w-full h-full object-cover"
                               />
                               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
@@ -2467,7 +2475,8 @@ export default function SavedRecipesPage() {
                                   className="border text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5"
                                   style={{
                                     backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-border)'
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text)'
                                   }}
                                 >
                                   <ImagePlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('changePhoto') || 'Change Photo'}
@@ -3169,7 +3178,7 @@ export default function SavedRecipesPage() {
         </div>
       )}
 
-      {/* ADD TO PLAN MODAL (NO FORM - STANDARD ACCESSIBLE DIV) */}
+      {/* ADD TO PLAN MODAL */}
       {showAddToPlanModal && selectedRecipe && (
         <div 
           onClick={() => setShowAddToPlanModal(false)}

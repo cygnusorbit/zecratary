@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.4",
+  "version": "8.0.5",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -12,16 +12,15 @@
   ],
   "scripts": {
     "dev": "turbo run dev",
-    "build": "turbo run build",
-    "start": "turbo run start --filter=web",
+    "build": "npx turbo run build",
+    "start": "node server.js",
     "db:generate": "turbo run db:generate",
     "db:push": "turbo run db:push",
     "worker:dev": "turbo run worker:dev",
-    "postbuild": "node -e \"const fs=require('fs'),path=require('path');const src=path.join('apps','web','.next');if(fs.existsSync(src)){['.next','dist','build'].forEach(d=>{if(!fs.existsSync(d)){try{fs.symlinkSync(src,d,'junction');console.log('Linked '+src+' -> '+d);}catch(e){fs.cpSync(src,d,{recursive:true});console.log('Copied '+src+' -> '+d);}}});console.log('\u2713 Hostinger output directories bridged successfully.');}else{console.warn('\u26a0\ufe0f Source output apps/web/.next not found.');}\"",
+    "postbuild": "node -e \"const fs=require('fs'),path=require('path');const src=path.join('apps','web','.next');if(fs.existsSync(src)){  ['.next','dist','build'].forEach(d=>{    if(!fs.existsSync(d)){try{fs.symlinkSync(src,d,'junction');}catch(e){fs.cpSync(src,d,{recursive:true});}}  });  const saStatic=path.join(src,'standalone','apps','web','.next','static');  const srcStatic=path.join(src,'static');  if(fs.existsSync(srcStatic)&&!fs.existsSync(saStatic)){    try{fs.mkdirSync(path.dirname(saStatic),{recursive:true});fs.cpSync(srcStatic,saStatic,{recursive:true});}catch(e){}  }  const saPublic=path.join(src,'standalone','apps','web','public');  const srcPublic=path.join('apps','web','public');  if(fs.existsSync(srcPublic)&&!fs.existsSync(saPublic)){    try{fs.mkdirSync(path.dirname(saPublic),{recursive:true});fs.cpSync(srcPublic,saPublic,{recursive:true});}catch(e){}  }  console.log('\u2713 Hostinger deployment artifacts bridged successfully.');}\"",
     "start:web": "npm run start --workspace=web"
   },
   "devDependencies": {
-    "turbo": "^2.4.2",
     "typescript": "^5.7.3",
     "@types/pg": "^8.11.0"
   },
@@ -29,7 +28,8 @@
   "dependencies": {
     "next": "^16.3.5",
     "pg": "^8.23.0",
-    "stripe": "^22.6.2"
+    "stripe": "^22.6.2",
+    "turbo": "^2.4.2"
   }
 }
 
@@ -113,7 +113,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.4",
+  "version": "8.0.5",
   "private": true,
   "scripts": {
     "dev": "next dev",
