@@ -175,7 +175,8 @@
       {
         "name": "next"
       }
-    ]
+    ],
+    "downlevelIteration": true
   },
   "include": [
     "src/**/*.ts",
@@ -186,7 +187,6 @@
     "node_modules"
   ]
 }
-
 ```
 
 ## File: `apps/web/src/middleware.ts`
@@ -324,131 +324,14 @@ declare module 'pg' {
 
 ```
 
-## File: `apps/web/src/contexts/LanguageContext.ts`
-```typescript
-export * from './LanguageContext';
-
-```
-
 ## File: `apps/web/src/contexts/LanguageContext.tsx`
 ```typescript
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
-
-export interface LanguageContextType {
-  language: string;
-  setLanguage: (lang: string) => void;
-  t: (key: string, fallback?: string) => string;
-
-  currentLanguage?: string;
-  locale?: string;
-  language?: string;
-  [key: string]: any;
-}
-
-const defaultTranslations: Record<string, Record<string, string>> = {
-  en: {
-    billing: 'Billing',
-    billingAndSubscriptionTitle: 'Billing & Subscriptions',
-    billingPageSubtitle: 'Manage your payment history, payment methods, and subscription tiers.',
-    refreshBtn: 'Refresh',
-    tabBillingHistory: 'Billing History',
-    tabPaymentMethod: 'Payment Method',
-    tabSubscriptions: 'Subscriptions',
-    searchBillingPlaceholder: 'Search by plan, gateway, or transaction ID...',
-    filterAllStatus: 'All Statuses',
-    filterSucceeded: 'Succeeded',
-    filterCanceled: 'Canceled',
-    filterRefunded: 'Refunded',
-    filterFailed: 'Failed',
-    colDate: 'Date',
-    colPlan: 'Plan',
-    colAmount: 'Amount',
-    colGateway: 'Gateway',
-    colStatus: 'Status',
-    colExpiry: 'Billing Expiry',
-    selectPaymentMethodTitle: 'Choose Preferred Payment Method',
-    paymentMethodAdminNotice: 'Available options are dynamically provisioned according to system administrative settings.',
-    savePaymentMethodBtn: 'Save Payment Method',
-    activePlanBadge: 'Current Active Plan',
-    autoRenewEnabledBadge: 'Auto-Renew ON',
-    renewalCancelledBadge: 'Renewal Canceled (Active Until Expiry)',
-    cancelPlanRenewalBtn: 'Cancel Renewal',
-    upgradeOrDowngradeBtn: 'Change Plan Tier',
-    availablePlansTableTitle: 'Subscription Packages Catalog',
-    availablePlansTableSubtitle: 'Compare tiers and smoothly upgrade or downgrade your active subscription.',
-    searchPlansPlaceholder: 'Search packages...',
-    colPackage: 'Package',
-    colDescription: 'Features / Overview',
-    colMonthlyPricing: 'Monthly',
-    colAnnualPricing: 'Annual',
-    colActions: 'Actions',
-    monthlyActive: 'Monthly Active',
-    annualActive: 'Annual Active',
-    chooseMonthlyBtn: 'Monthly',
-    chooseAnnualBtn: 'Annual',
-    activeLabel: 'Active',
-    freePrice: 'Free'
-  }
-};
-
-const LanguageContext = createContext<LanguageContextType>({
-  language: 'en',
-  setLanguage: () => {},
-  t: (key: string, fallback?: string) => fallback || key,
-});
-
-export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguage] = useState<string>('en');
-
-  useEffect(() => {
-    try {
-      const stored = typeof window !== 'undefined' ? localStorage.getItem('zecratary_lang') : null;
-      if (stored) setLanguage(stored);
-    } catch (_) {}
-  }, []);
-
-  const handleSetLanguage = (lang: string) => {
-    setLanguage(lang);
-    try {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('zecratary_lang', lang);
-      }
-    } catch (_) {}
-  };
-
-  const t = (key: string, fallback?: string): string => {
-    const langDict = defaultTranslations[language] || defaultTranslations['en'] || {};
-    return langDict[key] || fallback || key;
-  };
-
-  return (
-    <LanguageContext.Provider value={{ language, setLanguage: handleSetLanguage, t }}>
-      {children}
-    </LanguageContext.Provider>
-  );
-}
-
-export function useTranslation(): LanguageContextType {
-  const ctx = useContext(LanguageContext);
-  if (!ctx) {
-    return {
-      language: 'en',
-      setLanguage: () => {},
-      t: (key: string, fallback?: string) => fallback || key,
-    };
-  }
-  return ctx;
-}
-
-export default LanguageContext;
-
-```
-
-## File: `apps/web/src/context/LanguageContext.ts`
-```typescript
-export * from './LanguageContext';
+// Canonical bridge re-exporting localization context from @/components/LanguageProvider
+export { useTranslation, LanguageProvider } from '@/components/LanguageProvider';
+export type { LanguageContextType } from '@/components/LanguageProvider';
+export { useTranslation as default } from '@/components/LanguageProvider';
 
 ```
 
@@ -456,115 +339,10 @@ export * from './LanguageContext';
 ```typescript
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
-
-export interface LanguageContextType {
-  language: string;
-  setLanguage: (lang: string) => void;
-  t: (key: string, fallback?: string) => string;
-
-  currentLanguage?: string;
-  locale?: string;
-  language?: string;
-  [key: string]: any;
-}
-
-const defaultTranslations: Record<string, Record<string, string>> = {
-  en: {
-    billing: 'Billing',
-    billingAndSubscriptionTitle: 'Billing & Subscriptions',
-    billingPageSubtitle: 'Manage your payment history, payment methods, and subscription tiers.',
-    refreshBtn: 'Refresh',
-    tabBillingHistory: 'Billing History',
-    tabPaymentMethod: 'Payment Method',
-    tabSubscriptions: 'Subscriptions',
-    searchBillingPlaceholder: 'Search by plan, gateway, or transaction ID...',
-    filterAllStatus: 'All Statuses',
-    filterSucceeded: 'Succeeded',
-    filterCanceled: 'Canceled',
-    filterRefunded: 'Refunded',
-    filterFailed: 'Failed',
-    colDate: 'Date',
-    colPlan: 'Plan',
-    colAmount: 'Amount',
-    colGateway: 'Gateway',
-    colStatus: 'Status',
-    colExpiry: 'Billing Expiry',
-    selectPaymentMethodTitle: 'Choose Preferred Payment Method',
-    paymentMethodAdminNotice: 'Available options are dynamically provisioned according to system administrative settings.',
-    savePaymentMethodBtn: 'Save Payment Method',
-    activePlanBadge: 'Current Active Plan',
-    autoRenewEnabledBadge: 'Auto-Renew ON',
-    renewalCancelledBadge: 'Renewal Canceled (Active Until Expiry)',
-    cancelPlanRenewalBtn: 'Cancel Renewal',
-    upgradeOrDowngradeBtn: 'Change Plan Tier',
-    availablePlansTableTitle: 'Subscription Packages Catalog',
-    availablePlansTableSubtitle: 'Compare tiers and smoothly upgrade or downgrade your active subscription.',
-    searchPlansPlaceholder: 'Search packages...',
-    colPackage: 'Package',
-    colDescription: 'Features / Overview',
-    colMonthlyPricing: 'Monthly',
-    colAnnualPricing: 'Annual',
-    colActions: 'Actions',
-    monthlyActive: 'Monthly Active',
-    annualActive: 'Annual Active',
-    chooseMonthlyBtn: 'Monthly',
-    chooseAnnualBtn: 'Annual',
-    activeLabel: 'Active',
-    freePrice: 'Free'
-  }
-};
-
-const LanguageContext = createContext<LanguageContextType>({
-  language: 'en',
-  setLanguage: () => {},
-  t: (key: string, fallback?: string) => fallback || key,
-});
-
-export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguage] = useState<string>('en');
-
-  useEffect(() => {
-    try {
-      const stored = typeof window !== 'undefined' ? localStorage.getItem('zecratary_lang') : null;
-      if (stored) setLanguage(stored);
-    } catch (_) {}
-  }, []);
-
-  const handleSetLanguage = (lang: string) => {
-    setLanguage(lang);
-    try {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('zecratary_lang', lang);
-      }
-    } catch (_) {}
-  };
-
-  const t = (key: string, fallback?: string): string => {
-    const langDict = defaultTranslations[language] || defaultTranslations['en'] || {};
-    return langDict[key] || fallback || key;
-  };
-
-  return (
-    <LanguageContext.Provider value={{ language, setLanguage: handleSetLanguage, t }}>
-      {children}
-    </LanguageContext.Provider>
-  );
-}
-
-export function useTranslation(): LanguageContextType {
-  const ctx = useContext(LanguageContext);
-  if (!ctx) {
-    return {
-      language: 'en',
-      setLanguage: () => {},
-      t: (key: string, fallback?: string) => fallback || key,
-    };
-  }
-  return ctx;
-}
-
-export default LanguageContext;
+// Canonical bridge re-exporting localization context from @/components/LanguageProvider
+export { useTranslation, LanguageProvider } from '@/components/LanguageProvider';
+export type { LanguageContextType } from '@/components/LanguageProvider';
+export { useTranslation as default } from '@/components/LanguageProvider';
 
 ```
 
@@ -11719,7 +11497,7 @@ export default function SavedRecipesPage() {
       const activeUser = getCurrentUser();
       if (activeUser && (activeUser.id || activeUser.email)) {
         updatedUserList.forEach((r: any) => {
-          persistSavedRecipe(activeUser.id || activeUser.email, r, 'save');
+          (persistSavedRecipe as any)(activeUser.id || activeUser.email, r, { action: 'save', createdBy: activeUser.email, creatorName: activeUser.name });
         });
       }
 
@@ -32582,7 +32360,7 @@ export default function SubscriptionsPage() {
               });
             }
 
-            const activeTx = normalizedTxList.find((tx) => 
+            const activeTx = normalizedTxList.find((tx: any) => 
               ['active', 'succeeded', 'successful', 'paid', 'canceled'].includes(tx.status) &&
               (!tx.expiryDate || new Date(tx.expiryDate).getTime() > Date.now())
             );
@@ -32713,7 +32491,7 @@ export default function SubscriptionsPage() {
       if (rawAdminPlans.length > 0) {
         const parsed = rawAdminPlans.map(normalizePlan);
         const uniqueMap = new Map<string, PlanCatalog>();
-        parsed.forEach((p) => {
+        parsed.forEach((p: any) => {
           const baseKey = sanitizeSlug(p.slug || p.id);
           if (!uniqueMap.has(baseKey)) {
             uniqueMap.set(baseKey, p);
@@ -32721,7 +32499,7 @@ export default function SubscriptionsPage() {
         });
 
         let finalized = Array.from(uniqueMap.values());
-        const hasFreeTier = finalized.some((p) => p.isFree || sanitizeSlug(p.slug) === 'taster');
+        const hasFreeTier = finalized.some((p: any) => p.isFree || sanitizeSlug(p.slug) === 'taster');
         if (!hasFreeTier) {
           finalized.unshift(DEFAULT_FALLBACK_PLANS[0]);
         }
@@ -32776,7 +32554,7 @@ export default function SubscriptionsPage() {
   }, [feedback]);
 
   const activeTransaction = useMemo(() => {
-    return transactions.find((tx) => {
+    return transactions.find((tx: any) => {
       const isPaidOrActive = ['active', 'succeeded', 'successful', 'paid', 'canceled'].includes(tx.status);
       if (!isPaidOrActive) return false;
       if (!tx.expiryDate) return true;
@@ -32830,10 +32608,10 @@ export default function SubscriptionsPage() {
   }, [activeUserPlan, activeUserInterval, isFreeUser]);
 
   const annualDiscountPercent = useMemo(() => {
-    const paidPlans = plans.filter((p) => !p.isFree && p.monthlyPrice > 0 && p.annualPrice > 0);
+    const paidPlans = plans.filter((p: any) => !p.isFree && p.monthlyPrice > 0 && p.annualPrice > 0);
     if (paidPlans.length === 0) return 20;
-    const totalMonthly = paidPlans.reduce((sum, p) => sum + p.monthlyPrice * 12, 0);
-    const totalAnnual = paidPlans.reduce((sum, p) => sum + p.annualPrice, 0);
+    const totalMonthly = paidPlans.reduce((sum: number, p: any) => sum + p.monthlyPrice * 12, 0);
+    const totalAnnual = paidPlans.reduce((sum: number, p: any) => sum + p.annualPrice, 0);
     if (totalMonthly <= 0) return 20;
     const discount = Math.round(((totalMonthly - totalAnnual) / totalMonthly) * 100);
     return discount > 0 ? discount : 20;
@@ -33025,7 +32803,7 @@ export default function SubscriptionsPage() {
   const effectiveExpiry = activeTransaction?.expiryDate || user?.expiry_date;
 
   const displayActivePlanName = useMemo(() => {
-    const matched = plans.find((p) => sanitizeSlug(p.slug || p.id) === sanitizeSlug(activeUserPlan));
+    const matched = plans.find((p: any) => sanitizeSlug(p.slug || p.id) === sanitizeSlug(activeUserPlan));
     if (matched) {
       if (isFreeUser) return `${matched.name} (${t('freeLabel', 'Free')})`;
       return `${matched.name} (${activeUserInterval === 'YEAR' ? t('annualLabel', 'Annual') : t('monthlyLabel', 'Monthly')})`;
@@ -33449,7 +33227,7 @@ export default function SubscriptionsPage() {
                         {t('includedFeatures', 'Included Features:')}
                       </span>
                       <ul className="space-y-2 text-xs">
-                        {parsedFeatures.map((feat, fIdx) => (
+                        {parsedFeatures.map((feat: any, fIdx: number) => (
                           <li key={fIdx} className="flex items-start gap-2">
                             <Check className="w-3.5 h-3.5 shrink-0 mt-0.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
                             <span style={{ color: 'var(--color-text, #f8fafc)' }}>{feat}</span>
@@ -33595,7 +33373,7 @@ export default function SubscriptionsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                  {transactions.map((tx) => {
+                  {transactions.map((tx: any) => {
                     const isSucceeded = ['active', 'succeeded', 'successful', 'paid'].includes(tx.status);
                     const isCanceled = tx.status === 'canceled';
 
@@ -36874,6 +36652,8 @@ interface TokenSettingIdentity {
 }
 
 interface ExtendedUser extends User {
+  password?: string;
+
   linkedProviders?: SocialProvider[];
   linked_providers?: SocialProvider[];
   provider?: string;
@@ -36888,6 +36668,8 @@ interface ExtendedUser extends User {
   wallet_balance?: number;
   planExpiryDate?: string;
   expiryDate?: string;
+
+  [key: string]: any;
 }
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
@@ -37229,7 +37011,7 @@ export default function ProfilePage() {
       ...user,
       name: name.trim(),
       email: email.trim().toLowerCase(),
-      password: password ? password : user.password,
+      password: password ? password : (user as any)?.password,
     };
 
     try {
@@ -38416,7 +38198,7 @@ import {
   RotateCw
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
-import { useTranslation } from '@/context/LanguageContext';
+import { useTranslation } from '@/components/LanguageProvider';
 
 interface WalletSettings {
   is_enabled: boolean;
@@ -56610,15 +56392,14 @@ import {
   setStoredLocale as saveStoredLocale 
 } from '@/lib/i18n';
 
-interface LanguageContextType {
+export interface LanguageContextType {
   locale: string;
+  currentLanguage?: string;
+  language?: string;
   setLocale: (locale: string) => void;
+  setLanguage?: (lang: string) => void;
   t: (key: string, fallback?: string) => string;
   version: number;
-
-  currentLanguage?: string;
-  locale?: string;
-  language?: string;
   [key: string]: any;
 }
 
@@ -56677,7 +56458,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   }, [dict]);
 
   return (
-    <LanguageContext.Provider value={{ locale, setLocale, t, version }}>
+    <LanguageContext.Provider value={{ locale, currentLanguage: locale, language: locale, setLocale, setLanguage: setLocale, t, version }}>
       {children}
     </LanguageContext.Provider>
   );
@@ -58949,7 +58730,7 @@ export default function GlobalThemeSync() {
     const handleFontUpdate = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
       if (detail) {
-        applyGlobalFont(detail.fontFamily, detail.fontSize, detail.fontLetterSpacing);
+        (applyGlobalFont as any)(detail.fontFamily, detail.fontSize, detail.fontLetterSpacing);
       } else {
         applyGlobalFont();
       }
@@ -58976,8 +58757,8 @@ export default function GlobalThemeSync() {
 ## File: `apps/web/src/hooks/useTranslation.ts`
 ```typescript
 // Compatibility shim: re-export from LanguageProvider
-export { useTranslation } from '@/components/LanguageProvider';
-export default useTranslation;
+export { useTranslation as default, useTranslation } from '@/components/LanguageProvider';
+export type { LanguageContextType } from '@/components/LanguageProvider';
 
 ```
 
@@ -59203,30 +58984,50 @@ export function getEffectiveThemeMode(): 'light' | 'dark' {
 /**
  * Applies typography font family dynamically across document and custom properties
  */
-export function applyGlobalFont(fontName?: string): void {
+export function applyGlobalFont(fontFamily?: string, fontSize?: string, letterSpacing?: string): void {
   if (typeof document === 'undefined') return;
-  const targetFont = fontName || memoryGlobalFont || (typeof window !== 'undefined' ? localStorage.getItem('zecratary_global_font') : null) || 'inherit';
-  
-  if (!targetFont || targetFont === 'inherit') return;
-  memoryGlobalFont = targetFont;
+  const targetFont = fontFamily || memoryGlobalFont || (typeof window !== 'undefined' ? localStorage.getItem('zecratary_global_font') : null) || 'inherit';
 
-  try {
-    const root = document.documentElement;
-    root.style.setProperty('--font-primary', targetFont);
-    root.style.setProperty('--font-family', targetFont);
-    root.style.setProperty('--font-body', targetFont);
-    root.style.fontFamily = targetFont;
+  if (targetFont && targetFont !== 'inherit') {
+    memoryGlobalFont = targetFont;
+    try {
+      const root = document.documentElement;
+      root.style.setProperty('--font-primary', targetFont);
+      root.style.setProperty('--font-family', targetFont);
+      root.style.setProperty('--font-body', targetFont);
+      root.style.fontFamily = targetFont;
 
-    if (document.body) {
-      document.body.style.fontFamily = targetFont;
-    }
+      if (document.body) {
+        document.body.style.fontFamily = targetFont;
+      }
 
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('zecratary_global_font', targetFont);
-      } catch (_) {}
-    }
-  } catch (_) {}
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('zecratary_global_font', targetFont);
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  if (fontSize) {
+    try {
+      document.documentElement.style.setProperty('--font-size-global', fontSize);
+      document.documentElement.style.setProperty('--font-size', fontSize);
+      if (document.body) {
+        document.body.style.fontSize = fontSize;
+      }
+    } catch (_) {}
+  }
+
+  if (letterSpacing) {
+    try {
+      document.documentElement.style.setProperty('--letter-spacing-global', letterSpacing);
+      document.documentElement.style.setProperty('--letter-spacing', letterSpacing);
+      if (document.body) {
+        document.body.style.letterSpacing = letterSpacing;
+      }
+    } catch (_) {}
+  }
 }
 
 export function getGlobalFont(): string | null {
@@ -59800,14 +59601,14 @@ export function decodeGoogleCredential(credential: string): { email: string; nam
 export function executeSocialAuth(profile: SocialProfile): User {
   initAuthStorage();
   const cleanEmail = profile.email.trim().toLowerCase();
-  const rawUsers = localStorage.getItem('zecratary_users');
+  const rawUsers = typeof window !== 'undefined' ? localStorage.getItem('zecratary_users') : null;
   const users: User[] = rawUsers ? JSON.parse(rawUsers) : [];
 
-  let matchedUser = users.find((u) => u.email.toLowerCase() === cleanEmail);
+  let matchedUser: User | undefined = users.find((u) => u.email?.toLowerCase() === cleanEmail);
 
   if (!matchedUser) {
     const systemDefaultPlan = getDefaultSubscriptionPlan();
-    matchedUser = {
+    const newUser: User = {
       id: `usr_${profile.provider}_${Date.now().toString(36)}`,
       name: profile.name.trim() || `${profile.provider.toUpperCase()} User`,
       email: cleanEmail,
@@ -59816,26 +59617,34 @@ export function executeSocialAuth(profile: SocialProfile): User {
       subscriptionTier: systemDefaultPlan,
       createdAt: new Date().toISOString(),
       avatar: profile.avatar,
-    } as any;
-    users.unshift(matchedUser);
-    localStorage.setItem('zecratary_users', JSON.stringify(users));
+    };
+    users.unshift(newUser);
+    matchedUser = newUser;
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('zecratary_users', JSON.stringify(users));
+      } catch (_) {}
+    }
   }
 
-  setCurrentUser(matchedUser);
+  const activeUser: User = matchedUser as User;
+  setCurrentUser(activeUser);
 
   try {
     fetch('/api/admin/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(matchedUser),
+      body: JSON.stringify(activeUser),
     }).catch(() => {});
   } catch (_) {}
 
-  window.dispatchEvent(new Event('zecratary_users_updated'));
-  window.dispatchEvent(new Event('zecratary_auth_changed'));
-  window.dispatchEvent(new Event('storage'));
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('zecratary_users_updated'));
+    window.dispatchEvent(new Event('zecratary_auth_changed'));
+    window.dispatchEvent(new Event('storage'));
+  }
 
-  return matchedUser;
+  return activeUser;
 }
 
 ```
@@ -59884,7 +59693,7 @@ export interface AffectedUserBalance {
   adjustedTokens: number;
 }
 
-const DEFAULT_SETTINGS: TokenSettings = {
+export const DEFAULT_SETTINGS: TokenSettings = {
   id: 'primary_token_settings',
   tokenName: 'Foodie Token',
   tokenSymbol: '🪙',
@@ -59952,9 +59761,10 @@ export async function initTokenTables(): Promise<void> {
 export async function getTokenSettings(): Promise<TokenSettings> {
   await initTokenTables();
   try {
-    const rows = await query('SELECT * FROM token_settings ORDER BY updated_at DESC LIMIT 1');
-    if (rows && rows.length > 0) {
-      const r = rows[0];
+    const rows: any = await query('SELECT * FROM token_settings ORDER BY updated_at DESC LIMIT 1');
+    const list: any[] = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
+    if (list && list.length > 0) {
+      const r = list[0];
       return {
         id: r.id || 'primary_token_settings',
         tokenName: r.token_name || DEFAULT_SETTINGS.tokenName,
@@ -60026,14 +59836,15 @@ export async function saveTokenSettings(settings: Partial<TokenSettings>): Promi
 export async function getUserTokenBalance(userId?: string | null, userEmail?: string | null): Promise<number> {
   await initTokenTables();
   try {
-    let rows: any[] = [];
+    let rows: any = [];
     if (userId) {
       rows = await query('SELECT token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
     } else if (userEmail) {
       rows = await query('SELECT token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
     }
-    if (rows.length > 0 && rows[0].token_balance !== null) {
-      return Number(rows[0].token_balance);
+    const list: any[] = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
+    if (list.length > 0 && list[0].token_balance !== null) {
+      return Number(list[0].token_balance);
     }
   } catch (_) {}
   return 0;
@@ -60062,12 +59873,14 @@ export async function deductUserTokens({
 
   let userRow: any = null;
   if (userId) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
-    if (rows.length > 0) userRow = rows[0];
+    const rows: any = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
+    const list: any[] = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
+    if (list.length > 0) userRow = list[0];
   }
   if (!userRow && userEmail) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
-    if (rows.length > 0) userRow = rows[0];
+    const rows: any = await query('SELECT id, email, token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
+    const list: any[] = Array.isArray(rows) ? rows : ((rows as any)?.rows || []);
+    if (list.length > 0) userRow = list[0];
   }
 
   if (!userRow) {
@@ -60085,18 +59898,19 @@ export async function deductUserTokens({
     };
   }
 
-  const updateRes = await query(`
+  const updateRes: any = await query(`
     UPDATE users 
     SET token_balance = token_balance - $1, updated_at = NOW() 
     WHERE id = $2 AND token_balance >= $1 
     RETURNING token_balance
   `, [cost, userRow.id]);
 
-  if (updateRes.length === 0) {
+  const updatedList: any[] = Array.isArray(updateRes) ? updateRes : ((updateRes as any)?.rows || []);
+  if (updatedList.length === 0) {
     return { success: false, error: 'Token deduction failed.', currentBalance, required: cost };
   }
 
-  const newBalance = Number(updateRes[0].token_balance);
+  const newBalance = Number(updatedList[0].token_balance);
   const txId = 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
 
   try {
@@ -60116,34 +59930,52 @@ export async function deductUserTokens({
   };
 }
 
-export async function grantMonthlyPlanTokenReward(userEmail: string, tokens?: number, options?: { planSlug?: string; planName?: string; [key: string]: any } | any): Promise<{
+export async function grantMonthlyPlanTokenReward(
+  userEmailOrId?: string | null,
+  tokens?: number | { planSlug?: string; planName?: string; customTokens?: number; force?: boolean; [key: string]: any } | any,
+  options?: { planSlug?: string; planName?: string; customTokens?: number; force?: boolean; [key: string]: any } | any
+): Promise<{
   success: boolean;
   tokensGranted: number;
   newBalance: number;
   reason?: string;
   cycle?: string;
+  plan?: string;
+  [key: string]: any;
 }> {
   await initTokenTables();
+
+  let opt: any = options;
+  let numTokens: number | undefined = undefined;
+
+  if (typeof tokens === 'number') {
+    numTokens = tokens;
+  } else if (typeof tokens === 'object' && tokens !== null && !options) {
+    opt = tokens;
+  }
+
   const cleanIdent = String(userEmailOrId || '').trim();
   if (!cleanIdent) return { success: false, tokensGranted: 0, newBalance: 0, reason: 'User identifier required' };
 
   try {
-    const userRows = await query(`
+    const userRows: any = await query(`
       SELECT id, email, token_balance, subscription_plan, plan_slug, plan_name, last_token_grant_cycle 
       FROM users 
       WHERE LOWER(email) = LOWER($1) OR id = $1 
       LIMIT 1
     `, [cleanIdent]);
 
-    if (!userRows || userRows.length === 0) {
+    const uList: any[] = Array.isArray(userRows) ? userRows : ((userRows as any)?.rows || []);
+
+    if (!uList || uList.length === 0) {
       return { success: false, tokensGranted: 0, newBalance: 0, reason: 'User not found' };
     }
 
-    const user = userRows[0];
+    const user = uList[0];
     const now = new Date();
     const currentCycle = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-    if (user.last_token_grant_cycle === currentCycle && !options?.force) {
+    if (user.last_token_grant_cycle === currentCycle && !opt?.force) {
       return {
         success: false,
         tokensGranted: 0,
@@ -60152,8 +59984,17 @@ export async function grantMonthlyPlanTokenReward(userEmail: string, tokens?: nu
       };
     }
 
-    const tokensToGrant = options?.customTokens && options.customTokens > 0 ? options.customTokens : 500;
-    const updateRes = await query(`
+    const tokensToGrant = (typeof numTokens === 'number' && numTokens > 0)
+      ? numTokens
+      : (opt?.customTokens && Number(opt.customTokens) > 0)
+        ? Number(opt.customTokens)
+        : (opt?.tokens && Number(opt.tokens) > 0)
+          ? Number(opt.tokens)
+          : (opt?.tokenLimit && Number(opt.tokenLimit) > 0)
+            ? Number(opt.tokenLimit)
+            : 500;
+
+    const updateRes: any = await query(`
       UPDATE users 
       SET token_balance = COALESCE(token_balance, 0) + $1,
           last_token_grant_cycle = $2,
@@ -60163,19 +60004,22 @@ export async function grantMonthlyPlanTokenReward(userEmail: string, tokens?: nu
       RETURNING token_balance
     `, [tokensToGrant, currentCycle, user.id]);
 
-    const newBalance = Number(updateRes[0]?.token_balance || 0);
+    const updated: any[] = Array.isArray(updateRes) ? updateRes : ((updateRes as any)?.rows || []);
+    const newBalance = Number(updated[0]?.token_balance ?? (Number(user.token_balance || 0) + tokensToGrant));
     const txId = 'tx_grant_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+    const planDesc = opt?.planName || opt?.planSlug || user.plan_name || user.plan_slug || 'Monthly Plan';
 
     await query(`
       INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
       VALUES ($1, $2, $3, $4, $5, 'plan_monthly_grant', $6, NOW())
-    `, [txId, user.id, user.email, tokensToGrant, newBalance, `Monthly plan grant (+${tokensToGrant})`]);
+    `, [txId, user.id, user.email, tokensToGrant, newBalance, `Monthly plan grant: ${planDesc} (+${tokensToGrant})`]);
 
     return {
       success: true,
       tokensGranted: tokensToGrant,
       newBalance,
-      cycle: currentCycle
+      cycle: currentCycle,
+      plan: opt?.planSlug || opt?.planName
     };
   } catch (err: any) {
     return { success: false, tokensGranted: 0, newBalance: 0, reason: err.message };
@@ -60191,7 +60035,7 @@ export async function syncUserMonthlyTokens(userId?: string | null, email?: stri
 export async function grantPlanTokensOnPurchase(
   userEmailOrId: string,
   planSlug: string,
-  options?: { customTokens?: number; orderId?: string }
+  options?: { customTokens?: number; orderId?: string; [key: string]: any }
 ) {
   return grantMonthlyPlanTokenReward(userEmailOrId, options);
 }
@@ -60214,26 +60058,38 @@ export async function purchaseTokenPackage(
     tokens?: number;
     amount?: number;
     amountPaid?: number;
+    price?: number;
     currency?: string;
     gateway?: string;
+    paymentMethod?: string;
+    payment_method?: string;
+    packageName?: string;
+    package_name?: string;
     orderId?: string;
     description?: string;
-  },
-  packageIdOrTokens?: string | number,
+    [key: string]: any;
+  } | any,
+  packageIdOrTokens?: string | number | any,
   options?: {
     orderId?: string;
     amountPaid?: number;
     currency?: string;
     gateway?: string;
     description?: string;
-  }
+    [key: string]: any;
+  } | any
 ): Promise<{
   success: boolean;
   tokensAdded: number;
+  tokensToAdd?: number;
   newBalance: number;
+  wallet_balance?: number;
+  newWalletBalance?: number;
+  paymentMethod?: string;
   transactionId?: string;
   error?: string;
   user?: any;
+  [key: string]: any;
 }> {
   await initTokenTables();
 
@@ -60243,14 +60099,18 @@ export async function purchaseTokenPackage(
   let orderId = '';
   let gateway = 'stripe';
   let desc = '';
+  let paymentMethod = 'wallet';
+  let customPrice = 0;
 
   if (typeof userEmailOrIdOrPayload === 'object' && userEmailOrIdOrPayload !== null) {
     userIdentifier = String(userEmailOrIdOrPayload.userId || userEmailOrIdOrPayload.userEmail || userEmailOrIdOrPayload.email || '').trim();
     pkgId = String(userEmailOrIdOrPayload.packageId || userEmailOrIdOrPayload.package_id || '').trim();
     explicitTokens = Number(userEmailOrIdOrPayload.tokens || 0);
     orderId = String(userEmailOrIdOrPayload.orderId || '');
-    gateway = String(userEmailOrIdOrPayload.gateway || 'stripe');
+    gateway = String(userEmailOrIdOrPayload.gateway || userEmailOrIdOrPayload.paymentMethod || 'wallet');
+    paymentMethod = String(userEmailOrIdOrPayload.paymentMethod || userEmailOrIdOrPayload.payment_method || 'wallet');
     desc = String(userEmailOrIdOrPayload.description || '');
+    customPrice = Number(userEmailOrIdOrPayload.price || userEmailOrIdOrPayload.amount || 0);
   } else {
     userIdentifier = String(userEmailOrIdOrPayload || '').trim();
     if (typeof packageIdOrTokens === 'number') {
@@ -60264,6 +60124,7 @@ export async function purchaseTokenPackage(
       orderId = String(options.orderId || '');
       gateway = String(options.gateway || 'stripe');
       desc = String(options.description || '');
+      customPrice = Number(options.amountPaid || 0);
     }
   }
 
@@ -60272,69 +60133,111 @@ export async function purchaseTokenPackage(
   }
 
   // 1. Fetch user from PostgreSQL
-  const userRows = await query(`
-    SELECT id, email, token_balance 
+  const userRows: any = await query(`
+    SELECT id, email, token_balance, wallet_balance 
     FROM users 
     WHERE id = $1 OR LOWER(TRIM(email)) = LOWER(TRIM($2)) 
     LIMIT 1
   `, [userIdentifier, userIdentifier]);
 
-  if (!userRows || userRows.length === 0) {
+  const uList: any[] = Array.isArray(userRows) ? userRows : ((userRows as any)?.rows || []);
+  if (!uList || uList.length === 0) {
     return { success: false, tokensAdded: 0, newBalance: 0, error: 'User not found in database.' };
   }
 
-  const user = userRows[0];
+  const user = uList[0];
   const settings = await getTokenSettings();
 
-  // 2. Resolve token amount and package name
+  // 2. Resolve token amount, package price, and package name
   let tokensToAdd = explicitTokens;
   let packageName = 'Token Package';
+  let packagePrice = customPrice;
 
   if (pkgId && Array.isArray(settings.packages)) {
     const matched = settings.packages.find((p: any) => p.id === pkgId || p.name?.toLowerCase() === pkgId.toLowerCase());
     if (matched) {
       tokensToAdd = Number(matched.tokens || tokensToAdd);
       packageName = matched.name || packageName;
+      if (packagePrice <= 0) packagePrice = Number(matched.price || 0);
     }
   }
 
   if (tokensToAdd <= 0) {
-    if (pkgId === 'pkg_starter') tokensToAdd = 100;
-    else if (pkgId === 'pkg_pro') tokensToAdd = 500;
-    else if (pkgId === 'pkg_buffet') tokensToAdd = 1500;
-    else tokensToAdd = 100;
+    if (pkgId === 'pkg_starter') { tokensToAdd = 100; packagePrice = packagePrice || 4.99; }
+    else if (pkgId === 'pkg_pro') { tokensToAdd = 500; packagePrice = packagePrice || 19.99; }
+    else if (pkgId === 'pkg_buffet') { tokensToAdd = 1500; packagePrice = packagePrice || 49.99; }
+    else { tokensToAdd = 100; packagePrice = packagePrice || 4.99; }
   }
 
-  // 3. Atomically update users.token_balance in PostgreSQL
-  const updateRes = await query(`
+  // 3. Deduct from wallet if payment method is wallet
+  let updatedWalletBalance = parseFloat(user.wallet_balance || 0);
+  if (paymentMethod === 'wallet' && packagePrice > 0) {
+    if (updatedWalletBalance < packagePrice) {
+      return {
+        success: false,
+        tokensAdded: 0,
+        newBalance: Number(user.token_balance || 0),
+        error: `Insufficient wallet balance ($${updatedWalletBalance.toFixed(2)} available). This bundle requires $${packagePrice.toFixed(2)}.`
+      };
+    }
+
+    updatedWalletBalance = updatedWalletBalance - packagePrice;
+    await query(`
+      UPDATE users SET wallet_balance = $1, updated_at = NOW() WHERE id = $2
+    `, [updatedWalletBalance, user.id]);
+
+    const wtxId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    await query(`
+      INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, status, description, created_at)
+      VALUES ($1, $2, $3, 'token_purchase', $4, $5, 'wallet', 'succeeded', $6, NOW())
+    `, [wtxId, user.id, user.email, -packagePrice, updatedWalletBalance, `Purchased ${packageName} (+${tokensToAdd.toLocaleString()} tokens)`]);
+  }
+
+  // 4. Atomically update users.token_balance in PostgreSQL
+  const updateRes: any = await query(`
     UPDATE users 
     SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
     WHERE id = $2 
     RETURNING token_balance
   `, [tokensToAdd, user.id]);
 
-  const newBalance = Number(updateRes[0]?.token_balance ?? (Number(user.token_balance || 0) + tokensToAdd));
+  const updatedToken: any[] = Array.isArray(updateRes) ? updateRes : ((updateRes as any)?.rows || []);
+  const newBalance = Number(updatedToken[0]?.token_balance ?? (Number(user.token_balance || 0) + tokensToAdd));
 
-  // 4. Record audit ledger in token_transactions
+  // 5. Record audit ledger in token_transactions
   const txId = 'tx_buy_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
-  const txDesc = desc || `Purchased ${packageName} (+${tokensToAdd} tokens)${orderId ? ` [Order: ${orderId}]` : ''}`;
+  const txDesc = desc || `Purchased ${packageName} (+${tokensToAdd} tokens) via ${paymentMethod.toUpperCase()}${orderId ? ` [Order: ${orderId}]` : ''}`;
 
   await query(`
     INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
     VALUES ($1, $2, $3, $4, $5, 'purchase_package', $6, NOW())
   `, [txId, user.id, user.email, tokensToAdd, newBalance, txDesc]);
 
+  const tokensAdded = tokensToAdd;
+
   return {
     success: true,
     tokensAdded,
+    tokensToAdd,
     newBalance,
+    wallet_balance: updatedWalletBalance,
+    newWalletBalance: updatedWalletBalance,
+    paymentMethod,
     transactionId: txId,
     user: {
       id: user.id,
       email: user.email,
-      tokenBalance: newBalance
+      tokenBalance: newBalance,
+      walletBalance: updatedWalletBalance
     }
   };
+}
+
+export interface UserAdjustmentEntry {
+  userId: string;
+  userEmail: string;
+  netAmount: number;
+  types: string[];
 }
 
 export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Promise<{
@@ -60348,44 +60251,56 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
     return { success: false, deletedCount: 0, affectedUsers: [], error: 'No transaction ID(s) provided' };
   }
 
-  const txRows = await query(`
+  const txRows: any = await query(`
     SELECT id, user_id, user_email, amount, type, description 
     FROM token_transactions 
     WHERE id = ANY($1)
   `, [ids]);
-  const rawTxs = Array.isArray(txRows) ? txRows : (txRows?.rows || []);
+  const rawTxs: any[] = Array.isArray(txRows) ? txRows : ((txRows as any)?.rows || []);
 
   if (rawTxs.length === 0) {
     return { success: false, deletedCount: 0, affectedUsers: [], error: 'No matching transaction records found' };
   }
 
-  const userAdjustments = new Map<string, { userId: string; userEmail: string; netAmount: number; types: string[] }>();
+  const userAdjustments = new Map<string, UserAdjustmentEntry>();
 
-  for (const tx of rawTxs) {
-    const email = (tx.user_email || '').toLowerCase().trim();
-    const uId = (tx.user_id || '').trim();
+  for (let i = 0; i < rawTxs.length; i++) {
+    const tx = rawTxs[i];
+    const email = String(tx.user_email || '').toLowerCase().trim();
+    const uId = String(tx.user_id || '').trim();
     const key = email || uId;
     if (!key) continue;
 
     const amt = Number(tx.amount || 0);
-    const existing = userAdjustments.get(key) || { userId: uId, userEmail: email, netAmount: 0, types: [] };
+    const existing: UserAdjustmentEntry = userAdjustments.get(key) || {
+      userId: uId,
+      userEmail: email,
+      netAmount: 0,
+      types: [] as string[]
+    };
     existing.netAmount += amt;
-    existing.types.push(tx.type);
+    existing.types.push(String(tx.type || ''));
     if (!existing.userId && uId) existing.userId = uId;
     if (!existing.userEmail && email) existing.userEmail = email;
     userAdjustments.set(key, existing);
   }
 
+  const adjustmentsList: UserAdjustmentEntry[] = [];
+  userAdjustments.forEach((entry) => {
+    adjustmentsList.push(entry);
+  });
+
   const affectedUsers: AffectedUserBalance[] = [];
 
-  for (const [, adj] of userAdjustments.entries()) {
-    const uRes = await query(`
+  for (let i = 0; i < adjustmentsList.length; i++) {
+    const adj = adjustmentsList[i];
+    const uRes: any = await query(`
       SELECT id, email, token_balance 
       FROM users 
       WHERE (id = $1 AND $1 != '') OR (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '')
       LIMIT 1
     `, [adj.userId, adj.userEmail]);
-    const uList = Array.isArray(uRes) ? uRes : (uRes?.rows || []);
+    const uList: any[] = Array.isArray(uRes) ? uRes : ((uRes as any)?.rows || []);
 
     if (uList.length > 0) {
       const u = uList[0];
@@ -60407,8 +60322,8 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
       }
 
       affectedUsers.push({
-        id: u.id,
-        email: u.email,
+        id: String(u.id),
+        email: String(u.email || ''),
         oldBalance,
         newBalance,
         adjustedTokens: -adj.netAmount
@@ -60666,7 +60581,7 @@ export async function discoverRecipeLinksFromIndex(indexUrl: string): Promise<Di
     const discoveredMap = new Map<string, DiscoveredSlugItem>();
 
     // 1. Inspect Schema.org ItemList JSON-LD
-    const jsonLdMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+    const jsonLdMatches = Array.from(html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi));
     for (const match of jsonLdMatches) {
       try {
         const parsed = JSON.parse(match[1].trim());
@@ -60700,7 +60615,7 @@ export async function discoverRecipeLinksFromIndex(indexUrl: string): Promise<Di
     }
 
     // 2. Scan HTML anchor tags
-    const anchorMatches = html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi);
+    const anchorMatches = Array.from(html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi));
     for (const m of anchorMatches) {
       try {
         const rawHref = m[1].trim();
@@ -60811,7 +60726,7 @@ export async function scrapeRecipeFromUrl(rawUrl: string): Promise<ScrapedRecipe
     const domain = new URL(targetUrl).hostname.replace(/^www\./, '');
 
     // Search Schema.org Recipe in JSON-LD
-    const jsonLdMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+    const jsonLdMatches = Array.from(html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi));
     let recipeNode: any = null;
 
     for (const match of jsonLdMatches) {
@@ -61202,10 +61117,15 @@ export async function syncUserSavedRecipes(userId: string = 'guest', email?: str
   return [];
 }
 
-export async function persistSavedRecipe(userId: string, recipeOrList: any, creatorMeta?: { createdBy?: string; creatorName?: string }): Promise<boolean> {
+export async function persistSavedRecipe(
+  userId: string,
+  recipeOrList: any,
+  options?: { createdBy?: string; creatorName?: string; [key: string]: any } | string | any
+): Promise<boolean> {
   const targetId = (userId || '').trim();
   if (!targetId) return false;
 
+  const creatorMeta: any = typeof options === 'object' && options !== null ? options : {};
   const list = Array.isArray(recipeOrList) ? recipeOrList : [recipeOrList];
 
   const payload = list.map((item: any) => ({
@@ -61287,7 +61207,7 @@ export async function deleteSavedRecipe(userId: string, recipeId: string): Promi
   return true;
 }
 
-export function getLocalRecipes(userId: string): any[] {
+export function getLocalRecipes(userId: string = 'guest'): any[] {
   return [];
 }
 
@@ -61486,6 +61406,8 @@ export default pool;
 ```typescript
 // Generated / Maintained by AI Collaborator
 export interface User {
+  password?: string;
+
   id: string;
   email: string;
   name?: string;
@@ -61497,6 +61419,8 @@ export interface User {
   tokenUsage?: any;
   created_at?: string;
   updated_at?: string;
+
+  [key: string]: any;
 }
 
 export const DEFAULT_ADMIN_USER: User = {
