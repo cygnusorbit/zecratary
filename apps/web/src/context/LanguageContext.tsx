@@ -6,6 +6,11 @@ export interface LanguageContextType {
   language: string;
   setLanguage: (lang: string) => void;
   t: (key: string, fallback?: string) => string;
+
+  currentLanguage?: string;
+  locale?: string;
+  language?: string;
+  [key: string]: any;
 }
 
 const defaultTranslations: Record<string, Record<string, string>> = {

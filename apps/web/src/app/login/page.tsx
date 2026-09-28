@@ -89,7 +89,7 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const langContext = useTranslation();
   const rawT = langContext?.t;
-  const currentLangCode = langContext?.locale || langContext?.currentLanguage || 'en';
+  const currentLangCode = (langContext as any)?.locale || (langContext as any)?.language || (langContext as any)?.currentLanguage || 'en';
 
   // Dynamic server-backed custom dictionary cache
   const [dynamicDict, setDynamicDict] = useState<Record<string, string>>({});

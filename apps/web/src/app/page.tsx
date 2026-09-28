@@ -360,7 +360,7 @@ export default function DashboardPage() {
             className="text-sm"
             style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
           >
-            {(t('dashboardWelcomePrefix') || 'Welcome back, {name}!').replace('{name}', currentUser.name)} {t('dashboardSubtitle') || 'Autonomous culinary planning and pantry tracking.'}
+            {(t('dashboardWelcomePrefix') || 'Welcome back, {name}!').replace('{name}', currentUser?.name || currentUser?.email || 'Chef')} {t('dashboardSubtitle') || 'Autonomous culinary planning and pantry tracking.'}
           </p>
         </div>
 

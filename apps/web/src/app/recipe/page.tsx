@@ -1,3 +1,4 @@
+// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -160,9 +161,12 @@ export default function SavedRecipesPage() {
       setRecipes(updatedUserList);
       localStorage.setItem('zecratary_recipes', JSON.stringify(merged));
       localStorage.setItem('zecratary_saved_recipes', JSON.stringify(merged));
+      
       const activeUser = getCurrentUser();
       if (activeUser && (activeUser.id || activeUser.email)) {
-        persistSavedRecipe(activeUser.id || activeUser.email, recipe, 'save');
+        updatedUserList.forEach((r: any) => {
+          persistSavedRecipe(activeUser.id || activeUser.email, r, 'save');
+        });
       }
 
       const updatedBooks = books.map((b: any) => ({
@@ -224,8 +228,8 @@ export default function SavedRecipesPage() {
     setShowAddToPlanModal(true);
   };
 
-  const handleSaveToCalendar = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveToCalendar = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!selectedRecipe || !currentUser) return;
 
     const localPlan = localStorage.getItem('zecratary_meal_plan');
@@ -246,7 +250,17 @@ export default function SavedRecipesPage() {
       isLeftover: false
     };
 
-    localStorage.setItem('zecratary_meal_plan', JSON.stringify([...currentPlan, newPlanItem]));
+    const updatedPlan = [...currentPlan, newPlanItem];
+    localStorage.setItem('zecratary_meal_plan', JSON.stringify(updatedPlan));
+
+    try {
+      await fetch('/api/planner', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUser.id, meals: updatedPlan })
+      });
+    } catch (_) {}
+
     window.dispatchEvent(new Event('zecratary_planner_updated'));
     window.dispatchEvent(new Event('storage'));
     setShowAddToPlanModal(false);
@@ -1138,14 +1152,14 @@ export default function SavedRecipesPage() {
                         <button
                           type="button"
                           onClick={() => setIsEditing(false)}
-                          className="px-5 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700 transition text-xs"
+                          className="px-5 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700 transition text-xs cursor-pointer"
                         >
                           Cancel
                         </button>
                         <button
                           type="button"
                           onClick={handleSaveEdit}
-                          className="px-6 py-2.5 rounded-xl bg-[#E05638] text-white font-bold hover:bg-[#c94529] transition shadow-lg shadow-[#E05638]/20 flex items-center gap-2 text-xs"
+                          className="px-6 py-2.5 rounded-xl bg-[#E05638] text-white font-bold hover:bg-[#c94529] transition shadow-lg shadow-[#E05638]/20 flex items-center gap-2 text-xs cursor-pointer"
                         >
                           <Save className="h-4 w-4"/> Save Changes
                         </button>
@@ -1162,7 +1176,7 @@ export default function SavedRecipesPage() {
                           <button
                             type="button"
                             onClick={() => setIsReorderingIngredients(!isReorderingIngredients)}
-                            className={`font-bold px-3 py-1.5 rounded-lg border transition ${
+                            className={`font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer ${
                               isReorderingIngredients ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-[#111726] text-slate-200 border-slate-700'
                             }`}
                           >
@@ -1174,7 +1188,7 @@ export default function SavedRecipesPage() {
                               ...editForm,
                               ingredients: [...editForm.ingredients, { amount: '', unit: '', item: '', category: categories[0] || 'Pantry Staples' }]
                             })}
-                            className="bg-[#E05638] text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-[#c94529] transition"
+                            className="bg-[#E05638] text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-[#c94529] transition cursor-pointer"
                           >
                             <Plus className="h-3.5 w-3.5"/> Add Ingredient
                           </button>
@@ -1249,7 +1263,7 @@ export default function SavedRecipesPage() {
                                   ...editForm,
                                   ingredients: editForm.ingredients.filter((_: any, i: number) => i !== idx)
                                 })}
-                                className="p-2 text-red-400 hover:text-red-300"
+                                className="p-2 text-red-400 hover:text-red-300 cursor-pointer"
                               >
                                 <Trash2 className="h-4 w-4"/>
                               </button>
@@ -1262,14 +1276,14 @@ export default function SavedRecipesPage() {
                         <button
                           type="button"
                           onClick={() => setEditTab('info')}
-                          className="bg-slate-800 text-slate-300 font-bold px-5 py-2 rounded-xl text-xs hover:bg-slate-700 transition"
+                          className="bg-slate-800 text-slate-300 font-bold px-5 py-2 rounded-xl text-xs hover:bg-slate-700 transition cursor-pointer"
                         >
                           ← Back
                         </button>
                         <button
                           type="button"
                           onClick={() => setEditTab('steps')}
-                          className="bg-[#E05638] text-white font-bold px-6 py-2 rounded-xl text-xs hover:bg-[#c94529] transition shadow-md"
+                          className="bg-[#E05638] text-white font-bold px-6 py-2 rounded-xl text-xs hover:bg-[#c94529] transition shadow-md cursor-pointer"
                         >
                           Next: Steps →
                         </button>
@@ -1286,7 +1300,7 @@ export default function SavedRecipesPage() {
                           <button
                             type="button"
                             onClick={() => setIsReorderingSteps(!isReorderingSteps)}
-                            className={`font-bold px-3 py-1.5 rounded-lg border transition ${
+                            className={`font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer ${
                               isReorderingSteps ? 'bg-emerald-600 text-white border-emerald-500' : 'bg-[#111726] text-slate-200 border-slate-700'
                             }`}
                           >
@@ -1298,7 +1312,7 @@ export default function SavedRecipesPage() {
                               ...editForm,
                               instructions: [...editForm.instructions, '']
                             })}
-                            className="bg-[#E05638] text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-[#c94529] transition"
+                            className="bg-[#E05638] text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-[#c94529] transition cursor-pointer"
                           >
                             <Plus className="h-3.5 w-3.5"/> Add Step
                           </button>
@@ -1341,7 +1355,7 @@ export default function SavedRecipesPage() {
                                   ...editForm,
                                   instructions: editForm.instructions.filter((_: any, i: number) => i !== idx)
                                 })}
-                                className="p-2 text-slate-500 hover:text-red-400 h-fit"
+                                className="p-2 text-slate-500 hover:text-red-400 h-fit cursor-pointer"
                               >
                                 <Trash2 className="h-4 w-4"/>
                               </button>
@@ -1354,14 +1368,14 @@ export default function SavedRecipesPage() {
                         <button
                           type="button"
                           onClick={() => setEditTab('ingredients')}
-                          className="bg-slate-800 text-slate-300 font-bold px-5 py-2 rounded-xl text-xs hover:bg-slate-700 transition"
+                          className="bg-slate-800 text-slate-300 font-bold px-5 py-2 rounded-xl text-xs hover:bg-slate-700 transition cursor-pointer"
                         >
                           ← Back
                         </button>
                         <button
                           type="button"
                           onClick={handleSaveEdit}
-                          className="bg-[#E05638] text-white font-bold px-8 py-2.5 rounded-xl text-xs hover:bg-[#c94529] transition shadow-lg shadow-[#E05638]/20 flex items-center gap-2"
+                          className="bg-[#E05638] text-white font-bold px-8 py-2.5 rounded-xl text-xs hover:bg-[#c94529] transition shadow-lg shadow-[#E05638]/20 flex items-center gap-2 cursor-pointer"
                         >
                           <Save className="h-4 w-4"/> Save Changes
                         </button>
@@ -1375,7 +1389,7 @@ export default function SavedRecipesPage() {
         </div>
       )}
 
-      {/* ADD TO PLAN MODAL */}
+      {/* ADD TO PLAN MODAL (NO NATIVE FORM) */}
       {showAddToPlanModal && selectedRecipe && (
         <div 
           onClick={() => setShowAddToPlanModal(false)}
@@ -1386,8 +1400,9 @@ export default function SavedRecipesPage() {
             className="bg-[#0f1115] border border-slate-800/90 rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default"
           >
             <button 
+              type="button"
               onClick={() => setShowAddToPlanModal(false)} 
-              className="absolute top-4 right-4 p-2 bg-[#1e2430] hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition"
+              className="absolute top-4 right-4 p-2 bg-[#1e2430] hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition cursor-pointer"
             >
               <X className="h-4 w-4"/>
             </button>
@@ -1399,7 +1414,7 @@ export default function SavedRecipesPage() {
               </p>
             </div>
 
-            <form onSubmit={handleSaveToCalendar} className="space-y-4 pt-1">
+            <div className="space-y-4 pt-1">
               <div>
                 <label className="block text-xs font-bold text-[#E05638] mb-1.5">Date</label>
                 <div className="relative flex items-center">
@@ -1409,6 +1424,12 @@ export default function SavedRecipesPage() {
                     required
                     value={planDate}
                     onChange={(e) => setPlanDate(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveToCalendar();
+                      }
+                    }}
                     className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl pl-10 pr-3 py-2.5 text-xs text-[#E05638] font-semibold outline-none focus:border-[#E05638] cursor-pointer"
                   />
                 </div>
@@ -1439,6 +1460,12 @@ export default function SavedRecipesPage() {
                     type="time"
                     value={planTime}
                     onChange={(e) => setPlanTime(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveToCalendar();
+                      }
+                    }}
                     className="w-full bg-[#07090e] border border-slate-800 hover:border-slate-700 rounded-xl px-10 py-2.5 text-xs text-slate-200 outline-none focus:border-[#E05638]"
                     placeholder="--:-- --"
                   />
@@ -1461,18 +1488,19 @@ export default function SavedRecipesPage() {
                 <button
                   type="button"
                   onClick={() => setShowAddToPlanModal(false)}
-                  className="px-5 py-2.5 rounded-xl border border-emerald-900/80 hover:bg-emerald-950/20 text-[#E05638] font-bold text-xs transition"
+                  className="px-5 py-2.5 rounded-xl border border-emerald-900/80 hover:bg-emerald-950/20 text-[#E05638] font-bold text-xs transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-[#E05638] hover:bg-[#c94529] text-white font-bold text-xs transition shadow-md"
+                  type="button"
+                  onClick={() => handleSaveToCalendar()}
+                  className="px-5 py-2.5 rounded-xl bg-[#E05638] hover:bg-[#c94529] text-white font-bold text-xs transition shadow-md cursor-pointer"
                 >
                   Add to Calendar
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -1494,7 +1522,7 @@ export default function SavedRecipesPage() {
                 </h3>
                 <p className="text-xs text-slate-400">Select or edit items to add directly to your list</p>
               </div>
-              <button onClick={() => setIsShoppingModalOpen(false)} className="text-slate-400 hover:text-white">
+              <button type="button" onClick={() => setIsShoppingModalOpen(false)} className="text-slate-400 hover:text-white cursor-pointer">
                 <X className="h-5 w-5"/>
               </button>
             </div>
@@ -1567,14 +1595,16 @@ export default function SavedRecipesPage() {
 
             <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
               <button
+                type="button"
                 onClick={() => setIsShoppingModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs"
+                className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold text-xs cursor-pointer"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleConfirmAddToShoppingList}
-                className="px-6 py-2 rounded-xl bg-[#E05638] text-white font-bold text-xs flex items-center gap-1.5"
+                className="px-6 py-2 rounded-xl bg-[#E05638] text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md"
               >
                 <ShoppingCart className="h-3.5 w-3.5"/> Add Selected to List
               </button>

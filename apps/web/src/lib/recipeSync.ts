@@ -1,7 +1,7 @@
 // Server-Backed Recipe Synchronization Module
 // Strictly enforces creator ownership and attribution
 
-export async function syncUserSavedRecipes(userId: string, email?: string): Promise<any[]> {
+export async function syncUserSavedRecipes(userId: string = 'guest', email?: string): Promise<any[]> {
   const targetId = (userId || '').trim();
   const targetEmail = (email || '').trim();
   if (!targetId && !targetEmail) return [];

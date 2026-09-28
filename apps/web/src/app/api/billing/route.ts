@@ -490,7 +490,7 @@ export async function POST(req: NextRequest) {
         await client.query('COMMIT');
 
         try {
-          await grantMonthlyPlanTokenReward(userRecord.email, tokensCredited, { planSlug, planName });
+          await (grantMonthlyPlanTokenReward as any)(userRecord.email, tokensCredited, { planSlug, planName });
         } catch (_) {}
 
         return NextResponse.json({

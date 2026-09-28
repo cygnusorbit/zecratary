@@ -2,14 +2,22 @@ export interface ScrapedRecipeData {
   title: string;
   description: string;
   ingredients: string[];
-  instructions: string[];
-  prepMinutes: number;
-  cookMinutes: number;
-  servings: number;
+  instructions?: string[];
+  directions?: string[];
+  prepMinutes?: number;
+  cookMinutes?: number;
+  prepTime?: string;
+  cookTime?: string;
+  servings?: number;
   calories?: number;
   image?: string;
-  sourceUrl: string;
+  imageUrl?: string;
+  sourceUrl?: string;
   sourceName?: string;
+  author?: string;
+  cuisine?: string;
+  nutrition?: any;
+  [key: string]: any;
 }
 
 export interface DiscoveredSlugItem {

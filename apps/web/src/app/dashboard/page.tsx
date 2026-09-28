@@ -319,7 +319,7 @@ export default function DashboardPage() {
             className="text-sm"
             style={{ color: 'var(--color-text-secondary)' }}
           >
-            {(t('dashboardWelcomePrefix') || 'Welcome back, {name}!').replace('{name}', currentUser.name)} {t('dashboardSubtitle') || 'Autonomous culinary planning and pantry tracking.'}
+            {(t('dashboardWelcomePrefix') || 'Welcome back, {name}!').replace('{name}', currentUser?.name || currentUser?.email || 'Chef')} {t('dashboardSubtitle') || 'Autonomous culinary planning and pantry tracking.'}
           </p>
         </div>
 
@@ -520,7 +520,7 @@ export default function DashboardPage() {
                     className="text-xs font-bold uppercase tracking-wide flex items-center gap-1.5"
                     style={{ color: 'var(--color-emerald)' }}
                   >
-                    <Utensils className="h-3 w-3" /> {(t('todayMealPrefix') || 'Today • {mealType}').replace('{mealType}', upcomingMeal.mealType)}
+                    <Utensils className="h-3 w-3" /> {(t('todayMealPrefix') || 'Today • {mealType}').replace('{name}', upcomingMeal.mealType || 'Dinner')}
                   </span>
                   <h3 
                     className="font-bold text-base leading-tight mt-1 truncate"

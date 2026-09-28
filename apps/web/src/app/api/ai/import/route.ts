@@ -75,15 +75,20 @@ export async function POST(req: NextRequest) {
 
     if (type === 'url') {
       try {
-        const scraped = await scrapeRecipeFromUrl(inputContent);
+                const scraped: any = await scrapeRecipeFromUrl(inputContent);
+        if (!scraped) {
+          throw new Error('Target website blocked scraper or contains no recipe markup.');
+        }
         parsedTitle = scraped.title || recipeTitleInput || 'Imported Culinary Recipe';
         parsedDescription = scraped.description || `Scraped from ${inputContent}`;
-        ingredientsList = scraped.ingredients;
-        directionsList = scraped.directions;
-        parsedImageUrl = scraped.imageUrl || parsedImageUrl;
-        prepTime = scraped.prepTime || prepTime;
-        cookTime = scraped.cookTime || cookTime;
-        servings = scraped.servings || servings;
+        ingredientsList = Array.isArray(scraped.ingredients) ? scraped.ingredients : [];
+        directionsList = Array.isArray(scraped.directions)
+          ? scraped.directions
+          : (Array.isArray(scraped.instructions) ? scraped.instructions : []);
+        parsedImageUrl = scraped.imageUrl || scraped.image || parsedImageUrl;
+        prepTime = scraped.prepTime || (scraped.prepMinutes ? `${scraped.prepMinutes} mins` : prepTime);
+        cookTime = scraped.cookTime || (scraped.cookMinutes ? `${scraped.cookMinutes} mins` : cookTime);
+        servings = Number(scraped.servings) || servings;
         cuisine = scraped.cuisine || cuisine;
         nutrition = scraped.nutrition || nutrition;
 

@@ -21,7 +21,10 @@ export async function POST(req: NextRequest) {
     const uploadsDir = path.join(process.cwd(), 'apps/web/public/uploads');
     const fallbackDir = path.join(process.cwd(), 'public/uploads');
     const targetDir = fs.existsSync(path.dirname(uploadsDir)) ? uploadsDir : fallbackDir;
-    fs.makedirsSync ? fs.makedirsSync(targetDir) : fs.mkdirSync(targetDir, { recursive: true });
+
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
 
     const ext = path.extname(file.name) || '.png';
     const filename = `${type}-logo-${Date.now()}${ext}`;
@@ -31,20 +34,39 @@ export async function POST(req: NextRequest) {
     const publicUrl = `/uploads/${filename}`;
 
     // Update PostgreSQL admin_settings table directly
-    if (type === 'titlebar') {
+    const targetColumn = type === 'favicon' ? 'favicon_image' : 'titlebar_image';
+    try {
+      const existing = await query(`SELECT id FROM admin_settings LIMIT 1;`);
+      const targetId = existing && existing.length > 0 && existing[0]?.id ? existing[0].id : 'primary_settings';
+
       await query(`
-        UPDATE admin_settings SET
-          titlebar_image = $1,
-          updated_at = NOW()
-        WHERE id = 'primary_settings'
-      `, [publicUrl]);
-    } else if (type === 'favicon') {
-      await query(`
-        UPDATE admin_settings SET
-          favicon_image = $1,
-          updated_at = NOW()
-        WHERE id = 'primary_settings'
-      `, [publicUrl]);
+        INSERT INTO admin_settings (id, ${targetColumn}, updated_at)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (id) DO UPDATE
+        SET ${targetColumn} = EXCLUDED.${targetColumn},
+            updated_at = NOW();
+      `, [targetId, publicUrl]);
+    } catch (dbErr) {
+      console.warn('[upload-branding] PostgreSQL update fallback warning:', dbErr);
+    }
+
+    // Optional synchronization to dual-path static JSON stores
+    const settingsPaths = [
+      path.join(process.cwd(), 'apps/web/data/admin_settings.json'),
+      path.join(process.cwd(), 'data/admin_settings.json')
+    ];
+    for (const sp of settingsPaths) {
+      if (fs.existsSync(sp)) {
+        try {
+          const current = JSON.parse(fs.readFileSync(sp, 'utf-8'));
+          if (type === 'titlebar') {
+            current.titlebarImage = publicUrl;
+          } else if (type === 'favicon') {
+            current.faviconImage = publicUrl;
+          }
+          fs.writeFileSync(sp, JSON.stringify(current, null, 2));
+        } catch (_) {}
+      }
     }
 
     return NextResponse.json({
@@ -53,6 +75,7 @@ export async function POST(req: NextRequest) {
       message: `${type} branding image updated in PostgreSQL.`
     });
   } catch (err: any) {
+    console.error('[Upload Branding Error]:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }

@@ -272,10 +272,7 @@ export async function deductUserTokens({
   };
 }
 
-export async function grantMonthlyPlanTokenReward(
-  userEmailOrId: string,
-  options?: { force?: boolean; customTokens?: number; orderId?: string }
-): Promise<{
+export async function grantMonthlyPlanTokenReward(userEmail: string, tokens?: number, options?: { planSlug?: string; planName?: string; [key: string]: any } | any): Promise<{
   success: boolean;
   tokensGranted: number;
   newBalance: number;

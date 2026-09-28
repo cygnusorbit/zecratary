@@ -12,6 +12,11 @@ interface LanguageContextType {
   setLocale: (locale: string) => void;
   t: (key: string, fallback?: string) => string;
   version: number;
+
+  currentLanguage?: string;
+  locale?: string;
+  language?: string;
+  [key: string]: any;
 }
 
 const LanguageContext = createContext<LanguageContextType>({

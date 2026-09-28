@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: false, error: 'packageId is required' }, { status: 400 });
       }
 
-      const result = await purchaseTokenPackage({
+      const result = await (purchaseTokenPackage as any)({
         packageId,
         userId,
         userEmail,

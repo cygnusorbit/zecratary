@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "7.9.6",
+  "version": "7.9.8",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -20,7 +20,8 @@
   },
   "devDependencies": {
     "turbo": "^2.4.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "@types/pg": "^8.11.0"
   },
   "packageManager": "npm@10.8.2",
   "dependencies": {
@@ -110,7 +111,7 @@
 ```json
 {
   "name": "web",
-  "version": "7.9.6",
+  "version": "7.9.8",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -137,7 +138,8 @@
     "@types/react-dom": "^18.3.5",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.5.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "@types/pg": "^8.11.0"
   }
 }
 
@@ -280,6 +282,45 @@ export const config = {
     '/register'
   ],
 };
+
+```
+
+## File: `apps/web/src/types/pg.d.ts`
+```typescript
+// Ambient module declaration for pg
+declare module 'pg' {
+  export interface PoolConfig {
+    connectionString?: string;
+    ssl?: boolean | { rejectUnauthorized?: boolean };
+    max?: number;
+    idleTimeoutMillis?: number;
+    connectionTimeoutMillis?: number;
+    [key: string]: any;
+  }
+
+  export class Pool {
+    constructor(config?: PoolConfig);
+    connect(): Promise<any>;
+    query(queryTextOrConfig: any, values?: any): Promise<any>;
+    end(): Promise<void>;
+    on(event: string, listener: (...args: any[]) => void): this;
+  }
+
+  export class Client {
+    constructor(config?: any);
+    connect(): Promise<void>;
+    query(queryTextOrConfig: any, values?: any): Promise<any>;
+    end(): Promise<void>;
+  }
+
+  const pg: {
+    Pool: typeof Pool;
+    Client: typeof Client;
+    [key: string]: any;
+  };
+
+  export default pg;
+}
 
 ```
 
@@ -1745,7 +1786,6 @@ export default function SavedRecipesPage() {
       setLoading(true);
       const rawRecipes = await syncUserSavedRecipes(targetUserId, user.email);
 
-      // Verify creator identity explicitly on incoming records
       const userRecipes = rawRecipes
         .filter((r: any) => {
           const rUser = String(r.user_id || r.userId || '').trim();
@@ -1997,8 +2037,10 @@ export default function SavedRecipesPage() {
     setShowAddToPlanModal(true);
   };
 
-  const handleSaveToCalendar = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveToCalendar = async (e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
     if (!selectedRecipe || !currentUser) return;
 
     const recName = selectedRecipe.title || selectedRecipe.name || 'Untitled Recipe';
@@ -2490,8 +2532,8 @@ export default function SavedRecipesPage() {
     } catch (_) {}
   };
 
-  const handleAddIngredientFilter = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleAddIngredientFilter = (e?: React.SyntheticEvent) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
     const clean = ingredientQuery.trim();
     if (!clean) return;
     if (!selectedIngredientsList.includes(clean.toLowerCase())) {
@@ -2730,7 +2772,7 @@ export default function SavedRecipesPage() {
                     borderColor: 'var(--color-primary)'
                   }}
                 >
-                  <form onSubmit={handleAddIngredientFilter} className="flex items-center gap-2">
+                  <div className="flex items-center gap-2">
                     <div 
                       className="flex-1 border-2 rounded-xl overflow-hidden"
                       style={{
@@ -2744,18 +2786,25 @@ export default function SavedRecipesPage() {
                         placeholder={t('searchIngredientsPlaceholder') || 'Search ingredients'}
                         value={ingredientQuery}
                         onChange={(e) => setIngredientQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddIngredientFilter();
+                          }
+                        }}
                         className="w-full bg-transparent px-3 py-2 text-xs outline-none"
                         style={{ color: 'var(--color-text)' }}
                       />
                     </div>
                     <button
-                      type="submit"
+                      type="button"
+                      onClick={handleAddIngredientFilter}
                       className="text-white p-2 rounded-xl transition flex items-center justify-center font-bold text-sm shadow-md cursor-pointer shrink-0"
                       style={{ backgroundColor: 'var(--color-primary)' }}
                     >
                       <Plus className="h-4 w-4 stroke-[3]"/>
                     </button>
-                  </form>
+                  </div>
 
                   {selectedIngredientsList.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
@@ -4046,7 +4095,7 @@ export default function SavedRecipesPage() {
                           {t('cancel') || 'Cancel'}
                         </button>
                         <button
-                          type="submit"
+                          type="button"
                           onClick={handleSaveEdit}
                           className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg flex items-center gap-2 text-xs cursor-pointer"
                           style={{ backgroundColor: 'var(--color-primary)' }}
@@ -4355,7 +4404,7 @@ export default function SavedRecipesPage() {
                           {t('backBtn') || '← Back'}
                         </button>
                         <button
-                          type="submit"
+                          type="button"
                           onClick={handleSaveEdit}
                           className="text-white font-bold px-8 py-2.5 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer"
                           style={{ backgroundColor: 'var(--color-primary)' }}
@@ -4631,6 +4680,7 @@ export default function SavedRecipesPage() {
             }}
           >
             <button 
+              type="button"
               onClick={() => setShowAddToPlanModal(false)} 
               className="absolute top-4 right-4 p-2 rounded-lg transition cursor-pointer"
               style={{
@@ -4653,7 +4703,7 @@ export default function SavedRecipesPage() {
               </p>
             </div>
 
-            <form onSubmit={handleSaveToCalendar} className="space-y-4 pt-1">
+            <div className="space-y-4 pt-1">
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
@@ -4772,7 +4822,8 @@ export default function SavedRecipesPage() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={handleSaveToCalendar}
                   className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -4781,7 +4832,7 @@ export default function SavedRecipesPage() {
                   {t('addToCalendarBtn') || 'Add to Calendar'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -4809,6 +4860,7 @@ export default function SavedRecipesPage() {
                 <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t('selectOrEditItemsShopping') || 'Select or edit items to add directly to your list'}</p>
               </div>
               <button 
+                type="button"
                 onClick={() => setIsShoppingModalOpen(false)} 
                 className="cursor-pointer transition"
                 style={{ color: 'var(--color-text-secondary)' }}
@@ -5781,7 +5833,7 @@ export default function PantryPage() {
   const applyGlobalTheme = useCallback(() => {
     try {
       window.dispatchEvent(new Event('zecratary_theme_updated'));
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -5799,14 +5851,15 @@ export default function PantryPage() {
     };
   }, [applyGlobalTheme]);
 
-  const loadPantryData = useCallback((user: User | null) => {
+  const loadPantryData = useCallback(async (user: User | null) => {
     if (!user || typeof window === 'undefined') return;
 
     try {
+      const isSeeded = localStorage.getItem('zecratary_pantry_seeded') === 'true';
       const raw = localStorage.getItem('zecratary_pantry_items') || localStorage.getItem('zecratary_pantry');
       let allItems: any[] = raw ? JSON.parse(raw) : [];
 
-      if (!Array.isArray(allItems) || allItems.length === 0) {
+      if (!isSeeded && (!Array.isArray(allItems) || allItems.length === 0)) {
         allItems = [
           { 
             id: 'p_1_' + user.id, 
@@ -5841,13 +5894,33 @@ export default function PantryPage() {
         ];
         localStorage.setItem('zecratary_pantry_items', JSON.stringify(allItems));
         localStorage.setItem('zecratary_pantry', JSON.stringify(allItems));
+        localStorage.setItem('zecratary_pantry_seeded', 'true');
       }
 
-      const creatorItems = allItems.filter((item: any) => {
+      const creatorItems = Array.isArray(allItems) ? allItems.filter((item: any) => {
         return !item.userId || item.userId === user.id || item.createdBy === user.email;
-      });
+      }) : [];
 
       setPantryItems(creatorItems);
+
+      // Asynchronously synchronize with PostgreSQL backend
+      try {
+        const res = await fetch(`/api/pantry?userId=${encodeURIComponent(user.id)}`, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.items)) {
+            const serverItems = data.items.filter((item: any) => {
+              return !item.userId || item.userId === user.id || item.createdBy === user.email;
+            });
+            if (isSeeded || serverItems.length > 0) {
+              setPantryItems(serverItems);
+              localStorage.setItem('zecratary_pantry_items', JSON.stringify(data.items));
+              localStorage.setItem('zecratary_pantry', JSON.stringify(data.items));
+              localStorage.setItem('zecratary_pantry_seeded', 'true');
+            }
+          }
+        }
+      } catch (_) {}
     } catch (e) {
       console.error('Failed to load pantry data', e);
     }
@@ -5866,7 +5939,9 @@ export default function PantryPage() {
     setCurrentUser(user);
     loadPantryData(user);
 
-    const handleSync = () => {
+    const handleSync = (e: any) => {
+      // Ignore self-dispatched mutations to prevent race conditions during deletion
+      if (e?.detail?.source === 'local_pantry_mutation') return;
       const active = getCurrentUser();
       if (active) {
         setCurrentUser(active);
@@ -5875,17 +5950,17 @@ export default function PantryPage() {
     };
 
     window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_pantry_updated', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
+    window.addEventListener('zecratary_pantry_updated', handleSync as EventListener);
+    window.addEventListener('zecratary_auth_changed', handleSync as EventListener);
 
     return () => {
       window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_pantry_updated', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
+      window.removeEventListener('zecratary_pantry_updated', handleSync as EventListener);
+      window.removeEventListener('zecratary_auth_changed', handleSync as EventListener);
     };
   }, [loadPantryData, router, t]);
 
-  const savePantryList = (updatedCreatorItems: any[]) => {
+  const savePantryList = async (updatedCreatorItems: any[]) => {
     if (!currentUser) return;
 
     try {
@@ -5899,18 +5974,25 @@ export default function PantryPage() {
       const merged = [...updatedCreatorItems, ...otherUsersItems];
       localStorage.setItem('zecratary_pantry_items', JSON.stringify(merged));
       localStorage.setItem('zecratary_pantry', JSON.stringify(merged));
+      localStorage.setItem('zecratary_pantry_seeded', 'true');
 
       setPantryItems(updatedCreatorItems);
 
-      window.dispatchEvent(new Event('zecratary_pantry_updated'));
-      window.dispatchEvent(new Event('storage'));
+      // Asynchronously persist to PostgreSQL backend
+      fetch('/api/pantry', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUser.id, items: updatedCreatorItems })
+      }).catch(() => {});
+
+      window.dispatchEvent(new CustomEvent('zecratary_pantry_updated', { detail: { source: 'local_pantry_mutation' } }));
     } catch (e) {
       console.error('Failed to save pantry items', e);
     }
   };
 
-  const handleAddItem = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddItem = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!itemName.trim() || !currentUser) return;
 
     const newItem = {
@@ -5932,8 +6014,8 @@ export default function PantryPage() {
     setShowAddModal(false);
   };
 
-  const handleUpdateItem = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUpdateItem = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!editingItem || !editingItem.name.trim() || !currentUser) return;
 
     const updated = pantryItems.map(item => 
@@ -5950,19 +6032,72 @@ export default function PantryPage() {
     setEditingItem(null);
   };
 
-  const handleDeleteItem = (id: string) => {
+  const handleDeleteItem = async (id: string) => {
+    if (!currentUser) return;
+
+    // 1. Optimistically update local view
     const updated = pantryItems.filter(item => item.id !== id);
-    savePantryList(updated);
-    setSelectedIds(selectedIds.filter(selectedId => selectedId !== id));
+    setPantryItems(updated);
+    setSelectedIds(prev => prev.filter(selectedId => selectedId !== id));
+
+    // 2. Synchronize localStorage
+    try {
+      const raw = localStorage.getItem('zecratary_pantry_items') || localStorage.getItem('zecratary_pantry');
+      const allItems: any[] = raw ? JSON.parse(raw) : [];
+      const merged = allItems.filter((item: any) => item.id !== id);
+      localStorage.setItem('zecratary_pantry_items', JSON.stringify(merged));
+      localStorage.setItem('zecratary_pantry', JSON.stringify(merged));
+      localStorage.setItem('zecratary_pantry_seeded', 'true');
+    } catch (_) {}
+
+    // 3. Dispatch DELETE to PostgreSQL backend
+    try {
+      await fetch(`/api/pantry?id=${encodeURIComponent(id)}&userId=${encodeURIComponent(currentUser.id)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, userId: currentUser.id })
+      });
+    } catch (err) {
+      console.error('Error deleting item from PostgreSQL:', err);
+    }
+
+    window.dispatchEvent(new CustomEvent('zecratary_pantry_updated', { detail: { source: 'local_pantry_mutation' } }));
   };
 
-  const handleDeleteSelected = () => {
-    if (selectedIds.length === 0) return;
+  const handleDeleteSelected = async () => {
+    if (selectedIds.length === 0 || !currentUser) return;
     const confirmTemplate = t('confirmDeleteSelectedIngredients') || 'Are you sure you want to delete {count} selected ingredient(s)?';
     if (!confirm(confirmTemplate.replace('{count}', String(selectedIds.length)))) return;
-    const updated = pantryItems.filter(item => !selectedIds.includes(item.id));
-    savePantryList(updated);
+
+    const idsToDelete = [...selectedIds];
+
+    // 1. Optimistically update local view
+    const updated = pantryItems.filter(item => !idsToDelete.includes(item.id));
+    setPantryItems(updated);
     setSelectedIds([]);
+
+    // 2. Synchronize localStorage
+    try {
+      const raw = localStorage.getItem('zecratary_pantry_items') || localStorage.getItem('zecratary_pantry');
+      const allItems: any[] = raw ? JSON.parse(raw) : [];
+      const merged = allItems.filter((item: any) => !idsToDelete.includes(item.id));
+      localStorage.setItem('zecratary_pantry_items', JSON.stringify(merged));
+      localStorage.setItem('zecratary_pantry', JSON.stringify(merged));
+      localStorage.setItem('zecratary_pantry_seeded', 'true');
+    } catch (_) {}
+
+    // 3. Dispatch bulk DELETE to PostgreSQL backend
+    try {
+      await fetch(`/api/pantry?userId=${encodeURIComponent(currentUser.id)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: idsToDelete, userId: currentUser.id })
+      });
+    } catch (err) {
+      console.error('Error deleting selected items from PostgreSQL:', err);
+    }
+
+    window.dispatchEvent(new CustomEvent('zecratary_pantry_updated', { detail: { source: 'local_pantry_mutation' } }));
   };
 
   const toggleSelectAll = () => {
@@ -6232,7 +6367,10 @@ export default function PantryPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDeleteItem(item.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteItem(item.id);
+                      }}
                       className="p-2 hover:text-red-500 transition rounded-xl border cursor-pointer shadow-xs"
                       style={{
                         backgroundColor: 'var(--color-card)',
@@ -6282,7 +6420,7 @@ export default function PantryPage() {
               <Plus className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('addPantryIngredientTitle') || 'Add Pantry Ingredient(s)'}
             </h2>
 
-            <form onSubmit={handleAddItem} className="space-y-4">
+            <div className="space-y-4">
               <div>
                 <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('ingredientNameLabel') || 'Ingredient Name *'}
@@ -6293,6 +6431,12 @@ export default function PantryPage() {
                   placeholder={t('ingredientNamePlaceholder') || 'e.g. Eggs, Olive Oil...'}
                   value={itemName}
                   onChange={(e) => setItemName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddItem();
+                    }
+                  }}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -6313,6 +6457,12 @@ export default function PantryPage() {
                     type="text"
                     value={itemQuantity}
                     onChange={(e) => setItemQuantity(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddItem();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -6331,6 +6481,12 @@ export default function PantryPage() {
                     type="text"
                     value={itemUnit}
                     onChange={(e) => setItemUnit(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddItem();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -6381,6 +6537,12 @@ export default function PantryPage() {
                     type="date"
                     value={expiryDate}
                     onChange={(e) => setExpiryDate(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddItem();
+                      }
+                    }}
                     className="w-full border rounded-xl pl-10 pr-3 py-3 text-sm outline-none cursor-pointer pantry-date-input transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -6406,7 +6568,8 @@ export default function PantryPage() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleAddItem()}
                   className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -6415,7 +6578,7 @@ export default function PantryPage() {
                   {t('addIngredientSubmit') || 'Add Ingredient'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -6451,7 +6614,7 @@ export default function PantryPage() {
               <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('editPantryIngredientTitle') || 'Edit Pantry Ingredient'}
             </h2>
 
-            <form onSubmit={handleUpdateItem} className="space-y-4">
+            <div className="space-y-4">
               <div>
                 <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('ingredientNameLabel') || 'Ingredient Name *'}
@@ -6461,6 +6624,12 @@ export default function PantryPage() {
                   required
                   value={editingItem.name}
                   onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleUpdateItem();
+                    }
+                  }}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -6481,6 +6650,12 @@ export default function PantryPage() {
                     type="text"
                     value={editingItem.quantity}
                     onChange={(e) => setEditingItem({ ...editingItem, quantity: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateItem();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -6499,6 +6674,12 @@ export default function PantryPage() {
                     type="text"
                     value={editingItem.unit}
                     onChange={(e) => setEditingItem({ ...editingItem, unit: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateItem();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -6549,6 +6730,12 @@ export default function PantryPage() {
                     type="date"
                     value={editingItem.expiryDate || ''}
                     onChange={(e) => setEditingItem({ ...editingItem, expiryDate: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateItem();
+                      }
+                    }}
                     className="w-full border rounded-xl pl-10 pr-3 py-3 text-sm outline-none cursor-pointer pantry-date-input transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -6574,7 +6761,8 @@ export default function PantryPage() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleUpdateItem()}
                   className="px-6 py-2.5 rounded-xl text-white font-bold transition flex items-center gap-1.5 shadow-lg cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -6583,7 +6771,7 @@ export default function PantryPage() {
                   <Save className="h-4 w-4" /> {t('saveChanges') || 'Save Changes'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -6627,7 +6815,7 @@ export default function ContactPage() {
 ```typescript
 // Generated / Updated by AI Collaborator
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   Plus, Trash2, Check, Star, Copy, Edit3, X, Save, Search 
@@ -6772,9 +6960,14 @@ export default function ShoppingListPage() {
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.items)) {
-          setItems(data.items);
-          localStorage.setItem('zecratary_shopping_list', JSON.stringify(data.items));
-          localStorage.setItem('zecratary_shopping', JSON.stringify(data.items));
+          const normalized = data.items.map((i: any) => ({
+            ...i,
+            checked: Boolean(i.checked ?? i.completed),
+            completed: Boolean(i.checked ?? i.completed)
+          }));
+          setItems(normalized);
+          localStorage.setItem('zecratary_shopping_list', JSON.stringify(normalized));
+          localStorage.setItem('zecratary_shopping', JSON.stringify(normalized));
           localStorage.setItem('zecratary_shopping_seeded', 'true');
           return;
         }
@@ -6801,6 +6994,7 @@ export default function ShoppingListPage() {
             category: 'Produce', 
             staple: false, 
             checked: false,
+            completed: false,
             createdAt: new Date().toISOString()
           },
           { 
@@ -6814,6 +7008,7 @@ export default function ShoppingListPage() {
             category: 'Snacks', 
             staple: false, 
             checked: false,
+            completed: false,
             createdAt: new Date().toISOString()
           }
         ];
@@ -6830,7 +7025,11 @@ export default function ShoppingListPage() {
 
       const userItems = Array.isArray(allItems) ? allItems.filter((i: any) => {
         return !i.userId || i.userId === user.id || i.createdBy === user.email;
-      }) : [];
+      }).map((i: any) => ({
+        ...i,
+        checked: Boolean(i.checked ?? i.completed),
+        completed: Boolean(i.checked ?? i.completed)
+      })) : [];
 
       setItems(userItems);
     } catch (e) {
@@ -6851,7 +7050,9 @@ export default function ShoppingListPage() {
     setCurrentUser(user);
     loadShoppingData(user);
 
-    const handleSync = () => {
+    const handleSync = (e: any) => {
+      // Discard self-generated local mutations to prevent race conditions during toggling
+      if (e?.detail?.source === 'local_shopping_mutation') return;
       const active = getCurrentUser();
       if (active) {
         setCurrentUser(active);
@@ -6860,15 +7061,15 @@ export default function ShoppingListPage() {
     };
 
     window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_shopping_updated', handleSync);
-    window.addEventListener('zecratary_shopping_list_updated', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
+    window.addEventListener('zecratary_shopping_updated', handleSync as EventListener);
+    window.addEventListener('zecratary_shopping_list_updated', handleSync as EventListener);
+    window.addEventListener('zecratary_auth_changed', handleSync as EventListener);
 
     return () => {
       window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_shopping_updated', handleSync);
-      window.removeEventListener('zecratary_shopping_list_updated', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
+      window.removeEventListener('zecratary_shopping_updated', handleSync as EventListener);
+      window.removeEventListener('zecratary_shopping_list_updated', handleSync as EventListener);
+      window.removeEventListener('zecratary_auth_changed', handleSync as EventListener);
     };
   }, [loadShoppingData, router, t]);
 
@@ -6890,15 +7091,15 @@ export default function ShoppingListPage() {
 
       setItems(updatedUserItems);
 
-      window.dispatchEvent(new Event('zecratary_shopping_updated'));
-      window.dispatchEvent(new Event('storage'));
+      // Do NOT dispatch generic 'storage' event which re-queries the server before POST finishes
+      window.dispatchEvent(new CustomEvent('zecratary_shopping_updated', { detail: { source: 'local_shopping_mutation' } }));
     } catch (e) {
       console.error('Failed to save shopping list', e);
     }
   };
 
-  const handleAddItem = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddItem = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!itemName.trim() || !currentUser) return;
 
     const newItem = {
@@ -6912,6 +7113,7 @@ export default function ShoppingListPage() {
       category: itemCategory || availableCategories[0] || 'Produce',
       staple: false,
       checked: false,
+      completed: false,
       createdAt: new Date().toISOString()
     };
 
@@ -6919,11 +7121,18 @@ export default function ShoppingListPage() {
     saveList(updated);
 
     try {
-      await fetch('/api/shopping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify([newItem])
-      });
+      await Promise.allSettled([
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([newItem])
+        }),
+        fetch('/api/shopping-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([newItem])
+        })
+      ]);
     } catch (err) {
       console.error('Failed to persist item to PostgreSQL:', err);
     }
@@ -6935,8 +7144,8 @@ export default function ShoppingListPage() {
     setShowAddModal(false);
   };
 
-  const handleUpdateItem = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUpdateItem = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!editingItem || !editingItem.name.trim() || !currentUser) return;
 
     const updatedItem = {
@@ -6950,11 +7159,18 @@ export default function ShoppingListPage() {
     saveList(updated);
 
     try {
-      await fetch('/api/shopping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify([updatedItem])
-      });
+      await Promise.allSettled([
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([updatedItem])
+        }),
+        fetch('/api/shopping-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([updatedItem])
+        })
+      ]);
     } catch (err) {
       console.error('Failed to update item in PostgreSQL:', err);
     }
@@ -6966,15 +7182,26 @@ export default function ShoppingListPage() {
     const target = items.find((i) => i.id === id);
     if (!target) return;
     const nextVal = !target.checked;
-    const updated = items.map((i) => (i.id === id ? { ...i, checked: nextVal } : i));
+    const updatedItem = { ...target, checked: nextVal, completed: nextVal };
+    const updated = items.map((i) => (i.id === id ? updatedItem : i));
+    
+    // Update local state and cache synchronously without event loop
     saveList(updated);
 
+    // Persist to PostgreSQL asynchronously
     try {
-      await fetch('/api/shopping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify([{ ...target, checked: nextVal }])
-      });
+      await Promise.allSettled([
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([updatedItem])
+        }),
+        fetch('/api/shopping-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([updatedItem])
+        })
+      ]);
     } catch (_) {}
   };
 
@@ -6982,15 +7209,23 @@ export default function ShoppingListPage() {
     const target = items.find((i) => i.id === id);
     if (!target) return;
     const nextVal = !target.staple;
-    const updated = items.map((i) => (i.id === id ? { ...i, staple: nextVal } : i));
+    const updatedItem = { ...target, staple: nextVal };
+    const updated = items.map((i) => (i.id === id ? updatedItem : i));
     saveList(updated);
 
     try {
-      await fetch('/api/shopping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify([{ ...target, staple: nextVal }])
-      });
+      await Promise.allSettled([
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([updatedItem])
+        }),
+        fetch('/api/shopping-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify([updatedItem])
+        })
+      ]);
     } catch (_) {}
   };
 
@@ -7012,11 +7247,20 @@ export default function ShoppingListPage() {
 
   const handleDeleteItem = async (id: string) => {
     const updated = items.filter((i) => i.id !== id);
-    saveList(updated);
+    setItems(updated);
 
     if (editingItem && editingItem.id === id) {
       setEditingItem(null);
     }
+
+    try {
+      const local = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
+      const allItems: any[] = local ? JSON.parse(local) : [];
+      const merged = allItems.filter((item: any) => item.id !== id);
+      localStorage.setItem('zecratary_shopping_list', JSON.stringify(merged));
+      localStorage.setItem('zecratary_shopping', JSON.stringify(merged));
+      localStorage.setItem('zecratary_shopping_seeded', 'true');
+    } catch (_) {}
 
     try {
       await Promise.allSettled([
@@ -7034,22 +7278,41 @@ export default function ShoppingListPage() {
     } catch (err) {
       console.error('Failed to delete item from PostgreSQL:', err);
     }
+
+    window.dispatchEvent(new CustomEvent('zecratary_shopping_updated', { detail: { source: 'local_shopping_mutation' } }));
   };
 
-  const allCompleted = items.length > 0 && items.every((i) => i.checked);
+  const filteredItems = useMemo(() => {
+    return items.filter((i) => {
+      const matchesSearch = !search.trim() || i.name.toLowerCase().includes(search.toLowerCase().trim());
+      const matchesStaples = !showStaplesOnly || i.staple;
+      return matchesSearch && matchesStaples;
+    });
+  }, [items, search, showStaplesOnly]);
+
+  const allFilteredCompleted = filteredItems.length > 0 && filteredItems.every((i) => i.checked);
 
   const toggleAllComplete = async () => {
-    if (items.length === 0) return;
-    const targetState = !allCompleted;
-    const updated = items.map((i) => ({ ...i, checked: targetState }));
+    if (filteredItems.length === 0) return;
+    const targetState = !allFilteredCompleted;
+    const filteredIds = new Set(filteredItems.map(i => i.id));
+    const updated = items.map((i) => filteredIds.has(i.id) ? { ...i, checked: targetState, completed: targetState } : i);
     saveList(updated);
 
+    const changedItems = updated.filter(i => filteredIds.has(i.id));
     try {
-      await fetch('/api/shopping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated)
-      });
+      await Promise.allSettled([
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(changedItems)
+        }),
+        fetch('/api/shopping-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(changedItems)
+        })
+      ]);
     } catch (_) {}
   };
 
@@ -7059,7 +7322,16 @@ export default function ShoppingListPage() {
 
     const completedIds = completedList.map((i) => i.id);
     const activeOnly = items.filter((i) => !i.checked);
-    saveList(activeOnly);
+    setItems(activeOnly);
+
+    try {
+      const local = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
+      const allItems: any[] = local ? JSON.parse(local) : [];
+      const merged = allItems.filter((item: any) => !completedIds.includes(item.id));
+      localStorage.setItem('zecratary_shopping_list', JSON.stringify(merged));
+      localStorage.setItem('zecratary_shopping', JSON.stringify(merged));
+      localStorage.setItem('zecratary_shopping_seeded', 'true');
+    } catch (_) {}
 
     try {
       await Promise.allSettled([
@@ -7077,6 +7349,8 @@ export default function ShoppingListPage() {
     } catch (err) {
       console.error('Failed to remove completed items from PostgreSQL:', err);
     }
+
+    window.dispatchEvent(new CustomEvent('zecratary_shopping_updated', { detail: { source: 'local_shopping_mutation' } }));
   };
 
   const handleCopyList = () => {
@@ -7133,12 +7407,6 @@ export default function ShoppingListPage() {
 
   const completedCount = items.filter((i) => i.checked).length;
 
-  const filteredItems = items.filter((i) => {
-    const matchesSearch = !search.trim() || i.name.toLowerCase().includes(search.toLowerCase().trim());
-    const matchesStaples = !showStaplesOnly || i.staple;
-    return matchesSearch && matchesStaples;
-  });
-
   const activeItems = filteredItems.filter((i) => !i.checked);
   const completedItems = filteredItems.filter((i) => i.checked);
   const categories = Array.from(new Set(activeItems.map((i) => i.category || 'Produce')));
@@ -7167,17 +7435,17 @@ export default function ShoppingListPage() {
           <button
             type="button"
             onClick={toggleAllComplete}
-            disabled={items.length === 0}
+            disabled={filteredItems.length === 0}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
               color: 'var(--color-emerald)'
             }}
-            title={allCompleted ? (t('deselectAllItemsTooltip') || 'Deselect all items') : (t('selectAllItemsTooltip') || 'Select all items')}
+            title={allFilteredCompleted ? (t('deselectAllItemsTooltip') || 'Deselect all items') : (t('selectAllItemsTooltip') || 'Select all items')}
           >
             <Check className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
-            <span>{allCompleted ? (t('incompleteAll') || 'Incomplete All') : (t('completeAll') || 'Complete All')}</span>
+            <span>{allFilteredCompleted ? (t('incompleteAll') || 'Incomplete All') : (t('completeAll') || 'Complete All')}</span>
           </button>
 
           {/* REMOVE COMPLETED BUTTON */}
@@ -7479,7 +7747,7 @@ export default function ShoppingListPage() {
               <Plus className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('addShoppingItemTitle') || 'Add Shopping Item'}
             </h2>
 
-            <form onSubmit={handleAddItem} className="space-y-4 text-xs">
+            <div className="space-y-4 text-xs">
               <div>
                 <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('itemNameLabel') || 'Item Name *'}
@@ -7490,6 +7758,12 @@ export default function ShoppingListPage() {
                   placeholder={t('itemNamePlaceholder') || 'e.g. lime, roasted peanuts...'}
                   value={itemName}
                   onChange={(e) => setItemName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddItem();
+                    }
+                  }}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -7511,6 +7785,12 @@ export default function ShoppingListPage() {
                     placeholder={t('amountQtyPlaceholder') || 'e.g. 1 or ¼'}
                     value={itemAmount}
                     onChange={(e) => setItemAmount(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddItem();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -7530,6 +7810,12 @@ export default function ShoppingListPage() {
                     placeholder={t('unitPlaceholder') || 'e.g. cup, tbsp, oz'}
                     value={itemUnit}
                     onChange={(e) => setItemUnit(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddItem();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -7579,7 +7865,8 @@ export default function ShoppingListPage() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleAddItem()}
                   className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -7588,7 +7875,7 @@ export default function ShoppingListPage() {
                   {t('addItemSubmit') || 'Add Item'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -7624,7 +7911,7 @@ export default function ShoppingListPage() {
               <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('editShoppingItemTitle') || 'Edit Shopping Item'}
             </h2>
 
-            <form onSubmit={handleUpdateItem} className="space-y-4 text-xs">
+            <div className="space-y-4 text-xs">
               <div>
                 <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('itemNameLabel') || 'Item Name *'}
@@ -7634,6 +7921,12 @@ export default function ShoppingListPage() {
                   required
                   value={editingItem.name}
                   onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleUpdateItem();
+                    }
+                  }}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -7655,6 +7948,12 @@ export default function ShoppingListPage() {
                     value={editingItem.amount}
                     placeholder={t('amountQtyPlaceholder') || 'e.g. 1 or ¼'}
                     onChange={(e) => setEditingItem({ ...editingItem, amount: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateItem();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -7674,6 +7973,12 @@ export default function ShoppingListPage() {
                     value={editingItem.unit}
                     placeholder={t('unitPlaceholder') || 'e.g. cup, tbsp, oz'}
                     onChange={(e) => setEditingItem({ ...editingItem, unit: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateItem();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -7736,7 +8041,8 @@ export default function ShoppingListPage() {
                     {t('cancel') || 'Cancel'}
                   </button>
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={() => handleUpdateItem()}
                     className="px-6 py-2.5 rounded-xl text-white font-bold transition flex items-center gap-1.5 shadow-lg cursor-pointer"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                     onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -7746,7 +8052,7 @@ export default function ShoppingListPage() {
                   </button>
                 </div>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -7843,7 +8149,7 @@ export default function PlannerPage() {
   const applyGlobalTheme = useCallback(() => {
     try {
       window.dispatchEvent(new Event('zecratary_theme_updated'));
-    } catch (e) {}
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -7919,7 +8225,7 @@ export default function PlannerPage() {
     }
   }, []);
 
-  const loadMealPlan = useCallback((user: User | null) => {
+  const loadMealPlan = useCallback(async (user: User | null) => {
     if (typeof window === 'undefined') return;
     try {
       const localPlan = localStorage.getItem('zecratary_meal_plan');
@@ -7930,27 +8236,41 @@ export default function PlannerPage() {
             ? parsed.filter((m: any) => !m.userId || m.userId === user.id || m.createdBy === user.email)
             : parsed;
           setPlannedMeals(userPlans);
-          return;
         }
+      } else {
+        const systemToday = formatDateKey(new Date());
+        const defaultPlan = [
+          {
+            id: 'p_1_' + (user ? user.id : 'default'),
+            userId: user?.id,
+            createdBy: user?.email,
+            date: systemToday,
+            recipeName: 'Caesar Salad Recipe',
+            image: 'https://images.unsplash.com/photo-1550304943-4f24f54ddde9?auto=format&fit=crop&w=800&q=80',
+            mealType: 'Dinner',
+            time: '19:00',
+            isLeftover: false,
+            notes: ''
+          }
+        ];
+        setPlannedMeals(defaultPlan);
+        localStorage.setItem('zecratary_meal_plan', JSON.stringify(defaultPlan));
       }
 
-      const systemToday = formatDateKey(new Date());
-      const defaultPlan = [
-        {
-          id: 'p_1_' + (user ? user.id : 'default'),
-          userId: user?.id,
-          createdBy: user?.email,
-          date: systemToday,
-          recipeName: 'Caesar Salad Recipe',
-          image: 'https://images.unsplash.com/photo-1550304943-4f24f54ddde9?auto=format&fit=crop&w=800&q=80',
-          mealType: 'Dinner',
-          time: '19:00',
-          isLeftover: false,
-          notes: ''
-        }
-      ];
-      setPlannedMeals(defaultPlan);
-      localStorage.setItem('zecratary_meal_plan', JSON.stringify(defaultPlan));
+      // Synchronize with PostgreSQL backend
+      if (user?.id) {
+        try {
+          const res = await fetch(`/api/planner?userId=${encodeURIComponent(user.id)}`, { cache: 'no-store' });
+          if (res.ok) {
+            const data = await res.json();
+            if (data && Array.isArray(data.meals) && data.meals.length > 0) {
+              const serverPlans = data.meals.filter((m: any) => !m.userId || m.userId === user.id || m.createdBy === user.email);
+              setPlannedMeals(serverPlans);
+              localStorage.setItem('zecratary_meal_plan', JSON.stringify(data.meals));
+            }
+          }
+        } catch (_) {}
+      }
     } catch (e) {
       console.error('Failed to load meal plan', e);
     }
@@ -7965,7 +8285,8 @@ export default function PlannerPage() {
     loadSavedData(user);
     loadMealPlan(user);
 
-    const handleSync = () => {
+    const handleSync = (e: any) => {
+      if (e?.detail?.source === 'local_planner_mutation') return;
       const active = getCurrentUser();
       setCurrentUser(active);
       loadSavedData(active);
@@ -7975,15 +8296,15 @@ export default function PlannerPage() {
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_recipes_updated', handleSync);
     window.addEventListener('zecratary_saved_recipes_updated', handleSync);
-    window.addEventListener('zecratary_planner_updated', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
+    window.addEventListener('zecratary_planner_updated', handleSync as EventListener);
+    window.addEventListener('zecratary_auth_changed', handleSync as EventListener);
 
     return () => {
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_recipes_updated', handleSync);
       window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_planner_updated', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
+      window.removeEventListener('zecratary_planner_updated', handleSync as EventListener);
+      window.removeEventListener('zecratary_auth_changed', handleSync as EventListener);
     };
   }, [loadSavedData, loadMealPlan, t, locale, version]);
 
@@ -7999,9 +8320,18 @@ export default function PlannerPage() {
       const merged = [...updatedUserMeals, ...otherUserMeals];
       localStorage.setItem('zecratary_meal_plan', JSON.stringify(merged));
       setPlannedMeals(updatedUserMeals);
-      window.dispatchEvent(new Event('zecratary_planner_updated'));
+
+      // Asynchronously persist to PostgreSQL backend
+      if (currentUser?.id) {
+        fetch('/api/planner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: currentUser.id, meals: merged })
+        }).catch(() => {});
+      }
+
+      window.dispatchEvent(new CustomEvent('zecratary_planner_updated', { detail: { source: 'local_planner_mutation' } }));
       window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
-      window.dispatchEvent(new Event('storage'));
     } catch (e) {
       console.error('Failed to save meal plan', e);
     }
@@ -8144,8 +8474,8 @@ export default function PlannerPage() {
     handleCopyDayTo(sourceDateStr, formatDateKey(d));
   };
 
-  const handleAddMealSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddMealSubmit = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!selectedRecipeObj) {
       alert(t('pleaseSelectRecipeAlert'));
       return;
@@ -8167,8 +8497,8 @@ export default function PlannerPage() {
     setShowAddMealModal(false);
   };
 
-  const handleEditMealSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleEditMealSubmit = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!editingMealId || !editRecipeObj) return;
 
     const updated = plannedMeals.map((m) => {
@@ -8195,11 +8525,19 @@ export default function PlannerPage() {
     setEditingMealId(null);
   };
 
-  const handleDeleteMeal = (id: string) => {
+  const handleDeleteMeal = async (id: string) => {
     const updated = plannedMeals.filter(m => m.id !== id);
     savePlan(updated);
     if (showEditMealModal && editingMealId === id) {
       setShowEditMealModal(false);
+    }
+
+    if (currentUser?.id) {
+      fetch(`/api/planner?id=${encodeURIComponent(id)}&userId=${encodeURIComponent(currentUser.id)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, userId: currentUser.id })
+      }).catch(() => {});
     }
   };
 
@@ -8342,6 +8680,7 @@ export default function PlannerPage() {
         
         <div className="flex flex-wrap items-center gap-2.5">
           <button 
+            type="button"
             onClick={() => alert(t('planWeekActivatedAlert'))}
             className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-md cursor-pointer"
             style={{ backgroundColor: 'var(--color-primary)' }}
@@ -8351,6 +8690,7 @@ export default function PlannerPage() {
             <CalendarIcon className="h-4 w-4" /> {t('planWeekBtn')}
           </button>
           <button 
+            type="button"
             onClick={() => alert(t('weekCopiedAlert'))}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
             style={{
@@ -8374,6 +8714,7 @@ export default function PlannerPage() {
             <ShoppingBag className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('shoppingListBtn')}
           </button>
           <button 
+            type="button"
             onClick={() => alert(t('shareCopiedAlert'))}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
             style={{
@@ -8404,6 +8745,7 @@ export default function PlannerPage() {
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <button 
+            type="button"
             onClick={() => {
               const prev = new Date(currentWeekStart.getFullYear(), currentWeekStart.getMonth(), currentWeekStart.getDate() - 7);
               setCurrentWeekStart(prev);
@@ -8427,6 +8769,7 @@ export default function PlannerPage() {
 
           <div className="flex items-center gap-2">
             <button 
+              type="button"
               onClick={() => {
                 const next = new Date(currentWeekStart.getFullYear(), currentWeekStart.getMonth(), currentWeekStart.getDate() + 7);
                 setCurrentWeekStart(next);
@@ -8441,6 +8784,7 @@ export default function PlannerPage() {
               <ChevronRight className="h-4 w-4" />
             </button>
             <button 
+              type="button"
               onClick={() => {
                 const now = new Date();
                 setCurrentWeekStart(getMondayOfWeek(now));
@@ -8526,6 +8870,7 @@ export default function PlannerPage() {
             <span className="text-lg">🔥</span> {t('dailyAverage')}
           </div>
           <button 
+            type="button"
             className="flex items-center gap-1.5 border font-bold text-xs px-3 py-1.5 rounded-xl transition cursor-pointer shadow-xs"
             style={{
               backgroundColor: 'var(--color-inner-dark)',
@@ -8695,6 +9040,7 @@ export default function PlannerPage() {
                   )}
 
                   <button
+                    type="button"
                     onClick={() => openAddModal(day.dateStr)}
                     className="border font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer"
                     style={{
@@ -8723,6 +9069,7 @@ export default function PlannerPage() {
                   </div>
                   <p className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{t('nothingPlannedYet')}</p>
                   <button
+                    type="button"
                     onClick={() => openAddModal(day.dateStr)}
                     className="inline-flex items-center gap-2 border font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-xs cursor-pointer"
                     style={{
@@ -8778,6 +9125,7 @@ export default function PlannerPage() {
 
                       <div className="flex items-center gap-2 shrink-0">
                         <button
+                          type="button"
                           onClick={() => openEditModal(meal)}
                           className="p-2.5 rounded-xl border shadow-xs cursor-pointer transition"
                           style={{
@@ -8790,6 +9138,7 @@ export default function PlannerPage() {
                           <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                         </button>
                         <button
+                          type="button"
                           onClick={() => handleDeleteMeal(meal.id)}
                           className="p-2.5 rounded-xl border shadow-xs cursor-pointer transition hover:text-red-500"
                           style={{
@@ -8827,6 +9176,7 @@ export default function PlannerPage() {
             }}
           >
             <button 
+              type="button"
               onClick={() => setShowShoppingListModal(false)} 
               className="absolute top-5 right-5 p-2 rounded-xl transition cursor-pointer shadow-xs"
               style={{
@@ -9038,6 +9388,7 @@ export default function PlannerPage() {
             }}
           >
             <button 
+              type="button"
               onClick={() => setShowAddMealModal(false)} 
               className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer shadow-xs"
               style={{
@@ -9060,7 +9411,7 @@ export default function PlannerPage() {
               </p>
             </div>
 
-            <form onSubmit={handleAddMealSubmit} className="space-y-3.5 pt-1">
+            <div className="space-y-3.5 pt-1">
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
@@ -9120,6 +9471,12 @@ export default function PlannerPage() {
                     type="time"
                     value={mealTime}
                     onChange={(e) => setMealTime(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddMealSubmit();
+                      }
+                    }}
                     className="w-full border rounded-lg pl-9 pr-9 py-2 text-xs outline-none"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -9259,7 +9616,8 @@ export default function PlannerPage() {
                   {t('cancel')}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleAddMealSubmit()}
                   className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -9268,7 +9626,7 @@ export default function PlannerPage() {
                   {t('addToCalendarBtn')}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -9289,6 +9647,7 @@ export default function PlannerPage() {
             }}
           >
             <button 
+              type="button"
               onClick={() => setShowEditMealModal(false)} 
               className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer shadow-xs"
               style={{
@@ -9311,7 +9670,7 @@ export default function PlannerPage() {
               </p>
             </div>
 
-            <form onSubmit={handleEditMealSubmit} className="space-y-3.5 pt-1">
+            <div className="space-y-3.5 pt-1">
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
@@ -9323,6 +9682,12 @@ export default function PlannerPage() {
                   type="date"
                   value={editDate}
                   onChange={(e) => setEditDate(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleEditMealSubmit();
+                    }
+                  }}
                   className="w-full border rounded-lg px-3 py-2 text-xs font-semibold outline-none cursor-pointer"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -9374,6 +9739,12 @@ export default function PlannerPage() {
                     type="time"
                     value={editMealTime}
                     onChange={(e) => setEditMealTime(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleEditMealSubmit();
+                      }
+                    }}
                     className="w-full border rounded-lg pl-9 pr-9 py-2 text-xs outline-none"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -9526,7 +9897,8 @@ export default function PlannerPage() {
                     {t('cancel')}
                   </button>
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={() => handleEditMealSubmit()}
                     className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                     onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -9536,7 +9908,7 @@ export default function PlannerPage() {
                   </button>
                 </div>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -9558,6 +9930,7 @@ export default function PlannerPage() {
           >
             <div className="space-y-4">
               <button 
+                type="button"
                 onClick={() => setShowRecipePickerModal(false)} 
                 className="absolute top-4 right-4 p-2 rounded-xl transition cursor-pointer shadow-xs"
                 style={{
@@ -10051,8 +10424,8 @@ export default function ChefChatPage() {
     } catch (_) {}
   }, [getUserKey]);
 
-  const handleCreateCategory = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCreateCategory = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     const clean = newCategoryName.trim();
     if (!clean) return;
     try {
@@ -10440,8 +10813,8 @@ export default function ChefChatPage() {
     setSelectedAllergies(prev => prev.includes(item) ? prev.filter(a => a !== item) : [...prev, item]);
   };
 
-  const handleAddAvoid = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleAddAvoid = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     const clean = newAvoidInput.trim();
     if (!clean) return;
     if (!ingredientsToAvoid.includes(clean)) setIngredientsToAvoid([...ingredientsToAvoid, clean]);
@@ -10452,8 +10825,8 @@ export default function ChefChatPage() {
     setIngredientsToAvoid(ingredientsToAvoid.filter(a => a !== item));
   };
 
-  const handleAddTaste = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleAddTaste = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     const clean = newTasteInput.trim();
     if (!clean) return;
     if (!tastesList.includes(clean)) setTastesList([...tastesList, clean]);
@@ -10830,7 +11203,6 @@ export default function ChefChatPage() {
 
     const lower = textToSend.toLowerCase();
 
-    // Trigger full intake wizard if requested directly via prompt
     if (wizardStep === null && (
       lower.includes('complete meal plan intake') || 
       lower.includes('meal plan intake wizard') ||
@@ -10891,13 +11263,11 @@ export default function ChefChatPage() {
           const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
           const userKey = getUserKey(activeAuth);
 
-          // Build structured QA pairs for 100% accurate AI comprehension
           const qaSummary = wizardQuestionsList.map((q, idx) => ({
             question: q,
             answer: updatedAnswers[idx] || 'Not specified'
           }));
 
-          // Accurately parse user choices with 1-day priority
           let requestedDays = 1;
           let requestedMealTypes = ['Dinner'];
           let requestedTheme = 'Balanced Wholesome';
@@ -10909,7 +11279,6 @@ export default function ChefChatPage() {
             const a = answer.trim();
             const aLower = a.toLowerCase();
 
-            // 1. Duration
             if (/\b(how many days|number of days|duration|days to plan|how long|days would you like)\b/i.test(q) || (/\bdays?\b/i.test(q) && /\b(how many|plan for|total)\b/i.test(q))) {
               if (/\b(1|single|one|today only)\b/i.test(aLower) && !/\b(1[0-4])\b/.test(aLower)) {
                 requestedDays = 1;
@@ -10922,7 +11291,6 @@ export default function ChefChatPage() {
                 }
               }
             }
-            // 2. Meal types
             else if (/\b(meal type|meal types|which meal|types of meal|meals to include)\b/i.test(q)) {
               if (/all meals \+ snack/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
               else if (/all meals/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Lunch', 'Dinner'];
@@ -10934,15 +11302,12 @@ export default function ChefChatPage() {
               else if (/breakfast only/i.test(aLower)) requestedMealTypes = ['Breakfast'];
               else requestedMealTypes = [a];
             }
-            // 3. Start Date
             else if (/\b(when|start date|starting|start|commence|begin)\b/i.test(q)) {
               startDate = a;
             }
-            // 4. Budget
             else if (/\b(budget|cost|spend|price|financial)\b/i.test(q)) {
               requestedBudget = a;
             }
-            // 5. Themes & Preferences
             else if (/\b(theme|themes|preference|preferences|flavor|flavors|cuisine)\b/i.test(q)) {
               requestedTheme = a;
             }
@@ -10966,7 +11331,7 @@ export default function ChefChatPage() {
               userEmail: activeAuth?.email,
               preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
               pantry: enablePantryContext ? pantryIngredientsList : [],
-          enableSavedRecipeSearch
+              enableSavedRecipeSearch
             })
           });
 
@@ -11197,7 +11562,7 @@ export default function ChefChatPage() {
               backgroundColor: 'var(--color-inner-dark)',
               borderColor: 'var(--color-emerald)',
               color: 'var(--color-emerald)'
-            }}
+}}
           >
             {t('servingsLabelPref', 'Servings:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{(t('peopleSuffix', '{count} people')).replace('{count}', String(servings))}</strong>
           </span>
@@ -11346,7 +11711,7 @@ export default function ChefChatPage() {
                   key={sec.id}
                   type="button"
                   onClick={() => handleStartTopicWizard(sec)}
-                  className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-sm hover:scale-[1.02] cursor-pointer flex items-center gap-2"
+                  className="text-xs font-semibold px-3 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
                   style={{
                     backgroundColor: 'var(--color-card)',
                     borderColor: 'var(--color-border)',
@@ -11569,7 +11934,7 @@ export default function ChefChatPage() {
                     </div>
                   )}
 
-                  {/* MULTI-DAY PLAN PRESENTATION (SUPPORTS CARD, COMPACT, DETAILED MODES) */}
+                  {/* MULTI-DAY PLAN PRESENTATION */}
                   {m.plan && (
                     <div 
                       className="border rounded-3xl p-5 space-y-4 shadow-sm transition-colors duration-200"
@@ -11586,7 +11951,6 @@ export default function ChefChatPage() {
                           </h3>
                         </div>
 
-                        {/* In-Chat View Mode Switcher Pills */}
                         <div className="flex items-center gap-1.5 self-end sm:self-auto">
                           <span className="text-[10px] font-bold mr-1 hidden sm:inline" style={{ color: 'var(--color-text-secondary)' }}>
                             {m.plan.budgetPerServing ? `Budget: ${m.plan.budgetPerServing}` : '$5.00/serv'}
@@ -11834,10 +12198,8 @@ export default function ChefChatPage() {
                           ))}
                         </div>
                       )}
-
                     </div>
                   )}
-
                 </div>
 
                 {isUser && (
@@ -12074,12 +12436,18 @@ export default function ChefChatPage() {
                   </span>
                 </div>
 
-                <form onSubmit={handleCreateCategory} className="flex gap-2">
+                <div className="flex gap-2">
                   <input
                     type="text"
                     placeholder="New category name (e.g. Keto Prep, Dinners)..."
                     value={newCategoryName}
                     onChange={(e) => setNewCategoryName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleCreateCategory();
+                      }
+                    }}
                     className="flex-1 border rounded-xl px-3 py-1.5 text-xs outline-none"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -12088,14 +12456,15 @@ export default function ChefChatPage() {
                     }}
                   />
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={() => handleCreateCategory()}
                     disabled={!newCategoryName.trim()}
                     className="px-3 py-1.5 text-white font-bold text-xs rounded-xl transition cursor-pointer disabled:opacity-40 flex items-center gap-1 shadow-xs hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-emerald)' }}
                   >
                     <Plus className="h-3.5 w-3.5" /> Add
                   </button>
-                </form>
+                </div>
 
                 <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
                   <button
@@ -12457,12 +12826,18 @@ export default function ChefChatPage() {
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('ingredientsToAvoidTitle', 'Ingredients to Avoid')}
                 </label>
-                <form onSubmit={handleAddAvoid} className="flex gap-2">
+                <div className="flex gap-2">
                   <input
                     type="text"
                     placeholder={t('typeIngredientPlaceholder', 'Type an ingredient...')}
                     value={newAvoidInput}
                     onChange={(e) => setNewAvoidInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddAvoid();
+                      }
+                    }}
                     className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-sm"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -12471,13 +12846,14 @@ export default function ChefChatPage() {
                     }}
                   />
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={() => handleAddAvoid()}
                     className="px-3.5 py-2.5 text-white rounded-xl font-bold flex items-center justify-center transition cursor-pointer shadow-md hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     <Plus className="h-4 w-4" />
                   </button>
-                </form>
+                </div>
 
                 <div 
                   className="p-3 rounded-2xl border min-h-[50px] flex flex-wrap gap-2 items-center"
@@ -12519,12 +12895,18 @@ export default function ChefChatPage() {
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('tastesTitle', 'Tastes')}
                 </label>
-                <form onSubmit={handleAddTaste} className="flex gap-2">
+                <div className="flex gap-2">
                   <input
                     type="text"
                     placeholder={t('tastesPlaceholder', 'e.g. prefers larger portions, loves umami...')}
                     value={newTasteInput}
                     onChange={(e) => setNewTasteInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddTaste();
+                      }
+                    }}
                     className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-sm"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -12533,13 +12915,14 @@ export default function ChefChatPage() {
                     }}
                   />
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={() => handleAddTaste()}
                     className="px-3.5 py-2.5 text-white rounded-xl font-bold flex items-center justify-center transition cursor-pointer shadow-md hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     <Plus className="h-4 w-4" />
                   </button>
-                </form>
+                </div>
 
                 <div 
                   className="p-3 rounded-2xl border min-h-[50px] flex flex-wrap gap-2 items-center"
@@ -12842,7 +13225,7 @@ export default function ChefChatPage() {
                   <button
                     type="button"
                     onClick={() => handleOpenPlannerModal(selectedRecipeForModal)}
-                    className="px-3.5 py-1.5 rounded-xl text-white text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90"
+                    className="px-3.5 py-1.5 rounded-xl text-white text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90 animate-in fade-in"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >
                     <CalendarPlus className="h-3.5 w-3.5" />
@@ -25242,8 +25625,8 @@ export default function RecipeTypeAdminPage() {
     }
   };
 
-  const handleAddType = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddType = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     const clean = newTypeName.trim();
     if (!clean) return;
 
@@ -25314,6 +25697,7 @@ export default function RecipeTypeAdminPage() {
 
         <div className="flex items-center gap-2.5">
           <button
+            type="button"
             onClick={loadTypesFromServer}
             disabled={isLoading}
             className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
@@ -25329,6 +25713,7 @@ export default function RecipeTypeAdminPage() {
           </button>
 
           <button
+            type="button"
             onClick={handleResetDefaults}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs"
             style={{
@@ -25371,6 +25756,7 @@ export default function RecipeTypeAdminPage() {
             <span>{t('repositionBannerRecipeType', 'Drag items or use arrows to reorder recipe types. Click Done when finished.')}</span>
           </div>
           <button
+            type="button"
             onClick={toggleRepositionMode}
             className="px-3 py-1 text-white font-bold rounded-lg transition text-[11px] shrink-0 cursor-pointer shadow-sm"
             style={{ backgroundColor: 'var(--color-emerald)' }}
@@ -25380,7 +25766,7 @@ export default function RecipeTypeAdminPage() {
         </div>
       )}
 
-      {/* ADD RECIPE TYPE FORM */}
+      {/* ADD RECIPE TYPE CONTAINER (NO FORM) */}
       {!isReordering && (
         <div 
           className="border rounded-3xl p-6 shadow-sm space-y-3 transition-colors duration-200"
@@ -25392,13 +25778,19 @@ export default function RecipeTypeAdminPage() {
           <h2 className="text-base font-extrabold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
             <Plus className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('addNewRecipeType', 'Add New Recipe Type')}
           </h2>
-          <form onSubmit={handleAddType} className="flex flex-col sm:flex-row gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <input
               type="text"
               required
               placeholder={t('recipeTypePlaceholder', 'e.g. Soup, Salad, Curry...')}
               value={newTypeName}
               onChange={(e) => setNewTypeName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAddType();
+                }
+              }}
               className="flex-1 border rounded-xl px-4 py-3 text-sm outline-none transition"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
@@ -25409,7 +25801,8 @@ export default function RecipeTypeAdminPage() {
               onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
             />
             <button
-              type="submit"
+              type="button"
+              onClick={() => handleAddType()}
               className="text-white font-bold text-xs px-6 py-3 rounded-xl transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
               style={{ backgroundColor: 'var(--color-primary)' }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -25417,7 +25810,7 @@ export default function RecipeTypeAdminPage() {
             >
               <Plus className="h-4 w-4" /> {t('addRecipeTypeBtn', 'Add Recipe Type')}
             </button>
-          </form>
+          </div>
         </div>
       )}
 
@@ -25507,6 +25900,7 @@ export default function RecipeTypeAdminPage() {
                       }}
                     />
                     <button
+                      type="button"
                       onClick={() => handleSaveEdit(idx)}
                       className="p-1.5 border rounded-lg transition cursor-pointer shadow-xs"
                       style={{
@@ -25519,6 +25913,7 @@ export default function RecipeTypeAdminPage() {
                       <Check className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
                     </button>
                     <button
+                      type="button"
                       onClick={() => setEditingIndex(null)}
                       className="p-1.5 border rounded-lg transition cursor-pointer shadow-xs"
                       style={{
@@ -25574,6 +25969,7 @@ export default function RecipeTypeAdminPage() {
                     {!isReordering && (
                       <div className="flex items-center gap-1 shrink-0">
                         <button
+                          type="button"
                           onClick={() => {
                             setEditingIndex(idx);
                             setEditingValue(type);
@@ -25589,6 +25985,7 @@ export default function RecipeTypeAdminPage() {
                           <Edit3 className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                         </button>
                         <button
+                          type="button"
                           onClick={() => handleDeleteType(idx, type)}
                           className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shadow-xs"
                           style={{
@@ -30407,7 +30804,7 @@ export default function AdminUserManagementPage() {
     }
 
     const freshPlans = parsedPlans;
-      setAvailablePlans(prev => JSON.stringify(prev) === JSON.stringify(freshPlans) ? prev : freshPlans);
+    setAvailablePlans(prev => JSON.stringify(prev) === JSON.stringify(freshPlans) ? prev : freshPlans);
   }, []);
 
   const loadUsers = useCallback(async () => {
@@ -30666,8 +31063,8 @@ export default function AdminUserManagementPage() {
     setShowAddModal(true);
   };
 
-  const handleAddUserSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddUserSubmit = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     setAddError('');
 
     const cleanEmail = addEmail.trim().toLowerCase();
@@ -30721,7 +31118,7 @@ export default function AdminUserManagementPage() {
       const data = await res.json();
       if (data.users && Array.isArray(data.users)) {
         const freshList = data.users;
-          setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
+        setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
       } else {
         setUsers(prev => [newUser, ...prev.filter(u => u.email.toLowerCase() !== cleanEmail)]);
       }
@@ -30749,8 +31146,8 @@ export default function AdminUserManagementPage() {
     setShowEditModal(true);
   };
 
-  const handleEditUserSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleEditUserSubmit = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!editingUserId) return;
     setEditError('');
 
@@ -30805,7 +31202,7 @@ export default function AdminUserManagementPage() {
       const data = await res.json();
       if (data.users && Array.isArray(data.users)) {
         const freshList = data.users;
-          setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
+        setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
       } else {
         setUsers(prev => prev.map(u => u.id === editingUserId ? updatedUser : u));
       }
@@ -31211,21 +31608,48 @@ export default function AdminUserManagementPage() {
       {showAddModal && (
         <div onClick={() => setShowAddModal(false)} className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer">
           <div onClick={(e) => e.stopPropagation()} className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-            <button onClick={() => setShowAddModal(false)} className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text-secondary)' }}><X className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setShowAddModal(false)} className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text-secondary)' }}><X className="h-4 w-4" /></button>
             <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-primary)' }}><UserPlus className="h-5 w-5" /> Add New User</h2>
             {addError && <div className="p-3 border rounded-xl font-semibold flex items-center gap-2 bg-red-500/10 border-red-500 text-red-500"><AlertCircle className="h-4 w-4 shrink-0" /><span>{addError}</span></div>}
-            <form onSubmit={handleAddUserSubmit} className="space-y-3.5">
+            <div className="space-y-3.5">
               <div>
                 <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Full Name *</label>
-                <input type="text" required placeholder="Jordan Smith" value={addName} onChange={e => setAddName(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
+                <input 
+                  type="text" 
+                  required 
+                  placeholder="Jordan Smith" 
+                  value={addName} 
+                  onChange={e => setAddName(e.target.value)} 
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddUserSubmit(); } }}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none" 
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Email Address *</label>
-                <input type="email" required placeholder="jordan@example.com" value={addEmail} onChange={e => setAddEmail(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
+                <input 
+                  type="email" 
+                  required 
+                  placeholder="jordan@example.com" 
+                  value={addEmail} 
+                  onChange={e => setAddEmail(e.target.value)} 
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddUserSubmit(); } }}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none" 
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Password *</label>
-                <input type="password" required placeholder="••••••••" value={addPassword} onChange={e => setAddPassword(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
+                <input 
+                  type="password" 
+                  required 
+                  placeholder="••••••••" 
+                  value={addPassword} 
+                  onChange={e => setAddPassword(e.target.value)} 
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddUserSubmit(); } }}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none" 
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
@@ -31240,9 +31664,9 @@ export default function AdminUserManagementPage() {
               </div>
               <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2.5 border font-bold rounded-xl text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>
-                <button type="submit" className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-primary)' }}>Create User</button>
+                <button type="button" onClick={() => handleAddUserSubmit()} className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-primary)' }}>Create User</button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -31251,21 +31675,45 @@ export default function AdminUserManagementPage() {
       {showEditModal && (
         <div onClick={() => setShowEditModal(false)} className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer">
           <div onClick={(e) => e.stopPropagation()} className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-            <button onClick={() => setShowEditModal(false)} className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text-secondary)' }}><X className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setShowEditModal(false)} className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text-secondary)' }}><X className="h-4 w-4" /></button>
             <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-primary)' }}><Edit3 className="h-5 w-5" /> Edit User & Plan</h2>
             {editError && <div className="p-3 border rounded-xl font-semibold flex items-center gap-2 bg-red-500/10 border-red-500 text-red-500"><AlertCircle className="h-4 w-4 shrink-0" /><span>{editError}</span></div>}
-            <form onSubmit={handleEditUserSubmit} className="space-y-3.5">
+            <div className="space-y-3.5">
               <div>
                 <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Full Name *</label>
-                <input type="text" required value={editName} onChange={e => setEditName(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
+                <input 
+                  type="text" 
+                  required 
+                  value={editName} 
+                  onChange={e => setEditName(e.target.value)} 
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleEditUserSubmit(); } }}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none" 
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Email Address *</label>
-                <input type="email" required value={editEmail} onChange={e => setEditEmail(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
+                <input 
+                  type="email" 
+                  required 
+                  value={editEmail} 
+                  onChange={e => setEditEmail(e.target.value)} 
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleEditUserSubmit(); } }}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none" 
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Change Password <span className="font-normal" style={{ color: 'var(--color-text-secondary)' }}>(leave blank)</span></label>
-                <input type="password" placeholder="New password..." value={editPassword} onChange={e => setEditPassword(e.target.value)} className="w-full border rounded-xl p-2.5 text-xs outline-none" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} />
+                <input 
+                  type="password" 
+                  placeholder="New password..." 
+                  value={editPassword} 
+                  onChange={e => setEditPassword(e.target.value)} 
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleEditUserSubmit(); } }}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none" 
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
+                />
               </div>
               <div>
                 <label className="block font-bold mb-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
@@ -31280,9 +31728,9 @@ export default function AdminUserManagementPage() {
               </div>
               <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <button type="button" onClick={() => setShowEditModal(false)} className="px-4 py-2.5 border font-bold rounded-xl text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>Cancel</button>
-                <button type="submit" className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-primary)' }}>Save Changes</button>
+                <button type="button" onClick={() => handleEditUserSubmit()} className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-xs cursor-pointer" style={{ backgroundColor: 'var(--color-primary)' }}>Save Changes</button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -32266,8 +32714,8 @@ export default function IngredientCategoryPage() {
     }
   };
 
-  const handleAddCategory = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddCategory = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     const clean = newCatName.trim();
     if (!clean) return;
 
@@ -32338,6 +32786,7 @@ export default function IngredientCategoryPage() {
 
         <div className="flex items-center gap-2.5">
           <button
+            type="button"
             onClick={loadCategoriesFromServer}
             disabled={isLoading}
             className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
@@ -32353,6 +32802,7 @@ export default function IngredientCategoryPage() {
           </button>
 
           <button
+            type="button"
             onClick={handleResetDefaults}
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs"
             style={{
@@ -32395,6 +32845,7 @@ export default function IngredientCategoryPage() {
             <span>{t('repositionBanner', 'Drag items or use arrows to reorder ingredient categories. Click Done when finished.')}</span>
           </div>
           <button
+            type="button"
             onClick={toggleRepositionMode}
             className="px-3 py-1 text-white font-bold rounded-lg transition text-[11px] shrink-0 cursor-pointer shadow-sm"
             style={{ backgroundColor: 'var(--color-emerald)' }}
@@ -32404,7 +32855,7 @@ export default function IngredientCategoryPage() {
         </div>
       )}
 
-      {/* ADD CATEGORY FORM */}
+      {/* ADD CATEGORY CONTAINER (NO NATIVE FORM) */}
       {!isReordering && (
         <div 
           className="border rounded-3xl p-6 shadow-sm space-y-3 transition-colors duration-200"
@@ -32416,13 +32867,19 @@ export default function IngredientCategoryPage() {
           <h2 className="text-base font-extrabold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
             <Plus className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('addNewCategory', 'Add New Ingredient Category')}
           </h2>
-          <form onSubmit={handleAddCategory} className="flex flex-col sm:flex-row gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <input
               type="text"
               required
               placeholder={t('categoryPlaceholder', 'e.g. Spices, Grains, Produce...')}
               value={newCatName}
               onChange={(e) => setNewCatName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAddCategory();
+                }
+              }}
               className="flex-1 border rounded-xl px-4 py-3 text-sm outline-none transition"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
@@ -32433,7 +32890,8 @@ export default function IngredientCategoryPage() {
               onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
             />
             <button
-              type="submit"
+              type="button"
+              onClick={() => handleAddCategory()}
               className="text-white font-bold text-xs px-6 py-3 rounded-xl transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
               style={{ backgroundColor: 'var(--color-primary)' }}
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -32441,7 +32899,7 @@ export default function IngredientCategoryPage() {
             >
               <Plus className="h-4 w-4" /> {t('addCategoryBtn', 'Add Category')}
             </button>
-          </form>
+          </div>
         </div>
       )}
 
@@ -32531,6 +32989,7 @@ export default function IngredientCategoryPage() {
                       }}
                     />
                     <button
+                      type="button"
                       onClick={() => handleSaveEdit(idx)}
                       className="p-1.5 border rounded-lg transition cursor-pointer shadow-xs"
                       style={{
@@ -32543,6 +33002,7 @@ export default function IngredientCategoryPage() {
                       <Check className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
                     </button>
                     <button
+                      type="button"
                       onClick={() => setEditingIndex(null)}
                       className="p-1.5 border rounded-lg transition cursor-pointer shadow-xs"
                       style={{
@@ -32598,6 +33058,7 @@ export default function IngredientCategoryPage() {
                     {!isReordering && (
                       <div className="flex items-center gap-1 shrink-0">
                         <button
+                          type="button"
                           onClick={() => {
                             setEditingIndex(idx);
                             setEditingValue(cat);
@@ -32613,6 +33074,7 @@ export default function IngredientCategoryPage() {
                           <Edit3 className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                         </button>
                         <button
+                          type="button"
                           onClick={() => handleDeleteCategory(idx, cat)}
                           className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shadow-xs"
                           style={{
@@ -32641,75 +33103,29 @@ export default function IngredientCategoryPage() {
 
 ## File: `apps/web/src/app/books/page.tsx`
 ```typescript
-// @ts-nocheck
+// Generated / Updated by AI Collaborator
 'use client';
+
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
-  Book, Plus, Utensils, Trash2, Edit3, Save, X, 
-  ArrowRight, Palette, Check, Clock, Timer, Share2, 
-  CheckCircle2, CalendarPlus, ShoppingCart, 
-  BookmarkPlus, Heart, Star, ChevronDown, ImagePlus,
-  GripVertical, CheckSquare, ExternalLink, Users,
-  Search, ChevronLeft, ChevronRight, Grid3X3, LayoutGrid, Rows3,
-  Pipette
+  Book, Plus, Trash2, Edit3, Search, X, Check, BookOpen,
+  FolderPlus, ChevronRight, Utensils, Save, Sparkles, RefreshCw
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
 const COVER_GRADIENTS = [
-  { label: 'Rose & Pink', value: 'bg-gradient-to-r from-pink-600 via-rose-500 to-rose-600' },
-  { label: 'Emerald Green', value: 'bg-gradient-to-r from-emerald-600 to-teal-700' },
-  { label: 'Sunset Orange', value: 'bg-gradient-to-r from-orange-500 to-amber-600' },
-  { label: 'Royal Purple', value: 'bg-gradient-to-r from-purple-600 to-indigo-800' },
-  { label: 'Ocean Blue', value: 'bg-gradient-to-r from-blue-600 to-cyan-600' },
-  { label: 'Slate Charcoal', value: 'bg-gradient-to-r from-slate-700 to-slate-900' },
+  { id: 'rose', label: 'Rose Pink', className: 'from-pink-600 via-rose-500 to-rose-600' },
+  { id: 'orange', label: 'Sunset Orange', className: 'from-amber-500 via-orange-500 to-red-500' },
+  { id: 'emerald', label: 'Fresh Emerald', className: 'from-emerald-500 via-teal-500 to-cyan-500' },
+  { id: 'blue', label: 'Ocean Blue', className: 'from-blue-600 via-indigo-500 to-violet-600' },
+  { id: 'purple', label: 'Royal Purple', className: 'from-purple-600 via-fuchsia-500 to-pink-500' },
+  { id: 'slate', label: 'Dark Charcoal', className: 'from-slate-700 via-slate-800 to-slate-900' }
 ];
 
-const DEFAULT_CATEGORIES = [
-  'Produce', 'Meat and Seafood', 'Dairy', 
-  'Grains and Pasta', 'Pantry Staples', 
-  'Condiments and Sauces', 'Beverages'
-];
-
-type GridMode = '3x3' | '4x4' | '5x5';
-
-const GRID_CONFIG: Record<GridMode, { colsClass: string; perPage: number; label: string; headerHeight: string; titleSize: string }> = {
-  '3x3': {
-    colsClass: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3',
-    perPage: 9,
-    label: '3×3',
-    headerHeight: 'h-36',
-    titleSize: 'text-xl'
-  },
-  '4x4': {
-    colsClass: 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4',
-    perPage: 16,
-    label: '4×4',
-    headerHeight: 'h-28',
-    titleSize: 'text-base'
-  },
-  '5x5': {
-    colsClass: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5',
-    perPage: 25,
-    label: '5×5',
-    headerHeight: 'h-24',
-    titleSize: 'text-sm'
-  }
-};
-
-const isGradientClass = (color?: string) => {
-  if (!color) return true;
-  return color.startsWith('bg-') || color.startsWith('from-');
-};
-
-const getCoverBgStyle = (color?: string) => {
-  if (!color || isGradientClass(color)) return undefined;
-  return { backgroundColor: color };
-};
-
-export const isRecipeInBook = (rec: any, bookId: string): boolean => {
+const isRecipeInBook = (rec: any, bookId: string): boolean => {
   if (!rec || !bookId) return false;
   return rec.bookId === bookId || rec.book_id === bookId;
 };
@@ -32720,65 +33136,23 @@ export default function BooksPage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [books, setBooks] = useState<any[]>([]);
   const [recipes, setRecipes] = useState<any[]>([]);
-  
-  // Search, Grid Density & Pagination States
   const [search, setSearch] = useState('');
-  const [gridMode, setGridMode] = useState<GridMode>('3x3');
-  const [currentPage, setCurrentPage] = useState(1);
+  const [loading, setLoading] = useState(true);
 
-  // Cookbook Modal States
+  // Modals state
   const [showAddModal, setShowAddModal] = useState(false);
-  const [editingBook, setEditingBook] = useState<any | null>(null);
+  const [newTitle, setNewTitle] = useState('');
+  const [newDescription, setNewDescription] = useState('');
+  const [newCoverGradient, setNewCoverGradient] = useState(COVER_GRADIENTS[0].className);
+
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingBookId, setEditingBookId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editCoverGradient, setEditCoverGradient] = useState(COVER_GRADIENTS[0].className);
+
   const [selectedBook, setSelectedBook] = useState<any | null>(null);
 
-  // Form States for Cookbook Create
-  const [newTitle, setNewTitle] = useState('');
-  const [newDesc, setNewDesc] = useState('');
-  const [newCoverColor, setNewCoverColor] = useState(COVER_GRADIENTS[0].value);
-
-  // Form States for Cookbook Edit
-  const [editTitle, setEditTitle] = useState('');
-  const [editDesc, setEditDesc] = useState('');
-  const [editCoverColor, setEditCoverColor] = useState(COVER_GRADIENTS[0].value);
-
-  // Specific Recipe Popup State
-  const [viewingRecipe, setViewingRecipe] = useState<any | null>(null);
-  const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
-  const [servingsMultiplier, setServingsMultiplier] = useState(1);
-  const [fontSizeScale, setFontSizeScale] = useState(100);
-  const [completedSteps, setCompletedSteps] = useState<number[]>([]);
-  const [noteText, setNoteText] = useState('');
-  const [isNoteOpen, setIsNoteOpen] = useState(false);
-
-  // Recipe Editing State
-  const [isEditingRecipe, setIsEditingRecipe] = useState(false);
-  const [editRecipeTab, setEditRecipeTab] = useState<'info' | 'ingredients' | 'steps'>('info');
-  const [editRecipeForm, setEditRecipeForm] = useState<any>({
-    title: '',
-    description: '',
-    recipeType: 'Main Dish',
-    servings: 4,
-    prepTimeMinutes: 15,
-    cookTimeMinutes: 30,
-    imageUrl: '',
-    ingredients: [],
-    instructions: []
-  });
-  const [isReorderingIngredients, setIsReorderingIngredients] = useState(false);
-  const [isReorderingSteps, setIsReorderingSteps] = useState(false);
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-
-  // Shopping List Modal State
-  const [isShoppingModalOpen, setIsShoppingModalOpen] = useState(false);
-  const [shoppingModalIngredients, setShoppingModalIngredients] = useState<any[]>([]);
-
-  // Add to Plan Modal State
-  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
-  const [planDate, setPlanDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [planMealType, setPlanMealType] = useState('Dinner');
-  const [planMealTime, setPlanMealTime] = useState('19:00');
-
-  // Dynamic Theme Synchronization
   const applyGlobalTheme = useCallback(() => {
     try {
       window.dispatchEvent(new Event('zecratary_theme_updated'));
@@ -32802,222 +33176,188 @@ export default function BooksPage() {
 
   const loadData = useCallback(async (user: User | null) => {
     if (!user) return;
-    const activeUserId = user.id || 'usr_admin_1';
+    const activeUserId = user.id || user.email || 'usr_admin_1';
+    setLoading(true);
 
-    let loadedRecipes: any[] = [];
     try {
-      const rRes = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
-      if (rRes.ok) {
-        const rData = await rRes.json();
-        if (Array.isArray(rData.recipes)) {
-          loadedRecipes = rData.recipes;
+      // 1. Fetch recipes to calculate real-time book recipe counts
+      let loadedRecipes: any[] = [];
+      try {
+        const rRes = await fetch(`/api/recipes?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
+        if (rRes.ok) {
+          const rData = await rRes.json();
+          if (Array.isArray(rData.recipes)) loadedRecipes = rData.recipes;
+          else if (Array.isArray(rData)) loadedRecipes = rData;
         }
+      } catch (_) {}
+
+      if (loadedRecipes.length === 0 && typeof window !== 'undefined') {
+        try {
+          const localR = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
+          if (localR) {
+            const arrR = JSON.parse(localR);
+            if (Array.isArray(arrR)) loadedRecipes = arrR;
+          }
+        } catch (_) {}
       }
-    } catch (_) {}
+      setRecipes(loadedRecipes);
 
-    if (loadedRecipes.length === 0 && typeof window !== 'undefined') {
+      // 2. Fetch live books from PostgreSQL
+      let loadedBooks: any[] = [];
+      let fetchSuccess = false;
       try {
-        const local = localStorage.getItem('zecratary_saved_recipes') || localStorage.getItem('zecratary_recipes');
-        if (local) {
-          const arr = JSON.parse(local);
-          if (Array.isArray(arr)) loadedRecipes = arr;
+        const bRes = await fetch(`/api/books?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
+        if (bRes.ok) {
+          const bData = await bRes.json();
+          if (Array.isArray(bData.books)) {
+            loadedBooks = bData.books;
+            fetchSuccess = true;
+          }
         }
       } catch (_) {}
-    }
-    setRecipes(loadedRecipes);
 
-    let loadedBooks: any[] = [];
-    let fetchSuccess = false;
-    try {
-      const bRes = await fetch(`/api/books?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
-      if (bRes.ok) {
-        const bData = await bRes.json();
-        if (Array.isArray(bData.books)) {
-          loadedBooks = bData.books;
-          fetchSuccess = true;
-        }
+      // Fallback ONLY if network request failed (do not resurrect deleted books)
+      if (!fetchSuccess && typeof window !== 'undefined') {
+        try {
+          const localB = localStorage.getItem('zecratary_recipe_books');
+          if (localB) {
+            const arrB = JSON.parse(localB);
+            if (Array.isArray(arrB)) loadedBooks = arrB;
+          }
+        } catch (_) {}
       }
-    } catch (_) {}
 
-    if (!fetchSuccess && typeof window !== 'undefined') {
-      try {
-        const localB = localStorage.getItem('zecratary_recipe_books');
-        if (localB) {
-          const arrB = JSON.parse(localB);
-          if (Array.isArray(arrB)) loadedBooks = arrB;
-        }
-      } catch (_) {}
-    }
+      // Recalculate recipe counts dynamically based on loadedRecipes
+      const syncdBooks = loadedBooks.map((b: any) => ({
+        ...b,
+        recipeCount: loadedRecipes.filter((r: any) => isRecipeInBook(r, b.id)).length
+      }));
 
-    const syncdBooks = loadedBooks.map((b: any) => ({
-      ...b,
-      recipeCount: loadedRecipes.filter((r: any) => isRecipeInBook(r, b.id)).length
-    }));
-
-    setBooks(syncdBooks);
-
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('zecratary_recipe_books', JSON.stringify(syncdBooks));
-        localStorage.setItem('zecratary_saved_recipes', JSON.stringify(loadedRecipes));
-      } catch (_) {}
+      setBooks(syncdBooks);
+    } catch (e) {
+      console.error('[BooksPage] Error loading data:', e);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    document.title = `${t('recipeBooksTitle') || 'Recipe Books'} - FoodiePrep`;
+    document.title = `${t('cookbooksTitle') || 'Recipe Cookbooks'} - FoodiePrep`;
     initAuthStorage();
     const user = getCurrentUser();
-
     if (!user) {
       router.replace('/login');
       return;
     }
-
     setCurrentUser(user);
     loadData(user);
 
     const handleSync = () => {
-      const active = getCurrentUser();
-      if (active) {
-        setCurrentUser(active);
-        loadData(active);
+      const activeUser = getCurrentUser();
+      if (activeUser) {
+        setCurrentUser(activeUser);
+        loadData(activeUser);
       }
     };
 
     window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_recipes_updated', handleSync);
-    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
     window.addEventListener('zecratary_recipe_books_updated', handleSync);
+    window.addEventListener('zecratary_recipes_updated', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
 
     return () => {
       window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
       window.removeEventListener('zecratary_recipe_books_updated', handleSync);
+      window.removeEventListener('zecratary_recipes_updated', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
     };
   }, [loadData, router, t]);
 
-  const saveBooks = async (updatedUserBooks: any[]) => {
-    if (!currentUser) return;
-    setBooks(updatedUserBooks);
-
-    try {
-      await fetch('/api/books', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedUserBooks)
-      });
-
-      const raw = localStorage.getItem('zecratary_recipe_books');
-      const allBooks: any[] = raw ? JSON.parse(raw) : [];
-      const others = allBooks.filter((b: any) => b.userId !== currentUser.id && b.createdBy !== currentUser.email);
-      localStorage.setItem('zecratary_recipe_books', JSON.stringify([...updatedUserBooks, ...others]));
-
-      window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
-      window.dispatchEvent(new Event('storage'));
-    } catch (e) {
-      console.error('Failed to save books to PostgreSQL', e);
-    }
-  };
-
-  const saveAllRecipes = async (updatedUserList: any[]) => {
-    if (!currentUser) return;
-    setRecipes(updatedUserList);
-
-    try {
-      await fetch('/api/recipes/saved', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedUserList)
-      });
-
-      localStorage.setItem('zecratary_recipes', JSON.stringify(updatedUserList));
-      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(updatedUserList));
-
-      const updatedBooks = books.map((b: any) => ({
-        ...b,
-        recipeCount: updatedUserList.filter((r: any) => isRecipeInBook(r, b.id)).length
-      }));
-      await saveBooks(updatedBooks);
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_recipes_updated'));
-        window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
-        window.dispatchEvent(new Event('storage'));
-      }
-    } catch (e) {
-      console.error('Failed to save recipes to PostgreSQL', e);
-    }
-  };
-
-  const handleCreateBook = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCreateBook = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!newTitle.trim() || !currentUser) return;
 
     const newBook = {
-      id: 'book_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-      userId: currentUser.id,
-      createdBy: currentUser.email,
-      creatorName: currentUser.name,
+      id: 'book_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
+      userId: currentUser.id || 'usr_admin_1',
+      createdBy: currentUser.email || 'admin@zecratary.com',
+      creatorName: currentUser.name || 'Chef',
       title: newTitle.trim(),
-      description: newDesc.trim() || (t('customRecipeCollection') || 'Custom recipe collection'),
+      description: newDescription.trim(),
+      coverColor: newCoverGradient,
       recipeCount: 0,
-      coverColor: newCoverColor,
       createdAt: new Date().toISOString()
     };
 
     const updated = [...books, newBook];
-    await saveBooks(updated);
+    setBooks(updated);
+
+    try {
+      localStorage.setItem('zecratary_recipe_books', JSON.stringify(updated));
+      await fetch('/api/books', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newBook)
+      });
+      window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
+      window.dispatchEvent(new Event('storage'));
+    } catch (err) {
+      console.error('Failed to create book in PostgreSQL:', err);
+    }
+
     setNewTitle('');
-    setNewDesc('');
-    setNewCoverColor(COVER_GRADIENTS[0].value);
+    setNewDescription('');
+    setNewCoverGradient(COVER_GRADIENTS[0].className);
     setShowAddModal(false);
   };
 
-  const openEditModal = (e: React.MouseEvent, book: any) => {
+  const handleOpenEdit = (e: React.MouseEvent, book: any) => {
     e.stopPropagation();
-    setEditingBook(book);
+    setEditingBookId(book.id);
     setEditTitle(book.title || '');
-    setEditDesc(book.description || '');
-    setEditCoverColor(book.coverColor || COVER_GRADIENTS[0].value);
+    setEditDescription(book.description || '');
+    setEditCoverGradient(book.coverColor || COVER_GRADIENTS[0].className);
+    setShowEditModal(true);
   };
 
-  const handleSaveEdit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingBook || !editTitle.trim() || !currentUser) return;
+  const handleUpdateBook = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
+    if (!editingBookId || !editTitle.trim() || !currentUser) return;
 
-    const updated = books.map((b) =>
-      b.id === editingBook.id
-        ? {
-            ...b,
-            userId: currentUser.id,
-            createdBy: currentUser.email,
-            creatorName: currentUser.name,
-            title: editTitle.trim(),
-            description: editDesc.trim(),
-            coverColor: editCoverColor,
-          }
-        : b
-    );
+    const target = books.find(b => b.id === editingBookId);
+    if (!target) return;
 
-    await saveBooks(updated);
+    const updatedBook = {
+      ...target,
+      title: editTitle.trim(),
+      description: editDescription.trim(),
+      coverColor: editCoverGradient,
+      userId: currentUser.id || target.userId,
+      createdBy: currentUser.email || target.createdBy
+    };
 
-    if (selectedBook?.id === editingBook.id) {
-      setSelectedBook({
-        ...selectedBook,
-        userId: currentUser.id,
-        createdBy: currentUser.email,
-        creatorName: currentUser.name,
-        title: editTitle.trim(),
-        description: editDesc.trim(),
-        coverColor: editCoverColor,
-      });
+    const updated = books.map(b => b.id === editingBookId ? updatedBook : b);
+    setBooks(updated);
+
+    if (selectedBook?.id === editingBookId) {
+      setSelectedBook(updatedBook);
     }
 
-    setEditingBook(null);
+    try {
+      localStorage.setItem('zecratary_recipe_books', JSON.stringify(updated));
+      await fetch('/api/books', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedBook)
+      });
+      window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
+      window.dispatchEvent(new Event('storage'));
+    } catch (err) {
+      console.error('Failed to update book in PostgreSQL:', err);
+    }
+
+    setShowEditModal(false);
+    setEditingBookId(null);
   };
 
   const handleDeleteBook = async (e: React.MouseEvent, id: string) => {
@@ -33057,724 +33397,317 @@ export default function BooksPage() {
     }
   };
 
-  const handleOpenRecipePopup = (rec: any) => {
-    setViewingRecipe(rec);
-    setServingsMultiplier(1);
-    setFontSizeScale(100);
-    setCompletedSteps([]);
-    setNoteText(rec.note || '');
-    setIsNoteOpen(false);
-    setIsBookDropdownOpen(false);
-    setIsEditingRecipe(false);
-  };
-
-  const updateViewingRecipeState = async (key: string, val: any) => {
-    if (!viewingRecipe) return;
-    const updatedRec = { ...viewingRecipe, [key]: val };
-    setViewingRecipe(updatedRec);
-    const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
-    await saveAllRecipes(updatedList);
-  };
-
-  const handleAssignToBook = async (bookId: string) => {
-    if (!viewingRecipe) return;
-    const isRemoving = isRecipeInBook(viewingRecipe, bookId);
-    const targetBookId = isRemoving ? null : bookId;
-    const updatedRecipe = { 
-      ...viewingRecipe, 
-      bookId: targetBookId,
-      book_id: targetBookId 
-    };
-    setViewingRecipe(updatedRecipe);
-
-    const updatedList = recipes.map(r => r.id === viewingRecipe.id ? updatedRecipe : r);
-    await saveAllRecipes(updatedList);
-
-    const targetBookTitle = books.find(b => b.id === bookId)?.title || 'Cookbook';
-    const recName = viewingRecipe.title || viewingRecipe.name;
-    if (isRemoving) {
-      const msg = (t('removedFromBookAlert') || 'Removed "{title}" from "{book}"')
-        .replace('{title}', recName)
-        .replace('{book}', targetBookTitle);
-      alert(msg);
-    } else {
-      const msg = (t('assignedToBookAlert') || 'Assigned "{title}" to "{book}"!')
-        .replace('{title}', recName)
-        .replace('{book}', targetBookTitle);
-      alert(msg);
-    }
-  };
-
-  const handleDeleteRecipe = async (id: string) => {
-    if (!confirm(t('confirmDeleteRecipe') || 'Are you sure you want to delete this recipe?')) return;
-    try {
-      await fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-      const updated = recipes.filter(r => r.id !== id);
-      await saveAllRecipes(updated);
-      setViewingRecipe(null);
-      setIsEditingRecipe(false);
-    } catch (err) {
-      console.error('Error deleting recipe:', err);
-    }
-  };
-
-  const toggleStepComplete = (idx: number) => {
-    if (completedSteps.includes(idx)) {
-      setCompletedSteps(completedSteps.filter(i => i !== idx));
-    } else {
-      setCompletedSteps([...completedSteps, idx]);
-    }
-  };
-
-  const calculateScaledAmount = (baseAmount: any, baseServings: number, currentServings: number) => {
-    if (!baseAmount || isNaN(Number(baseAmount))) return baseAmount;
-    const num = Number(baseAmount);
-    const scaled = (num / (baseServings || 4)) * currentServings;
-    return Number.isInteger(scaled) ? scaled : Number(scaled.toFixed(2));
-  };
-
-  const handleOpenEditRecipe = () => {
-    if (!viewingRecipe) return;
-    setEditRecipeForm({
-      title: viewingRecipe.title || viewingRecipe.name || '',
-      description: viewingRecipe.description || '',
-      recipeType: viewingRecipe.recipeType || viewingRecipe.tags?.[0] || 'Main Dish',
-      servings: viewingRecipe.servings || 4,
-      prepTimeMinutes: viewingRecipe.prepTimeMinutes || 15,
-      cookTimeMinutes: viewingRecipe.cookTimeMinutes || 30,
-      imageUrl: viewingRecipe.imageUrl || viewingRecipe.image || '',
-      ingredients: viewingRecipe.ingredients
-        ? viewingRecipe.ingredients.map((ing: any) => ({
-            amount: typeof ing === 'string' ? '' : ing.amount || ing.quantity || '',
-            unit: typeof ing === 'string' ? '' : ing.unit || '',
-            item: typeof ing === 'string' ? ing : ing.item || ing.name || '',
-            category: typeof ing === 'string' ? 'Pantry Staples' : ing.category || 'Pantry Staples'
-          }))
-        : [{ amount: '', unit: '', item: '', category: 'Pantry Staples' }],
-      instructions: viewingRecipe.instructions && viewingRecipe.instructions.length > 0
-        ? [...viewingRecipe.instructions]
-        : ['']
-    });
-    setEditRecipeTab('info');
-    setIsReorderingIngredients(false);
-    setIsReorderingSteps(false);
-    setIsEditingRecipe(true);
-  };
-
-  const handleSaveRecipeEdit = async () => {
-    if (!editRecipeForm.title.trim() || !currentUser) {
-      alert(t('enterRecipeTitleAlert') || 'Please enter a recipe title.');
-      setEditRecipeTab('info');
-      return;
-    }
-
-    const updatedRec = {
-      ...viewingRecipe,
-      ...editRecipeForm,
-      userId: currentUser.id,
-      createdBy: currentUser.email,
-      creatorName: currentUser.name,
-      tags: [editRecipeForm.recipeType]
-    };
-
-    setViewingRecipe(updatedRec);
-    const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
-    await saveAllRecipes(updatedList);
-    setIsEditingRecipe(false);
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setEditRecipeForm((prev: any) => ({ ...prev, imageUrl: reader.result as string }));
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleDragStart = (index: number) => setDraggedIndex(index);
-  const handleDragOver = (e: React.DragEvent, index: number, type: 'ingredients' | 'steps') => {
-    e.preventDefault();
-    if (draggedIndex === null || draggedIndex === index) return;
-    if (type === 'ingredients') {
-      const list = [...editRecipeForm.ingredients];
-      const item = list[draggedIndex];
-      list.splice(draggedIndex, 1);
-      list.splice(index, 0, item);
-      setEditRecipeForm({ ...editRecipeForm, ingredients: list });
-    } else {
-      const list = [...editRecipeForm.instructions];
-      const item = list[draggedIndex];
-      list.splice(draggedIndex, 1);
-      list.splice(index, 0, item);
-      setEditRecipeForm({ ...editRecipeForm, instructions: list });
-    }
-    setDraggedIndex(index);
-  };
-  const handleDrop = () => setDraggedIndex(null);
-
-  const handleOpenShoppingModal = () => {
-    if (!viewingRecipe) return;
-    const items = (viewingRecipe.ingredients || []).map((ing: any, idx: number) => ({
-      id: 'shop_item_' + idx,
-      selected: true,
-      amount: typeof ing === 'string' ? '' : ing.amount || ing.quantity || '',
-      unit: typeof ing === 'string' ? '' : ing.unit || '',
-      name: typeof ing === 'string' ? ing : ing.item || ing.name || '',
-      category: typeof ing === 'string' ? 'Pantry Staples' : ing.category || 'Pantry Staples'
-    }));
-    setShoppingModalIngredients(items);
-    setIsShoppingModalOpen(true);
-  };
-
-  const handleConfirmAddToShoppingList = () => {
-    if (!currentUser) return;
-    const selectedItems = shoppingModalIngredients.filter(i => i.selected);
-    if (selectedItems.length === 0) {
-      alert(t('noIngredientsSelectedAlert') || 'No ingredients selected.');
-      return;
-    }
-    const local = localStorage.getItem('zecratary_shopping') || localStorage.getItem('zecratary_shopping_list');
-    const current = local ? JSON.parse(local) : [];
-    const formatted = selectedItems.map(i => ({
-      id: 's_' + Date.now() + Math.random(),
-      userId: currentUser.id,
-      createdBy: currentUser.email,
-      creatorName: currentUser.name,
-      name: i.name,
-      quantity: i.amount || '1',
-      unit: i.unit || 'item',
-      category: i.category,
-      checked: false,
-      createdAt: new Date().toISOString()
-    }));
-    const updated = [...formatted, ...current];
-    localStorage.setItem('zecratary_shopping', JSON.stringify(updated));
-    localStorage.setItem('zecratary_shopping_list', JSON.stringify(updated));
-    setIsShoppingModalOpen(false);
-    const alertMsg = (t('addedIngredientsToShoppingAlert') || 'Added {count} ingredients to your Shopping List!')
-      .replace('{count}', String(selectedItems.length));
-    alert(alertMsg);
-  };
-
-  const handleConfirmAddToPlan = () => {
-    if (!viewingRecipe || !currentUser) return;
-    const localPlan = localStorage.getItem('zecratary_meal_plan');
-    const planItems = localPlan ? JSON.parse(localPlan) : [];
-    const newMeal = {
-      id: 'plan_' + Date.now(),
-      userId: currentUser.id,
-      createdBy: currentUser.email,
-      creatorName: currentUser.name,
-      date: planDate,
-      recipeId: viewingRecipe.id,
-      recipeName: viewingRecipe.title || viewingRecipe.name,
-      image: viewingRecipe.imageUrl || viewingRecipe.image,
-      mealType: planMealType,
-      time: planMealTime,
-      isLeftover: false,
-      notes: '',
-      createdAt: new Date().toISOString()
-    };
-    const updatedPlan = [...planItems, newMeal];
-    localStorage.setItem('zecratary_meal_plan', JSON.stringify(updatedPlan));
-    window.dispatchEvent(new Event('zecratary_planner_updated'));
-    setIsPlanModalOpen(false);
-    const alertMsg = (t('addedToMealPlanAlert') || 'Added "{title}" to meal plan on {date}!')
-      .replace('{title}', viewingRecipe.title || viewingRecipe.name)
-      .replace('{date}', planDate);
-    alert(alertMsg);
-  };
-
   const filteredBooks = useMemo(() => {
     const q = search.toLowerCase().trim();
     if (!q) return books;
-    return books.filter((b) =>
-      (b.title || '').toLowerCase().includes(q) ||
+    return books.filter(b => 
+      (b.title || '').toLowerCase().includes(q) || 
       (b.description || '').toLowerCase().includes(q)
     );
   }, [books, search]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [search, gridMode]);
-
-  const itemsPerPage = GRID_CONFIG[gridMode].perPage;
-  const totalPages = Math.max(1, Math.ceil(filteredBooks.length / itemsPerPage));
-  const safeCurrentPage = Math.min(currentPage, totalPages);
-  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
-  const paginatedBooks = filteredBooks.slice(startIndex, startIndex + itemsPerPage);
-
-  const baseServings = viewingRecipe?.servings || 4;
-  const currentTotalServings = baseServings * servingsMultiplier;
-  const assignedBook = books.find(b => isRecipeInBook(viewingRecipe, b.id));
+  const selectedBookRecipes = useMemo(() => {
+    if (!selectedBook) return [];
+    return recipes.filter(r => isRecipeInBook(r, selectedBook.id));
+  }, [recipes, selectedBook]);
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-16 px-4 font-sans transition-colors duration-200"
+      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
-      {/* Page Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
-        <div>
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2">
+        <div className="space-y-1">
           <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-            {t('recipeBooksTitle') || 'Recipe Books'}
+            {t('cookbooksTitle') || 'Recipe Cookbooks'}
           </h1>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {currentUser 
-              ? (t('recipeBooksSubtitleUser') || "{name}'s curated cookbooks ({count})")
-                  .replace('{name}', currentUser.name)
-                  .replace('{count}', String(books.length))
-              : (t('recipeBooksSubtitleDefault') || 'Organize your saved recipes into curated digital cookbooks')}
+            {(t('cookbooksSubtitle') || 'Organize and group your saved recipes into custom collections ({count})').replace('{count}', String(books.length))}
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          {/* Density Selector */}
-          <div 
-            className="flex items-center p-1 rounded-xl border shadow-sm"
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => loadData(currentUser)}
+            disabled={loading}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
             style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
             }}
+            title="Reload cookbooks from server"
           >
-            {(['3x3', '4x4', '5x5'] as GridMode[]).map((mode) => {
-              const isActive = gridMode === mode;
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => setGridMode(mode)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer`}
-                  style={isActive ? {
-                    backgroundColor: 'var(--color-primary)',
-                    color: '#ffffff',
-                    boxShadow: '0 2px 8px rgba(224, 86, 56, 0.3)'
-                  } : {
-                    color: 'var(--color-text-secondary)',
-                    backgroundColor: 'transparent'
-                  }}
-                  title={`Show ${GRID_CONFIG[mode].label} layout (${GRID_CONFIG[mode].perPage} per page)`}
-                >
-                  {mode === '3x3' && <Grid3X3 className="h-3.5 w-3.5" />}
-                  {mode === '4x4' && <LayoutGrid className="h-3.5 w-3.5" />}
-                  {mode === '5x5' && <Rows3 className="h-3.5 w-3.5" />}
-                  <span>{GRID_CONFIG[mode].label}</span>
-                </button>
-              );
-            })}
-          </div>
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
+            <span>Reload</span>
+          </button>
 
           <button
+            type="button"
             onClick={() => setShowAddModal(true)}
-            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer"
+            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-lg cursor-pointer"
             style={{ backgroundColor: 'var(--color-primary)' }}
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
             onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
-            <Plus className="h-4 w-4" /> {t('createRecipeBookBtn') || 'Create Recipe Book'}
+            <FolderPlus className="h-4 w-4" /> {t('newCookbookBtn') || 'New Cookbook'}
           </button>
         </div>
       </div>
 
       {/* Search Bar */}
       <div className="relative">
-        <Search className="h-4 w-4 absolute left-3.5 top-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
+        <Search 
+          className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none" 
+          style={{ color: 'var(--color-text-secondary)' }}
+        />
         <input
           type="text"
           placeholder={t('searchCookbooksPlaceholder') || 'Search cookbooks by title or description...'}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-xs outline-none transition"
+          className="w-full border rounded-2xl pl-11 pr-4 py-2.5 text-sm outline-none transition shadow-xs"
           style={{
-            backgroundColor: 'var(--color-inner-dark)',
+            backgroundColor: 'var(--color-card)',
             borderColor: 'var(--color-border)',
             color: 'var(--color-text)'
           }}
           onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
           onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
         />
-        {search && (
-          <button
-            type="button"
-            onClick={() => setSearch('')}
-            className="absolute right-3 top-2.5 transition"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        )}
       </div>
 
-      {/* Books Grid */}
-      {paginatedBooks.length === 0 ? (
+      {/* Cookbook Grid */}
+      {loading ? (
+        <div className="text-center py-12 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+          {t('loadingCookbooks') || 'Loading cookbooks...'}
+        </div>
+      ) : filteredBooks.length === 0 ? (
         <div 
-          className="p-12 rounded-3xl text-center space-y-2 border"
+          className="text-center py-16 px-4 border border-dashed rounded-3xl space-y-3"
           style={{
             backgroundColor: 'var(--color-inner-dark)',
             borderColor: 'var(--color-border)'
           }}
         >
-          <Book className="h-8 w-8 mx-auto" style={{ color: 'var(--color-text-secondary)' }} />
-          <h4 className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{t('noCookbooksFound') || 'No cookbooks found'}</h4>
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {search 
-              ? (t('tryClearingSearch') || 'Try clearing your search query.') 
-              : (t('createFirstCookbook') || 'Create your first cookbook collection using the button above.')}
+          <div 
+            className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto shadow-sm"
+            style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' }}
+          >
+            <Book className="h-6 w-6"/>
+          </div>
+          <h3 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>
+            {t('noCookbooksFound') || 'No Cookbooks Found'}
+          </h3>
+          <p className="text-xs max-w-sm mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('noCookbooksDesc') || 'Create your first cookbook collection to organize and categorize recipes.'}
           </p>
+          <button
+            type="button"
+            onClick={() => setShowAddModal(true)}
+            className="text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow-sm inline-flex items-center gap-1.5"
+            style={{ backgroundColor: 'var(--color-primary)' }}
+          >
+            <Plus className="h-4 w-4" /> {t('createFirstCookbook') || 'Create First Cookbook'}
+          </button>
         </div>
       ) : (
-        <div className={`grid ${GRID_CONFIG[gridMode].colsClass} gap-6`}>
-          {paginatedBooks.map((book) => {
-            const count = recipes.filter((r: any) => isRecipeInBook(r, book.id)).length;
-            const cfg = GRID_CONFIG[gridMode];
-            return (
-              <div
-                key={book.id}
-                onClick={() => setSelectedBook(book)}
-                className="rounded-3xl overflow-hidden transition cursor-pointer group flex flex-col justify-between shadow-sm hover:shadow-md border"
-                style={{
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)'
-                }}
-              >
-                <div 
-                  className={`${cfg.headerHeight} w-full ${isGradientClass(book.coverColor) ? (book.coverColor || COVER_GRADIENTS[0].value) : ''} p-4 sm:p-5 flex flex-col justify-between relative overflow-hidden shadow-inner`}
-                  style={getCoverBgStyle(book.coverColor)}
-                >
-                  <div className="flex items-center justify-between z-10">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-white/90 bg-black/25 backdrop-blur-md px-2.5 py-0.5 rounded-full border border-white/10">
-                      {t('cookbookBadge') || 'COOKBOOK'}
-                    </span>
-                    <div className="w-7 h-7 rounded-lg bg-black/25 backdrop-blur-md flex items-center justify-center text-white border border-white/10">
-                      <Book className="h-3.5 w-3.5" />
-                    </div>
-                  </div>
-
-                  <h3 className={`font-black text-white ${cfg.titleSize} leading-snug drop-shadow-md z-10 truncate`}>
-                    {book.title}
-                  </h3>
-                </div>
-
-                <div className="p-4 sm:p-5 space-y-3 flex-1 flex flex-col justify-between">
-                  <p className="text-xs leading-relaxed line-clamp-2 min-h-[32px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {book.description || (t('customRecipeCollection') || 'Custom recipe collection')}
-                  </p>
-
-                  <div 
-                    className="flex items-center justify-between pt-3 border-t text-xs"
-                    style={{ borderColor: 'var(--color-border)' }}
-                  >
-                    <span className="font-bold flex items-center gap-1.5 truncate pr-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      <Utensils className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-primary)' }} /> 
-                      {(t('recipesCountSuffix') || '{count} recipes').replace('{count}', String(count))}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {filteredBooks.map((b) => (
+            <div
+              key={b.id}
+              onClick={() => setSelectedBook(b)}
+              className="border rounded-2xl overflow-hidden transition cursor-pointer group shadow-sm hover:shadow-md flex flex-col justify-between"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)'
+              }}
+            >
+              <div>
+                <div className={`h-28 w-full bg-gradient-to-r ${b.coverColor || COVER_GRADIENTS[0].className} p-4 flex flex-col justify-between relative`}>
+                  <div className="flex items-center justify-between text-white">
+                    <span className="text-xs font-black uppercase tracking-wider bg-black/40 backdrop-blur-md px-2.5 py-0.5 rounded-full flex items-center gap-1 border border-white/20">
+                      <BookOpen className="h-3 w-3" /> {(t('recipesCountSuffix') || '{count} Recipes').replace('{count}', String(b.recipeCount || 0))}
                     </span>
 
-                    <div className="flex items-center gap-1 shrink-0">
+                    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
-                        onClick={(e) => openEditModal(e, book)}
-                        className="p-1.5 rounded-xl transition cursor-pointer"
-                        style={{ color: 'var(--color-text-secondary)' }}
+                        onClick={(e) => handleOpenEdit(e, b)}
+                        className="p-1.5 rounded-lg bg-black/40 hover:bg-black/60 text-white backdrop-blur-md transition cursor-pointer border border-white/20"
                         title={t('editCookbookTooltip') || 'Edit Cookbook'}
                       >
                         <Edit3 className="h-3.5 w-3.5" />
                       </button>
                       <button
                         type="button"
-                        onClick={(e) => handleDeleteBook(e, book.id)}
-                        className="p-1.5 rounded-xl transition cursor-pointer hover:text-red-500"
-                        style={{ color: 'var(--color-text-secondary)' }}
+                        onClick={(e) => handleDeleteBook(e, b.id)}
+                        className="p-1.5 rounded-lg bg-black/40 hover:bg-red-600/80 text-white backdrop-blur-md transition cursor-pointer border border-white/20"
                         title={t('deleteCookbookTooltip') || 'Delete Cookbook'}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </div>
+
+                  <h3 className="text-white font-black text-lg truncate drop-shadow-md">
+                    {b.title}
+                  </h3>
+                </div>
+
+                <div className="p-4 space-y-2">
+                  <p className="text-xs line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                    {b.description || t('noDescriptionProvided') || 'No description provided.'}
+                  </p>
                 </div>
               </div>
-            );
-          })}
+
+              <div 
+                className="px-4 py-2.5 border-t flex items-center justify-between text-xs font-bold"
+                style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
+              >
+                <span>{t('viewRecipesInBook') || 'View Collection'}</span>
+                <ChevronRight className="h-4 w-4 transition transform group-hover:translate-x-1" />
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Pagination Controls */}
-      {filteredBooks.length > 0 && (
+      {/* SELECTED BOOK DRAWER / MODAL */}
+      {selectedBook && (
         <div 
-          className="pt-4 border-t flex flex-wrap items-center justify-between gap-3 text-xs"
-          style={{ borderColor: 'var(--color-border)' }}
-        >
-          <span style={{ color: 'var(--color-text-secondary)' }}>
-            {t('showing') || 'Showing'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{startIndex + 1}</strong> - <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{Math.min(startIndex + itemsPerPage, filteredBooks.length)}</strong> {t('of') || 'of'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{filteredBooks.length}</strong> {t('cookbooksSuffix') || 'cookbooks'}
-          </span>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              disabled={safeCurrentPage <= 1}
-              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-              className="p-2 rounded-xl border disabled:opacity-30 transition cursor-pointer shadow-sm"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-              title={t('previousPageTooltip') || 'Previous Page'}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-
-            {Array.from({ length: totalPages }, (_, i) => i + 1)
-              .filter(num => num === 1 || num === totalPages || Math.abs(num - safeCurrentPage) <= 1)
-              .map((num, i, arr) => {
-                const prev = arr[i - 1];
-                const showEllipsis = prev && num - prev > 1;
-
-                return (
-                  <div key={num} className="flex items-center gap-1">
-                    {showEllipsis && <span className="px-1 font-bold" style={{ color: 'var(--color-text-secondary)' }}>...</span>}
-                    <button
-                      type="button"
-                      onClick={() => setCurrentPage(num)}
-                      className="min-w-[32px] h-8 rounded-xl text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-sm"
-                      style={safeCurrentPage === num ? {
-                        backgroundColor: 'var(--color-primary)',
-                        borderColor: 'var(--color-primary)',
-                        color: '#ffffff',
-                        boxShadow: '0 2px 8px rgba(224, 86, 56, 0.3)'
-                      } : {
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      {num}
-                    </button>
-                  </div>
-                );
-              })}
-
-            <button
-              type="button"
-              disabled={safeCurrentPage >= totalPages}
-              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-              className="p-2 rounded-xl border disabled:opacity-30 transition cursor-pointer shadow-sm"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-              title={t('nextPageTooltip') || 'Next Page'}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* EDIT BOOK MODAL */}
-      {editingBook && (
-        <div 
-          onClick={() => setEditingBook(null)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+          onClick={() => setSelectedBook(null)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl relative text-xs animate-in fade-in cursor-default border transition-colors duration-200"
+            className="border rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl relative cursor-default transition-colors duration-200"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
               color: 'var(--color-text)'
             }}
           >
-            <button
-              onClick={() => setEditingBook(null)}
-              className="absolute top-4 right-4 p-2 rounded-xl transition cursor-pointer"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <X className="h-4 w-4" />
-            </button>
+            <div className={`p-6 bg-gradient-to-r ${selectedBook.coverColor || COVER_GRADIENTS[0].className} text-white space-y-2 relative`}>
+              <button 
+                type="button"
+                onClick={() => setSelectedBook(null)} 
+                className="absolute top-4 right-4 p-2 rounded-full bg-black/40 hover:bg-black/60 text-white transition cursor-pointer border border-white/20"
+              >
+                <X className="h-4 w-4" />
+              </button>
 
-            <div className="space-y-1 pr-6">
-              <h2 className="text-lg font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('editRecipeBookTitle') || 'Edit Recipe Book'}
-              </h2>
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('editRecipeBookSub') || 'Update your cookbook title, description, and cover color.'}
-              </p>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black uppercase tracking-wider bg-black/40 backdrop-blur-md px-2.5 py-0.5 rounded-full border border-white/20">
+                  {(t('recipesCountSuffix') || '{count} Recipes').replace('{count}', String(selectedBookRecipes.length))}
+                </span>
+              </div>
+              <h2 className="text-2xl font-black tracking-tight">{selectedBook.title}</h2>
+              {selectedBook.description && (
+                <p className="text-xs text-white/90 leading-relaxed max-w-lg">{selectedBook.description}</p>
+              )}
             </div>
 
-            <form onSubmit={handleSaveEdit} className="space-y-4">
-              <div>
-                <label className="block font-bold mb-1.5 text-xs" style={{ color: 'var(--color-text)' }}>
-                  {t('bookTitleLabel') || 'Book Title *'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder={t('bookTitlePlaceholderEdit') || 'e.g. Baking & Desserts'}
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  className="w-full border rounded-xl p-3 text-xs outline-none"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1.5 text-xs" style={{ color: 'var(--color-text)' }}>
-                  {t('templateDescriptionLabel') || 'Description'}
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder={t('bookDescPlaceholder') || 'Short summary of this cookbook collection...'}
-                  value={editDesc}
-                  onChange={(e) => setEditDesc(e.target.value)}
-                  className="w-full border rounded-xl p-3 text-xs outline-none resize-none leading-relaxed"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold mb-2 text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                  <Palette className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('backgroundColorLabel') || 'Background Color'}
-                </label>
-                <div className="grid grid-cols-3 gap-2.5">
-                  {COVER_GRADIENTS.map((g) => {
-                    const isSelected = editCoverColor === g.value;
-                    return (
-                      <button
-                        key={g.label}
-                        type="button"
-                        onClick={() => setEditCoverColor(g.value)}
-                        className={`h-11 rounded-xl ${g.value} flex items-center justify-center transition border-2 cursor-pointer ${
-                          isSelected ? 'border-white scale-105 shadow-md' : 'border-transparent opacity-75 hover:opacity-100'
-                        }`}
-                        title={g.label}
-                      >
-                        {isSelected && <Check className="h-4 w-4 text-white stroke-[3]" />}
-                      </button>
-                    );
-                  })}
+            <div className="overflow-y-auto flex-1 p-5 space-y-3">
+              {selectedBookRecipes.length === 0 ? (
+                <div className="py-12 text-center text-xs space-y-2" style={{ color: 'var(--color-text-secondary)' }}>
+                  <Utensils className="h-8 w-8 mx-auto opacity-30" />
+                  <p>{t('noRecipesInBookYet') || 'No recipes added to this cookbook yet.'}</p>
+                  <Link 
+                    href="/saved"
+                    className="inline-block font-bold text-xs hover:underline pt-1"
+                    style={{ color: 'var(--color-primary)' }}
+                  >
+                    {t('browseSavedToAssign') || 'Browse Saved Recipes to assign'}
+                  </Link>
                 </div>
-
-                <div 
-                  className="mt-3 p-3 rounded-2xl border flex items-center justify-between transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: !isGradientClass(editCoverColor) ? 'var(--color-primary)' : 'var(--color-border)'
-                  }}
-                >
-                  <div className="flex items-center gap-3">
-                    <div 
-                      className="relative w-9 h-9 rounded-xl border-2 flex items-center justify-center overflow-hidden cursor-pointer shadow-md transition"
-                      style={{
-                        borderColor: !isGradientClass(editCoverColor) ? '#ffffff' : 'var(--color-border)',
-                        backgroundColor: !isGradientClass(editCoverColor) ? editCoverColor : '#E05638'
-                      }}
-                    >
-                      <input
-                        type="color"
-                        value={!isGradientClass(editCoverColor) && editCoverColor.startsWith('#') && editCoverColor.length === 7 ? editCoverColor : '#E05638'}
-                        onChange={(e) => setEditCoverColor(e.target.value)}
-                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                        title="Pick custom color"
+              ) : (
+                selectedBookRecipes.map((r) => (
+                  <div
+                    key={r.id}
+                    onClick={() => router.push('/saved')}
+                    className="p-3 rounded-xl border flex items-center justify-between gap-3 transition cursor-pointer hover:scale-[1.01]"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)'
+                    }}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <img 
+                        src={r.imageUrl || r.image || '/uploads/recipes/default.jpg'} 
+                        alt={r.title || r.name}
+                        className="w-12 h-12 rounded-lg object-cover border shrink-0"
+                        style={{ borderColor: 'var(--color-border)' }}
                       />
-                      {!isGradientClass(editCoverColor) ? (
-                        <Check className="h-4 w-4 text-white stroke-[3] drop-shadow pointer-events-none" />
-                      ) : (
-                        <Pipette className="h-4 w-4 text-white drop-shadow pointer-events-none" />
-                      )}
+                      <div className="min-w-0 space-y-0.5">
+                        <h4 className="text-xs font-bold truncate" style={{ color: 'var(--color-text)' }}>
+                          {r.title || r.name}
+                        </h4>
+                        <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>
+                          {r.tags?.[0] || r.recipeType || 'Main Dish'}
+                        </span>
+                      </div>
                     </div>
 
-                    <div>
-                      <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>{t('customColorLabel') || 'Custom Color'}</span>
-                      <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{t('customColorHint') || 'Click to pick color wheel or type hex'}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-mono text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>#</span>
-                    <input
-                      type="text"
-                      placeholder="E05638"
-                      value={!isGradientClass(editCoverColor) ? editCoverColor.replace('#', '') : ''}
-                      onChange={(e) => {
-                        const raw = e.target.value.trim().replace('#', '');
-                        setEditCoverColor('#' + raw);
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        router.push('/saved');
                       }}
-                      maxLength={6}
-                      className="w-20 px-2.5 py-1.5 rounded-xl border text-xs font-mono uppercase outline-none"
+                      className="px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer"
                       style={{
                         backgroundColor: 'var(--color-card)',
                         borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
+                        color: 'var(--color-primary)'
                       }}
-                    />
+                    >
+                      {t('openRecipeBtn') || 'Open'}
+                    </button>
                   </div>
-                </div>
-              </div>
+                ))
+              )}
+            </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                <button
-                  type="button"
-                  onClick={() => setEditingBook(null)}
-                  className="px-4 py-2.5 rounded-xl font-bold transition text-xs cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    color: 'var(--color-text-secondary)'
-                  }}
-                >
-                  {t('cancel')}
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl text-white font-bold transition flex items-center gap-1.5 shadow-lg text-xs cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-                >
-                  <Save className="h-4 w-4" /> {t('saveChanges')}
-                </button>
-              </div>
-            </form>
+            <div className="p-4 border-t flex justify-end" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setSelectedBook(null)}
+                className="px-5 py-2 rounded-xl border font-bold text-xs transition cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                {t('close') || 'Close'}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* CREATE BOOK MODAL */}
+      {/* CREATE COOKBOOK MODAL (NO NATIVE FORM) */}
       {showAddModal && (
         <div 
           onClick={() => setShowAddModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl relative text-xs animate-in fade-in cursor-default border transition-colors duration-200"
+            className="border rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
               color: 'var(--color-text)'
             }}
           >
-            <button
-              onClick={() => setShowAddModal(false)}
+            <button 
+              type="button"
+              onClick={() => setShowAddModal(false)} 
               className="absolute top-4 right-4 p-2 rounded-xl transition cursor-pointer"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
@@ -33784,27 +33717,34 @@ export default function BooksPage() {
               <X className="h-4 w-4" />
             </button>
 
-            <div className="space-y-1 pr-6">
-              <h2 className="text-lg font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                <Book className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('createRecipeBookTitle') || 'Create Recipe Book'}
+            <div className="space-y-1">
+              <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <FolderPlus className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> 
+                {t('createCookbookTitle') || 'Create New Cookbook'}
               </h2>
               <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('createRecipeBookSub') || 'Create a new curated recipe collection.'}
+                {t('createCookbookSubtitle') || 'Add a customized recipe collection to categorize recipes'}
               </p>
             </div>
 
-            <form onSubmit={handleCreateBook} className="space-y-4">
+            <div className="space-y-4">
               <div>
-                <label className="block font-bold mb-1.5 text-xs" style={{ color: 'var(--color-text)' }}>
-                  {t('bookTitleLabel') || 'Book Title *'}
+                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('cookbookTitleLabel') || 'Cookbook Title *'}
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder={t('bookTitlePlaceholder') || 'e.g. Weekend Baking & Desserts'}
+                  placeholder={t('cookbookTitlePlaceholder') || 'e.g. Weeknight Dinners, Healthy Salads...'}
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full border rounded-xl p-3 text-xs outline-none"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleCreateBook();
+                    }
+                  }}
+                  className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
@@ -33816,15 +33756,15 @@ export default function BooksPage() {
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5 text-xs" style={{ color: 'var(--color-text)' }}>
-                  {t('templateDescriptionLabel') || 'Description'}
+                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('descriptionLabel') || 'Description'}
                 </label>
                 <textarea
                   rows={3}
-                  placeholder={t('bookDescPlaceholder') || 'Short summary of this cookbook collection...'}
-                  value={newDesc}
-                  onChange={(e) => setNewDesc(e.target.value)}
-                  className="w-full border rounded-xl p-3 text-xs outline-none resize-none leading-relaxed"
+                  placeholder={t('cookbookDescPlaceholder') || 'Short summary of recipes in this collection...'}
+                  value={newDescription}
+                  onChange={(e) => setNewDescription(e.target.value)}
+                  className="w-full border rounded-xl p-3 text-xs outline-none transition resize-none"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
@@ -33836,83 +33776,24 @@ export default function BooksPage() {
               </div>
 
               <div>
-                <label className="block font-bold mb-2 text-xs flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                  <Palette className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('backgroundColorLabel') || 'Background Color'}
+                <label className="block font-semibold mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('coverGradientLabel') || 'Cover Theme'}
                 </label>
-                
-                <div className="grid grid-cols-3 gap-2.5">
-                  {COVER_GRADIENTS.map((g) => {
-                    const isSelected = newCoverColor === g.value;
-                    return (
-                      <button
-                        key={g.label}
-                        type="button"
-                        onClick={() => setNewCoverColor(g.value)}
-                        className={`h-11 rounded-xl ${g.value} flex items-center justify-center transition border-2 cursor-pointer ${
-                          isSelected ? 'border-white scale-105 shadow-md' : 'border-transparent opacity-75 hover:opacity-100'
-                        }`}
-                        title={g.label}
-                      >
-                        {isSelected && <Check className="h-4 w-4 text-white stroke-[3]" />}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div 
-                  className="mt-3 p-3 rounded-2xl border flex items-center justify-between transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: !isGradientClass(newCoverColor) ? 'var(--color-primary)' : 'var(--color-border)'
-                  }}
-                >
-                  <div className="flex items-center gap-3">
-                    <div 
-                      className="relative w-9 h-9 rounded-xl border-2 flex items-center justify-center overflow-hidden cursor-pointer shadow-md transition"
+                <div className="grid grid-cols-3 gap-2">
+                  {COVER_GRADIENTS.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => setNewCoverGradient(g.className)}
+                      className={`h-10 rounded-xl bg-gradient-to-r ${g.className} transition flex items-center justify-center border-2 cursor-pointer shadow-xs`}
                       style={{
-                        borderColor: !isGradientClass(newCoverColor) ? '#ffffff' : 'var(--color-border)',
-                        backgroundColor: !isGradientClass(newCoverColor) ? newCoverColor : '#E05638'
+                        borderColor: newCoverGradient === g.className ? 'var(--color-primary)' : 'transparent'
                       }}
+                      title={g.label}
                     >
-                      <input
-                        type="color"
-                        value={!isGradientClass(newCoverColor) && newCoverColor.startsWith('#') && newCoverColor.length === 7 ? newCoverColor : '#E05638'}
-                        onChange={(e) => setNewCoverColor(e.target.value)}
-                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                        title="Click to pick custom color"
-                      />
-                      {!isGradientClass(newCoverColor) ? (
-                        <Check className="h-4 w-4 text-white stroke-[3] drop-shadow pointer-events-none" />
-                      ) : (
-                        <Pipette className="h-4 w-4 text-white drop-shadow pointer-events-none" />
-                      )}
-                    </div>
-
-                    <div>
-                      <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>{t('customColorLabel') || 'Custom Color'}</span>
-                      <span className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>{t('customColorHint') || 'Pick color wheel or enter hex'}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-1.5">
-                    <span className="font-mono text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>#</span>
-                    <input
-                      type="text"
-                      placeholder="E05638"
-                      value={!isGradientClass(newCoverColor) ? newCoverColor.replace('#', '') : ''}
-                      onChange={(e) => {
-                        const raw = e.target.value.trim().replace('#', '');
-                        setNewCoverColor('#' + raw);
-                      }}
-                      maxLength={6}
-                      className="w-20 px-2.5 py-1.5 rounded-xl border text-xs font-mono uppercase outline-none"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
+                      {newCoverGradient === g.className && <Check className="h-4 w-4 text-white stroke-[3]" />}
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -33920,46 +33801,49 @@ export default function BooksPage() {
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2.5 rounded-xl font-bold transition text-xs cursor-pointer"
+                  className="px-4 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
                     color: 'var(--color-text-secondary)'
                   }}
                 >
-                  {t('cancel')}
+                  {t('cancel') || 'Cancel'}
                 </button>
                 <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl text-white font-bold transition flex items-center gap-1.5 shadow-lg text-xs cursor-pointer"
+                  type="button"
+                  onClick={() => handleCreateBook()}
+                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-lg cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                 >
-                  {t('createRecipeBookBtn') || 'Create Book'}
+                  {t('createCookbookBtn') || 'Create Cookbook'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
 
-      {/* VIEW BOOK DETAILS MODAL */}
-      {selectedBook && (
+      {/* EDIT COOKBOOK MODAL (NO NATIVE FORM) */}
+      {showEditModal && (
         <div 
-          onClick={() => setSelectedBook(null)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+          onClick={() => setShowEditModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="rounded-3xl max-w-2xl w-full p-6 space-y-6 shadow-2xl relative max-h-[85vh] overflow-y-auto cursor-default border transition-colors duration-200"
+            className="border rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
               color: 'var(--color-text)'
             }}
           >
-            <button
-              onClick={() => setSelectedBook(null)}
+            <button 
+              type="button"
+              onClick={() => setShowEditModal(false)} 
               className="absolute top-4 right-4 p-2 rounded-xl transition cursor-pointer"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
@@ -33969,1331 +33853,33 @@ export default function BooksPage() {
               <X className="h-4 w-4" />
             </button>
 
-            <div 
-              className={`h-32 w-full ${isGradientClass(selectedBook.coverColor) ? (selectedBook.coverColor || COVER_GRADIENTS[0].value) : ''} rounded-2xl p-6 flex flex-col justify-between text-white shadow-md`}
-              style={getCoverBgStyle(selectedBook.coverColor)}
-            >
-              <div className="flex justify-between items-start">
-                <span className="text-[10px] font-black uppercase tracking-widest bg-black/30 backdrop-blur-md px-3 py-1 rounded-full border border-white/10">
-                  {t('cookbookDetailsBadge') || 'Cookbook Details'}
-                </span>
-                <button
-                  onClick={(e) => openEditModal(e, selectedBook)}
-                  className="bg-black/40 hover:bg-black/70 backdrop-blur-md px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition border border-white/10 cursor-pointer"
-                >
-                  <Edit3 className="h-3.5 w-3.5" /> {t('editBookBtn') || 'Edit Book'}
-                </button>
-              </div>
-              <div>
-                <h2 className="text-2xl font-black">{selectedBook.title}</h2>
-                <p className="text-xs text-white/90 mt-0.5 line-clamp-1">{selectedBook.description}</p>
-              </div>
+            <div className="space-y-1">
+              <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> 
+                {t('editCookbookTitle') || 'Edit Cookbook'}
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('editCookbookSubtitle') || 'Update title, description, and cover theme'}
+              </p>
             </div>
 
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 
-                  className="text-sm font-bold uppercase tracking-wider"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {(t('recipesInThisBook') || 'Recipes in this Book ({count})')
-                    .replace('{count}', String(recipes.filter((r: any) => isRecipeInBook(r, selectedBook.id)).length))}
-                </h3>
-                <Link
-                  href="/saved"
-                  className="text-xs font-bold hover:underline flex items-center gap-1"
-                  style={{ color: 'var(--color-accent)' }}
-                >
-                  {t('browseRecipes') || 'Browse Recipes'} <ArrowRight className="h-3.5 w-3.5" />
-                </Link>
-              </div>
-
-              {recipes.filter((r: any) => isRecipeInBook(r, selectedBook.id)).length === 0 ? (
-                <div 
-                  className="p-8 rounded-2xl text-center space-y-2 border"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)'
-                  }}
-                >
-                  <Utensils className="h-8 w-8 mx-auto" style={{ color: 'var(--color-text-secondary)' }} />
-                  <h4 className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{t('noRecipesInBook') || 'No recipes in this book yet'}</h4>
-                  <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t('assignRecipeHint') || 'Open any saved recipe and assign it to this cookbook.'}</p>
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {recipes
-                    .filter((r: any) => isRecipeInBook(r, selectedBook.id))
-                    .map((rec: any) => (
-                      <div 
-                        key={rec.id} 
-                        className="flex items-center justify-between p-3 rounded-xl border text-xs"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)'
-                        }}
-                      >
-                        <div className="flex items-center gap-3">
-                          <img src={rec.imageUrl || rec.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=200&q=80'} alt={rec.title || rec.name} className="w-10 h-10 rounded-lg object-cover" />
-                          <div>
-                            <h4 className="font-bold" style={{ color: 'var(--color-text)' }}>{rec.title || rec.name}</h4>
-                            <span className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                              {rec.recipeType || rec.tags?.[0] || 'Main Dish'} • {(t('servingsSuffix') || '{count} servings').replace('{count}', String(rec.servings || 4))}
-                            </span>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenRecipePopup(rec)}
-                          className="font-bold px-3 py-1.5 rounded-lg transition border cursor-pointer"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text)'
-                          }}
-                        >
-                          {t('viewBtn') || 'View'}
-                        </button>
-                      </div>
-                    ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* SPECIFIC RECIPE POPUP MODAL */}
-      {viewingRecipe && (
-        <div 
-          onClick={() => { setViewingRecipe(null); setIsEditingRecipe(false); setIsBookDropdownOpen(false); }}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[80] flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative cursor-default border transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <button
-              onClick={() => { setViewingRecipe(null); setIsEditingRecipe(false); setIsBookDropdownOpen(false); }}
-              className="absolute top-4 right-4 z-30 p-2.5 rounded-xl border backdrop-blur-md transition cursor-pointer"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <X className="h-5 w-5" />
-            </button>
-
-            <div className="overflow-y-auto flex-1">
-              {!isEditingRecipe ? (
-                /* RECIPE DETAILS VIEW */
-                <div className="space-y-5 pb-8">
-                  {/* Hero Banner */}
-                  <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
-                    <img
-                      src={viewingRecipe.imageUrl || viewingRecipe.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80'}
-                      alt={viewingRecipe.title || viewingRecipe.name}
-                      className="absolute inset-0 w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
-
-                    <div className="relative z-10 space-y-3">
-                      <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
-                        {viewingRecipe.title || viewingRecipe.name}
-                      </h2>
-
-                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-                        <span className="border text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/60 border-white/20">
-                          <Clock className="h-3.5 w-3.5" /> 
-                          {(t('cookTimePrefix') || 'Cook: {time} minutes').replace('{time}', String(viewingRecipe.cookTimeMinutes || 10))}
-                        </span>
-                        <span className="border text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/60 border-white/20">
-                          <Clock className="h-3.5 w-3.5" /> 
-                          {(t('prepTimePrefix') || 'Prep: {time} minutes').replace('{time}', String(viewingRecipe.prepTimeMinutes || 30))}
-                        </span>
-                        <span className="border text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/60 border-white/20">
-                          <Utensils className="h-3.5 w-3.5" /> {viewingRecipe.tags?.[0] || viewingRecipe.recipeType || 'Main Dish'}
-                        </span>
-                        
-                        <button
-                          onClick={() => updateViewingRecipeState('isFavorite', !viewingRecipe.isFavorite)}
-                          className="ml-auto w-8 h-8 bg-white/95 rounded-full flex items-center justify-center shadow hover:scale-105 transition cursor-pointer"
-                          style={{ color: 'var(--color-primary)' }}
-                        >
-                          <Heart className={`h-4 w-4 ${viewingRecipe.isFavorite ? 'fill-current' : 'text-slate-400'}`} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Top Action Row */}
-                  <div className="px-5 grid grid-cols-3 gap-2.5">
-                    {/* Add to Book Dropdown */}
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setIsBookDropdownOpen(!isBookDropdownOpen)}
-                        className="w-full border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
-                        style={assignedBook ? {
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
-                        } : {
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
-                        }}
-                      >
-                        <BookmarkPlus className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }} />
-                        <span className="truncate">
-                          {assignedBook ? assignedBook.title : (t('addToBook') || 'Add to Book')}
-                        </span>
-                        <ChevronDown className="h-3 w-3 shrink-0 opacity-70 ml-0.5" />
-                      </button>
-
-                      {isBookDropdownOpen && (
-                        <>
-                          <div className="fixed inset-0 z-40" onClick={() => setIsBookDropdownOpen(false)} />
-                          <div 
-                            className="absolute left-0 top-full mt-2 w-64 border rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in"
-                            style={{
-                              backgroundColor: 'var(--color-card)',
-                              borderColor: 'var(--color-border)'
-                            }}
-                          >
-                            <div className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
-                              <span>{t('selectCookbook') || 'Select Cookbook'}</span>
-                              <button 
-                                onClick={() => { setSelectedBook(null); setIsBookDropdownOpen(false); }} 
-                                className="hover:underline cursor-pointer"
-                                style={{ color: 'var(--color-accent)' }}
-                              >
-                                {t('books') || 'Books'}
-                              </button>
-                            </div>
-
-                            <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
-                              {books.length === 0 ? (
-                                <div className="text-xs px-2.5 py-2" style={{ color: 'var(--color-text-secondary)' }}>{t('noCookbooksAvailable') || 'No cookbooks available'}</div>
-                              ) : (
-                                books.map((b) => {
-                                  const isAssigned = isRecipeInBook(viewingRecipe, b.id);
-                                  return (
-                                    <button
-                                      key={b.id}
-                                      type="button"
-                                      onClick={() => {
-                                        handleAssignToBook(b.id);
-                                        setIsBookDropdownOpen(false);
-                                      }}
-                                      className="w-full text-left px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition cursor-pointer"
-                                      style={isAssigned ? {
-                                        backgroundColor: 'var(--color-inner-dark)',
-                                        color: 'var(--color-primary)',
-                                        border: '1px solid var(--color-primary)'
-                                      } : {
-                                        color: 'var(--color-text)'
-                                      }}
-                                    >
-                                      <span className="truncate flex-1 pr-2">{b.title}</span>
-                                      {isAssigned && <Check className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-primary)' }} />}
-                                    </button>
-                                  );
-                                })
-                              )}
-                            </div>
-                          </div>
-                        </>
-                      )}
-                    </div>
-
-                    {/* Add to Plan Trigger */}
-                    <button
-                      onClick={() => setIsPlanModalOpen(true)}
-                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
-                      style={{
-                        borderColor: 'var(--color-primary)',
-                        color: 'var(--color-primary)'
-                      }}
-                    >
-                      <CalendarPlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('addToPlan') || 'Add to Plan'}
-                    </button>
-
-                    {/* Shopping List Trigger */}
-                    <button
-                      onClick={handleOpenShoppingModal}
-                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
-                      style={{
-                        borderColor: 'var(--color-primary)',
-                        color: 'var(--color-primary)'
-                      }}
-                    >
-                      <ShoppingCart className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('shoppingList') || 'Shopping List'}
-                    </button>
-                  </div>
-
-                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
-
-                  {/* Servings, Timer, Edit, Share Controls */}
-                  <div className="px-5 flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <span 
-                        className="text-xs font-bold flex items-center gap-1.5"
-                        style={{ color: 'var(--color-primary)' }}
-                      >
-                        <Users className="h-4 w-4" /> {t('servingsLabel') || 'Servings'}
-                      </span>
-                      <div 
-                        className="flex items-center border rounded-lg overflow-hidden"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)'
-                        }}
-                      >
-                        <button
-                          onClick={() => setServingsMultiplier(Math.max(1, servingsMultiplier - 1))}
-                          className="px-2.5 py-1 font-bold cursor-pointer transition"
-                          style={{ color: 'var(--color-text-secondary)' }}
-                        >
-                          -
-                        </button>
-                        <span className="px-3 py-1 text-xs font-bold min-w-[32px] text-center" style={{ color: 'var(--color-text)' }}>
-                          {currentTotalServings}
-                        </span>
-                        <button
-                          onClick={() => setServingsMultiplier(servingsMultiplier + 1)}
-                          className="px-2.5 py-1 font-bold cursor-pointer transition"
-                          style={{ color: 'var(--color-text-secondary)' }}
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => alert(t('timerSetAlert') || 'Kitchen Timer set for 15 minutes!')}
-                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                        style={{
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
-                        }}
-                      >
-                        <Timer className="h-3.5 w-3.5" /> {t('timerBtn') || 'Timer'}
-                      </button>
-                      <button
-                        onClick={handleOpenEditRecipe}
-                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                        style={{
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
-                        }}
-                      >
-                        <Edit3 className="h-3.5 w-3.5" /> {t('editBtn') || 'Edit'}
-                      </button>
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(window.location.href);
-                          alert(t('recipeLinkCopiedAlert') || 'Recipe link copied!');
-                        }}
-                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                        style={{
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
-                        }}
-                      >
-                        <Share2 className="h-3.5 w-3.5" /> {t('shareRecipeBtn') || 'Share Recipe'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Description */}
-                  <div className="px-5 text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                    {viewingRecipe.description || (t('defaultRecipeDesc') || 'Authentic traditional recipe cooked to perfection.')}
-                  </div>
-
-                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
-
-                  {/* Ingredients & Steps Viewer */}
-                  <div className="px-5 space-y-6">
-                    <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-                      <h3 className="text-base font-extrabold" style={{ color: 'var(--color-text)' }}>{t('ingredientsHeading') || 'Ingredients'}</h3>
-                      <div 
-                        className="flex items-center border rounded-lg text-xs"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)'
-                        }}
-                      >
-                        <button
-                          onClick={() => setFontSizeScale(Math.max(80, fontSizeScale - 10))}
-                          className="px-2 py-1 font-bold cursor-pointer"
-                          style={{ color: 'var(--color-text-secondary)' }}
-                        >
-                          -
-                        </button>
-                        <span className="px-2 py-1 font-bold" style={{ color: 'var(--color-text)' }}>{fontSizeScale}%</span>
-                        <button
-                          onClick={() => setFontSizeScale(Math.min(140, fontSizeScale + 10))}
-                          className="px-2 py-1 font-bold cursor-pointer"
-                          style={{ color: 'var(--color-text-secondary)' }}
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="grid md:grid-cols-2 gap-3" style={{ fontSize: `${fontSizeScale}%` }}>
-                      {Array.isArray(viewingRecipe.ingredients) && viewingRecipe.ingredients.map((ing: any, idx: number) => {
-                        const amt = typeof ing === 'string' ? '' : ing.amount || ing.quantity || '';
-                        const unit = typeof ing === 'string' ? '' : ing.unit || '';
-                        const name = typeof ing === 'string' ? ing : ing.item || ing.name || '';
-                        const scaledAmount = calculateScaledAmount(amt, baseServings, currentTotalServings);
-                        return (
-                          <div key={idx} className="flex items-start gap-2.5 text-xs py-1">
-                            <span 
-                              className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0"
-                              style={{ backgroundColor: 'var(--color-primary)' }}
-                            />
-                            <span style={{ color: 'var(--color-text)' }}>
-                              {(scaledAmount || unit) && <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{scaledAmount} {unit !== 'Unit' ? unit : ''} </strong>}
-                              {name}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <div className="space-y-3 pt-2">
-                      <h3 className="text-base font-extrabold" style={{ color: 'var(--color-text)' }}>{t('instructionsHeading') || 'Instructions'}</h3>
-                      <div className="space-y-2.5" style={{ fontSize: `${fontSizeScale}%` }}>
-                        {Array.isArray(viewingRecipe.instructions) && viewingRecipe.instructions.map((step: string, idx: number) => {
-                          const isDone = completedSteps.includes(idx);
-                          return (
-                            <div
-                              key={idx}
-                              onClick={() => toggleStepComplete(idx)}
-                              className={`flex items-start gap-3 p-3 rounded-xl border text-xs cursor-pointer transition shadow-xs ${
-                                isDone ? 'opacity-50 line-through' : ''
-                              }`}
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark)',
-                                borderColor: 'var(--color-border)'
-                              }}
-                            >
-                              <span 
-                                className="font-extrabold shrink-0"
-                                style={{ color: 'var(--color-primary)' }}
-                              >
-                                {idx + 1}.
-                              </span>
-                              <span className="leading-relaxed flex-1" style={{ color: 'var(--color-text)' }}>{step}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
-
-                  {/* Cooked & Rating */}
-                  <div className="px-5 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <button
-                        onClick={() => updateViewingRecipeState('isCooked', !viewingRecipe.isCooked)}
-                        className="flex items-center gap-2 text-sm font-bold cursor-pointer"
-                        style={{ color: 'var(--color-text)' }}
-                      >
-                        {t('markAsCooked') || 'Mark as Cooked'}
-                        <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${
-                          viewingRecipe.isCooked ? 'bg-[var(--color-emerald)] text-white' : 'border border-[var(--color-border)]'
-                        }`}>
-                          {viewingRecipe.isCooked && '✓'}
-                        </span>
-                      </button>
-
-                      <div className="flex items-center gap-1">
-                        {[1, 2, 3, 4, 5].map((star) => (
-                          <Star
-                            key={star}
-                            onClick={() => updateViewingRecipeState('rating', star)}
-                            className="h-4 w-4 cursor-pointer transition"
-                            style={{
-                              color: (viewingRecipe.rating || 0) >= star ? 'var(--color-primary)' : 'var(--color-border)',
-                              fill: (viewingRecipe.rating || 0) >= star ? 'var(--color-primary)' : 'transparent'
-                            }}
-                          />
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <button
-                        onClick={() => setIsNoteOpen(!isNoteOpen)}
-                        className="flex items-center gap-1.5 text-xs font-semibold cursor-pointer transition"
-                        style={{ color: 'var(--color-text-secondary)' }}
-                      >
-                        <Edit3 className="h-3.5 w-3.5" /> {t('addANote') || 'Add a note'}
-                      </button>
-
-                      {isNoteOpen && (
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            placeholder={t('addNotesPlaceholder') || 'Add notes...'}
-                            value={noteText}
-                            onChange={(e) => setNoteText(e.target.value)}
-                            className="flex-1 border rounded-xl px-3 py-2 text-xs outline-none"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text)'
-                            }}
-                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                          />
-                          <button
-                            onClick={() => {
-                              updateViewingRecipeState('note', noteText);
-                              setIsNoteOpen(false);
-                            }}
-                            className="text-white font-bold text-xs px-3 py-2 rounded-xl cursor-pointer shadow-sm"
-                            style={{ backgroundColor: 'var(--color-primary)' }}
-                          >
-                            {t('save') || 'Save'}
-                          </button>
-                        </div>
-                      )}
-                      {viewingRecipe.note && !isNoteOpen && (
-                        <p className="text-xs italic" style={{ color: 'var(--color-emerald)' }}>
-                          Note: "{viewingRecipe.note}"
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
-
-                  {/* Source Footer & Delete Action */}
-                  <div className="px-5 flex items-center justify-between text-xs">
-                    <div>
-                      <span className="block uppercase font-bold text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                        {t('sourceLabel') || 'Source'}
-                      </span>
-                      {viewingRecipe.sourceUrl ? (
-                        <a
-                          href={viewingRecipe.sourceUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-bold hover:underline flex items-center gap-1 mt-0.5"
-                          style={{ color: 'var(--color-accent)' }}
-                        >
-                          {(t('visitSource') || 'Visit {domain}').replace('{domain}', new URL(viewingRecipe.sourceUrl).hostname.replace('www.', ''))} <ExternalLink className="h-3 w-3" />
-                        </a>
-                      ) : (
-                        <span style={{ color: 'var(--color-text-secondary)' }}>
-                          {t('manualCustomRecipe') || 'Manual / Custom Recipe'}
-                        </span>
-                      )}
-                    </div>
-
-                    <button
-                      onClick={() => handleDeleteRecipe(viewingRecipe.id)}
-                      className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'rgba(239, 68, 68, 0.4)',
-                        color: '#ef4444'
-                      }}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" /> {t('deleteRecipeBtn') || 'Delete Recipe'}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                /* RECIPE EDIT FORM */
-                <div className="p-6 space-y-6">
-                  <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-                    <h3 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                      <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('editRecipeTitle') || 'Edit Recipe'}
-                    </h3>
-                    <button
-                      onClick={() => setIsEditingRecipe(false)}
-                      className="p-1 rounded-lg transition cursor-pointer"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                    >
-                      <X className="h-5 w-5" />
-                    </button>
-                  </div>
-
-                  <div 
-                    className="flex p-1.5 rounded-2xl border"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)'
-                    }}
-                  >
-                    {[
-                      { id: 'info', label: t('basicInfoTab') || 'Basic Info' },
-                      { id: 'ingredients', label: t('ingredientsTab') || 'Ingredients' },
-                      { id: 'steps', label: t('stepsTab') || 'Steps' }
-                    ].map((tab) => (
-                      <button
-                        key={tab.id}
-                        type="button"
-                        onClick={() => setEditRecipeTab(tab.id as any)}
-                        className="flex-1 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer"
-                        style={editRecipeTab === tab.id ? {
-                          backgroundColor: 'var(--color-card)',
-                          color: 'var(--color-text)',
-                          border: '1px solid var(--color-border)',
-                          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-                        } : {
-                          color: 'var(--color-text-secondary)'
-                        }}
-                      >
-                        {tab.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* TAB 1: BASIC INFO */}
-                  {editRecipeTab === 'info' && (
-                    <div className="space-y-5 animate-in fade-in text-xs">
-                      <div className="space-y-1.5">
-                        <label 
-                          className="block font-bold uppercase tracking-wider text-[11px]"
-                          style={{ color: 'var(--color-primary)' }}
-                        >
-                          {t('photoLabel') || 'Photo'}
-                        </label>
-                        <label 
-                          className="border-2 border-dashed rounded-2xl h-44 flex flex-col items-center justify-center cursor-pointer transition relative overflow-hidden group"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)'
-                          }}
-                        >
-                          {editRecipeForm.imageUrl ? (
-                            <>
-                              <img
-                                src={editRecipeForm.imageUrl}
-                                alt="Recipe Preview"
-                                className="absolute inset-0 w-full h-full object-cover"
-                              />
-                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
-                                <span 
-                                  className="border text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5"
-                                  style={{
-                                    backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-border)'
-                                  }}
-                                >
-                                  <ImagePlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('changePhoto') || 'Change Photo'}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    setEditRecipeForm({ ...editRecipeForm, imageUrl: '' });
-                                  }}
-                                  className="bg-red-950/90 border border-red-500/50 text-red-400 text-xs font-bold px-3 py-1.5 rounded-xl hover:bg-red-900 cursor-pointer"
-                                >
-                                  {t('removePhoto') || 'Remove'}
-                                </button>
-                              </div>
-                            </>
-                          ) : (
-                            <div className="text-center space-y-2">
-                              <ImagePlus className="h-8 w-8 mx-auto transition" style={{ color: 'var(--color-text-secondary)' }} />
-                              <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>
-                                {t('addAPhoto') || 'Add a photo'}
-                              </span>
-                            </div>
-                          )}
-                          <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-                        </label>
-                      </div>
-
-                      <div>
-                        <label 
-                          className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                          style={{ color: 'var(--color-primary)' }}
-                        >
-                          {t('recipeTitle') || 'Recipe Title'}
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          value={editRecipeForm.title}
-                          onChange={(e) => setEditRecipeForm({ ...editRecipeForm, title: e.target.value })}
-                          className="w-full border rounded-xl p-3 text-sm outline-none"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text)'
-                          }}
-                          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                        />
-                      </div>
-
-                      <div>
-                        <label 
-                          className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                          style={{ color: 'var(--color-primary)' }}
-                        >
-                          {t('templateDescriptionLabel') || 'Description'}
-                        </label>
-                        <textarea
-                          rows={3}
-                          value={editRecipeForm.description}
-                          onChange={(e) => setEditRecipeForm({ ...editRecipeForm, description: e.target.value })}
-                          className="w-full border rounded-xl p-3 text-xs outline-none resize-y leading-relaxed"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text)'
-                          }}
-                          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label 
-                            className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                            style={{ color: 'var(--color-primary)' }}
-                          >
-                            {t('recipeType') || 'Recipe Type'}
-                          </label>
-                          <select
-                            value={editRecipeForm.recipeType}
-                            onChange={(e) => setEditRecipeForm({ ...editRecipeForm, recipeType: e.target.value })}
-                            className="w-full border rounded-xl p-3 text-xs outline-none cursor-pointer"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text)'
-                            }}
-                          >
-                            <option value="Main Dish" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('mainDish') || 'Main Dish'}</option>
-                            <option value="Appetizer" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Appetizer</option>
-                            <option value="Dessert" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Dessert</option>
-                            <option value="Side Dish" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Side Dish</option>
-                            <option value="Beverage" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>Beverage</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label 
-                            className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                            style={{ color: 'var(--color-primary)' }}
-                          >
-                            {t('servingsLabel') || 'Servings'}
-                          </label>
-                          <input
-                            type="number"
-                            value={editRecipeForm.servings}
-                            onChange={(e) => setEditRecipeForm({ ...editRecipeForm, servings: parseInt(e.target.value) || 1 })}
-                            className="w-full border rounded-xl p-3 text-xs outline-none"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text)'
-                            }}
-                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label 
-                            className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                            style={{ color: 'var(--color-primary)' }}
-                          >
-                            {t('prepTimeMinsLabel') || 'Preparation Time (mins)'}
-                          </label>
-                          <input
-                            type="number"
-                            value={editRecipeForm.prepTimeMinutes}
-                            onChange={(e) => setEditRecipeForm({ ...editRecipeForm, prepTimeMinutes: parseInt(e.target.value) || 0 })}
-                            className="w-full border rounded-xl p-3 text-xs outline-none"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text)'
-                            }}
-                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                          />
-                        </div>
-
-                        <div>
-                          <label 
-                            className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                            style={{ color: 'var(--color-primary)' }}
-                          >
-                            {t('cookTimeMinsLabel') || 'Cooking Time (mins)'}
-                          </label>
-                          <input
-                            type="number"
-                            value={editRecipeForm.cookTimeMinutes}
-                            onChange={(e) => setEditRecipeForm({ ...editRecipeForm, cookTimeMinutes: parseInt(e.target.value) || 0 })}
-                            className="w-full border rounded-xl p-3 text-xs outline-none"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text)'
-                            }}
-                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="pt-4 border-t flex justify-end gap-3" style={{ borderColor: 'var(--color-border)' }}>
-                        <button
-                          type="button"
-                          onClick={() => setIsEditingRecipe(false)}
-                          className="px-5 py-2.5 rounded-xl font-bold transition text-xs cursor-pointer"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            color: 'var(--color-text-secondary)'
-                          }}
-                        >
-                          {t('cancel')}
-                        </button>
-                        <button
-                          type="submit"
-                          onClick={handleSaveRecipeEdit}
-                          className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg flex items-center gap-2 text-xs cursor-pointer"
-                          style={{ backgroundColor: 'var(--color-primary)' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-                        >
-                          <Save className="h-4 w-4" /> {t('saveChanges')}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* TAB 2: INGREDIENTS */}
-                  {editRecipeTab === 'ingredients' && (
-                    <div 
-                      className="border rounded-2xl p-5 space-y-4 animate-in fade-in text-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)'
-                      }}
-                    >
-                      <div className="flex justify-between items-center">
-                        <h2 
-                          className="text-sm font-bold uppercase tracking-wider"
-                          style={{ color: 'var(--color-primary)' }}
-                        >
-                          {t('ingredientsHeading') || 'Ingredients'}
-                        </h2>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setIsReorderingIngredients(!isReorderingIngredients)}
-                            className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
-                            style={isReorderingIngredients ? {
-                              backgroundColor: 'var(--color-emerald)',
-                              borderColor: 'var(--color-emerald)',
-                              color: '#ffffff'
-                            } : {
-                              backgroundColor: 'var(--color-card)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text-secondary)'
-                            }}
-                          >
-                            {isReorderingIngredients ? (t('done') || 'Done') : (t('reorderBtn') || 'Reorder')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditRecipeForm({
-                              ...editRecipeForm,
-                              ingredients: [...editRecipeForm.ingredients, { amount: '', unit: '', item: '', category: DEFAULT_CATEGORIES[0] }]
-                            })}
-                            className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
-                            style={{ backgroundColor: 'var(--color-primary)' }}
-                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-                          >
-                            <Plus className="h-3.5 w-3.5" /> {t('addIngredientModalBtn') || 'Add Ingredient'}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
-                        {editRecipeForm.ingredients.map((ing: any, idx: number) => (
-                          <div
-                            key={idx}
-                            draggable={isReorderingIngredients}
-                            onDragStart={() => handleDragStart(idx)}
-                            onDragOver={(e) => handleDragOver(e, idx, 'ingredients')}
-                            onDrop={handleDrop}
-                            className={`flex items-center gap-2 p-2.5 rounded-xl border transition ${
-                              isReorderingIngredients ? 'cursor-grab' : ''
-                            }`}
-                            style={{
-                              backgroundColor: 'var(--color-card)',
-                              borderColor: isReorderingIngredients ? 'var(--color-emerald)' : 'var(--color-border)'
-                            }}
-                          >
-                            <input
-                              type="text"
-                              placeholder="Amt"
-                              value={ing.amount}
-                              onChange={(e) => {
-                                const list = [...editRecipeForm.ingredients];
-                                list[idx].amount = e.target.value;
-                                setEditRecipeForm({ ...editRecipeForm, ingredients: list });
-                              }}
-                              className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark)',
-                                borderColor: 'var(--color-border)',
-                                color: 'var(--color-text)'
-                              }}
-                            />
-                            <input
-                              type="text"
-                              placeholder="Unit"
-                              value={ing.unit}
-                              onChange={(e) => {
-                                const list = [...editRecipeForm.ingredients];
-                                list[idx].unit = e.target.value;
-                                setEditRecipeForm({ ...editRecipeForm, ingredients: list });
-                              }}
-                              className="w-20 border rounded-lg p-2 text-center outline-none"
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark)',
-                                borderColor: 'var(--color-border)',
-                                color: 'var(--color-text-secondary)'
-                              }}
-                            />
-                            <input
-                              type="text"
-                              placeholder="Ingredient name..."
-                              value={ing.item}
-                              onChange={(e) => {
-                                const list = [...editRecipeForm.ingredients];
-                                list[idx].item = e.target.value;
-                                setEditRecipeForm({ ...editRecipeForm, ingredients: list });
-                              }}
-                              className="flex-1 bg-transparent border-none outline-none px-2"
-                              style={{ color: 'var(--color-text)' }}
-                            />
-                            <select
-                              value={ing.category}
-                              onChange={(e) => {
-                                const list = [...editRecipeForm.ingredients];
-                                list[idx].category = e.target.value;
-                                setEditRecipeForm({ ...editRecipeForm, ingredients: list });
-                              }}
-                              className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer"
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark)',
-                                borderColor: 'var(--color-border)',
-                                color: 'var(--color-text-secondary)'
-                              }}
-                            >
-                              {DEFAULT_CATEGORIES.map((cat) => (
-                                <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
-                              ))}
-                            </select>
-
-                            {isReorderingIngredients ? (
-                              <div className="p-2 cursor-grab" style={{ color: 'var(--color-emerald)' }}>
-                                <GripVertical className="h-4 w-4" />
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setEditRecipeForm({
-                                  ...editRecipeForm,
-                                  ingredients: editRecipeForm.ingredients.filter((_: any, i: number) => i !== idx)
-                                })}
-                                className="p-2 text-red-500 hover:text-red-600 cursor-pointer"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="flex justify-between pt-3">
-                        <button
-                          type="button"
-                          onClick={() => setEditRecipeTab('info')}
-                          className="font-bold px-5 py-2 rounded-xl text-xs transition cursor-pointer"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            color: 'var(--color-text-secondary)'
-                          }}
-                        >
-                          {t('backBtn') || '← Back'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditRecipeTab('steps')}
-                          className="text-white font-bold px-6 py-2 rounded-xl text-xs transition shadow-md cursor-pointer"
-                          style={{ backgroundColor: 'var(--color-primary)' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-                        >
-                          {t('nextStepsBtn') || 'Next: Steps →'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* TAB 3: STEPS */}
-                  {editRecipeTab === 'steps' && (
-                    <div 
-                      className="border rounded-2xl p-5 space-y-4 animate-in fade-in text-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)'
-                      }}
-                    >
-                      <div className="flex justify-between items-center">
-                        <h2 
-                          className="text-sm font-bold uppercase tracking-wider"
-                          style={{ color: 'var(--color-primary)' }}
-                        >
-                          {t('stepInstructionsHeading') || 'Step-by-Step Instructions'}
-                        </h2>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setIsReorderingSteps(!isReorderingSteps)}
-                            className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
-                            style={isReorderingSteps ? {
-                              backgroundColor: 'var(--color-emerald)',
-                              borderColor: 'var(--color-emerald)',
-                              color: '#ffffff'
-                            } : {
-                              backgroundColor: 'var(--color-card)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text-secondary)'
-                            }}
-                          >
-                            {isReorderingSteps ? (t('done') || 'Done') : (t('reorderBtn') || 'Reorder')}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditRecipeForm({
-                              ...editRecipeForm,
-                              instructions: [...editRecipeForm.instructions, '']
-                            })}
-                            className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
-                            style={{ backgroundColor: 'var(--color-primary)' }}
-                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-                          >
-                            <Plus className="h-3.5 w-3.5" /> {t('addStepBtn') || 'Add Step'}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
-                        {editRecipeForm.instructions.map((step: string, idx: number) => (
-                          <div
-                            key={idx}
-                            draggable={isReorderingSteps}
-                            onDragStart={() => handleDragStart(idx)}
-                            onDragOver={(e) => handleDragOver(e, idx, 'steps')}
-                            onDrop={handleDrop}
-                            className={`flex items-start gap-3 p-3 rounded-xl border transition ${
-                              isReorderingSteps ? 'cursor-grab' : ''
-                            }`}
-                            style={{
-                              backgroundColor: 'var(--color-card)',
-                              borderColor: isReorderingSteps ? 'var(--color-emerald)' : 'var(--color-border)'
-                            }}
-                          >
-                            <span 
-                              className="w-6 h-6 rounded-full font-bold flex items-center justify-center shrink-0 mt-1"
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark)',
-                                color: 'var(--color-primary)',
-                                borderColor: 'var(--color-primary)',
-                                borderWidth: '1px'
-                              }}
-                            >
-                              {idx + 1}
-                            </span>
-                            <textarea
-                              rows={2}
-                              placeholder={(t('describeStepPlaceholder') || 'Describe step {n}...').replace('{n}', String(idx + 1))}
-                              value={step}
-                              onChange={(e) => {
-                                const list = [...editRecipeForm.instructions];
-                                list[idx] = e.target.value;
-                                setEditRecipeForm({ ...editRecipeForm, instructions: list });
-                              }}
-                              className="flex-1 bg-transparent border-none outline-none resize-y"
-                              style={{ color: 'var(--color-text)' }}
-                            />
-
-                            {isReorderingSteps ? (
-                              <div className="p-2 cursor-grab mt-1" style={{ color: 'var(--color-emerald)' }}>
-                                <GripVertical className="h-4 w-4" />
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setEditRecipeForm({
-                                  ...editRecipeForm,
-                                  instructions: editRecipeForm.instructions.filter((_: any, i: number) => i !== idx)
-                                })}
-                                className="p-2 text-slate-400 hover:text-red-500 h-fit cursor-pointer"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="flex justify-between pt-3">
-                        <button
-                          type="button"
-                          onClick={() => setEditRecipeTab('ingredients')}
-                          className="font-bold px-5 py-2 rounded-xl text-xs transition cursor-pointer"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            color: 'var(--color-text-secondary)'
-                          }}
-                        >
-                          {t('backBtn') || '← Back'}
-                        </button>
-                        <button
-                          type="submit"
-                          onClick={handleSaveRecipeEdit}
-                          className="text-white font-bold px-8 py-2.5 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer"
-                          style={{ backgroundColor: 'var(--color-primary)' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-                        >
-                          <Save className="h-4 w-4" /> {t('saveChanges')}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ADD TO SHOPPING LIST MODAL */}
-      {isShoppingModalOpen && (
-        <div 
-          onClick={() => setIsShoppingModalOpen(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[90] flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl p-6 space-y-5 cursor-default border transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
               <div>
-                <h3 className="text-lg font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                  <ShoppingCart className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('addToShoppingListTitle') || 'Add to Shopping List'}
-                </h3>
-                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('addToShoppingListSub') || 'Select or edit items to add directly to your list'}
-                </p>
-              </div>
-              <button 
-                onClick={() => setIsShoppingModalOpen(false)} 
-                className="cursor-pointer transition"
-                style={{ color: 'var(--color-text-secondary)' }}
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="overflow-y-auto flex-1 space-y-3 pr-1 text-xs">
-              {shoppingModalIngredients.map((ing, idx) => (
-                <div 
-                  key={ing.id} 
-                  className="flex items-center gap-2 p-2.5 rounded-xl border"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)'
-                  }}
-                >
-                  <div
-                    onClick={() => {
-                      const updated = [...shoppingModalIngredients];
-                      updated[idx].selected = !updated[idx].selected;
-                      setShoppingModalIngredients(updated);
-                    }}
-                    className="w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition"
-                    style={ing.selected ? {
-                      backgroundColor: 'var(--color-primary)',
-                      borderColor: 'var(--color-primary)',
-                      color: '#ffffff'
-                    } : {
-                      borderColor: 'var(--color-border)',
-                      backgroundColor: 'var(--color-card)'
-                    }}
-                  >
-                    {ing.selected && <CheckSquare className="h-3.5 w-3.5" />}
-                  </div>
-
-                  <input
-                    type="text"
-                    value={ing.amount}
-                    onChange={(e) => {
-                      const updated = [...shoppingModalIngredients];
-                      updated[idx].amount = e.target.value;
-                      setShoppingModalIngredients(updated);
-                    }}
-                    className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
-                    style={{
-                      backgroundColor: 'var(--color-card)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                    placeholder="Amt"
-                  />
-                  <input
-                    type="text"
-                    value={ing.unit}
-                    onChange={(e) => {
-                      const updated = [...shoppingModalIngredients];
-                      updated[idx].unit = e.target.value;
-                      setShoppingModalIngredients(updated);
-                    }}
-                    className="w-20 border rounded-lg p-2 text-center outline-none"
-                    style={{
-                      backgroundColor: 'var(--color-card)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text-secondary)'
-                    }}
-                    placeholder="Unit"
-                  />
-                  <input
-                    type="text"
-                    value={ing.name}
-                    onChange={(e) => {
-                      const updated = [...shoppingModalIngredients];
-                      updated[idx].name = e.target.value;
-                      setShoppingModalIngredients(updated);
-                    }}
-                    className="flex-1 bg-transparent border-none outline-none px-2"
-                    style={{ color: 'var(--color-text)' }}
-                    placeholder="Ingredient name..."
-                  />
-                  <select
-                    value={ing.category}
-                    onChange={(e) => {
-                      const updated = [...shoppingModalIngredients];
-                      updated[idx].category = e.target.value;
-                      setShoppingModalIngredients(updated);
-                    }}
-                    className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer"
-                    style={{
-                      backgroundColor: 'var(--color-card)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text-secondary)'
-                    }}
-                  >
-                    {DEFAULT_CATEGORIES.map((cat) => (
-                      <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-              ))}
-            </div>
-
-            <div className="pt-3 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
-              <button
-                onClick={() => setIsShoppingModalOpen(false)}
-                className="px-4 py-2 rounded-xl font-bold text-xs cursor-pointer"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  color: 'var(--color-text-secondary)'
-                }}
-              >
-                {t('cancel')}
-              </button>
-              <button
-                onClick={handleConfirmAddToShoppingList}
-                className="px-6 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 shadow-lg cursor-pointer"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-              >
-                <ShoppingCart className="h-3.5 w-3.5" /> {t('addSelectedToListBtn') || 'Add Selected to List'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ADD TO MEAL PLAN MODAL */}
-      {isPlanModalOpen && (
-        <div 
-          onClick={() => setIsPlanModalOpen(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[90] flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-xs cursor-default border transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                <CalendarPlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('addToMealPlanTitle') || 'Add to Meal Plan'}
-              </h3>
-              <button 
-                onClick={() => setIsPlanModalOpen(false)} 
-                className="cursor-pointer transition"
-                style={{ color: 'var(--color-text-secondary)' }}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('dateLabel') || 'Date'}
+                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('cookbookTitleLabel') || 'Cookbook Title *'}
                 </label>
                 <input
-                  type="date"
-                  value={planDate}
-                  onChange={(e) => setPlanDate(e.target.value)}
-                  className="w-full border rounded-xl px-3 py-2 outline-none"
+                  type="text"
+                  required
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleUpdateBook();
+                    }
+                  }}
+                  className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
@@ -35305,35 +33891,14 @@ export default function BooksPage() {
               </div>
 
               <div>
-                <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('mealTypeLabel') || 'Meal Type'}
+                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('descriptionLabel') || 'Description'}
                 </label>
-                <select
-                  value={planMealType}
-                  onChange={(e) => setPlanMealType(e.target.value)}
-                  className="w-full border rounded-xl px-3 py-2 outline-none cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  <option value="Breakfast" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('breakfast') || 'Breakfast'}</option>
-                  <option value="Lunch" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('lunch') || 'Lunch'}</option>
-                  <option value="Dinner" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('dinner') || 'Dinner'}</option>
-                  <option value="Snack" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('snack') || 'Snack'}</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('timeLabel') || 'Time'}
-                </label>
-                <input
-                  type="time"
-                  value={planMealTime}
-                  onChange={(e) => setPlanMealTime(e.target.value)}
-                  className="w-full border rounded-xl px-3 py-2 outline-none"
+                <textarea
+                  rows={3}
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  className="w-full border rounded-xl p-3 text-xs outline-none transition resize-none"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
@@ -35343,33 +33908,57 @@ export default function BooksPage() {
                   onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
               </div>
-            </div>
 
-            <div className="pt-3 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
-              <button
-                onClick={() => setIsPlanModalOpen(false)}
-                className="px-4 py-2 rounded-xl font-bold text-xs cursor-pointer"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  color: 'var(--color-text-secondary)'
-                }}
-              >
-                {t('cancel')}
-              </button>
-              <button
-                onClick={handleConfirmAddToPlan}
-                className="px-5 py-2 rounded-xl text-white font-bold text-xs shadow-lg cursor-pointer"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-              >
-                {t('scheduleMealBtn') || 'Schedule Meal'}
-              </button>
+              <div>
+                <label className="block font-semibold mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('coverGradientLabel') || 'Cover Theme'}
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {COVER_GRADIENTS.map((g) => (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => setEditCoverGradient(g.className)}
+                      className={`h-10 rounded-xl bg-gradient-to-r ${g.className} transition flex items-center justify-center border-2 cursor-pointer shadow-xs`}
+                      style={{
+                        borderColor: editCoverGradient === g.className ? 'var(--color-primary)' : 'transparent'
+                      }}
+                      title={g.label}
+                    >
+                      {editCoverGradient === g.className && <Check className="h-4 w-4 text-white stroke-[3]" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="px-4 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)'
+                  }}
+                >
+                  {t('cancel') || 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateBook()}
+                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-lg flex items-center gap-1.5 cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                >
+                  <Save className="h-4 w-4" /> {t('saveChanges') || 'Save Changes'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
-
     </div>
   );
 }
@@ -38933,6 +37522,7 @@ export default function TransactionsPage() {
 
 ## File: `apps/web/src/app/register/page.tsx`
 ```typescript
+// Generated / Updated by AI Collaborator
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -38947,6 +37537,9 @@ import {
   syncSessionCookie, isSessionCookieValid, DEFAULT_USERS, User 
 } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+
+// Safe default subscription tier helper
+const getDefaultSubscriptionPlan = () => 'free';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -38967,20 +37560,20 @@ export default function RegisterPage() {
   const applySavedTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light';
+      const isDay = mode === 'light' || mode === 'day';
       setIsDayMode(isDay);
 
       const root = document.documentElement;
       if (isDay) {
         root.classList.remove('dark');
         root.classList.add('light');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme#f8fafc';
+        if (typeof document !== 'undefined' && document.body) {
           document.body.style.color = '#0f172a';
         }
       } else {
         root.classList.remove('light');
         root.classList.add('dark');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme
+        if (typeof document !== 'undefined' && document.body) {
           document.body.style.color = '';
         }
       }
@@ -39008,14 +37601,14 @@ export default function RegisterPage() {
       window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
       window.removeEventListener('storage', applySavedTheme);
-      if (typeof document !== 'undefined' && document.body) { // preserved by global theme
+      if (typeof document !== 'undefined' && document.body) {
         document.body.style.color = '';
       }
     };
   }, [applySavedTheme]);
 
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleRegister = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     setError('');
 
     const cleanName = name.trim();
@@ -39023,22 +37616,22 @@ export default function RegisterPage() {
     const cleanPass = password.trim();
 
     if (!cleanName || !cleanEmail || !cleanPass) {
-      setError('Please fill in all required fields.');
+      setError(t('fillAllFields') || 'Please fill in all required fields.');
       return;
     }
 
     if (cleanPass.length < 6) {
-      setError('Password must be at least 6 characters.');
+      setError(t('passwordMinLength') || 'Password must be at least 6 characters.');
       return;
     }
 
     if (cleanPass !== confirmPassword.trim()) {
-      setError('Passwords do not match.');
+      setError(t('passwordsDoNotMatch') || 'Passwords do not match.');
       return;
     }
 
     if (!agreeTerms) {
-      setError('Please agree to the Terms of Service and Privacy Policy.');
+      setError(t('agreeTermsPrompt') || 'Please agree to the Terms of Service and Privacy Policy.');
       return;
     }
 
@@ -39050,26 +37643,49 @@ export default function RegisterPage() {
       const users: User[] = rawUsers ? JSON.parse(rawUsers) : [...DEFAULT_USERS];
 
       if (users.some(u => u.email.toLowerCase() === cleanEmail)) {
-        setError('An account with this email already exists.');
+        setError(t('emailAlreadyExists') || 'An account with this email already exists.');
         setLoading(false);
         return;
       }
 
+      const defaultPlan = getDefaultSubscriptionPlan();
       const newUser: User = {
         id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         name: cleanName,
         email: cleanEmail,
         password: cleanPass,
         role: 'user',
-        subscriptionPlan: getDefaultSubscriptionPlan(),
-        subscriptionTier: getDefaultSubscriptionPlan(),
+        subscriptionPlan: defaultPlan,
+        subscriptionTier: defaultPlan,
         createdAt: new Date().toISOString()
       };
 
+      // 1. Asynchronously persist to PostgreSQL backend
+      try {
+        await Promise.allSettled([
+          fetch('/api/admin/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newUser)
+          }),
+          fetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newUser)
+          })
+        ]);
+      } catch (_) {}
+
+      // 2. Local storage & cookie session synchronization
       users.push(newUser);
       localStorage.setItem('zecratary_users', JSON.stringify(users));
       setCurrentUser(newUser);
       syncSessionCookie(newUser);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_auth_changed'));
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+      }
 
       window.location.replace('/profile');
     } catch (err: any) {
@@ -39111,10 +37727,10 @@ export default function RegisterPage() {
             <UserPlus className="h-6 w-6" />
           </div>
           <h1 className="text-2xl font-black tracking-tight" style={{ color: cText }}>
-            Create Your Account
+            {t('createYourAccount') || 'Create Your Account'}
           </h1>
           <p className="text-xs" style={{ color: cSubText }}>
-            Join Zecratary to start planning, saving, and organizing recipes.
+            {t('registerSubtitle') || 'Join Zecratary to start planning, saving, and organizing recipes.'}
           </p>
         </div>
 
@@ -39129,15 +37745,25 @@ export default function RegisterPage() {
           </div>
         )}
 
-        <form onSubmit={handleRegister} className="space-y-4 text-xs">
+        {/* REGISTRATION CONTAINER (NO NATIVE FORM) */}
+        <div className="space-y-4 text-xs">
           <div>
             <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
-              Full Name
+              {t('fullNameLabel') || 'Full Name'}
             </label>
             <div className="relative">
               <UserIcon className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
               <input 
-                type="text" required value={name} onChange={e => setName(e.target.value)}
+                type="text" 
+                required 
+                value={name} 
+                onChange={e => setName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleRegister();
+                  }
+                }}
                 placeholder="Marcus Vance"
                 className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none font-medium transition shadow-inner"
                 style={{
@@ -39151,12 +37777,21 @@ export default function RegisterPage() {
 
           <div>
             <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
-              Email Address
+              {t('emailAddressLabel') || 'Email Address'}
             </label>
             <div className="relative">
               <Mail className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
               <input 
-                type="email" required value={email} onChange={e => setEmail(e.target.value)}
+                type="email" 
+                required 
+                value={email} 
+                onChange={e => setEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleRegister();
+                  }
+                }}
                 placeholder="name@example.com"
                 className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none font-mono transition shadow-inner"
                 style={{
@@ -39170,12 +37805,21 @@ export default function RegisterPage() {
 
           <div>
             <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
-              Password
+              {t('passwordLabel') || 'Password'}
             </label>
             <div className="relative">
               <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
               <input 
-                type={showPassword ? 'text' : 'password'} required value={password} onChange={e => setPassword(e.target.value)}
+                type={showPassword ? 'text' : 'password'} 
+                required 
+                value={password} 
+                onChange={e => setPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleRegister();
+                  }
+                }}
                 placeholder="Min. 6 characters"
                 className="w-full border rounded-xl pl-10 pr-10 py-2.5 outline-none transition shadow-inner"
                 style={{
@@ -39196,12 +37840,21 @@ export default function RegisterPage() {
 
           <div>
             <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
-              Confirm Password
+              {t('confirmPasswordLabel') || 'Confirm Password'}
             </label>
             <div className="relative">
               <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
               <input 
-                type={showPassword ? 'text' : 'password'} required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+                type={showPassword ? 'text' : 'password'} 
+                required 
+                value={confirmPassword} 
+                onChange={e => setConfirmPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleRegister();
+                  }
+                }}
                 placeholder="Repeat password"
                 className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none transition shadow-inner"
                 style={{
@@ -39215,28 +37868,42 @@ export default function RegisterPage() {
 
           <div className="flex items-center gap-2 pt-1">
             <input 
-              type="checkbox" id="terms" checked={agreeTerms} onChange={e => setAgreeTerms(e.target.checked)}
+              type="checkbox" 
+              id="terms" 
+              checked={agreeTerms} 
+              onChange={e => setAgreeTerms(e.target.checked)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleRegister();
+                }
+              }}
               className="w-4 h-4 rounded accent-[var(--color-primary,#E05638)] cursor-pointer"
             />
             <label htmlFor="terms" className="text-[11px] cursor-pointer" style={{ color: cSubText }}>
-              I agree to the <span className="underline hover:opacity-80">Terms of Service</span> and <span className="underline hover:opacity-80">Privacy Policy</span>
+              {t('agreeTermsPrefix') || 'I agree to the'}{' '}
+              <span className="underline hover:opacity-80">{t('termsOfService') || 'Terms of Service'}</span>{' '}
+              {t('and') || 'and'}{' '}
+              <span className="underline hover:opacity-80">{t('privacyPolicy') || 'Privacy Policy'}</span>
             </label>
           </div>
 
           <button
-            type="submit" disabled={loading}
+            type="button" 
+            onClick={() => handleRegister()}
+            disabled={loading}
             className="w-full py-3 mt-2 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer hover:opacity-90 disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
           >
             {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-            Create Free Account
+            {t('createFreeAccount') || 'Create Free Account'}
           </button>
-        </form>
+        </div>
 
         <div className="text-center pt-2 border-t text-xs" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
-          <span style={{ color: cSubText }}>Already have an account? </span>
+          <span style={{ color: cSubText }}>{t('alreadyHaveAccount') || 'Already have an account?'} </span>
           <Link href="/login" className="font-bold hover:underline" style={{ color: 'var(--color-primary, #E05638)' }}>
-            Sign in
+            {t('signIn') || 'Sign in'}
           </Link>
         </div>
       </div>
@@ -39392,8 +38059,8 @@ export default function ManualRecipePage() {
     setDraggedIndex(null);
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSave = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!form.title.trim()) {
       alert(t('enterRecipeTitleAlert') || 'Please enter a recipe title.');
       setActiveTab('info');
@@ -39526,7 +38193,8 @@ export default function ManualRecipePage() {
           })}
         </div>
 
-        <form onSubmit={handleSave} className="space-y-6">
+        {/* CONTAINER REPLACED NATIVE FORM */}
+        <div className="space-y-6">
           {activeTab === 'info' && (
             <div className="space-y-6 animate-in fade-in">
               <div className="space-y-2">
@@ -39564,6 +38232,12 @@ export default function ManualRecipePage() {
                     placeholder={t('recipeTitlePlaceholder') || 'e.g. Authentic Pad Thai'}
                     value={form.title}
                     onChange={(e) => setForm({ ...form, title: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSave();
+                      }
+                    }}
                     className="w-full border rounded-xl p-3 text-sm outline-none transition font-bold"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -39616,6 +38290,12 @@ export default function ManualRecipePage() {
                       type="number"
                       value={form.servings}
                       onChange={(e) => setForm({ ...form, servings: parseInt(e.target.value) || 1 })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSave();
+                        }
+                      }}
                       className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -39631,6 +38311,12 @@ export default function ManualRecipePage() {
                       type="number"
                       value={form.prepTimeMinutes}
                       onChange={(e) => setForm({ ...form, prepTimeMinutes: parseInt(e.target.value) || 0 })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSave();
+                        }
+                      }}
                       className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -39646,6 +38332,12 @@ export default function ManualRecipePage() {
                       type="number"
                       value={form.cookTimeMinutes}
                       onChange={(e) => setForm({ ...form, cookTimeMinutes: parseInt(e.target.value) || 0 })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSave();
+                        }
+                      }}
                       className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -39731,6 +38423,12 @@ export default function ManualRecipePage() {
                         list[idx].amount = e.target.value;
                         setForm({ ...form, ingredients: list });
                       }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSave();
+                        }
+                      }}
                       className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
                       style={{
                         backgroundColor: 'var(--color-card)',
@@ -39747,6 +38445,12 @@ export default function ManualRecipePage() {
                         list[idx].unit = e.target.value;
                         setForm({ ...form, ingredients: list });
                       }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSave();
+                        }
+                      }}
                       className="w-20 border rounded-lg p-2 text-center outline-none"
                       style={{
                         backgroundColor: 'var(--color-card)',
@@ -39762,6 +38466,12 @@ export default function ManualRecipePage() {
                         const list = [...form.ingredients];
                         list[idx].item = e.target.value;
                         setForm({ ...form, ingredients: list });
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSave();
+                        }
                       }}
                       className="flex-1 bg-transparent border-none outline-none px-2 font-medium"
                       style={{ color: 'var(--color-text)' }}
@@ -39939,7 +38649,8 @@ export default function ManualRecipePage() {
                   {t('backBtn') || '← Back'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleSave()}
                   disabled={saving}
                   className="text-white font-bold px-8 py-3 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
                   style={{ backgroundColor: 'var(--color-primary)' }}
@@ -39949,7 +38660,7 @@ export default function ManualRecipePage() {
               </div>
             </div>
           )}
-        </form>
+        </div>
       </div>
     </div>
   );
@@ -40317,9 +39028,9 @@ export default function ProfilePage() {
     };
   }, [reloadActiveUser, fetchTokenSummary, fetchWalletSummary]);
 
-  // Update Profile Form
-  const handleUpdateProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Update Profile Action
+  const handleUpdateProfile = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     setError('');
     setSuccessMsg('');
     if (!user) return;
@@ -40495,9 +39206,7 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* 🚀 HIGH-VISIBILITY EXECUTIVE SUMMARY KPI BANNER                           */}
-      {/* ========================================================================= */}
+      {/* EXECUTIVE SUMMARY KPI BANNER */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-in fade-in">
         {/* KPI 1: AI Token Spendable Balance */}
         <div 
@@ -40677,7 +39386,7 @@ export default function ProfilePage() {
       {/* Profile Overview (Credentials, Token & Wallet Summary, Socials) */}
       <div className="space-y-6 animate-in fade-in">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left: Profile Credentials Form */}
+          {/* Left: Profile Credentials Container (No Form) */}
           <div 
             className="lg:col-span-7 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl flex flex-col justify-between"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -40721,7 +39430,7 @@ export default function ProfilePage() {
               </div>
             </div>
 
-            <form onSubmit={handleUpdateProfile} className="space-y-4 text-xs" autoComplete="off">
+            <div className="space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-bold mb-1.5 opacity-80">{t('fullNameLabel', 'Full Name *')}</label>
@@ -40730,6 +39439,12 @@ export default function ProfilePage() {
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateProfile();
+                      }
+                    }}
                     className="w-full border rounded-xl px-3.5 py-2.5 text-sm font-bold outline-none bg-[var(--color-inner-dark)] border-[var(--color-border)]"
                   />
                 </div>
@@ -40740,6 +39455,12 @@ export default function ProfilePage() {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateProfile();
+                      }
+                    }}
                     className="w-full border rounded-xl px-3.5 py-2.5 text-sm font-bold outline-none bg-[var(--color-inner-dark)] border-[var(--color-border)]"
                   />
                 </div>
@@ -40753,6 +39474,12 @@ export default function ProfilePage() {
                     autoComplete="new-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateProfile();
+                      }
+                    }}
                     placeholder="••••••••"
                     className="w-full border rounded-xl px-3.5 py-2.5 text-sm font-bold outline-none bg-[var(--color-inner-dark)] border-[var(--color-border)]"
                   />
@@ -40764,6 +39491,12 @@ export default function ProfilePage() {
                     autoComplete="new-password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleUpdateProfile();
+                      }
+                    }}
                     placeholder="••••••••"
                     className="w-full border rounded-xl px-3.5 py-2.5 text-sm font-bold outline-none bg-[var(--color-inner-dark)] border-[var(--color-border)]"
                   />
@@ -40790,14 +39523,15 @@ export default function ProfilePage() {
                 </div>
 
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleUpdateProfile()}
                   className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
                   <Check className="h-4 w-4" /> {t('saveProfileBtn', 'Save Profile')}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
 
           {/* Right: Dual Asset Summary Cards */}
@@ -41000,6 +39734,7 @@ export default function ProfilePage() {
 
 ## File: `apps/web/src/app/forgot-password/page.tsx`
 ```typescript
+// Generated / Updated by AI Collaborator
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -41040,13 +39775,13 @@ export default function ForgotPasswordPage() {
       if (isDay) {
         root.classList.remove('dark');
         root.classList.add('light');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme#f8fafc';
+        if (typeof document !== 'undefined' && document.body) {
           document.body.style.color = '#0f172a';
         }
       } else {
         root.classList.remove('light');
         root.classList.add('dark');
-        if (typeof document !== 'undefined' && document.body) { // preserved by global theme
+        if (typeof document !== 'undefined' && document.body) {
           document.body.style.color = '';
         }
       }
@@ -41069,20 +39804,20 @@ export default function ForgotPasswordPage() {
       window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
       window.removeEventListener('storage', applySavedTheme);
-      if (typeof document !== 'undefined' && document.body) { // preserved by global theme
+      if (typeof document !== 'undefined' && document.body) {
         document.body.style.color = '';
       }
     };
   }, [router, applySavedTheme]);
 
-  const handleRequestToken = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleRequestToken = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     setError('');
     setSuccess('');
 
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      setError('Please provide a valid email address.');
+      setError(t('invalidEmailPrompt') || 'Please provide a valid email address.');
       return;
     }
 
@@ -41097,7 +39832,7 @@ export default function ForgotPasswordPage() {
           DEFAULT_USERS.find(u => u.email.toLowerCase() === cleanEmail);
 
         if (!matched) {
-          setError('No account found with this email address.');
+          setError(t('noAccountFoundEmail') || 'No account found with this email address.');
           setLoading(false);
           return;
         }
@@ -41106,65 +39841,95 @@ export default function ForgotPasswordPage() {
         setGeneratedToken(simulatedToken);
         setTokenInput(simulatedToken);
 
-        setSuccess(`Reset code generated for ${cleanEmail}. Enter code to set a new password.`);
+        setSuccess((t('resetCodeGeneratedSuccess') || 'Reset code generated for {email}. Enter code to set a new password.').replace('{email}', cleanEmail));
         setStep(2);
       } catch (err: any) {
-        setError('Failed to process recovery request.');
+        setError(t('recoveryRequestFailed') || 'Failed to process recovery request.');
       } finally {
         setLoading(false);
       }
     }, 600);
   };
 
-  const handleResetPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleResetPassword = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     setError('');
     setSuccess('');
 
     if (tokenInput.trim() !== generatedToken.trim()) {
-      setError('Invalid or expired security code.');
+      setError(t('invalidSecurityCode') || 'Invalid or expired security code.');
       return;
     }
 
     if (newPassword.length < 6) {
-      setError('Password must be at least 6 characters.');
+      setError(t('passwordMinLength') || 'Password must be at least 6 characters.');
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      setError('Passwords do not match.');
+      setError(t('passwordsDoNotMatch') || 'Passwords do not match.');
       return;
     }
 
     setLoading(true);
 
-    setTimeout(() => {
-      try {
-        const rawUsers = localStorage.getItem('zecratary_users');
-        let users: User[] = rawUsers ? JSON.parse(rawUsers) : [...DEFAULT_USERS];
-        const cleanEmail = email.trim().toLowerCase();
+    try {
+      const cleanEmail = email.trim().toLowerCase();
+      const rawUsers = localStorage.getItem('zecratary_users');
+      let users: User[] = rawUsers ? JSON.parse(rawUsers) : [...DEFAULT_USERS];
 
-        const userIndex = users.findIndex(u => u.email.toLowerCase() === cleanEmail);
-        if (userIndex !== -1) {
-          users[userIndex].password = newPassword.trim();
-        } else {
-          const fallback = DEFAULT_USERS.find(u => u.email.toLowerCase() === cleanEmail);
-          if (fallback) {
-            users.push({ ...fallback, password: newPassword.trim() });
-          }
+      const userIndex = users.findIndex(u => u.email.toLowerCase() === cleanEmail);
+      let matchedUser: any = null;
+      if (userIndex !== -1) {
+        (users[userIndex] as any).password = newPassword.trim();
+        matchedUser = users[userIndex];
+      } else {
+        const fallback = DEFAULT_USERS.find(u => u.email.toLowerCase() === cleanEmail);
+        if (fallback) {
+          const updatedFallback = { ...fallback, password: newPassword.trim() };
+          users.push(updatedFallback as any);
+          matchedUser = updatedFallback;
         }
+      }
 
-        localStorage.setItem('zecratary_users', JSON.stringify(users));
+      // 1. Asynchronously persist to PostgreSQL backend
+      try {
+        await Promise.allSettled([
+          fetch('/api/admin/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: matchedUser?.id,
+              email: cleanEmail,
+              password: newPassword.trim(),
+              name: matchedUser?.name,
+              role: matchedUser?.role || 'user'
+            })
+          }),
+          fetch('/api/auth/reset-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: cleanEmail,
+              password: newPassword.trim()
+            })
+          })
+        ]);
+      } catch (_) {}
+
+      // 2. Synchronize localStorage & broadcast update
+      localStorage.setItem('zecratary_users', JSON.stringify(users));
+      if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_users_updated'));
         window.dispatchEvent(new Event('storage'));
-
-        setSuccess('Password updated successfully! Redirecting to login...');
-        setTimeout(() => router.replace('/login'), 1200);
-      } catch (err: any) {
-        setError('Failed to update password.');
-        setLoading(false);
       }
-    }, 600);
+
+      setSuccess(t('passwordUpdatedRedirect') || 'Password updated successfully! Redirecting to login...');
+      setTimeout(() => router.replace('/login'), 1200);
+    } catch (err: any) {
+      setError(t('passwordUpdateFailed') || 'Failed to update password.');
+      setLoading(false);
+    }
   };
 
   const cPageBg = isDayMode ? '#f8fafc' : 'var(--color-bg, #070b13)';
@@ -41199,12 +39964,14 @@ export default function ForgotPasswordPage() {
             <Key className="h-6 w-6" />
           </div>
           <h1 className="text-2xl font-black tracking-tight" style={{ color: cText }}>
-            {step === 1 ? 'Password Recovery' : 'Create New Password'}
+            {step === 1 
+              ? (t('passwordRecoveryTitle') || 'Password Recovery') 
+              : (t('createNewPasswordTitle') || 'Create New Password')}
           </h1>
           <p className="text-xs" style={{ color: cSubText }}>
             {step === 1 
-              ? 'Enter your registered email to generate a secure reset token.' 
-              : `Enter the code and create a new password for ${email}`}
+              ? (t('enterEmailTokenPrompt') || 'Enter your registered email to generate a secure reset token.') 
+              : (t('enterCodeNewPasswordPrompt') || 'Enter the code and create a new password for {email}').replace('{email}', email)}
           </p>
         </div>
 
@@ -41230,11 +39997,12 @@ export default function ForgotPasswordPage() {
           </div>
         )}
 
+        {/* STEP 1: REQUEST CODE CONTAINER (NO NATIVE FORM) */}
         {step === 1 ? (
-          <form onSubmit={handleRequestToken} className="space-y-4 text-xs" autoComplete="off">
+          <div className="space-y-4 text-xs">
             <div>
               <label className="block font-bold mb-1.5" style={{ color: cLabel }}>
-                Email Address *
+                {t('emailAddressLabel') || 'Email Address'} *
               </label>
               <div className="relative">
                 <Mail className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
@@ -41243,6 +40011,12 @@ export default function ForgotPasswordPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleRequestToken();
+                    }
+                  }}
                   placeholder="name@example.com"
                   className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none font-mono transition shadow-inner"
                   style={{
@@ -41255,20 +40029,22 @@ export default function ForgotPasswordPage() {
             </div>
 
             <button
-              type="submit"
+              type="button"
+              onClick={() => handleRequestToken()}
               disabled={loading}
               className="w-full py-3 mt-2 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer hover:opacity-90 disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
             >
               {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-              Send Reset Code
+              {t('sendResetCodeBtn') || 'Send Reset Code'}
             </button>
-          </form>
+          </div>
         ) : (
-          <form onSubmit={handleResetPassword} className="space-y-3.5 text-xs" autoComplete="off">
+          /* STEP 2: RESET PASSWORD CONTAINER (NO NATIVE FORM) */
+          <div className="space-y-3.5 text-xs">
             <div>
               <label className="block font-bold mb-1" style={{ color: cLabel }}>
-                6-Digit Security Code *
+                {t('securityCodeLabel') || '6-Digit Security Code'} *
               </label>
               <input
                 type="text"
@@ -41276,6 +40052,12 @@ export default function ForgotPasswordPage() {
                 maxLength={6}
                 value={tokenInput}
                 onChange={(e) => setTokenInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleResetPassword();
+                  }
+                }}
                 placeholder="123456"
                 className="w-full border rounded-xl px-3.5 py-2.5 outline-none font-mono font-bold tracking-widest text-center text-sm transition shadow-inner"
                 style={{
@@ -41288,7 +40070,7 @@ export default function ForgotPasswordPage() {
 
             <div>
               <label className="block font-bold mb-1" style={{ color: cLabel }}>
-                New Password *
+                {t('newPasswordLabel') || 'New Password'} *
               </label>
               <div className="relative">
                 <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
@@ -41297,7 +40079,13 @@ export default function ForgotPasswordPage() {
                   required
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="At least 6 characters"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleResetPassword();
+                    }
+                  }}
+                  placeholder={t('passwordMinLengthPlaceholder') || 'At least 6 characters'}
                   className="w-full border rounded-xl pl-10 pr-10 py-2.5 outline-none transition shadow-inner"
                   style={{
                     backgroundColor: cInputBg,
@@ -41317,7 +40105,7 @@ export default function ForgotPasswordPage() {
 
             <div>
               <label className="block font-bold mb-1" style={{ color: cLabel }}>
-                Confirm New Password *
+                {t('confirmNewPasswordLabel') || 'Confirm New Password'} *
               </label>
               <div className="relative">
                 <Lock className="h-4 w-4 absolute left-3.5 top-3 text-slate-500" />
@@ -41326,7 +40114,13 @@ export default function ForgotPasswordPage() {
                   required
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  placeholder="Repeat new password"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleResetPassword();
+                    }
+                  }}
+                  placeholder={t('repeatNewPasswordPlaceholder') || 'Repeat new password'}
                   className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 outline-none transition shadow-inner"
                   style={{
                     backgroundColor: cInputBg,
@@ -41338,13 +40132,14 @@ export default function ForgotPasswordPage() {
             </div>
 
             <button
-              type="submit"
+              type="button"
+              onClick={() => handleResetPassword()}
               disabled={loading}
               className="w-full py-3 mt-2 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer hover:opacity-90 disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
             >
               {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-              Set New Password
+              {t('setNewPasswordBtn') || 'Set New Password'}
             </button>
 
             <button
@@ -41352,9 +40147,9 @@ export default function ForgotPasswordPage() {
               onClick={() => setStep(1)}
               className="w-full py-2 text-slate-400 hover:text-slate-600 text-center font-bold text-[11px] cursor-pointer"
             >
-              Re-send to a different email
+              {t('resendDifferentEmail') || 'Re-send to a different email'}
             </button>
-          </form>
+          </div>
         )}
 
         <div className="text-center pt-2 border-t text-xs" style={{ borderColor: isDayMode ? '#e2e8f0' : '#1e293b' }}>
@@ -41363,7 +40158,7 @@ export default function ForgotPasswordPage() {
             className="font-bold inline-flex items-center gap-1.5 hover:underline"
             style={{ color: 'var(--color-primary, #E05638)' }}
           >
-            <ArrowLeft className="h-3.5 w-3.5" /> Back to Sign In
+            <ArrowLeft className="h-3.5 w-3.5" /> {t('backToSignIn') || 'Back to Sign In'}
           </Link>
         </div>
       </div>
@@ -42584,6 +41379,217 @@ export default function WalletPage() {
 
 ```
 
+## File: `apps/web/src/app/api/pantry/route.ts`
+```typescript
+import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+function getFallbackPath(): string {
+  const p1 = path.join(process.cwd(), 'apps', 'web', 'data', 'pantry_items.json');
+  const p2 = path.join(process.cwd(), 'data', 'pantry_items.json');
+  return fs.existsSync(path.dirname(p1)) ? p1 : p2;
+}
+
+function readFallback(userId?: string): any[] {
+  try {
+    const fPath = getFallbackPath();
+    if (!fs.existsSync(fPath)) return [];
+    const raw = fs.readFileSync(fPath, 'utf-8');
+    const items = JSON.parse(raw);
+    if (!Array.isArray(items)) return [];
+    if (!userId) return items;
+    return items.filter((i: any) => i.userId === userId || i.createdBy === userId);
+  } catch {
+    return [];
+  }
+}
+
+function writeFallback(items: any[]): void {
+  try {
+    const fPath = getFallbackPath();
+    fs.mkdirSync(path.dirname(fPath), { recursive: true });
+    fs.writeFileSync(fPath, JSON.stringify(items, null, 2), 'utf-8');
+  } catch {}
+}
+
+async function getDbQuery() {
+  try {
+    const dbMod = await import('@/lib/db');
+    if (typeof dbMod.query === 'function') return dbMod.query;
+    if (dbMod.default && typeof dbMod.default.query === 'function') return dbMod.default.query.bind(dbMod.default);
+    if (dbMod.pool && typeof dbMod.pool.query === 'function') return dbMod.pool.query.bind(dbMod.pool);
+  } catch {}
+  return null;
+}
+
+async function ensureTable(dbQuery: any) {
+  try {
+    await dbQuery(`
+      CREATE TABLE IF NOT EXISTS pantry_items (
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        created_by VARCHAR(255),
+        name VARCHAR(255) NOT NULL,
+        quantity VARCHAR(100),
+        unit VARCHAR(100),
+        category VARCHAR(100),
+        expiry_date VARCHAR(100),
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch {}
+}
+
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const userId = searchParams.get('userId') || '';
+  const dbQuery = await getDbQuery();
+
+  if (dbQuery && userId) {
+    try {
+      await ensureTable(dbQuery);
+      const res = await dbQuery(
+        `SELECT 
+           id, 
+           user_id AS "userId", 
+           created_by AS "createdBy", 
+           name, 
+           quantity, 
+           unit, 
+           category, 
+           expiry_date AS "expiryDate",
+           created_at AS "createdAt"
+         FROM pantry_items 
+         WHERE user_id = $1 OR created_by = $1
+         ORDER BY created_at DESC`,
+        [userId]
+      );
+      return NextResponse.json({ success: true, items: res.rows || [] });
+    } catch {}
+  }
+
+  return NextResponse.json({ success: true, items: readFallback(userId) });
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const userId = body.userId || '';
+    const items = Array.isArray(body.items) ? body.items : (body.item ? [body.item] : []);
+    const dbQuery = await getDbQuery();
+
+    if (dbQuery && userId) {
+      try {
+        await ensureTable(dbQuery);
+        // Replace user records with updated list
+        if (items.length > 0) {
+          const itemIds = items.map((i: any) => i.id);
+          await dbQuery(
+            `DELETE FROM pantry_items WHERE (user_id = $1 OR created_by = $1) AND NOT (id = ANY($2))`,
+            [userId, itemIds]
+          );
+
+          for (const item of items) {
+            await dbQuery(
+              `INSERT INTO pantry_items (id, user_id, created_by, name, quantity, unit, category, expiry_date, updated_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+               ON CONFLICT (id) DO UPDATE SET
+                 name = EXCLUDED.name,
+                 quantity = EXCLUDED.quantity,
+                 unit = EXCLUDED.unit,
+                 category = EXCLUDED.category,
+                 expiry_date = EXCLUDED.expiry_date,
+                 updated_at = NOW()`,
+              [
+                item.id,
+                item.userId || userId,
+                item.createdBy || userId,
+                item.name,
+                item.quantity || '1',
+                item.unit || 'Unit',
+                item.category || 'Produce',
+                item.expiryDate || ''
+              ]
+            );
+          }
+        } else {
+          // If items array is empty, purge user's pantry
+          await dbQuery(`DELETE FROM pantry_items WHERE user_id = $1 OR created_by = $1`, [userId]);
+        }
+      } catch {}
+    }
+
+    // Synchronize fallback file
+    const existing = readFallback();
+    const others = existing.filter((i: any) => i.userId !== userId && i.createdBy !== userId);
+    writeFallback([...items, ...others]);
+
+    return NextResponse.json({ success: true, count: items.length });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 400 });
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id') || '';
+    let userId = searchParams.get('userId') || '';
+    let ids: string[] = [];
+
+    try {
+      const body = await req.json();
+      if (body.id) id = body.id;
+      if (body.userId) userId = body.userId;
+      if (Array.isArray(body.ids)) ids = body.ids;
+    } catch {}
+
+    if (id && !ids.includes(id)) {
+      ids.push(id);
+    }
+
+    const dbQuery = await getDbQuery();
+    if (dbQuery && ids.length > 0) {
+      try {
+        await ensureTable(dbQuery);
+        if (userId) {
+          await dbQuery(
+            `DELETE FROM pantry_items WHERE id = ANY($1) AND (user_id = $2 OR created_by = $2)`,
+            [ids, userId]
+          );
+        } else {
+          await dbQuery(`DELETE FROM pantry_items WHERE id = ANY($1)`, [ids]);
+        }
+      } catch {}
+    }
+
+    // Clean fallback file
+    const existing = readFallback();
+    const remaining = existing.filter((i: any) => !ids.includes(i.id));
+    writeFallback(remaining);
+
+    return NextResponse.json({ success: true, deleted: ids });
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e.message }, { status: 400 });
+  }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+    }
+  });
+}
+
+```
+
 ## File: `apps/web/src/app/api/shopping/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
@@ -42641,6 +41647,7 @@ export async function GET(req: NextRequest) {
       category: r.category || 'Produce',
       staple: Boolean(r.staple),
       checked: Boolean(r.checked),
+      completed: Boolean(r.checked),
       recipeId: r.recipe_id || null,
       recipeTitle: r.recipe_title || null,
       createdAt: r.created_at || new Date().toISOString(),
@@ -42671,7 +41678,7 @@ export async function POST(req: NextRequest) {
       const unit = String(item.unit || '').slice(0, 64);
       const category = String(item.category || 'Produce').slice(0, 64);
       const staple = Boolean(item.staple);
-      const checked = Boolean(item.checked || item.completed);
+      const checked = typeof item.checked !== 'undefined' ? Boolean(item.checked) : Boolean(item.completed);
       const recipeId = item.recipeId || item.recipe_id ? String(item.recipeId || item.recipe_id).slice(0, 64) : null;
       const recipeTitle = item.recipeTitle || item.recipe_title ? String(item.recipeTitle || item.recipe_title).slice(0, 255) : null;
 
@@ -43652,55 +42659,27 @@ export async function GET(
 ## File: `apps/web/src/app/api/planner/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-let cachedPool: any = null;
-
-async function getPostgresPool() {
-  if (cachedPool) return cachedPool;
-  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
-  if (!connStr) return null;
+async function ensureTable() {
   try {
-    const { Pool } = await import('pg');
-    const requiresSsl = connStr.includes('sslmode=require') || 
-                        connStr.includes('neon.tech') || 
-                        connStr.includes('supabase.co') || 
-                        process.env.NODE_ENV === 'production';
-    cachedPool = new Pool({
-      connectionString: connStr,
-      ssl: requiresSsl ? { rejectUnauthorized: false } : false
-    });
-    return cachedPool;
-  } catch (_) {
-    return null;
-  }
-}
-
-async function ensurePlannerTable(pool: any) {
-  if (!pool) return;
-  try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS planner_meals (
-        id VARCHAR(100) PRIMARY KEY,
-        user_id VARCHAR(100),
+    await query(`
+      CREATE TABLE IF NOT EXISTS planned_meals (
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255),
         created_by VARCHAR(255),
-        creator_name VARCHAR(255),
-        title VARCHAR(255) NOT NULL,
-        description TEXT,
-        date VARCHAR(50),
-        date_str VARCHAR(50),
-        day_name VARCHAR(50),
-        meal_type VARCHAR(50) DEFAULT 'Dinner',
-        time VARCHAR(50),
-        servings INT DEFAULT 2,
-        prep_minutes INT DEFAULT 15,
-        cook_minutes INT DEFAULT 20,
-        image_url TEXT,
-        ingredients JSONB DEFAULT '[]'::jsonb,
+        date VARCHAR(64) NOT NULL,
+        recipe_id VARCHAR(255),
+        recipe_name VARCHAR(255) NOT NULL,
+        image TEXT,
+        meal_type VARCHAR(64) DEFAULT 'Dinner',
+        time VARCHAR(64) DEFAULT '',
+        is_leftover BOOLEAN DEFAULT FALSE,
         notes TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);
   } catch (_) {}
@@ -43708,18 +42687,38 @@ async function ensurePlannerTable(pool: any) {
 
 export async function GET(req: NextRequest) {
   try {
+    await ensureTable();
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId') || 'guest';
-    const pool = await getPostgresPool();
-    if (pool) {
-      await ensurePlannerTable(pool);
-      const res = await pool.query(
-        "SELECT * FROM planner_meals WHERE user_id = $1 OR created_by = $1 ORDER BY date ASC LIMIT 100",
-        [userId]
-      );
-      return NextResponse.json({ success: true, meals: res.rows });
+    const userId = searchParams.get('userId');
+
+    let sql = 'SELECT * FROM planned_meals WHERE 1=1';
+    const params: any[] = [];
+
+    if (userId) {
+      params.push(userId);
+      sql += ` AND (user_id = $${params.length} OR created_by = $${params.length} OR user_id IS NULL)`;
     }
-    return NextResponse.json({ success: true, meals: [] });
+
+    sql += ' ORDER BY date ASC, time ASC, created_at ASC';
+    const rows = await query(sql, params);
+
+    const formatted = rows.map((r: any) => ({
+      id: r.id,
+      userId: r.user_id,
+      createdBy: r.created_by,
+      date: r.date,
+      recipeId: r.recipe_id,
+      recipeName: r.recipe_name,
+      image: r.image,
+      mealType: r.meal_type || 'Dinner',
+      time: r.time || '',
+      isLeftover: Boolean(r.is_leftover),
+      notes: r.notes || '',
+      createdAt: r.created_at,
+      updatedAt: r.updated_at
+    }));
+
+    return NextResponse.json({ success: true, meals: formatted });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -43727,50 +42726,88 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureTable();
     const body = await req.json();
-    const id = body.id || `plan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const userId = body.userId || body.user_id || 'guest';
-    const email = body.createdBy || body.creator_email || 'guest';
-    const name = body.creatorName || email.split('@')[0];
-    const title = body.title || body.name || body.recipeTitle || 'Scheduled Meal';
-    const description = body.description || '';
-    const date = body.date || body.formattedDate || new Date().toISOString().split('T')[0];
-    const dateStr = body.dateStr || date;
-    const dayName = body.dayName || body.day || '';
-    const mealType = (body.mealType || body.type || 'Dinner').toUpperCase();
-    const time = body.time || '19:00';
-    const servings = Number(body.servings || 2);
-    const prep = Number(body.prepMinutes || body.prepTimeMinutes || 15);
-    const cook = Number(body.cookMinutes || body.cookTimeMinutes || 20);
-    const image = body.image || body.imageUrl || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80';
-    const ingredients = Array.isArray(body.ingredients) ? body.ingredients : [];
-    const notes = body.notes || '';
+    const userId = body.userId;
+    const meals = Array.isArray(body.meals) ? body.meals : (body.meal ? [body.meal] : []);
 
-    const pool = await getPostgresPool();
-    if (pool) {
-      await ensurePlannerTable(pool);
-      await pool.query(
-        `INSERT INTO planner_meals (
-          id, user_id, created_by, creator_name, title, description,
-          date, date_str, day_name, meal_type, time, servings,
-          prep_minutes, cook_minutes, image_url, ingredients, notes, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, $17, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          title = EXCLUDED.title,
-          date = EXCLUDED.date,
-          meal_type = EXCLUDED.meal_type,
-          time = EXCLUDED.time,
-          notes = EXCLUDED.notes,
-          updated_at = NOW();`,
-        [id, userId, email, name, title, description, date, dateStr, dayName, mealType, time, servings, prep, cook, image, JSON.stringify(ingredients), notes]
-      );
+    if (userId && Array.isArray(body.meals)) {
+      const mealIds = meals.map((m: any) => m.id);
+      if (mealIds.length > 0) {
+        await query(
+          'DELETE FROM planned_meals WHERE (user_id = $1 OR created_by = $1) AND NOT (id = ANY($2::text[]))',
+          [userId, mealIds]
+        );
+      } else {
+        await query('DELETE FROM planned_meals WHERE user_id = $1 OR created_by = $1', [userId]);
+      }
     }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Meal scheduled successfully in PostgreSQL planner.',
-      meal: { id, title, date, mealType, time, servings }
-    });
+    for (const m of meals) {
+      if (!m || !m.recipeName) continue;
+      const id = String(m.id || 'plan_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
+      const targetUserId = m.userId || userId || null;
+      const createdBy = m.createdBy || userId || null;
+
+      await query(`
+        INSERT INTO planned_meals (
+          id, user_id, created_by, date, recipe_id, recipe_name, image, meal_type, time, is_leftover, notes, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          user_id = COALESCE(EXCLUDED.user_id, planned_meals.user_id),
+          created_by = COALESCE(EXCLUDED.created_by, planned_meals.created_by),
+          date = EXCLUDED.date,
+          recipe_id = EXCLUDED.recipe_id,
+          recipe_name = EXCLUDED.recipe_name,
+          image = EXCLUDED.image,
+          meal_type = EXCLUDED.meal_type,
+          time = EXCLUDED.time,
+          is_leftover = EXCLUDED.is_leftover,
+          notes = EXCLUDED.notes,
+          updated_at = NOW();
+      `, [
+        id,
+        targetUserId,
+        createdBy,
+        m.date,
+        m.recipeId || null,
+        m.recipeName,
+        m.image || null,
+        m.mealType || 'Dinner',
+        m.time || '',
+        Boolean(m.isLeftover),
+        m.notes || ''
+      ]);
+    }
+
+    return NextResponse.json({ success: true, count: meals.length });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    await ensureTable();
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+    let userId = searchParams.get('userId');
+
+    try {
+      const body = await req.json();
+      if (body) {
+        id = body.id || id;
+        userId = body.userId || userId;
+      }
+    } catch (_) {}
+
+    if (id) {
+      await query('DELETE FROM planned_meals WHERE id = $1', [id]);
+    } else if (userId) {
+      await query('DELETE FROM planned_meals WHERE user_id = $1 OR created_by = $1', [userId]);
+    }
+
+    return NextResponse.json({ success: true, message: 'Meal plan record deleted from PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -45118,7 +44155,7 @@ export async function GET() {
       `SELECT * FROM subscription_plans ORDER BY monthly_price_dollars ASC, id ASC`
     ).catch(() => ({ rows: [] }));
 
-    let plans = Array.isArray(res) ? res : (res?.rows || []);
+    let plans = Array.isArray(res) ? res : ((res as any)?.rows || []);
 
     // 4. Ensure default free plan (taster) exists
     if (!plans.some((p: any) => p.slug === 'taster' || p.id === 'preset_taster')) {
@@ -45442,103 +44479,64 @@ export async function DELETE(req: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import fs from 'fs';
-import path from 'path';
+import { DEFAULT_RECIPE_TYPES } from '@/lib/recipe-types';
 
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_RECIPE_TYPES: string[] = [
-  'Breakfast',
-  'Lunch',
-  'Dinner',
-  'Snack',
-  'Dessert',
-  'Beverage',
-  'Appetizer',
-  'Salad',
-  'Soup',
-  'Side Dish',
-  'Baking'
-];
+async function ensureTable() {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id VARCHAR(64) PRIMARY KEY,
+        settings JSONB,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+  } catch (_) {}
+}
 
 export async function GET() {
   try {
-    const rows = await query('SELECT recipe_types FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
-    let list = rows[0]?.recipe_types;
-
-    if (typeof list === 'string') {
-      try { list = JSON.parse(list); } catch (_) {}
+    await ensureTable();
+    const rows = await query('SELECT settings FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    if (rows && rows.length > 0 && rows[0].settings) {
+      const types = rows[0].settings.recipeTypes || rows[0].settings.types;
+      if (Array.isArray(types) && types.length > 0) {
+        return NextResponse.json({ success: true, recipeTypes: types });
+      }
     }
-
-    if (!Array.isArray(list) || list.length === 0) {
-      list = DEFAULT_RECIPE_TYPES;
-    }
-
-    return NextResponse.json(
-      { success: true, recipeTypes: list, types: list },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' } }
-    );
+    return NextResponse.json({ success: true, recipeTypes: DEFAULT_RECIPE_TYPES });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: true, recipeTypes: DEFAULT_RECIPE_TYPES });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureTable();
     const body = await req.json();
-    let types = body.recipeTypes || body.types || body.settings?.recipeTypes || body;
+    const recipeTypes = Array.isArray(body) ? body : (body.recipeTypes || body.types || []);
 
-    if (typeof types === 'string') {
-      try { types = JSON.parse(types); } catch (_) {}
+    const existingRows = await query('SELECT settings FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    let currentSettings: any = {};
+    if (existingRows && existingRows.length > 0 && existingRows[0].settings) {
+      currentSettings = existingRows[0].settings;
     }
 
-    if (!Array.isArray(types)) {
-      return NextResponse.json({ success: false, error: 'recipeTypes must be an array of strings' }, { status: 400 });
-    }
+    currentSettings.recipeTypes = recipeTypes;
 
-    const cleanTypes = types.map((t: any) => String(t).trim()).filter(Boolean);
-
-    // 1. Direct PostgreSQL Update
     await query(`
-      INSERT INTO admin_settings (id, recipe_types, updated_at)
-      VALUES ('primary_settings', $1::jsonb, NOW())
+      INSERT INTO admin_settings (id, settings, updated_at)
+      VALUES ($1, $2, NOW())
       ON CONFLICT (id) DO UPDATE SET
-        recipe_types = EXCLUDED.recipe_types,
+        settings = EXCLUDED.settings,
         updated_at = NOW();
-    `, [JSON.stringify(cleanTypes)]);
+    `, ['primary_settings', JSON.stringify(currentSettings)]);
 
-    // 2. Synchronize disk stores for legacy fallback readers
-    const dataDirs = [
-      path.join(process.cwd(), 'apps/web/data', 'admin_settings.json'),
-      path.join(process.cwd(), 'apps/web/apps/web/data', 'admin_settings.json'),
-      path.join(process.cwd(), 'data', 'admin_settings.json')
-    ];
-
-    for (const fpath of dataDirs) {
-      if (fs.existsSync(fpath)) {
-        try {
-          const raw = fs.readFileSync(fpath, 'utf-8');
-          const parsed = JSON.parse(raw);
-          parsed.recipeTypes = cleanTypes;
-          fs.writeFileSync(fpath, JSON.stringify(parsed, null, 2), 'utf-8');
-        } catch (_) {}
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      recipeTypes: cleanTypes,
-      message: 'Recipe types saved successfully in PostgreSQL.'
-    }, {
-      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' }
-    });
+    return NextResponse.json({ success: true, recipeTypes });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
-}
-
-export async function PUT(req: NextRequest) {
-  return POST(req);
 }
 
 ```
@@ -45733,22 +44731,22 @@ export async function GET() {
   try {
     await ensurePaymentSchema();
 
-    let txRes = await query(
+    let txRes: any = await query(
       `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
     ).catch(async () => {
       return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => ({ rows: [] }));
     });
 
-    const transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
+    const transactions = Array.isArray(txRes) ? txRes : ((txRes as any)?.rows || []);
 
     let settings = null;
     try {
-      const sRes = await query(
+      const sRes: any = await query(
         `SELECT payment_settings, currency FROM admin_settings 
          WHERE id::text IN ('primary_settings', '1') 
          ORDER BY updated_at DESC LIMIT 1`
       );
-      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
       if (sRow) {
         settings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
         if (sRow.currency && typeof settings === 'object') {
@@ -45784,8 +44782,8 @@ export async function POST(req: Request) {
 
       let currentSettings: any = {};
       try {
-        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
-        const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
+        const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
         if (sRow?.payment_settings) {
           currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
         }
@@ -45812,8 +44810,8 @@ export async function POST(req: Request) {
     if (body.action === 'verify_stripe_keys' || body.action === 'verify_stripe_key') {
       let currentSettings: any = {};
       try {
-        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
-        const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
+        const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
         if (sRow?.payment_settings) {
           currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
         }
@@ -45862,8 +44860,8 @@ export async function POST(req: Request) {
     if (body.action === 'toggle_test_mode') {
       let currentSettings: any = {};
       try {
-        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
-        const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
+        const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
         if (sRow?.payment_settings) {
           currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
         }
@@ -46735,7 +45733,7 @@ export async function GET(request: Request) {
         } else {
           const res = await client.query('SELECT lang_code, lang_name, dictionary FROM app_translations');
           const records: Record<string, any> = {};
-          res.rows.forEach(r => { records[r.lang_code] = r.dictionary; });
+          res.rows.forEach((r: any) => { records[r.lang_code] = r.dictionary; });
           return NextResponse.json({ success: true, translations: records });
         }
       } finally {
@@ -46821,7 +45819,7 @@ function syncIndexFile(langDir: string) {
   const importsStr = codes.map((c) => `import { ${c} } from './${c}';`).join('\n');
   const dictEntries = codes.map((c) => `  ${c},`).join('\n');
 
-  const content = `${exportsStr}\n\n${importsStr}\n\nexport const DEFAULT_DICTIONARIES: Record<string, Record<string, string>> = {\n${dictEntries}\n};\n\nexport const dictionaries = DEFAULT_DICTIONARIES;\nexport default DEFAULT_DICTIONARIES;\n`;
+  const content = `${exportsStr}\n\n${importsStr}\n\nconst DEFAULT_DICTIONARIES: Record<string, Record<string, string>> = {\n${dictEntries}\n};\n\nconst dictionaries = DEFAULT_DICTIONARIES;\nexport default DEFAULT_DICTIONARIES;\n`;
 
   fs.writeFileSync(indexPath, content, 'utf8');
 }
@@ -47571,7 +46569,7 @@ async function ensureUsersTableAndMigrate() {
     let deletedEmails = new Set<string>();
     try {
       const deletedRows = await query('SELECT LOWER(TRIM(email)) AS email FROM deleted_users');
-      const dArr = Array.isArray(deletedRows) ? deletedRows : (deletedRows?.rows || []);
+      const dArr = Array.isArray(deletedRows) ? deletedRows : ((deletedRows as any)?.rows || []);
       deletedEmails = new Set(dArr.map((r: any) => r.email));
     } catch (_) {}
 
@@ -47740,10 +46738,10 @@ export async function GET() {
           CASE WHEN LOWER(role) = 'admin' THEN 0 ELSE 1 END,
           created_at DESC
       `);
-      rawUsers = Array.isArray(uRes) ? uRes : (uRes?.rows || []);
+      rawUsers = Array.isArray(uRes) ? uRes : ((uRes as any)?.rows || []);
     } catch (_) {
       const fallbackRes = await query(`SELECT * FROM users ORDER BY created_at DESC`).catch(() => []);
-      rawUsers = Array.isArray(fallbackRes) ? fallbackRes : (fallbackRes?.rows || []);
+      rawUsers = Array.isArray(fallbackRes) ? fallbackRes : ((fallbackRes as any)?.rows || []);
     }
 
     // 2. Fetch latest active succeeded transactions from payment_transactions
@@ -47756,7 +46754,7 @@ export async function GET() {
           AND (expiry_date IS NULL OR expiry_date > NOW())
         ORDER BY created_at DESC
       `).catch(() => []);
-      rawTxs = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
+      rawTxs = Array.isArray(txRes) ? txRes : ((txRes as any)?.rows || []);
     } catch (_) {}
 
     const activeTxMap = new Map<string, any>();
@@ -47926,6 +46924,8 @@ async function getPostgresPool() {
   const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
   if (!connStr) return null;
   try {
+    // @ts-ignore - pg declaration handled via custom d.ts
+
     const { Pool } = await import('pg');
     const requiresSsl = connStr.includes('sslmode=require') || 
                         connStr.includes('neon.tech') || 
@@ -48424,106 +47424,64 @@ export async function POST(req: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import fs from 'fs';
-import path from 'path';
+import { DEFAULT_CATEGORIES } from '@/lib/categories';
 
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_CATEGORIES: string[] = [
-  'Produce',
-  'Dairy & Eggs',
-  'Meat & Poultry',
-  'Seafood',
-  'Bakery',
-  'Pantry & Dry Goods',
-  'Canned Goods',
-  'Baking & Cooking',
-  'Spices & Seasonings',
-  'Snacks',
-  'Beverages',
-  'Frozen Foods',
-  'Condiments & Sauces',
-  'Oils & Vinegars'
-];
+async function ensureTable() {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id VARCHAR(64) PRIMARY KEY,
+        settings JSONB,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+  } catch (_) {}
+}
 
 export async function GET() {
   try {
-    const rows = await query('SELECT ingredient_categories FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
-    let list = rows[0]?.ingredient_categories;
-
-    if (typeof list === 'string') {
-      try { list = JSON.parse(list); } catch (_) {}
+    await ensureTable();
+    const rows = await query('SELECT settings FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    if (rows && rows.length > 0 && rows[0].settings) {
+      const cats = rows[0].settings.ingredientCategories || rows[0].settings.categories;
+      if (Array.isArray(cats) && cats.length > 0) {
+        return NextResponse.json({ success: true, ingredientCategories: cats, categories: cats });
+      }
     }
-
-    if (!Array.isArray(list) || list.length === 0) {
-      list = DEFAULT_CATEGORIES;
-    }
-
-    return NextResponse.json(
-      { success: true, ingredientCategories: list, categories: list },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' } }
-    );
+    return NextResponse.json({ success: true, ingredientCategories: DEFAULT_CATEGORIES, categories: DEFAULT_CATEGORIES });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: true, ingredientCategories: DEFAULT_CATEGORIES, categories: DEFAULT_CATEGORIES });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureTable();
     const body = await req.json();
-    let categories = body.ingredientCategories || body.categories || body.settings?.ingredientCategories || body;
+    const ingredientCategories = Array.isArray(body) ? body : (body.ingredientCategories || body.categories || []);
 
-    if (typeof categories === 'string') {
-      try { categories = JSON.parse(categories); } catch (_) {}
+    const existingRows = await query('SELECT settings FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
+    let currentSettings: any = {};
+    if (existingRows && existingRows.length > 0 && existingRows[0].settings) {
+      currentSettings = existingRows[0].settings;
     }
 
-    if (!Array.isArray(categories)) {
-      return NextResponse.json({ success: false, error: 'ingredientCategories must be an array of strings' }, { status: 400 });
-    }
+    currentSettings.ingredientCategories = ingredientCategories;
 
-    const cleanCategories = categories.map((c: any) => String(c).trim()).filter(Boolean);
-
-    // 1. Direct PostgreSQL Update
     await query(`
-      INSERT INTO admin_settings (id, ingredient_categories, updated_at)
-      VALUES ('primary_settings', $1::jsonb, NOW())
+      INSERT INTO admin_settings (id, settings, updated_at)
+      VALUES ($1, $2, NOW())
       ON CONFLICT (id) DO UPDATE SET
-        ingredient_categories = EXCLUDED.ingredient_categories,
+        settings = EXCLUDED.settings,
         updated_at = NOW();
-    `, [JSON.stringify(cleanCategories)]);
+    `, ['primary_settings', JSON.stringify(currentSettings)]);
 
-    // 2. Synchronize legacy file stores if present
-    const dataDirs = [
-      path.join(process.cwd(), 'apps/web/data', 'admin_settings.json'),
-      path.join(process.cwd(), 'apps/web/apps/web/data', 'admin_settings.json'),
-      path.join(process.cwd(), 'data', 'admin_settings.json')
-    ];
-
-    for (const fpath of dataDirs) {
-      if (fs.existsSync(fpath)) {
-        try {
-          const raw = fs.readFileSync(fpath, 'utf-8');
-          const parsed = JSON.parse(raw);
-          parsed.ingredientCategories = cleanCategories;
-          fs.writeFileSync(fpath, JSON.stringify(parsed, null, 2), 'utf-8');
-        } catch (_) {}
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      ingredientCategories: cleanCategories,
-      message: 'Ingredient categories saved successfully in PostgreSQL.'
-    }, {
-      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' }
-    });
+    return NextResponse.json({ success: true, ingredientCategories });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
-}
-
-export async function PUT(req: NextRequest) {
-  return POST(req);
 }
 
 ```
@@ -49506,6 +48464,7 @@ export async function GET(req: NextRequest) {
       category: r.category || 'Produce',
       staple: Boolean(r.staple),
       checked: Boolean(r.checked),
+      completed: Boolean(r.checked),
       recipeId: r.recipe_id || null,
       recipeTitle: r.recipe_title || null,
       createdAt: r.created_at || new Date().toISOString(),
@@ -49536,7 +48495,7 @@ export async function POST(req: NextRequest) {
       const unit = String(item.unit || '').slice(0, 64);
       const category = String(item.category || 'Produce').slice(0, 64);
       const staple = Boolean(item.staple);
-      const checked = Boolean(item.checked || item.completed);
+      const checked = typeof item.checked !== 'undefined' ? Boolean(item.checked) : Boolean(item.completed);
       const recipeId = item.recipeId || item.recipe_id ? String(item.recipeId || item.recipe_id).slice(0, 64) : null;
       const recipeTitle = item.recipeTitle || item.recipe_title ? String(item.recipeTitle || item.recipe_title).slice(0, 255) : null;
 
@@ -53533,104 +52492,87 @@ import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-async function ensureTemplatesTable() {
+async function ensureTable() {
   try {
     await query(`
       CREATE TABLE IF NOT EXISTS meal_plan_templates (
-        id VARCHAR(128) PRIMARY KEY,
+        id VARCHAR(64) PRIMARY KEY,
         user_id VARCHAR(64),
         created_by VARCHAR(255),
         title VARCHAR(255) NOT NULL,
-        description TEXT DEFAULT '',
-        days JSONB DEFAULT '[]'::jsonb,
-        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        description TEXT,
+        days JSONB DEFAULT '[]',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
-      CREATE INDEX IF NOT EXISTS idx_meal_plan_templates_user_id ON meal_plan_templates(user_id);
     `);
   } catch (_) {}
 }
 
 export async function GET(req: NextRequest) {
-  await ensureTemplatesTable();
   try {
+    await ensureTable();
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
 
-    let sql = 'SELECT * FROM meal_plan_templates';
+    let sql = 'SELECT * FROM meal_plan_templates WHERE 1=1';
     const params: any[] = [];
 
     if (userId) {
       params.push(userId);
-      sql += ' WHERE user_id = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL';
+      sql += ` AND (user_id = $${params.length} OR created_by = $${params.length} OR user_id = 'usr_admin_1' OR user_id IS NULL)`;
     }
 
     sql += ' ORDER BY created_at DESC';
-
     const rows = await query(sql, params);
 
-    const formatted = rows.map((r: any) => {
-      let days = r.days;
-      if (typeof days === 'string') {
-        try { days = JSON.parse(days); } catch (_) { days = []; }
-      }
-      return {
-        id: r.id,
-        userId: r.user_id || 'usr_admin_1',
-        createdBy: r.created_by || '',
-        title: r.title || 'Untitled Template',
-        description: r.description || '',
-        days: Array.isArray(days) ? days : [],
-        createdAt: r.created_at || new Date().toISOString(),
-        updatedAt: r.updated_at || new Date().toISOString()
-      };
-    });
+    const formatted = rows.map((r: any) => ({
+      id: r.id,
+      userId: r.user_id,
+      createdBy: r.created_by,
+      title: r.title,
+      description: r.description || '',
+      days: Array.isArray(r.days) ? r.days : (typeof r.days === 'string' ? JSON.parse(r.days || '[]') : []),
+      createdAt: r.created_at,
+      updatedAt: r.updated_at
+    }));
 
-    return NextResponse.json(
-      { success: true, templates: formatted },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-    );
+    return NextResponse.json({ success: true, templates: formatted });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
-  await ensureTemplatesTable();
   try {
+    await ensureTable();
     const body = await req.json();
-    const items = Array.isArray(body) ? body : (body.templates || [body.template || body]);
+    const templatesList = Array.isArray(body) ? body : (Array.isArray(body.templates) ? body.templates : [body]);
 
-    for (const t of items) {
-      if (!t || !t.id || !t.title) continue;
-      const targetUserId = t.userId || t.user_id || 'usr_admin_1';
-
-      let days = t.days;
-      if (typeof days === 'string') {
-        try { days = JSON.parse(days); } catch (_) { days = []; }
-      }
-      if (!Array.isArray(days)) days = [];
+    for (const t of templatesList) {
+      if (!t || !t.title) continue;
+      const id = String(t.id || 'tpl_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
+      const userId = t.userId || 'usr_admin_1';
+      const createdBy = t.createdBy || 'admin@zecratary.com';
+      const title = String(t.title || 'Untitled Template').trim();
+      const description = String(t.description || '').trim();
+      const days = Array.isArray(t.days) ? t.days : [];
 
       await query(`
         INSERT INTO meal_plan_templates (
           id, user_id, created_by, title, description, days, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())
+        ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
         ON CONFLICT (id) DO UPDATE SET
+          user_id = EXCLUDED.user_id,
+          created_by = EXCLUDED.created_by,
           title = EXCLUDED.title,
           description = EXCLUDED.description,
           days = EXCLUDED.days,
           updated_at = NOW();
-      `, [
-        t.id,
-        targetUserId,
-        t.createdBy || '',
-        t.title.trim(),
-        t.description || '',
-        JSON.stringify(days)
-      ]);
+      `, [id, userId, createdBy, title, description, JSON.stringify(days)]);
     }
 
-    return NextResponse.json({ success: true, message: 'Template(s) saved in PostgreSQL.' });
+    return NextResponse.json({ success: true, count: templatesList.length });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -53638,23 +52580,20 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   try {
+    await ensureTable();
     const { searchParams } = new URL(req.url);
     let id = searchParams.get('id');
 
-    if (!id) {
-      try {
-        const body = await req.json();
-        id = body?.id || id;
-      } catch (_) {}
-    }
+    try {
+      const body = await req.json();
+      if (body?.id) id = body.id;
+    } catch (_) {}
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Template ID is required' }, { status: 400 });
     }
 
-    const cleanId = id.trim();
-    await query('DELETE FROM meal_plan_templates WHERE id = $1', [cleanId]);
-
+    await query('DELETE FROM meal_plan_templates WHERE id = $1', [id.trim()]);
     return NextResponse.json({ success: true, message: 'Template deleted from PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
@@ -53676,7 +52615,7 @@ async function getStripeWebhookConfig() {
     const res = await query(
       `SELECT payment_settings FROM admin_settings WHERE id = 'primary_settings' LIMIT 1`
     );
-    const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+    const row = Array.isArray(res) ? res[0] : (res as any)?.rows?.[0];
     let settings: any = {};
     if (row?.payment_settings) {
       settings = typeof row.payment_settings === 'string' 
@@ -53745,7 +52684,7 @@ export async function POST(req: Request) {
           `SELECT id FROM wallet_transactions WHERE gateway_tx_id = $1 AND status = 'succeeded' LIMIT 1`,
           [txId]
         ).catch(() => ({ rows: [] }));
-        const existingRows = Array.isArray(existingRes) ? existingRes : (existingRes?.rows || []);
+        const existingRows = Array.isArray(existingRes) ? existingRes : ((existingRes as any)?.rows || []);
 
         if (existingRows.length === 0) {
           const userUpdateRes = await query(
@@ -53756,7 +52695,7 @@ export async function POST(req: Request) {
             [totalAddition, String(userId || ''), customerEmail]
           ).catch(() => ({ rows: [] }));
 
-          const uRows = Array.isArray(userUpdateRes) ? userUpdateRes : (userUpdateRes?.rows || []);
+          const uRows = Array.isArray(userUpdateRes) ? userUpdateRes : ((userUpdateRes as any)?.rows || []);
           const updatedUser = uRows[0];
           const newBal = updatedUser ? parseFloat(updatedUser.wallet_balance || 0) : totalAddition;
           const finalUserId = updatedUser?.id || userId || 'user';
@@ -55142,10 +54081,11 @@ export default function TemplatesPage() {
 
     let liveRecipes: any[] = [];
     try {
-      const rRes = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
+      const rRes = await fetch(`/api/recipes?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
       if (rRes.ok) {
         const rData = await rRes.json();
         if (Array.isArray(rData.recipes)) liveRecipes = rData.recipes;
+        else if (Array.isArray(rData)) liveRecipes = rData;
       }
     } catch (_) {}
 
@@ -55429,8 +54369,8 @@ export default function TemplatesPage() {
     setShowMealSubModal(true);
   };
 
-  const handleSaveMealSubModal = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveMealSubModal = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (targetDayIndex === null || !subSelectedRecipe) {
       alert(t('selectRecipeAlert') || 'Please select a recipe for this meal.');
       return;
@@ -55473,8 +54413,8 @@ export default function TemplatesPage() {
     setEditingMealSubId(null);
   };
 
-  const handleSaveTemplate = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveTemplate = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!templateTitle.trim()) {
       alert(t('enterTemplateTitleAlert') || 'Please enter a template title.');
       return;
@@ -55562,8 +54502,8 @@ export default function TemplatesPage() {
     setModalDays(updatedDays);
   };
 
-  const handleApplyTemplateToPlanner = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleApplyTemplateToPlanner = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!selectedTemplate || !applyStartDate) return;
 
     try {
@@ -55594,7 +54534,17 @@ export default function TemplatesPage() {
         });
       });
 
-      localStorage.setItem('zecratary_meal_plan', JSON.stringify([...currentPlan, ...newPlannedMeals]));
+      const merged = [...currentPlan, ...newPlannedMeals];
+      localStorage.setItem('zecratary_meal_plan', JSON.stringify(merged));
+
+      if (currentUser?.id) {
+        await fetch('/api/planner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: currentUser.id, meals: merged })
+        }).catch(() => {});
+      }
+
       window.dispatchEvent(new Event('zecratary_planner_updated'));
       window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
       setShowApplyModal(false);
@@ -55688,6 +54638,7 @@ export default function TemplatesPage() {
         </div>
 
         <button
+          type="button"
           onClick={openCreateModal}
           className="text-white font-bold text-xs px-5 py-3 rounded-2xl transition flex items-center gap-2 shadow-lg cursor-pointer"
           style={{ backgroundColor: 'var(--color-primary)' }}
@@ -55802,6 +54753,7 @@ export default function TemplatesPage() {
 
                 <div className="flex items-center gap-2">
                   <button
+                    type="button"
                     onClick={() => {
                       setApplyStartDate(formatDateKey(new Date()));
                       setShowApplyModal(true);
@@ -55814,6 +54766,7 @@ export default function TemplatesPage() {
                     <CalendarIcon className="h-4 w-4" /> {t('applyToCalendarBtn') || 'Apply to Calendar'}
                   </button>
                   <button
+                    type="button"
                     onClick={() => openEditModal(selectedTemplate)}
                     className="p-2.5 rounded-xl border transition cursor-pointer shadow-xs"
                     style={{
@@ -55826,6 +54779,7 @@ export default function TemplatesPage() {
                     <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                   </button>
                   <button
+                    type="button"
                     onClick={() => handleDeleteTemplate(selectedTemplate.id)}
                     className="p-2.5 rounded-xl border transition cursor-pointer hover:text-red-500 shadow-xs"
                     style={{
@@ -55931,7 +54885,7 @@ export default function TemplatesPage() {
         </div>
       </div>
 
-      {/* 1. CREATE / EDIT TEMPLATE MODAL */}
+      {/* 1. CREATE / EDIT TEMPLATE MODAL (NO NATIVE FORM) */}
       {showModal && (
         <div 
           onClick={() => setShowModal(false)}
@@ -55947,6 +54901,7 @@ export default function TemplatesPage() {
             }}
           >
             <button
+              type="button"
               onClick={() => setShowModal(false)}
               className="absolute top-4 right-4 p-2 rounded-xl transition cursor-pointer shadow-xs"
               style={{
@@ -55962,7 +54917,7 @@ export default function TemplatesPage() {
               {editingTemplateId ? (t('editMealTemplateTitle') || 'Edit Meal Template') : (t('createMealTemplateTitle') || 'Create Meal Template')}
             </h2>
 
-            <form onSubmit={handleSaveTemplate} className="space-y-4">
+            <div className="space-y-4">
               <div>
                 <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('templateTitleLabel') || 'Template Title *'}
@@ -55973,6 +54928,12 @@ export default function TemplatesPage() {
                   placeholder={t('templateTitlePlaceholder') || 'e.g. Clean Eating Week'}
                   value={templateTitle}
                   onChange={(e) => setTemplateTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveTemplate();
+                    }
+                  }}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -55993,6 +54954,12 @@ export default function TemplatesPage() {
                   placeholder={t('templateDescPlaceholder') || 'e.g. Healthy macro-balanced meals for high energy'}
                   value={templateDescription}
                   onChange={(e) => setTemplateDescription(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveTemplate();
+                    }
+                  }}
                   className="w-full border rounded-xl p-3 text-sm outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -56124,7 +55091,8 @@ export default function TemplatesPage() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleSaveTemplate()}
                   className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -56133,12 +55101,12 @@ export default function TemplatesPage() {
                   {t('saveTemplateBtn') || 'Save Template'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
 
-      {/* 2. ADD / EDIT MEAL SUB-MODAL */}
+      {/* 2. ADD / EDIT MEAL SUB-MODAL (NO NATIVE FORM) */}
       {showMealSubModal && targetDayIndex !== null && (
         <div 
           onClick={() => setShowMealSubModal(false)}
@@ -56154,6 +55122,7 @@ export default function TemplatesPage() {
             }}
           >
             <button 
+              type="button"
               onClick={() => setShowMealSubModal(false)} 
               className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer shadow-xs"
               style={{
@@ -56177,7 +55146,7 @@ export default function TemplatesPage() {
               </p>
             </div>
 
-            <form onSubmit={handleSaveMealSubModal} className="space-y-3.5 pt-1">
+            <div className="space-y-3.5 pt-1">
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
@@ -56218,6 +55187,12 @@ export default function TemplatesPage() {
                     type="time"
                     value={subMealTime}
                     onChange={(e) => setSubMealTime(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveMealSubModal();
+                      }
+                    }}
                     className="w-full border rounded-lg pl-9 pr-9 py-2 text-xs outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -56297,7 +55272,8 @@ export default function TemplatesPage() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleSaveMealSubModal()}
                   className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -56306,7 +55282,7 @@ export default function TemplatesPage() {
                   {editingMealSubId ? (t('saveChanges') || 'Save Changes') : (t('addMealBtn') || 'Add Meal')}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -56328,6 +55304,7 @@ export default function TemplatesPage() {
           >
             <div className="space-y-4">
               <button 
+                type="button"
                 onClick={() => setShowRecipePickerModal(false)} 
                 className="absolute top-4 right-4 p-2 rounded-xl transition cursor-pointer shadow-xs"
                 style={{
@@ -56509,7 +55486,7 @@ export default function TemplatesPage() {
         </div>
       )}
 
-      {/* 4. APPLY TEMPLATE MODAL */}
+      {/* 4. APPLY TEMPLATE MODAL (NO NATIVE FORM) */}
       {showApplyModal && selectedTemplate && (
         <div 
           onClick={() => setShowApplyModal(false)}
@@ -56525,6 +55502,7 @@ export default function TemplatesPage() {
             }}
           >
             <button
+              type="button"
               onClick={() => setShowApplyModal(false)}
               className="absolute top-4 right-4 p-2 rounded-lg transition cursor-pointer shadow-xs"
               style={{
@@ -56547,7 +55525,7 @@ export default function TemplatesPage() {
               </p>
             </div>
 
-            <form onSubmit={handleApplyTemplateToPlanner} className="space-y-4 pt-1">
+            <div className="space-y-4 pt-1">
               <div 
                 className="w-full border rounded-xl px-3.5 py-3 text-xs font-bold flex items-center gap-2"
                 style={{
@@ -56573,12 +55551,17 @@ export default function TemplatesPage() {
                     required
                     value={applyStartDate}
                     onChange={(e) => setApplyStartDate(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleApplyTemplateToPlanner();
+                      }
+                    }}
                     className="w-full border-2 rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none cursor-pointer transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-primary)',
-                      color: 'var(--color-text)',
-                      colorScheme: isDayMode ? 'light' : 'dark'
+                      color: 'var(--color-text)'
                     }}
                   />
                   <CalendarIcon 
@@ -56605,7 +55588,8 @@ export default function TemplatesPage() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={() => handleApplyTemplateToPlanner()}
                   className="w-full py-2.5 px-4 text-white font-bold text-xs rounded-xl transition shadow-md cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -56614,7 +55598,7 @@ export default function TemplatesPage() {
                   {t('applyBtn') || 'Apply to Planner'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -56690,7 +55674,7 @@ export default function GroceriesPage() {
 
 ## File: `apps/web/src/app/import/page.tsx`
 ```typescript
-// @ts-nocheck
+// Generated / Updated by AI Collaborator
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -56711,7 +55695,7 @@ const DEFAULT_RECIPE_TYPES = [
   'Side Dish', 'Dessert', 'Snacks', 'Beverages', 'Soup', 'Salad'
 ];
 
-export function decodeHtmlEntities(str: string): string {
+function decodeHtmlEntities(str: string): string {
   if (!str) return '';
   return str
     .replace(/&quot;/g, '"')
@@ -56767,6 +55751,12 @@ export default function ImportPage() {
   const [loading, setLoading] = useState(false);
   const [fetchingTelemetry, setFetchingTelemetry] = useState(true);
   const [status, setStatus] = useState<{ type: 'success' | 'error' | 'warning'; msg: string } | null>(null);
+
+  const applySavedTheme = useCallback(() => {
+    try {
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
+    } catch (_) {}
+  }, []);
 
   const fetchTokenAndAiTelemetry = useCallback(async () => {
     try {
@@ -56828,24 +55818,32 @@ export default function ImportPage() {
 
   useEffect(() => {
     document.title = `${t('importRecipeTitle', 'Import Recipe')} - Zecratary`;
+    applySavedTheme();
     syncRecipeTypes();
     fetchTokenAndAiTelemetry();
 
     const handleUpdates = () => {
       fetchTokenAndAiTelemetry();
       syncRecipeTypes();
+      applySavedTheme();
     };
 
+    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_updated', applySavedTheme);
     window.addEventListener('zecratary_users_updated', handleUpdates);
     window.addEventListener('zecratary_admin_settings_updated', handleUpdates);
     window.addEventListener('storage', handleUpdates);
 
     return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('zecratary_users_updated', handleUpdates);
       window.removeEventListener('zecratary_admin_settings_updated', handleUpdates);
       window.removeEventListener('storage', handleUpdates);
     };
-  }, [fetchTokenAndAiTelemetry, t]);
+  }, [fetchTokenAndAiTelemetry, applySavedTheme, t]);
 
   const handlePostImportSuccess = async (recipeData: any, consumedTokens: number, newBalance?: number) => {
     const user = getCurrentUser();
@@ -56862,6 +55860,11 @@ export default function ImportPage() {
       await persistSavedRecipe(targetUserId, recipeData, {
         createdBy: user?.email || targetUserId,
         creatorName: user?.name || 'You'
+      });
+      await fetch('/api/recipes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(recipeData)
       });
     } catch (_) {}
 
@@ -56893,8 +55896,8 @@ export default function ImportPage() {
     }, 850);
   };
 
-  const handleUrlImport = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleUrlImport = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!url.trim()) return;
 
     if (!enableWebSearch) {
@@ -56948,8 +55951,8 @@ export default function ImportPage() {
     }
   };
 
-  const handleTextImport = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleTextImport = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!rawText.trim()) return;
 
     const cost = tokenCosts.text;
@@ -57013,8 +56016,8 @@ export default function ImportPage() {
     setPreviewUrls(previewUrls.filter((_, idx) => idx !== index));
   };
 
-  const handleImageImport = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleImageImport = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (selectedFiles.length === 0) return;
 
     const cost = tokenCosts.photo;
@@ -57206,9 +56209,9 @@ export default function ImportPage() {
           </div>
         )}
 
-        {/* TAB 1: URL IMPORT */}
+        {/* TAB 1: URL IMPORT (NO NATIVE FORM) */}
         {activeTab === 'url' && (
-          <form onSubmit={handleUrlImport} className="space-y-4">
+          <div className="space-y-4">
             {!enableWebSearch && (
               <div 
                 className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 text-amber-500"
@@ -57230,6 +56233,12 @@ export default function ImportPage() {
                 placeholder={t('recipeWebUrlPlaceholder', 'https://www.recipetineats.com/... or food blog URL')}
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleUrlImport();
+                  }
+                }}
                 className="w-full border rounded-xl px-4 py-3.5 text-sm outline-none transition font-medium disabled:opacity-50"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
@@ -57242,7 +56251,8 @@ export default function ImportPage() {
             </div>
 
             <button
-              type="submit"
+              type="button"
+              onClick={() => handleUrlImport()}
               disabled={loading || !url.trim() || !enableWebSearch}
               className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary)' }}
@@ -57252,12 +56262,12 @@ export default function ImportPage() {
                 ? t('downloadingPhotoParsingSteps', 'Parsing recipe & deducting tokens...') 
                 : `${t('importRecipeBtn', 'Import Recipe')} (${tokenCosts.url} ${tokenSymbol})`}
             </button>
-          </form>
+          </div>
         )}
 
-        {/* TAB 2: TEXT IMPORT */}
+        {/* TAB 2: TEXT IMPORT (NO NATIVE FORM) */}
         {activeTab === 'text' && (
-          <form onSubmit={handleTextImport} className="space-y-4">
+          <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
@@ -57268,6 +56278,12 @@ export default function ImportPage() {
                   placeholder={t('recipeTitlePlaceholder', 'e.g. Homemade Apple Cake')}
                   value={textTitle}
                   onChange={(e) => setTextTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleTextImport();
+                    }
+                  }}
                   className="w-full border rounded-xl px-4 py-3 text-sm outline-none"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -57323,7 +56339,8 @@ export default function ImportPage() {
             </div>
 
             <button
-              type="submit"
+              type="button"
+              onClick={() => handleTextImport()}
               disabled={loading || !rawText.trim()}
               className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary)' }}
@@ -57333,12 +56350,12 @@ export default function ImportPage() {
                 ? t('processingSavingRecipe', 'Processing & saving recipe...') 
                 : `${t('saveAndImportRecipe', 'Save & Import Recipe')} (${tokenCosts.text} ${tokenSymbol})`}
             </button>
-          </form>
+          </div>
         )}
 
-        {/* TAB 3: IMAGE / PHOTO IMPORT */}
+        {/* TAB 3: IMAGE / PHOTO IMPORT (NO NATIVE FORM) */}
         {activeTab === 'image' && (
-          <form onSubmit={handleImageImport} className="space-y-4">
+          <div className="space-y-4">
             <div>
               <label className="block text-xs font-bold mb-2" style={{ color: 'var(--color-text)' }}>
                 {t('recipeImagesMax5', 'Recipe Images (up to 5)')}
@@ -57412,7 +56429,8 @@ export default function ImportPage() {
             )}
 
             <button
-              type="submit"
+              type="button"
+              onClick={() => handleImageImport()}
               disabled={loading || selectedFiles.length === 0}
               className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary)' }}
@@ -57422,7 +56440,7 @@ export default function ImportPage() {
                 ? t('aiSearchingRecipeImporting', 'AI OCR analyzing & importing...') 
                 : `${t('importRecipeFromImages', 'Import Recipe from Images')} (${tokenCosts.photo} ${tokenSymbol})`}
             </button>
-          </form>
+          </div>
         )}
 
         {/* Notifications & Status Banner */}
@@ -57867,6 +56885,7 @@ export default function CookbooksPage() {
 
 ## File: `apps/web/src/app/login/page.tsx`
 ```typescript
+// Generated / Updated by AI Collaborator
 'use client';
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
@@ -58233,9 +57252,9 @@ function LoginForm() {
     };
   }, [verifySession]);
 
-  // 8. Credentials Submission
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // 8. Credentials Submission (Decoupled from native form)
+  const handleSubmit = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
 
@@ -58430,8 +57449,8 @@ function LoginForm() {
           </div>
         )}
 
-        {/* Credentials Form */}
-        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+        {/* Credentials Container (No Native Form) */}
+        <div className="space-y-4 text-xs">
           <div>
             <label 
               className="block font-bold mb-1.5 transition-colors duration-200"
@@ -58451,6 +57470,12 @@ function LoginForm() {
                 placeholder={t('emailPlaceholder', 'you@example.com')}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSubmit();
+                  }
+                }}
                 className="w-full border rounded-xl pl-10 pr-3 py-2.5 outline-none font-medium transition-colors duration-200"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
@@ -58489,6 +57514,12 @@ function LoginForm() {
                 placeholder={t('passwordPlaceholder', '••••••••••••')}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSubmit();
+                  }
+                }}
                 className="w-full border rounded-xl pl-10 pr-10 py-2.5 outline-none font-mono transition-colors duration-200"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
@@ -58509,7 +57540,8 @@ function LoginForm() {
           </div>
 
           <button 
-            type="submit"
+            type="button"
+            onClick={() => handleSubmit()}
             disabled={loading}
             className="w-full py-3 mt-2 rounded-xl text-xs font-bold text-white shadow-lg transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-primary)' }}
@@ -58525,7 +57557,7 @@ function LoginForm() {
               </>
             )}
           </button>
-        </form>
+        </div>
 
         {/* Dynamic Social Login Section */}
         {hasAnySocial && (
