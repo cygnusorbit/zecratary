@@ -1,0 +1,7 @@
+
+
+exclude:
+  - CODEBASE_SOURCE.md
+  - node_modules/
+  - .next/
+  - .turbo/
