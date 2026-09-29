@@ -8,7 +8,8 @@ import {
   AlertCircle, Calendar, LogOut, Check,
   Zap, Sparkles, RefreshCw, Shield,
   Clock, Coins, Link2, Unlink, ArrowRight,
-  Wallet, Plus, Receipt, ArrowDownLeft, ArrowUpRight, Activity
+  Wallet, Plus, Receipt, ArrowDownLeft, ArrowUpRight, Activity,
+  Globe, Compass
 } from 'lucide-react';
 import { getCurrentUser, setCurrentUser, logoutUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -22,7 +23,9 @@ interface TokenSettingIdentity {
 
 interface ExtendedUser extends User {
   password?: string;
-
+  country?: string;
+  timezone?: string;
+  timeZone?: string;
   linkedProviders?: SocialProvider[];
   linked_providers?: SocialProvider[];
   provider?: string;
@@ -37,13 +40,85 @@ interface ExtendedUser extends User {
   wallet_balance?: number;
   planExpiryDate?: string;
   expiryDate?: string;
-
   [key: string]: any;
 }
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'AU$', JPY: '¥'
 };
+
+const COUNTRY_OPTIONS = [
+  { code: 'US', name: 'United States', flag: '🇺🇸' },
+  { code: 'GB', name: 'United Kingdom', flag: '🇬🇧' },
+  { code: 'CA', name: 'Canada', flag: '🇨🇦' },
+  { code: 'AU', name: 'Australia', flag: '🇦🇺' },
+  { code: 'TH', name: 'Thailand', flag: '🇹🇭' },
+  { code: 'SG', name: 'Singapore', flag: '🇸🇬' },
+  { code: 'JP', name: 'Japan', flag: '🇯🇵' },
+  { code: 'DE', name: 'Germany', flag: '🇩🇪' },
+  { code: 'FR', name: 'France', flag: '🇫🇷' },
+  { code: 'ES', name: 'Spain', flag: '🇪🇸' },
+  { code: 'IT', name: 'Italy', flag: '🇮🇹' },
+  { code: 'NL', name: 'Netherlands', flag: '🇳🇱' },
+  { code: 'CH', name: 'Switzerland', flag: '🇨🇭' },
+  { code: 'SE', name: 'Sweden', flag: '🇸🇪' },
+  { code: 'NO', name: 'Norway', flag: '🇳🇴' },
+  { code: 'DK', name: 'Denmark', flag: '🇩🇰' },
+  { code: 'IE', name: 'Ireland', flag: '🇮🇪' },
+  { code: 'NZ', name: 'New Zealand', flag: '🇳🇿' },
+  { code: 'IN', name: 'India', flag: '🇮🇳' },
+  { code: 'BR', name: 'Brazil', flag: '🇧🇷' },
+  { code: 'MX', name: 'Mexico', flag: '🇲🇽' },
+  { code: 'AE', name: 'United Arab Emirates', flag: '🇦🇪' },
+  { code: 'KR', name: 'South Korea', flag: '🇰🇷' },
+  { code: 'CN', name: 'China', flag: '🇨🇳' },
+  { code: 'ID', name: 'Indonesia', flag: '🇮🇩' },
+  { code: 'MY', name: 'Malaysia', flag: '🇲🇾' },
+  { code: 'PH', name: 'Philippines', flag: '🇵🇭' },
+  { code: 'VN', name: 'Vietnam', flag: '🇻🇳' },
+  { code: 'ZA', name: 'South Africa', flag: '🇿🇦' },
+  { code: 'AR', name: 'Argentina', flag: '🇦🇷' }
+];
+
+const TIMEZONE_OPTIONS = [
+  { value: 'UTC', label: 'UTC (Coordinated Universal Time)' },
+  { value: 'America/New_York', label: 'America/New_York (Eastern Time - US & Canada)' },
+  { value: 'America/Chicago', label: 'America/Chicago (Central Time - US & Canada)' },
+  { value: 'America/Denver', label: 'America/Denver (Mountain Time - US & Canada)' },
+  { value: 'America/Los_Angeles', label: 'America/Los_Angeles (Pacific Time - US & Canada)' },
+  { value: 'America/Anchorage', label: 'America/Anchorage (Alaska Time)' },
+  { value: 'Pacific/Honolulu', label: 'Pacific/Honolulu (Hawaii Time)' },
+  { value: 'America/Toronto', label: 'America/Toronto (Canada Eastern)' },
+  { value: 'America/Vancouver', label: 'America/Vancouver (Canada Pacific)' },
+  { value: 'America/Sao_Paulo', label: 'America/Sao_Paulo (São Paulo, Brazil)' },
+  { value: 'America/Argentina/Buenos_Aires', label: 'America/Buenos_Aires (Argentina)' },
+  { value: 'Europe/London', label: 'Europe/London (London, GMT/BST)' },
+  { value: 'Europe/Paris', label: 'Europe/Paris (Paris, CET/CEST)' },
+  { value: 'Europe/Berlin', label: 'Europe/Berlin (Berlin, CET/CEST)' },
+  { value: 'Europe/Rome', label: 'Europe/Rome (Rome)' },
+  { value: 'Europe/Madrid', label: 'Europe/Madrid (Madrid)' },
+  { value: 'Europe/Amsterdam', label: 'Europe/Amsterdam (Amsterdam)' },
+  { value: 'Europe/Zurich', label: 'Europe/Zurich (Zurich)' },
+  { value: 'Europe/Athens', label: 'Europe/Athens (Athens, EET/EEST)' },
+  { value: 'Africa/Cairo', label: 'Africa/Cairo (Cairo)' },
+  { value: 'Africa/Johannesburg', label: 'Africa/Johannesburg (South Africa)' },
+  { value: 'Asia/Dubai', label: 'Asia/Dubai (Gulf Standard Time)' },
+  { value: 'Asia/Kolkata', label: 'Asia/Kolkata (India Standard Time)' },
+  { value: 'Asia/Bangkok', label: 'Asia/Bangkok (Bangkok, ICT)' },
+  { value: 'Asia/Jakarta', label: 'Asia/Jakarta (Jakarta, WIB)' },
+  { value: 'Asia/Singapore', label: 'Asia/Singapore (Singapore Standard Time)' },
+  { value: 'Asia/Hong_Kong', label: 'Asia/Hong_Kong (Hong Kong Time)' },
+  { value: 'Asia/Shanghai', label: 'Asia/Shanghai (China Standard Time)' },
+  { value: 'Asia/Taipei', label: 'Asia/Taipei (Taipei Time)' },
+  { value: 'Asia/Seoul', label: 'Asia/Seoul (Korea Standard Time)' },
+  { value: 'Asia/Tokyo', label: 'Asia/Tokyo (Japan Standard Time)' },
+  { value: 'Australia/Perth', label: 'Australia/Perth (Western Australia)' },
+  { value: 'Australia/Adelaide', label: 'Australia/Adelaide (South Australia)' },
+  { value: 'Australia/Brisbane', label: 'Australia/Brisbane (Queensland)' },
+  { value: 'Australia/Sydney', label: 'Australia/Sydney (Sydney, AEST/AEDT)' },
+  { value: 'Australia/Melbourne', label: 'Australia/Melbourne (Melbourne)' },
+  { value: 'Pacific/Auckland', label: 'Pacific/Auckland (New Zealand Time)' }
+];
 
 const sanitizeSinglePlan = (planInput?: string | string[]): string => {
   if (!planInput) return 'taster';
@@ -166,6 +241,10 @@ export default function ProfilePage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [country, setCountry] = useState('US');
+  const [timezone, setTimezone] = useState('UTC');
+  const [currentTimePreview, setCurrentTimePreview] = useState('');
+
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [processingSocial, setProcessingSocial] = useState<SocialProvider | null>(null);
@@ -184,6 +263,49 @@ export default function ProfilePage() {
   // Guards
   const isFetchingProfileRef = useRef(false);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Live Time Zone Clock Formatter
+  useEffect(() => {
+    const updateClock = () => {
+      try {
+        const formatter = new Intl.DateTimeFormat(undefined, {
+          timeZone: timezone || 'UTC',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: true,
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          timeZoneName: 'short'
+        });
+        setCurrentTimePreview(formatter.format(new Date()));
+      } catch (_) {
+        setCurrentTimePreview(new Date().toUTCString());
+      }
+    };
+
+    updateClock();
+    const timer = setInterval(updateClock, 1000);
+    return () => clearInterval(timer);
+  }, [timezone]);
+
+  // Format date helper respecting configured timezone
+  const formatTzDate = useCallback((dInput?: string | Date | null) => {
+    if (!dInput) return '-';
+    try {
+      const d = typeof dInput === 'string' ? new Date(dInput) : dInput;
+      if (isNaN(d.getTime())) return String(dInput);
+      return new Intl.DateTimeFormat(undefined, {
+        timeZone: timezone || 'UTC',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      }).format(d);
+    } catch (_) {
+      return new Date(dInput).toLocaleDateString();
+    }
+  }, [timezone]);
 
   // 1. Fetch Token High-Level Balance & Stats
   const fetchTokenSummary = useCallback(async () => {
@@ -321,10 +443,27 @@ export default function ProfilePage() {
         freshUser.authProvider = activeSocial;
       }
 
+      // Restore country and timezone preference
+      const resolvedTz = freshUser.timezone || freshUser.timeZone || 
+        (typeof window !== 'undefined' ? localStorage.getItem('zecratary_timezone') : null) || 
+        (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+      const resolvedCountry = freshUser.country || 
+        (typeof window !== 'undefined' ? localStorage.getItem('zecratary_country') : null) || 'US';
+
+      freshUser.timezone = resolvedTz;
+      freshUser.country = resolvedCountry;
+
       currentUserRef.current = freshUser;
       setUserState(freshUser);
       setName(freshUser.name || '');
       setEmail(freshUser.email || '');
+      setCountry(resolvedCountry);
+      setTimezone(resolvedTz);
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zecratary_timezone', resolvedTz);
+        localStorage.setItem('zecratary_country', resolvedCountry);
+      }
 
       fetchTokenSummary();
       fetchWalletSummary();
@@ -360,7 +499,19 @@ export default function ProfilePage() {
     };
   }, [reloadActiveUser, fetchTokenSummary, fetchWalletSummary]);
 
-  // Update Profile Action
+  // Auto-Detect Browser Time Zone
+  const handleAutoDetectTimezone = () => {
+    try {
+      const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (detected) {
+        setTimezone(detected);
+        setSuccessMsg(t('timezoneAutoDetected', `Auto-detected system timezone: ${detected}`));
+        setTimeout(() => setSuccessMsg(''), 3000);
+      }
+    } catch (_) {}
+  };
+
+  // Update Profile Action (Accessible <div>, No Form Autofill)
   const handleUpdateProfile = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
     if (e && 'preventDefault' in e) e.preventDefault();
     setError('');
@@ -380,6 +531,9 @@ export default function ProfilePage() {
       ...user,
       name: name.trim(),
       email: email.trim().toLowerCase(),
+      country: country.trim(),
+      timezone: timezone.trim(),
+      timeZone: timezone.trim(),
       password: password ? password : (user as any)?.password,
     };
 
@@ -389,12 +543,23 @@ export default function ProfilePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedUser)
       });
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zecratary_timezone', timezone.trim());
+        localStorage.setItem('zecratary_country', country.trim());
+        localStorage.setItem('zecratary_current_user', JSON.stringify(updatedUser));
+        localStorage.setItem('zecratary_user', JSON.stringify(updatedUser));
+      }
+
       setCurrentUser(updatedUser);
       currentUserRef.current = updatedUser;
       setUserState(updatedUser);
       setPassword('');
       setConfirmPassword('');
-      setSuccessMsg(t('profileSavedSuccess', 'Profile changes saved successfully!'));
+      setSuccessMsg(t('profileSavedSuccess', 'Profile changes and regional settings saved successfully!'));
+
+      // Emit global timezone and user update events
+      window.dispatchEvent(new CustomEvent('zecratary_timezone_updated', { detail: { timezone, country } }));
       window.dispatchEvent(new Event('zecratary_users_updated'));
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err: any) {
@@ -494,33 +659,11 @@ export default function ProfilePage() {
             {t('accountProfileTitle', 'Account Profile')}
           </h1>
           <p className="text-xs opacity-70">
-            {t('accountProfileSubtitle', 'Manage your credentials, active AI token quotas, store wallet, and linked accounts')}
+            {t('accountProfileSubtitle', 'Manage your credentials, country, time zone, active AI tokens, and store wallet')}
           </p>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <Link 
-            href="/transactions" 
-            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs bg-[var(--color-card)] border-[var(--color-border)] hover:border-[var(--color-primary)]"
-          >
-            <Receipt className="h-3.5 w-3.5 text-[var(--color-primary)]" /> 
-            <span>{t('viewTransactions', 'Transactions')}</span>
-          </Link>
-
-          {user.role === 'admin' && (
-            <>
-              <Link href="/admin/token-setting" className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs bg-[var(--color-card)] border-[var(--color-border)]">
-                <Coins className="h-3.5 w-3.5 text-amber-500" /> {t('tokenSettings', 'Token Settings')}
-              </Link>
-              <Link href="/admin/wallet-settings" className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs bg-[var(--color-card)] border-[var(--color-border)]">
-                <Wallet className="h-3.5 w-3.5 text-[var(--color-primary)]" /> {t('walletSettings', 'Wallet Settings')}
-              </Link>
-              <Link href="/admin" className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs bg-[var(--color-card)] border-[var(--color-border)]">
-                <Shield className="h-3.5 w-3.5 text-emerald-400" /> {t('adminAccess', 'Admin Access')}
-              </Link>
-            </>
-          )}
-        </div>
+        
       </div>
 
       {/* Notifications */}
@@ -538,187 +681,13 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* EXECUTIVE SUMMARY KPI BANNER */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-in fade-in">
-        {/* KPI 1: AI Token Spendable Balance */}
-        <div 
-          className="border rounded-2xl p-4 shadow-lg space-y-2 flex flex-col justify-between transition-all duration-200 hover:shadow-xl"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500">
-                <Coins className="h-4 w-4" />
-              </div>
-              <span className="text-xs font-bold opacity-80">{tokenIdentity.tokenName} {t('balanceLabel', 'Balance')}</span>
-            </div>
-            <Link 
-              href="/transactions?tab=tokens" 
-              className="text-[11px] font-bold text-amber-500 hover:underline flex items-center gap-0.5"
-            >
-              <span>{t('ledgerShort', 'Ledger')}</span>
-              <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-          
-          <div>
-            <div className="flex items-baseline gap-1.5" suppressHydrationWarning>
-              <span className="text-2xl sm:text-3xl font-black font-mono text-emerald-400">
-                {ownerTokenBalance.toLocaleString()}
-              </span>
-              <span className="text-sm font-bold text-amber-500 font-mono">
-                {tokenIdentity.tokenSymbol}
-              </span>
-            </div>
-            <p className="text-[10px] opacity-60 mt-0.5">
-              {t('spendableTokensSub', 'Available for AI Chat & recipe parsing')}
-            </p>
-          </div>
+      
+      
 
-          <div className="flex items-center gap-2 pt-1 border-t border-[var(--color-border)] text-[10px] font-mono">
-            <span className="inline-flex items-center gap-1 text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md border border-red-500/20">
-              <ArrowDownLeft className="h-3 w-3" /> -{tokenStats.totalDeducted.toLocaleString()}
-            </span>
-            <span className="inline-flex items-center gap-1 text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
-              <ArrowUpRight className="h-3 w-3" /> +{tokenStats.totalGranted.toLocaleString()}
-            </span>
-          </div>
-        </div>
-
-        {/* KPI 2: Store Wallet Balance */}
-        <div 
-          className="border rounded-2xl p-4 shadow-lg space-y-2 flex flex-col justify-between transition-all duration-200 hover:shadow-xl"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 text-[var(--color-primary)]">
-                <Wallet className="h-4 w-4" />
-              </div>
-              <span className="text-xs font-bold opacity-80">{t('storeCreditLabel', 'Store Credit')}</span>
-            </div>
-            <Link 
-              href="/wallet" 
-              className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-0.5"
-            >
-              <Plus className="h-3 w-3" />
-              <span>{t('topUp', 'Top Up')}</span>
-            </Link>
-          </div>
-
-          <div>
-            <div className="flex items-baseline gap-1.5" suppressHydrationWarning>
-              <span className="text-2xl sm:text-3xl font-black font-mono text-[var(--color-primary)]">
-                {walletSymbol}{ownerWalletBalance.toFixed(2)}
-              </span>
-              <span className="text-xs font-bold opacity-60 font-mono">
-                {walletCurrency}
-              </span>
-            </div>
-            <p className="text-[10px] opacity-60 mt-0.5">
-              {t('storeCreditSub', 'Spendable for token bundles & plans')}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 pt-1 border-t border-[var(--color-border)] text-[10px] font-mono">
-            <span className="inline-flex items-center gap-1 text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
-              <ArrowUpRight className="h-3 w-3" /> +{walletSymbol}{walletStats.totalDeposited.toFixed(2)}
-            </span>
-            <span className="inline-flex items-center gap-1 text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md border border-red-500/20">
-              <ArrowDownLeft className="h-3 w-3" /> -{walletSymbol}{walletStats.totalSpent.toFixed(2)}
-            </span>
-          </div>
-        </div>
-
-        {/* KPI 3: Membership Plan & Health */}
-        <div 
-          className="border rounded-2xl p-4 shadow-lg space-y-2 flex flex-col justify-between transition-all duration-200 hover:shadow-xl"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
-                {isFreePlan ? <Sparkles className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
-              </div>
-              <span className="text-xs font-bold opacity-80">{t('membershipTierLabel', 'Membership Tier')}</span>
-            </div>
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border uppercase ${
-              isFreePlan ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-primary/10 text-primary border-primary/30'
-            }`}>
-              {t('activeStatus', 'Active')}
-            </span>
-          </div>
-
-          <div>
-            <div className="text-2xl sm:text-3xl font-black tracking-tight uppercase">
-              {cleanPlanSlug}
-            </div>
-            <p className="text-[10px] opacity-60 mt-0.5">
-              {user.role === 'admin' ? t('adminRoleLabel', 'Administrator Account') : t('standardUserLabel', 'Standard User Plan')}
-            </p>
-          </div>
-
-          <div className="flex items-center justify-between pt-1 border-t border-[var(--color-border)] text-[10px]">
-            <div className="flex items-center gap-1 opacity-70">
-              <Calendar className="h-3 w-3 text-[var(--color-primary)]" />
-              <span suppressHydrationWarning>{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'Active'}</span>
-            </div>
-            {activeExpiryDate ? (
-              <span className="text-emerald-400 font-semibold" suppressHydrationWarning>
-                Exp: {new Date(activeExpiryDate).toLocaleDateString()}
-              </span>
-            ) : (
-              <span className="text-emerald-400 font-semibold">Lifetime Access</span>
-            )}
-          </div>
-        </div>
-
-        {/* KPI 4: Total Activity & Ledger Events */}
-        <div 
-          className="border rounded-2xl p-4 shadow-lg space-y-2 flex flex-col justify-between transition-all duration-200 hover:shadow-xl"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400">
-                <Activity className="h-4 w-4" />
-              </div>
-              <span className="text-xs font-bold opacity-80">{t('totalActivityLabel', 'Total Activity')}</span>
-            </div>
-            <Link 
-              href="/transactions" 
-              className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-0.5"
-            >
-              <span>{t('viewAll', 'View All')}</span>
-              <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-
-          <div>
-            <div className="flex items-baseline gap-1.5" suppressHydrationWarning>
-              <span className="text-2xl sm:text-3xl font-black font-mono">
-                {(tokenStats.totalEvents + walletStats.totalEvents).toLocaleString()}
-              </span>
-              <span className="text-xs font-bold opacity-60">
-                {t('totalEventsUnit', 'records')}
-              </span>
-            </div>
-            <p className="text-[10px] opacity-60 mt-0.5">
-              {t('totalActivitySub', 'Combined token debits & store ledger')}
-            </p>
-          </div>
-
-          <div className="flex items-center justify-between pt-1 border-t border-[var(--color-border)] text-[10px] font-mono opacity-80">
-            <span className="text-amber-500">{tokenStats.totalEvents} {tokenIdentity.tokenName}</span>
-            <span className="text-[var(--color-primary)]">{walletStats.totalEvents} Wallet</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Profile Overview (Credentials, Token & Wallet Summary, Socials) */}
+      {/* Profile Overview (Credentials, Regional Settings, Asset Summary, Socials) */}
       <div className="space-y-6 animate-in fade-in">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left: Profile Credentials Container (No Form) */}
+          {/* Left: Profile Credentials & Regional Container (No Form) */}
           <div 
             className="lg:col-span-7 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl flex flex-col justify-between"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -742,7 +711,7 @@ export default function ProfilePage() {
               <div className="text-left sm:text-right text-[11px] space-y-1 opacity-80">
                 <div className="flex sm:justify-end items-center gap-1.5">
                   <Calendar className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                  <span suppressHydrationWarning>{t('joinedPrefix', 'Joined: ')} {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : t('activeStatus', 'Active')}</span>
+                  <span suppressHydrationWarning>{t('joinedPrefix', 'Joined: ')} {formatTzDate(user.createdAt)}</span>
                 </div>
                 <div className="flex sm:justify-end items-center gap-1.5 pt-0.5">
                   <span className="font-semibold">{t('activeMembershipLabel', 'Plan:')}</span>
@@ -756,13 +725,14 @@ export default function ProfilePage() {
                 {activeExpiryDate && (
                   <div className="flex sm:justify-end items-center gap-1 text-[10px] text-emerald-400 font-semibold pt-0.5">
                     <Clock className="h-3 w-3" />
-                    <span suppressHydrationWarning>Expires: {new Date(activeExpiryDate).toLocaleDateString()}</span>
+                    <span suppressHydrationWarning>Expires: {formatTzDate(activeExpiryDate)}</span>
                   </div>
                 )}
               </div>
             </div>
 
             <div className="space-y-4 text-xs">
+              {/* Full Name & Email */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-bold mb-1.5 opacity-80">{t('fullNameLabel', 'Full Name *')}</label>
@@ -798,6 +768,74 @@ export default function ProfilePage() {
                 </div>
               </div>
 
+              {/* Country & Time Zone Fields */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block font-bold opacity-80 flex items-center gap-1.5">
+                      <Globe className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+                      <span>{t('countryLabel', 'Country / Region')}</span>
+                    </label>
+                  </div>
+                  <select
+                    value={country}
+                    onChange={(e) => setCountry(e.target.value)}
+                    className="w-full border rounded-xl px-3.5 py-2.5 text-sm font-bold outline-none bg-[var(--color-inner-dark)] border-[var(--color-border)] cursor-pointer"
+                  >
+                    {COUNTRY_OPTIONS.map((c) => (
+                      <option key={c.code} value={c.code} className="bg-[var(--color-card)] text-[var(--color-text)]">
+                        {c.flag} {c.name} ({c.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block font-bold opacity-80 flex items-center gap-1.5">
+                      <Clock className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+                      <span>{t('timeZoneLabel', 'System Time Zone')}</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleAutoDetectTimezone}
+                      className="text-[10px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <Compass className="h-3 w-3" />
+                      <span>{t('autoDetect', 'Auto-detect')}</span>
+                    </button>
+                  </div>
+                  <select
+                    value={timezone}
+                    onChange={(e) => setTimezone(e.target.value)}
+                    className="w-full border rounded-xl px-3.5 py-2.5 text-sm font-bold outline-none bg-[var(--color-inner-dark)] border-[var(--color-border)] cursor-pointer"
+                  >
+                    {TIMEZONE_OPTIONS.map((tz) => (
+                      <option key={tz.value} value={tz.value} className="bg-[var(--color-card)] text-[var(--color-text)]">
+                        {tz.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Dynamic Live Time Preview Banner */}
+              <div className="p-3 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-inner bg-[var(--color-inner-dark)] border-[var(--color-border)]">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
+                    <Clock className="h-3.5 w-3.5" />
+                  </div>
+                  <div className="text-[11px]">
+                    <span className="opacity-70 font-medium block sm:inline">{t('systemTimePreview', 'System Time Preview')}: </span>
+                    <span className="font-mono font-bold text-emerald-400" suppressHydrationWarning>{currentTimePreview}</span>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md border opacity-80 self-start sm:self-auto bg-primary/10 border-primary/20 text-[var(--color-primary)]">
+                  {timezone}
+                </span>
+              </div>
+
+              {/* Password Fields */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-bold mb-1.5 opacity-80">{t('newPasswordLabel', 'New Password')}</label>
@@ -835,6 +873,7 @@ export default function ProfilePage() {
                 </div>
               </div>
 
+              {/* Action Buttons */}
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-[var(--color-border)]">
                 <div className="flex items-center gap-2 w-full sm:w-auto">
                   <button
@@ -860,7 +899,7 @@ export default function ProfilePage() {
                   className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
-                  <Check className="h-4 w-4" /> {t('saveProfileBtn', 'Save Profile')}
+                  <Check className="h-4 w-4" /> {t('saveProfileBtn', 'Save Profile & Settings')}
                 </button>
               </div>
             </div>

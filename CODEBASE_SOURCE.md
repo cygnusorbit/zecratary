@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.71",
+  "version": "8.0.72",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -113,7 +113,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.71",
+  "version": "8.0.72",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -20883,8 +20883,7 @@ export default function ChefAISettingsPage() {
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)',
-                      WebkitTextSecurity: showApiKey ? 'none' : 'disc'
+                      color: 'var(--color-text)'
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
                     onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
