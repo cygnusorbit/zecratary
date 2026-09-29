@@ -1168,8 +1168,7 @@ export default function ChefAISettingsPage() {
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)',
-                      WebkitTextSecurity: showApiKey ? 'none' : 'disc'
+                      color: 'var(--color-text)'
                     }}
                     onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
                     onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
