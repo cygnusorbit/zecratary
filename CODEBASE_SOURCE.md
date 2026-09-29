@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.5",
+  "version": "8.0.6",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -113,11 +113,11 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.5",
+  "version": "8.0.6",
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start"
   },
   "dependencies": {
@@ -193,12 +193,12 @@
 
 ```
 
-## File: `apps/web/src/middleware.ts`
+## File: `apps/web/src/proxy.ts`
 ```typescript
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const sessionCookie = req.cookies.get('zecratary_session')?.value;
 
@@ -324,6 +324,44 @@ declare module 'pg' {
   };
 
   export default pg;
+}
+
+```
+
+## File: `apps/web/src/types/db-drivers.d.ts`
+```typescript
+// Ambient Type Declarations for Dual-Engine Drivers (PostgreSQL & MySQL)
+// GitHub: cygnusorbit/zecratary
+// Ensures production builds succeed when either driver is dynamically loaded
+
+declare module 'pg' {
+  export class Pool {
+    constructor(config?: any);
+    connect(): Promise<any>;
+    query(queryText: string, values?: any[]): Promise<any>;
+    end(): Promise<void>;
+  }
+}
+
+declare module 'mysql2/promise' {
+  export interface PoolConnection {
+    beginTransaction(): Promise<void>;
+    commit(): Promise<void>;
+    rollback(): Promise<void>;
+    release(): void;
+    query(sql: string, values?: any[]): Promise<[any, any]>;
+    execute(sql: string, values?: any[]): Promise<[any, any]>;
+  }
+
+  export interface Pool {
+    query(sql: string, values?: any[]): Promise<[any, any]>;
+    execute(sql: string, values?: any[]): Promise<[any, any]>;
+    getConnection(): Promise<PoolConnection>;
+    end(): Promise<void>;
+  }
+
+  export function createPool(config: any): Pool;
+  export function createConnection(config: any): Promise<any>;
 }
 
 ```
@@ -1309,6 +1347,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
 
 ## File: `apps/web/src/app/saved/page.tsx`
 ```typescript
+// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -1364,6 +1403,8 @@ const GRID_CONFIG: Record<GridMode, { colsClass: string; perPage: number; label:
   }
 };
 
+const DEFAULT_RECIPE_IMAGE = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80';
+
 const isRecipeInBook = (rec: any, bookId: string): boolean => {
   if (!rec || !bookId) return false;
   return rec.bookId === bookId || rec.book_id === bookId;
@@ -1397,7 +1438,7 @@ export default function SavedRecipesPage() {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
 
-  // Add to Plan / Calendar Modal State (Dynamic Current Date)
+  // Add to Plan / Calendar Modal State
   const [showAddToPlanModal, setShowAddToPlanModal] = useState(false);
   const [planDate, setPlanDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [planMealType, setPlanMealType] = useState('Dinner');
@@ -1453,6 +1494,7 @@ export default function SavedRecipesPage() {
   } | null>(null);
 
   const audioCtxRef = useRef<any>(null);
+  const isSyncingRef = useRef<boolean>(false);
 
   const defaultBooks = [
     { id: 'book_1', title: 'Family Favorites & Weeknight Dinners', description: 'Quick and easy meals.' },
@@ -1460,7 +1502,6 @@ export default function SavedRecipesPage() {
     { id: 'book_3', title: 'Baking & Desserts', description: 'Sweet treats & pastries.' }
   ];
 
-  // Restore saved grid preference from localStorage
   useEffect(() => {
     try {
       const savedMode = localStorage.getItem('zecratary_saved_grid_mode') as GridMode;
@@ -1590,18 +1631,17 @@ export default function SavedRecipesPage() {
     return `https://${urlStr}`;
   };
 
-  const loadData = useCallback(async (user: User | null) => {
+  const loadData = useCallback(async (user: User | null, showSpinner = true) => {
     if (!user) return;
     setCategories(getStoredCategories());
     const targetUserId = (user.id || user.email || '').trim();
     if (!targetUserId) return;
 
     try {
-      setLoading(true);
+      if (showSpinner) setLoading(true);
       const rawRecipes = await syncUserSavedRecipes(targetUserId);
 
-      // Verify creator identity explicitly on incoming records
-      const userRecipes = rawRecipes
+      const userRecipes = (Array.isArray(rawRecipes) ? rawRecipes : [])
         .filter((r: any) => {
           const rUser = String(r.user_id || r.userId || '').trim();
           const rCreator = String(r.created_by || r.createdBy || '').trim();
@@ -1609,6 +1649,7 @@ export default function SavedRecipesPage() {
         })
         .map((r: any) => {
           const cleanType = getCleanRecipeType(r);
+          const resolvedImg = r.imageUrl || r.image || r.image_url || '';
           return {
             ...r,
             userId: targetUserId,
@@ -1619,6 +1660,9 @@ export default function SavedRecipesPage() {
             creator_name: r.creator_name || r.creatorName || user.name || 'You',
             recipeType: cleanType,
             category: cleanType,
+            imageUrl: resolvedImg,
+            image: resolvedImg,
+            image_url: resolvedImg,
             bookId: r.book_id || r.bookId || null,
             isFavorite: Boolean(r.is_favorite || r.isFavorite),
             is_favorite: Boolean(r.is_favorite || r.isFavorite),
@@ -1664,7 +1708,7 @@ export default function SavedRecipesPage() {
     } catch (e) {
       console.error('[SavedRecipesPage] Load error:', e);
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   }, []);
 
@@ -1692,13 +1736,14 @@ export default function SavedRecipesPage() {
       return;
     }
     setCurrentUser(user);
-    loadData(user);
+    loadData(user, true);
 
     const handleSync = () => {
+      if (isSyncingRef.current) return;
       const activeUser = getCurrentUser();
       if (activeUser) {
         setCurrentUser(activeUser);
-        loadData(activeUser);
+        loadData(activeUser, false);
       }
     };
 
@@ -1719,41 +1764,53 @@ export default function SavedRecipesPage() {
     };
   }, [loadData, router, t]);
 
+  // Unified persistence function: POST /api/recipes/saved exclusively
   const saveAllRecipes = (updatedUserList: any[]) => {
     if (!currentUser) return;
     const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
 
-    const updatedWithId = updatedUserList.map(r => ({
-      ...r,
-      userId: targetUserId,
-      user_id: targetUserId,
-      createdBy: r.createdBy || r.created_by || currentUser.email || targetUserId,
-      created_by: r.createdBy || r.created_by || currentUser.email || targetUserId,
-      creatorName: r.creatorName || r.creator_name || currentUser.name || 'You',
-      creator_name: r.creatorName || r.creator_name || currentUser.name || 'You',
-      bookId: r.bookId || r.book_id || null,
-      book_id: r.bookId || r.book_id || null,
-      isFavorite: Boolean(r.isFavorite ?? r.is_favorite),
-      is_favorite: Boolean(r.isFavorite ?? r.is_favorite),
-      isCooked: Boolean(r.isCooked ?? r.is_cooked),
-      is_cooked: Boolean(r.isCooked ?? r.is_cooked),
-      rating: Number(r.rating) || 0,
-      note: r.note || '',
-      sourceUrl: r.sourceUrl || r.source_url || '',
-      source_url: r.sourceUrl || r.source_url || ''
-    }));
+    const updatedWithId = updatedUserList.map(r => {
+      const resolvedImg = r.imageUrl || r.image || r.image_url || '';
+      return {
+        ...r,
+        userId: targetUserId,
+        user_id: targetUserId,
+        createdBy: r.createdBy || r.created_by || currentUser.email || targetUserId,
+        created_by: r.createdBy || r.created_by || currentUser.email || targetUserId,
+        creatorName: r.creatorName || r.creator_name || currentUser.name || 'You',
+        creator_name: r.creatorName || r.creator_name || currentUser.name || 'You',
+        imageUrl: resolvedImg,
+        image: resolvedImg,
+        image_url: resolvedImg,
+        bookId: r.bookId || r.book_id || null,
+        book_id: r.bookId || r.book_id || null,
+        isFavorite: Boolean(r.isFavorite ?? r.is_favorite),
+        is_favorite: Boolean(r.isFavorite ?? r.is_favorite),
+        isCooked: Boolean(r.isCooked ?? r.is_cooked),
+        is_cooked: Boolean(r.isCooked ?? r.is_cooked),
+        rating: Number(r.rating) || 0,
+        note: r.note || '',
+        sourceUrl: r.sourceUrl || r.source_url || '',
+        source_url: r.sourceUrl || r.source_url || ''
+      };
+    });
 
     setRecipes(updatedWithId);
 
+    isSyncingRef.current = true;
     persistSavedRecipe(targetUserId, updatedWithId, {
       createdBy: currentUser.email || targetUserId,
       creatorName: currentUser.name || 'You'
     }).then(() => {
+      setTimeout(() => {
+        isSyncingRef.current = false;
+      }, 400);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
       }
     }).catch((err) => {
-      console.error('[SavedRecipesPage] Error saving recipes:', err);
+      isSyncingRef.current = false;
+      console.error('[SavedRecipesPage] Error saving recipes via POST:', err);
     });
 
     const updatedBooks = books.map((b: any) => ({
@@ -1763,7 +1820,7 @@ export default function SavedRecipesPage() {
     setBooks(updatedBooks);
   };
 
-  const toggleFavorite = async (e: React.MouseEvent, id: string) => {
+  const toggleFavorite = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     const target = recipes.find(r => r.id === id);
     if (!target) return;
@@ -1773,22 +1830,13 @@ export default function SavedRecipesPage() {
     setRecipes(updated);
 
     if (selectedRecipe?.id === id) {
-      setSelectedRecipe({ ...selectedRecipe, isFavorite: newFav, is_favorite: newFav });
+      setSelectedRecipe((prev: any) => prev ? { ...prev, isFavorite: newFav, is_favorite: newFav } : null);
     }
 
     saveAllRecipes(updated);
-
-    try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, isFavorite: newFav, is_favorite: newFav })
-      });
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-    } catch (_) {}
   };
 
-  const toggleCooked = async (e: React.MouseEvent, id: string) => {
+  const toggleCooked = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     const target = recipes.find(r => r.id === id);
     if (!target) return;
@@ -1798,22 +1846,13 @@ export default function SavedRecipesPage() {
     setRecipes(updated);
 
     if (selectedRecipe?.id === id) {
-      setSelectedRecipe({ ...selectedRecipe, isCooked: newCooked, is_cooked: newCooked });
+      setSelectedRecipe((prev: any) => prev ? { ...prev, isCooked: newCooked, is_cooked: newCooked } : null);
     }
 
     saveAllRecipes(updated);
-
-    try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, isCooked: newCooked, is_cooked: newCooked })
-      });
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-    } catch (_) {}
   };
 
-  const handleAssignToBook = async (bookId: string) => {
+  const handleAssignToBook = (bookId: string) => {
     if (!selectedRecipe) return;
     const isRemoving = isRecipeInBook(selectedRecipe, bookId);
     const targetBookId = isRemoving ? null : bookId;
@@ -1827,20 +1866,7 @@ export default function SavedRecipesPage() {
 
     const updatedRecipes = recipes.map(r => r.id === selectedRecipe.id ? updatedRecipe : r);
     setRecipes(updatedRecipes);
-
-    try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selectedRecipe.id, bookId: targetBookId, book_id: targetBookId })
-      });
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-      window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
-      window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
-      window.dispatchEvent(new Event('storage'));
-    } catch (err) {
-      console.error('Error assigning recipe to book:', err);
-    }
+    saveAllRecipes(updatedRecipes);
   };
 
   const openAddToPlanModal = () => {
@@ -1856,7 +1882,7 @@ export default function SavedRecipesPage() {
     if (!selectedRecipe || !currentUser) return;
 
     const recName = selectedRecipe.title || selectedRecipe.name || 'Untitled Recipe';
-    const recImage = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80';
+    const recImage = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || DEFAULT_RECIPE_IMAGE;
     const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
 
     const newPlanItem = {
@@ -1905,11 +1931,6 @@ export default function SavedRecipesPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newPlanItem)
-        }),
-        fetch('/api/meal-plan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newPlanItem)
         })
       ]);
     } catch (_) {}
@@ -1927,7 +1948,7 @@ export default function SavedRecipesPage() {
     alert(alertMsg);
   };
 
-  const updateSelectedRecipeState = async (key: string, val: any) => {
+  const updateSelectedRecipeState = (key: string, val: any) => {
     if (!selectedRecipe) return;
     const updatedRec = { ...selectedRecipe, [key]: val };
     if (key === 'isFavorite') updatedRec.is_favorite = val;
@@ -1937,15 +1958,6 @@ export default function SavedRecipesPage() {
     setSelectedRecipe(updatedRec);
     const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
     saveAllRecipes(updatedList);
-
-    try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selectedRecipe.id, [key]: val })
-      });
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-    } catch (_) {}
   };
 
   const handleDeleteRecipe = async (id: string) => {
@@ -1954,11 +1966,6 @@ export default function SavedRecipesPage() {
     try {
       await Promise.allSettled([
         fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { 
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id })
-        }),
-        fetch(`/api/saved-recipes?id=${encodeURIComponent(id)}`, { 
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id })
@@ -2060,6 +2067,8 @@ export default function SavedRecipesPage() {
     }
     if (!Array.isArray(rawIngredients)) rawIngredients = [];
 
+    const currentImg = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || '';
+
     setEditForm({
       title: selectedRecipe.title || selectedRecipe.name || '',
       description: selectedRecipe.description || '',
@@ -2068,7 +2077,7 @@ export default function SavedRecipesPage() {
       servings: selectedRecipe.servings || 4,
       prepTimeMinutes: selectedRecipe.prepTimeMinutes || 30,
       cookTimeMinutes: selectedRecipe.cookTimeMinutes || 10,
-      imageUrl: selectedRecipe.imageUrl || selectedRecipe.image || '',
+      imageUrl: currentImg,
       ingredients: rawIngredients.length > 0
         ? rawIngredients.map((ing: any) => ({
             amount: typeof ing === 'string' ? '' : ing.amount || ing.quantity || '',
@@ -2096,10 +2105,14 @@ export default function SavedRecipesPage() {
 
     const cleanType = getCleanRecipeType(editForm);
     const targetUserId = currentUser?.id || currentUser?.email || 'usr_admin_1';
+    const resolvedImg = editForm.imageUrl || editForm.image || editForm.image_url || selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || '';
 
     const updatedRec = {
       ...selectedRecipe,
       ...editForm,
+      imageUrl: resolvedImg,
+      image: resolvedImg,
+      image_url: resolvedImg,
       userId: targetUserId,
       user_id: targetUserId,
       createdBy: selectedRecipe.createdBy || currentUser?.email || targetUserId,
@@ -2409,7 +2422,6 @@ export default function SavedRecipesPage() {
     });
   }, [recipes, search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime]);
 
-  // Reset current page when filters change
   useEffect(() => {
     setCurrentPage(1);
   }, [search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime, gridMode]);
@@ -2450,7 +2462,7 @@ export default function SavedRecipesPage() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* 3x3, 4x4, 5x5 Toggle View */}
+          {/* 3x3, 4x4, 5x5 Grid Switcher */}
           <div 
             className="flex items-center p-1 rounded-xl border shadow-xs"
             style={{
@@ -2559,7 +2571,7 @@ export default function SavedRecipesPage() {
               <span>{t('favorites') || 'Favorites'}</span>
             </button>
 
-            {/* Ingredients Popover Filter (NO FORM) */}
+            {/* Ingredients Popover Filter */}
             <div className="relative" onClick={(e) => e.stopPropagation()}>
               <button
                 type="button"
@@ -2638,7 +2650,7 @@ export default function SavedRecipesPage() {
                           <button
                             type="button"
                             onClick={() => handleRemoveIngredientFilter(ing)}
-                            className="text-slate-400 hover:text-red-500"
+                            className="text-slate-400 hover:text-red-500 cursor-pointer"
                           >
                             <X className="h-3 w-3"/>
                           </button>
@@ -2928,6 +2940,7 @@ export default function SavedRecipesPage() {
             const cardBook = books.find(b => b.id === (r.bookId || r.book_id));
             const cardTypeBadge = getCleanRecipeType(r);
             const cfg = GRID_CONFIG[gridMode];
+            const displayImg = r.imageUrl || r.image || r.image_url || DEFAULT_RECIPE_IMAGE;
 
             return (
               <div
@@ -2949,12 +2962,21 @@ export default function SavedRecipesPage() {
                 <div>
                   <div className={`relative ${cfg.imgHeight} w-full overflow-hidden`} style={{ backgroundColor: 'var(--color-inner-dark)' }}>
                     <img
-                      src={r.imageUrl || r.image || '/uploads/recipes/default.jpg'}
+                      src={displayImg}
                       alt={r.title || r.name}
+                      referrerPolicy="no-referrer"
+                      crossOrigin="anonymous"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (!target.dataset.failed) {
+                          target.dataset.failed = 'true';
+                          target.src = DEFAULT_RECIPE_IMAGE;
+                        }
+                      }}
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                     />
                     
-                    {/* Card Action Buttons */}
+                    {/* Card Action Buttons (Direct POST trigger) */}
                     <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
@@ -3022,7 +3044,6 @@ export default function SavedRecipesPage() {
                       {cardTypeBadge}
                     </span>
 
-                    {/* Creator Tag Badge */}
                     <span 
                       className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 border"
                       style={{
@@ -3144,6 +3165,7 @@ export default function SavedRecipesPage() {
             }}
           >
             <button
+              type="button"
               onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
               className="absolute top-4 right-4 z-30 p-2 rounded-xl border transition cursor-pointer shadow-md"
               style={{
@@ -3160,8 +3182,17 @@ export default function SavedRecipesPage() {
                 <div className="space-y-5 pb-6">
                   <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
                     <img
-                      src={selectedRecipe.imageUrl || selectedRecipe.image || '/uploads/recipes/default.jpg'}
+                      src={selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || DEFAULT_RECIPE_IMAGE}
                       alt={selectedRecipe.title || selectedRecipe.name}
+                      referrerPolicy="no-referrer"
+                      crossOrigin="anonymous"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (!target.dataset.failed) {
+                          target.dataset.failed = 'true';
+                          target.src = DEFAULT_RECIPE_IMAGE;
+                        }
+                      }}
                       className="absolute inset-0 w-full h-full object-cover"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
@@ -3209,7 +3240,6 @@ export default function SavedRecipesPage() {
                           <span className="font-bold">{recipeCategoryBadge}</span>
                         </span>
 
-                        {/* Creator Tag in Modal */}
                         <span 
                           className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
                           style={{
@@ -3224,7 +3254,6 @@ export default function SavedRecipesPage() {
                           </span>
                         </span>
                         
-                        {/* Modal Header Favorite Button */}
                         <button
                           type="button"
                           onClick={(e) => toggleFavorite(e, selectedRecipe.id)}
@@ -3242,7 +3271,7 @@ export default function SavedRecipesPage() {
                     </div>
                   </div>
 
-                  {/* 3 CORE ACTION BUTTONS */}
+                  {/* 3 Core Action Buttons */}
                   <div className="px-5 grid grid-cols-3 gap-2.5">
                     <div className="relative">
                       <button
@@ -3365,6 +3394,7 @@ export default function SavedRecipesPage() {
                         }}
                       >
                         <button
+                          type="button"
                           onClick={() => setServingsMultiplier(Math.max(1, servingsMultiplier - 1))}
                           className="px-2.5 py-1 font-bold cursor-pointer transition"
                           style={{ color: 'var(--color-text-secondary)' }}
@@ -3375,6 +3405,7 @@ export default function SavedRecipesPage() {
                           {currentTotalServings}
                         </span>
                         <button
+                          type="button"
                           onClick={() => setServingsMultiplier(servingsMultiplier + 1)}
                           className="px-2.5 py-1 font-bold cursor-pointer transition"
                           style={{ color: 'var(--color-text-secondary)' }}
@@ -3398,6 +3429,7 @@ export default function SavedRecipesPage() {
                         <Timer className="h-3.5 w-3.5"/> {t('timerBtn') || 'Timer'}
                       </button>
                       <button
+                        type="button"
                         onClick={handleOpenEdit}
                         className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
                         style={{
@@ -3409,6 +3441,7 @@ export default function SavedRecipesPage() {
                         <Edit3 className="h-3.5 w-3.5"/> {t('editBtn') || 'Edit'}
                       </button>
                       <button
+                        type="button"
                         onClick={() => {
                           navigator.clipboard.writeText(window.location.href);
                           alert(t('recipeLinkCopiedAlert') || 'Recipe link copied!');
@@ -3545,6 +3578,7 @@ export default function SavedRecipesPage() {
                           <Type className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/>
                         </div>
                         <button
+                          type="button"
                           onClick={() => setFontSizeScale(Math.max(60, fontSizeScale - 10))}
                           className="px-2.5 py-1 font-bold cursor-pointer"
                           style={{ color: 'var(--color-text-secondary)' }}
@@ -3555,6 +3589,7 @@ export default function SavedRecipesPage() {
                           {fontSizeScale}%
                         </span>
                         <button
+                          type="button"
                           onClick={() => setFontSizeScale(Math.min(140, fontSizeScale + 10))}
                           className="px-2.5 py-1 font-bold cursor-pointer"
                           style={{ color: 'var(--color-text-secondary)' }}
@@ -3655,6 +3690,7 @@ export default function SavedRecipesPage() {
                   {/* MODAL FOOTER */}
                   <div className="px-5 flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
                     <button
+                      type="button"
                       onClick={() => handleDeleteRecipe(selectedRecipe.id)}
                       className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
                       style={{
@@ -3710,6 +3746,7 @@ export default function SavedRecipesPage() {
                       <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('editRecipeTitle') || 'Edit Recipe'}
                     </h3>
                     <button
+                      type="button"
                       onClick={() => setIsEditing(false)}
                       className="p-1 rounded-lg transition cursor-pointer"
                       style={{ color: 'var(--color-text-secondary)' }}
@@ -3771,6 +3808,15 @@ export default function SavedRecipesPage() {
                               <img
                                 src={editForm.imageUrl}
                                 alt="Recipe Preview"
+                                referrerPolicy="no-referrer"
+                                crossOrigin="anonymous"
+                                onError={(e) => {
+                                  const target = e.currentTarget;
+                                  if (!target.dataset.failed) {
+                                    target.dataset.failed = 'true';
+                                    target.src = DEFAULT_RECIPE_IMAGE;
+                                  }
+                                }}
                                 className="absolute inset-0 w-full h-full object-cover"
                               />
                               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
@@ -3778,7 +3824,8 @@ export default function SavedRecipesPage() {
                                   className="border text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5"
                                   style={{
                                     backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-border)'
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text)'
                                   }}
                                 >
                                   <ImagePlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('changePhoto') || 'Change Photo'}
@@ -4480,7 +4527,7 @@ export default function SavedRecipesPage() {
         </div>
       )}
 
-      {/* ADD TO PLAN MODAL (NO FORM - STANDARD ACCESSIBLE DIV) */}
+      {/* ADD TO PLAN MODAL */}
       {showAddToPlanModal && selectedRecipe && (
         <div 
           onClick={() => setShowAddToPlanModal(false)}
@@ -32855,6 +32902,72 @@ export default function IngredientCategoryPage() {
 
 ```
 
+## File: `apps/web/src/app/uploads/recipes/[filename]/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(
+  req: NextRequest,
+  context: { params: Promise<{ filename: string }> }
+) {
+  const resolvedParams = await Promise.resolve(context.params);
+  const filename = resolvedParams?.filename;
+
+  if (!filename) {
+    return new NextResponse('File not found', { status: 404 });
+  }
+
+  const safeFilename = path.basename(filename);
+  const candidateDirs = [
+    path.join(process.cwd(), 'apps', 'web', 'public', 'uploads', 'recipes'),
+    path.join(process.cwd(), 'public', 'uploads', 'recipes')
+  ];
+
+  for (const dir of candidateDirs) {
+    const fullPath = path.join(dir, safeFilename);
+    if (fs.existsSync(fullPath)) {
+      try {
+        const buffer = fs.readFileSync(fullPath);
+        const ext = path.extname(safeFilename).toLowerCase();
+        let contentType = 'image/jpeg';
+        if (ext === '.png') contentType = 'image/png';
+        else if (ext === '.webp') contentType = 'image/webp';
+        else if (ext === '.gif') contentType = 'image/gif';
+        else if (ext === '.svg') contentType = 'image/svg+xml';
+        else if (ext === '.avif') contentType = 'image/avif';
+
+        return new NextResponse(buffer, {
+          headers: {
+            'Content-Type': contentType,
+            'Cache-Control': 'public, max-age=31536000, immutable'
+          }
+        });
+      } catch (_) {}
+    }
+  }
+
+  for (const dir of candidateDirs) {
+    const defaultPath = path.join(dir, 'default.jpg');
+    if (fs.existsSync(defaultPath)) {
+      const buffer = fs.readFileSync(defaultPath);
+      return new NextResponse(buffer, {
+        headers: {
+          'Content-Type': 'image/jpeg',
+          'Cache-Control': 'public, max-age=86400'
+        }
+      });
+    }
+  }
+
+  return new NextResponse('Not found', { status: 404 });
+}
+
+```
+
 ## File: `apps/web/src/app/books/page.tsx`
 ```typescript
 // Generated / Updated by AI Collaborator
@@ -48698,83 +48811,161 @@ export async function DELETE(req: NextRequest) {
 ## File: `apps/web/src/app/api/recipes/saved/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-let cachedPool: any = null;
-
-async function getPostgresPool() {
-  if (cachedPool) return cachedPool;
-  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
-  if (!connStr) return null;
+async function ensureTableColumns(): Promise<Set<string>> {
   try {
-    const { Pool } = await import('pg');
-    const requiresSsl = connStr.includes('sslmode=require') || 
-                        connStr.includes('neon.tech') || 
-                        connStr.includes('supabase.co') || 
-                        process.env.NODE_ENV === 'production';
-    cachedPool = new Pool({
-      connectionString: connStr,
-      ssl: requiresSsl ? { rejectUnauthorized: false } : false
-    });
-    return cachedPool;
-  } catch (_) {
-    return null;
-  }
-}
-
-async function ensureSavedRecipesTable(pool: any) {
-  if (!pool) return;
-  try {
-    await pool.query(`
+    await query(`
       CREATE TABLE IF NOT EXISTS saved_recipes (
-        id VARCHAR(100) PRIMARY KEY,
-        user_id VARCHAR(100),
-        created_by VARCHAR(255),
-        creator_name VARCHAR(255),
-        creator_email VARCHAR(255),
-        title VARCHAR(255) NOT NULL,
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255),
+        title TEXT NOT NULL,
         description TEXT,
-        recipe_type VARCHAR(100) DEFAULT 'Main Dish',
-        prep_time_minutes INT DEFAULT 15,
-        cook_time_minutes INT DEFAULT 20,
-        servings INT DEFAULT 2,
-        calories INT,
-        image_url TEXT,
+        recipe_type VARCHAR(100),
+        category VARCHAR(100),
+        cuisine VARCHAR(100),
+        prep_time VARCHAR(50),
+        cook_time VARCHAR(50),
+        prep_time_minutes INTEGER DEFAULT 15,
+        cook_time_minutes INTEGER DEFAULT 10,
+        servings VARCHAR(50) DEFAULT '4',
+        difficulty VARCHAR(50),
         ingredients JSONB DEFAULT '[]'::jsonb,
         directions JSONB DEFAULT '[]'::jsonb,
-        is_favorite BOOLEAN DEFAULT TRUE,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        instructions JSONB DEFAULT '[]'::jsonb,
+        nutrition JSONB DEFAULT '{}'::jsonb,
+        tags JSONB DEFAULT '[]'::jsonb,
+        image TEXT,
+        image_url TEXT,
+        is_favorite BOOLEAN DEFAULT FALSE,
+        is_cooked BOOLEAN DEFAULT FALSE,
+        rating INTEGER DEFAULT 0,
+        note TEXT DEFAULT '',
+        book_id VARCHAR(255),
+        source_url TEXT DEFAULT '',
+        created_by VARCHAR(255),
+        creator_name VARCHAR(255),
+        is_public BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
-      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS created_by VARCHAR(255);
-      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS creator_name VARCHAR(255);
-      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS creator_email VARCHAR(255);
     `);
-  } catch (_) {}
+
+    const migrations = [
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS instructions JSONB DEFAULT \'[]\'::jsonb;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS directions JSONB DEFAULT \'[]\'::jsonb;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS ingredients JSONB DEFAULT \'[]\'::jsonb;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS nutrition JSONB DEFAULT \'{}\'::jsonb;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT \'[]\'::jsonb;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS image TEXT;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS image_url TEXT;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS rating INTEGER DEFAULT 0;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS note TEXT DEFAULT \'\';',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS book_id VARCHAR(255);',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS source_url TEXT DEFAULT \'\';',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS created_by VARCHAR(255);',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS creator_name VARCHAR(255);',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS prep_time_minutes INTEGER DEFAULT 15;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS cook_time_minutes INTEGER DEFAULT 10;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS category VARCHAR(100);',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS recipe_type VARCHAR(100);',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS cuisine VARCHAR(100);',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS difficulty VARCHAR(50);',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS servings VARCHAR(50) DEFAULT \'4\';',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT FALSE;'
+    ];
+
+    for (const sql of migrations) {
+      try {
+        await query(sql);
+      } catch (_) {}
+    }
+
+    try {
+      await query(`
+        UPDATE saved_recipes 
+        SET image = image_url 
+        WHERE (image IS NULL OR image = '') AND (image_url IS NOT NULL AND image_url != '');
+
+        UPDATE saved_recipes 
+        SET image_url = image 
+        WHERE (image_url IS NULL OR image_url = '') AND (image IS NOT NULL AND image != '');
+      `);
+    } catch (_) {}
+
+    try {
+      await query(`
+        INSERT INTO users (id, email, name, updated_at)
+        VALUES ('usr_admin_1', 'admin@zecratary.local', 'Admin', NOW())
+        ON CONFLICT (id) DO NOTHING;
+      `);
+    } catch (_) {}
+  } catch (e) {
+    console.warn('[saved_recipes:ensureTableColumns] Warning:', e);
+  }
+
+  try {
+    const colRows = await query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'saved_recipes'
+    `);
+    return new Set(colRows.map((r: any) => String(r.column_name).toLowerCase()));
+  } catch (_) {
+    return new Set();
+  }
 }
 
 export async function GET(req: NextRequest) {
   try {
+    await ensureTableColumns();
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId') || '';
-    const email = (searchParams.get('email') || '').toLowerCase().trim();
+    const userId = searchParams.get('userId');
 
-    const pool = await getPostgresPool();
-    if (pool && (userId || email)) {
-      await ensureSavedRecipesTable(pool);
-      const res = await pool.query(
-        `SELECT id, user_id, created_by, creator_name, creator_email, title, description,
-                recipe_type, prep_time_minutes, cook_time_minutes, servings, calories,
-                image_url, ingredients, directions, is_favorite, created_at
-         FROM saved_recipes
-         WHERE user_id = $1 OR created_by = $2 OR creator_email = $2
-         ORDER BY created_at DESC LIMIT 50`,
-        [userId || 'guest', email || 'guest']
-      );
-      return NextResponse.json({ success: true, recipes: res.rows });
+    let rows: any[];
+    if (userId) {
+      rows = await query(`
+        SELECT * FROM saved_recipes 
+        WHERE user_id = $1 OR is_public = TRUE 
+        ORDER BY created_at DESC
+      `, [userId]);
+    } else {
+      rows = await query(`
+        SELECT * FROM saved_recipes 
+        ORDER BY created_at DESC
+      `);
     }
-    return NextResponse.json({ success: true, recipes: [] });
+
+    const mapped = (rows || []).map((r: any) => {
+      const img = r.image || r.image_url || r.imageUrl || '';
+      const rawSteps = r.instructions || r.directions || [];
+      const safeSteps = Array.isArray(rawSteps)
+        ? rawSteps
+        : (typeof rawSteps === 'string' ? (() => { try { return JSON.parse(rawSteps); } catch { return [rawSteps]; } })() : []);
+      const rawIng = r.ingredients || [];
+      const safeIng = Array.isArray(rawIng)
+        ? rawIng
+        : (typeof rawIng === 'string' ? (() => { try { return JSON.parse(rawIng); } catch { return [rawIng]; } })() : []);
+
+      return {
+        ...r,
+        image: img,
+        image_url: img,
+        imageUrl: img,
+        instructions: safeSteps,
+        directions: safeSteps,
+        ingredients: safeIng
+      };
+    });
+
+    return NextResponse.json(
+      { success: true, recipes: mapped },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -48782,47 +48973,152 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const existingCols = await ensureTableColumns();
     const body = await req.json();
-    const id = body.id || `rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const userId = body.userId || 'guest';
-    const email = body.createdBy || body.creatorEmail || body.email || 'guest';
-    const name = body.creatorName || email.split('@')[0];
-    const title = body.title || body.name || 'Untitled Recipe';
-    const description = body.description || '';
-    const recipeType = body.recipeType || body.mealType || 'Main Dish';
-    const prep = Number(body.prepTimeMinutes || body.prepMinutes || 15);
-    const cook = Number(body.cookTimeMinutes || body.cookMinutes || 20);
-    const servings = Number(body.servings || 2);
-    const calories = Number(body.calories || 0);
-    const image = body.imageUrl || body.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80';
-    const ingredients = Array.isArray(body.ingredients) ? body.ingredients : [];
-    const directions = Array.isArray(body.directions || body.instructions) ? (body.directions || body.instructions) : [];
+    const items = Array.isArray(body) ? body : (body.recipes || [body.recipe || body]);
 
-    const pool = await getPostgresPool();
-    if (pool) {
-      await ensureSavedRecipesTable(pool);
-      await pool.query(
-        `INSERT INTO saved_recipes (
-          id, user_id, created_by, creator_name, creator_email, title, description,
-          recipe_type, prep_time_minutes, cook_time_minutes, servings, calories,
-          image_url, ingredients, directions, is_favorite, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15::jsonb, true, NOW())
+    for (const item of items) {
+      if (!item || !item.id) continue;
+      const id = item.id;
+
+      let validUserId = 'usr_admin_1';
+      const candidateUserId = String(item.userId || item.user_id || '').trim();
+      if (candidateUserId) {
+        try {
+          const userCheck = await query('SELECT id FROM users WHERE id = $1', [candidateUserId]);
+          if (userCheck && userCheck.length > 0) {
+            validUserId = candidateUserId;
+          } else {
+            await query(
+              'INSERT INTO users (id, email, name, updated_at) VALUES ($1, $2, $3, NOW()) ON CONFLICT (id) DO NOTHING',
+              [candidateUserId, item.createdBy || item.email || candidateUserId, item.creatorName || 'User']
+            );
+            validUserId = candidateUserId;
+          }
+        } catch (_) {
+          validUserId = 'usr_admin_1';
+        }
+      }
+
+      const safeIngredients = Array.isArray(item.ingredients)
+        ? item.ingredients
+        : (typeof item.ingredients === 'string' ? (() => { try { return JSON.parse(item.ingredients); } catch { return [item.ingredients]; } })() : []);
+
+      const safeInstructions = Array.isArray(item.instructions)
+        ? item.instructions
+        : (Array.isArray(item.directions) ? item.directions : (typeof item.instructions === 'string' ? [item.instructions] : []));
+
+      const safeTags = Array.isArray(item.tags) ? item.tags : [];
+      const safeNutrition = (item.nutrition && typeof item.nutrition === 'object') ? item.nutrition : {};
+
+      const prepMinutes = Number(item.prepTimeMinutes || item.prep_time_minutes) || (parseInt(item.prepTime) || 15);
+      const cookMinutes = Number(item.cookTimeMinutes || item.cook_time_minutes) || (parseInt(item.cookTime) || 10);
+      const recipeType = item.recipeType || item.category || 'Main Dish';
+      const resolvedImg = item.imageUrl || item.image || item.image_url || '';
+
+      const columnData: { col: string; val: any; isJson?: boolean }[] = [
+        { col: 'id', val: id },
+        { col: 'user_id', val: validUserId },
+        { col: 'title', val: item.title || item.name || 'Untitled Recipe' },
+        { col: 'description', val: item.description || '' },
+        { col: 'recipe_type', val: recipeType },
+        { col: 'category', val: recipeType },
+        { col: 'cuisine', val: item.cuisine || '' },
+        { col: 'prep_time', val: String(prepMinutes) + 'm' },
+        { col: 'cook_time', val: String(cookMinutes) + 'm' },
+        { col: 'prep_time_minutes', val: prepMinutes },
+        { col: 'cook_time_minutes', val: cookMinutes },
+        { col: 'servings', val: String(item.servings || '4') },
+        { col: 'difficulty', val: item.difficulty || '' },
+        { col: 'ingredients', val: JSON.stringify(safeIngredients), isJson: true },
+        { col: 'directions', val: JSON.stringify(safeInstructions), isJson: true },
+        { col: 'instructions', val: JSON.stringify(safeInstructions), isJson: true },
+        { col: 'nutrition', val: JSON.stringify(safeNutrition), isJson: true },
+        { col: 'tags', val: JSON.stringify(safeTags), isJson: true },
+        { col: 'image', val: resolvedImg },
+        { col: 'image_url', val: resolvedImg },
+        { col: 'is_favorite', val: Boolean(item.isFavorite ?? item.is_favorite) },
+        { col: 'is_cooked', val: Boolean(item.isCooked ?? item.is_cooked) },
+        { col: 'rating', val: Number(item.rating) || 0 },
+        { col: 'note', val: item.note || '' },
+        { col: 'book_id', val: item.bookId || item.book_id || null },
+        { col: 'source_url', val: item.sourceUrl || item.source_url || '' },
+        { col: 'created_by', val: item.createdBy || item.created_by || validUserId },
+        { col: 'creator_name', val: item.creatorName || item.creator_name || 'You' },
+        { col: 'is_public', val: Boolean(item.isPublic ?? item.is_public) }
+      ];
+
+      // Dynamically filter only columns that physically exist in the PostgreSQL table
+      const validEntries = columnData.filter(entry => existingCols.size === 0 || existingCols.has(entry.col));
+
+      const colNames: string[] = [];
+      const placeholders: string[] = [];
+      const values: any[] = [];
+      const updateClauses: string[] = [];
+
+      validEntries.forEach((entry) => {
+        colNames.push(entry.col);
+        values.push(entry.val);
+        const idx = values.length;
+        placeholders.push(entry.isJson ? `$${idx}::jsonb` : `$${idx}`);
+
+        if (entry.col !== 'id') {
+          if (entry.col === 'image') {
+            updateClauses.push(`image = COALESCE(NULLIF(EXCLUDED.image, ''), saved_recipes.image, EXCLUDED.image_url)`);
+          } else if (entry.col === 'image_url') {
+            updateClauses.push(`image_url = COALESCE(NULLIF(EXCLUDED.image_url, ''), saved_recipes.image_url, EXCLUDED.image)`);
+          } else if (entry.isJson) {
+            updateClauses.push(`${entry.col} = CASE WHEN EXCLUDED.${entry.col} IS NOT NULL AND EXCLUDED.${entry.col} != '[]'::jsonb AND EXCLUDED.${entry.col} != '{}'::jsonb THEN EXCLUDED.${entry.col} ELSE saved_recipes.${entry.col} END`);
+          } else if (['title', 'description', 'recipe_type', 'category', 'cuisine', 'servings', 'difficulty', 'source_url', 'created_by', 'creator_name'].includes(entry.col)) {
+            updateClauses.push(`${entry.col} = COALESCE(NULLIF(EXCLUDED.${entry.col}, ''), saved_recipes.${entry.col})`);
+          } else {
+            updateClauses.push(`${entry.col} = EXCLUDED.${entry.col}`);
+          }
+        }
+      });
+
+      if (existingCols.size === 0 || existingCols.has('updated_at')) {
+        colNames.push('updated_at');
+        placeholders.push('NOW()');
+        updateClauses.push('updated_at = NOW()');
+      }
+
+      const sql = `
+        INSERT INTO saved_recipes (${colNames.join(', ')})
+        VALUES (${placeholders.join(', ')})
         ON CONFLICT (id) DO UPDATE SET
-          title = EXCLUDED.title,
-          description = EXCLUDED.description,
-          recipe_type = EXCLUDED.recipe_type,
-          ingredients = EXCLUDED.ingredients,
-          directions = EXCLUDED.directions,
-          updated_at = NOW();`,
-        [id, userId, email, name, email, title, description, recipeType, prep, cook, servings, calories, image, JSON.stringify(ingredients), JSON.stringify(directions)]
-      );
+          ${updateClauses.join(',\n          ')};
+      `;
+
+      await query(sql, values);
     }
 
-    return NextResponse.json({
-      success: true,
-      message: 'Recipe saved successfully to PostgreSQL database.',
-      recipe: { id, title, recipeType, prep, cook, servings, image }
-    });
+    return NextResponse.json({ success: true, message: 'Recipe(s) persisted to PostgreSQL.' });
+  } catch (err: any) {
+    console.error('[saved_recipes:POST] Error:', err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    await ensureTableColumns();
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+
+    if (!id) {
+      try {
+        const body = await req.json();
+        id = body?.id || id;
+      } catch (_) {}
+    }
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
+    }
+
+    await query('DELETE FROM saved_recipes WHERE id = $1', [id.trim()]);
+    return NextResponse.json({ success: true, message: 'Recipe removed from PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -49557,6 +49853,40 @@ export async function POST(req: Request) {
   } catch (error: any) {
     console.error('[Ingest API Error]:', error);
     return NextResponse.json({ success: false, error: error.message || 'Ingestion failed' }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/recipes/save-remote-image/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { downloadAndSaveScrapedImage } from '@/lib/imageDownloader';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const imageUrl = body.imageUrl || body.url || '';
+    const prefix = body.prefix || 'scraped';
+
+    if (!imageUrl || typeof imageUrl !== 'string') {
+      return NextResponse.json({ success: false, error: 'No image URL provided' }, { status: 400 });
+    }
+
+    if (imageUrl.startsWith('/uploads/')) {
+      return NextResponse.json({ success: true, localPath: imageUrl });
+    }
+
+    const localPath = await downloadAndSaveScrapedImage(imageUrl, prefix);
+    if (!localPath) {
+      return NextResponse.json({ success: false, error: 'Could not download image' }, { status: 422 });
+    }
+
+    return NextResponse.json({ success: true, localPath });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -50673,135 +51003,155 @@ import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-async function ensureColumns() {
+async function ensureTableColumns(): Promise<Set<string>> {
   try {
     await query(`
-      ALTER TABLE saved_recipes 
-      ADD COLUMN IF NOT EXISTS user_id TEXT,
-      ADD COLUMN IF NOT EXISTS created_by TEXT,
-      ADD COLUMN IF NOT EXISTS creator_name TEXT,
-      ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS rating NUMERIC DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '',
-      ADD COLUMN IF NOT EXISTS book_id TEXT,
-      ADD COLUMN IF NOT EXISTS source_url TEXT;
-
-      CREATE INDEX IF NOT EXISTS idx_saved_recipes_creator ON saved_recipes(user_id, created_by);
+      CREATE TABLE IF NOT EXISTS saved_recipes (
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255),
+        title TEXT NOT NULL,
+        description TEXT,
+        recipe_type VARCHAR(100),
+        category VARCHAR(100),
+        cuisine VARCHAR(100),
+        prep_time VARCHAR(50),
+        cook_time VARCHAR(50),
+        prep_time_minutes INTEGER DEFAULT 15,
+        cook_time_minutes INTEGER DEFAULT 10,
+        servings VARCHAR(50) DEFAULT '4',
+        difficulty VARCHAR(50),
+        ingredients JSONB DEFAULT '[]'::jsonb,
+        directions JSONB DEFAULT '[]'::jsonb,
+        instructions JSONB DEFAULT '[]'::jsonb,
+        nutrition JSONB DEFAULT '{}'::jsonb,
+        tags JSONB DEFAULT '[]'::jsonb,
+        image TEXT,
+        image_url TEXT,
+        is_favorite BOOLEAN DEFAULT FALSE,
+        is_cooked BOOLEAN DEFAULT FALSE,
+        rating INTEGER DEFAULT 0,
+        note TEXT DEFAULT '',
+        book_id VARCHAR(255),
+        source_url TEXT DEFAULT '',
+        created_by VARCHAR(255),
+        creator_name VARCHAR(255),
+        is_public BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
     `);
-  } catch (_) {}
+
+    const migrations = [
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS instructions JSONB DEFAULT \'[]\'::jsonb;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS directions JSONB DEFAULT \'[]\'::jsonb;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS ingredients JSONB DEFAULT \'[]\'::jsonb;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS nutrition JSONB DEFAULT \'{}\'::jsonb;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT \'[]\'::jsonb;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS image TEXT;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS image_url TEXT;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS rating INTEGER DEFAULT 0;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS note TEXT DEFAULT \'\';',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS book_id VARCHAR(255);',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS source_url TEXT DEFAULT \'\';',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS created_by VARCHAR(255);',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS creator_name VARCHAR(255);',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS prep_time_minutes INTEGER DEFAULT 15;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS cook_time_minutes INTEGER DEFAULT 10;',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS category VARCHAR(100);',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS recipe_type VARCHAR(100);',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS cuisine VARCHAR(100);',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS difficulty VARCHAR(50);',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS servings VARCHAR(50) DEFAULT \'4\';',
+      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT FALSE;'
+    ];
+
+    for (const sql of migrations) {
+      try {
+        await query(sql);
+      } catch (_) {}
+    }
+
+    try {
+      await query(`
+        UPDATE saved_recipes 
+        SET image = image_url 
+        WHERE (image IS NULL OR image = '') AND (image_url IS NOT NULL AND image_url != '');
+
+        UPDATE saved_recipes 
+        SET image_url = image 
+        WHERE (image_url IS NULL OR image_url = '') AND (image IS NOT NULL AND image != '');
+      `);
+    } catch (_) {}
+
+    try {
+      await query(`
+        INSERT INTO users (id, email, name, updated_at)
+        VALUES ('usr_admin_1', 'admin@zecratary.local', 'Admin', NOW())
+        ON CONFLICT (id) DO NOTHING;
+      `);
+    } catch (_) {}
+  } catch (e) {
+    console.warn('[saved_recipes:ensureTableColumns] Warning:', e);
+  }
+
+  try {
+    const colRows = await query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'saved_recipes'
+    `);
+    return new Set(colRows.map((r: any) => String(r.column_name).toLowerCase()));
+  } catch (_) {
+    return new Set();
+  }
 }
 
 export async function GET(req: NextRequest) {
   try {
-    await ensureColumns();
+    await ensureTableColumns();
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId')?.trim();
-    const email = searchParams.get('email')?.trim();
-    const category = searchParams.get('category');
+    const userId = searchParams.get('userId');
 
-    if (!userId && !email) {
-      return NextResponse.json(
-        { success: true, recipes: [] },
-        { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-      );
-    }
-
-    let sql = `SELECT * FROM saved_recipes WHERE `;
-    const params: any[] = [];
-
-    const conditions: string[] = [];
+    let rows: any[];
     if (userId) {
-      params.push(userId);
-      conditions.push(`user_id = $${params.length} OR created_by = $${params.length}`);
-    }
-    if (email && email !== userId) {
-      params.push(email);
-      conditions.push(`user_id = $${params.length} OR created_by = $${params.length}`);
-    }
-
-    sql += `(${conditions.join(' OR ')})`;
-
-    if (category && category !== 'all' && category !== 'All Types') {
-      params.push(category);
-      sql += ` AND LOWER(recipe_type) = LOWER($${params.length})`;
+      rows = await query(`
+        SELECT * FROM saved_recipes 
+        WHERE user_id = $1 OR is_public = TRUE 
+        ORDER BY created_at DESC
+      `, [userId]);
+    } else {
+      rows = await query(`
+        SELECT * FROM saved_recipes 
+        ORDER BY created_at DESC
+      `);
     }
 
-    sql += ' ORDER BY created_at DESC';
-
-    const rows = await query(sql, params);
-
-    const formatted = rows.map((r: any) => {
-      let ingredients = r.ingredients;
-      if (typeof ingredients === 'string') {
-        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = []; }
-      }
-
-      let directions = r.directions;
-      if (typeof directions === 'string') {
-        try { directions = JSON.parse(directions); } catch (_) { directions = []; }
-      }
-
-      let nutrition = r.nutrition;
-      if (typeof nutrition === 'string') {
-        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
-      }
-
-      let tags = r.tags;
-      if (typeof tags === 'string') {
-        try { tags = JSON.parse(tags); } catch (_) { tags = []; }
-      }
+    const mapped = (rows || []).map((r: any) => {
+      const img = r.image || r.image_url || r.imageUrl || '';
+      const rawSteps = r.instructions || r.directions || [];
+      const safeSteps = Array.isArray(rawSteps)
+        ? rawSteps
+        : (typeof rawSteps === 'string' ? (() => { try { return JSON.parse(rawSteps); } catch { return [rawSteps]; } })() : []);
+      const rawIng = r.ingredients || [];
+      const safeIng = Array.isArray(rawIng)
+        ? rawIng
+        : (typeof rawIng === 'string' ? (() => { try { return JSON.parse(rawIng); } catch { return [rawIng]; } })() : []);
 
       return {
         ...r,
-        id: r.id,
-        userId: r.user_id || userId,
-        user_id: r.user_id || userId,
-        createdBy: r.created_by || r.user_id || userId,
-        created_by: r.created_by || r.user_id || userId,
-        creatorName: r.creator_name || 'Creator',
-        creator_name: r.creator_name || 'Creator',
-        title: r.title || r.name || 'Untitled Recipe',
-        name: r.title || r.name || 'Untitled Recipe',
-        description: r.description || '',
-        recipeType: r.recipe_type || 'Main Dish',
-        category: r.recipe_type || 'Main Dish',
-        recipe_type: r.recipe_type || 'Main Dish',
-        cuisine: r.cuisine || '',
-        prepTime: r.prep_time || '15',
-        cookTime: r.cook_time || '25',
-        prepTimeMinutes: Number(r.prep_time) || 15,
-        cookTimeMinutes: Number(r.cook_time) || 25,
-        servings: Number(r.servings) || 4,
-        difficulty: r.difficulty || 'Medium',
-        ingredients: Array.isArray(ingredients) ? ingredients : [],
-        directions: Array.isArray(directions) ? directions : [],
-        instructions: Array.isArray(directions) ? directions : [],
-        steps: Array.isArray(directions) ? directions : [],
-        nutrition: nutrition || {},
-        tags: Array.isArray(tags) ? tags : [],
-        imageUrl: r.image_url || r.imageUrl || r.image || '',
-        image: r.image_url || r.imageUrl || r.image || '',
-        image_url: r.image_url || r.imageUrl || r.image || '',
-        sourceUrl: r.source_url || r.sourceUrl || '',
-        source_url: r.source_url || r.sourceUrl || '',
-        isFavorite: Boolean(r.is_favorite || r.isFavorite),
-        is_favorite: Boolean(r.is_favorite || r.isFavorite),
-        isCooked: Boolean(r.is_cooked || r.isCooked),
-        is_cooked: Boolean(r.is_cooked || r.isCooked),
-        rating: Number(r.rating) || 0,
-        note: r.note || '',
-        bookId: r.book_id || r.bookId || null,
-        book_id: r.book_id || r.bookId || null,
-        isPublic: Boolean(r.is_public),
-        is_public: Boolean(r.is_public),
-        createdAt: r.created_at || new Date().toISOString(),
-        updatedAt: r.updated_at || new Date().toISOString()
+        image: img,
+        image_url: img,
+        imageUrl: img,
+        instructions: safeSteps,
+        directions: safeSteps,
+        ingredients: safeIng
       };
     });
 
     return NextResponse.json(
-      { success: true, recipes: formatted },
+      { success: true, recipes: mapped },
       { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
     );
   } catch (err: any) {
@@ -50811,173 +51161,136 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureColumns();
+    const existingCols = await ensureTableColumns();
     const body = await req.json();
     const items = Array.isArray(body) ? body : (body.recipes || [body.recipe || body]);
 
     for (const item of items) {
-      if (!item) continue;
-      const targetUserId = (item.userId || item.user_id || body.userId || body.user_id || '').trim();
-      if (!targetUserId) continue;
+      if (!item || !item.id) continue;
+      const id = item.id;
 
-      const createdBy = (item.createdBy || item.created_by || body.createdBy || body.created_by || targetUserId).trim();
-      const creatorName = (item.creatorName || item.creator_name || body.creatorName || body.creator_name || 'Creator').trim();
-      const id = item.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-
-      try {
-        const userCheck = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
-        if (userCheck.length === 0) {
-          await query(`
-            INSERT INTO users (id, name, email, role, subscription_plan)
-            VALUES ($1, $2, $3, 'user', 'taster')
-            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email;
-          `, [targetUserId, creatorName, createdBy.includes('@') ? createdBy : `${targetUserId}@zecratary.local`]);
+      let validUserId = 'usr_admin_1';
+      const candidateUserId = String(item.userId || item.user_id || '').trim();
+      if (candidateUserId) {
+        try {
+          const userCheck = await query('SELECT id FROM users WHERE id = $1', [candidateUserId]);
+          if (userCheck && userCheck.length > 0) {
+            validUserId = candidateUserId;
+          } else {
+            await query(
+              'INSERT INTO users (id, email, name, updated_at) VALUES ($1, $2, $3, NOW()) ON CONFLICT (id) DO NOTHING',
+              [candidateUserId, item.createdBy || item.email || candidateUserId, item.creatorName || 'User']
+            );
+            validUserId = candidateUserId;
+          }
+        } catch (_) {
+          validUserId = 'usr_admin_1';
         }
-      } catch (_) {}
-
-      let ingredients = item.ingredients;
-      if (typeof ingredients === 'string') {
-        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = [ingredients]; }
-      }
-      if (!Array.isArray(ingredients)) ingredients = [];
-
-      let directions = item.directions || item.instructions || item.steps;
-      if (typeof directions === 'string') {
-        try { directions = JSON.parse(directions); } catch (_) { directions = [directions]; }
-      }
-      if (!Array.isArray(directions)) directions = [];
-
-      let tags = item.tags;
-      if (typeof tags === 'string') {
-        try { tags = JSON.parse(tags); } catch (_) { tags = [tags]; }
-      }
-      if (!Array.isArray(tags)) tags = [];
-
-      let nutrition = item.nutrition || item.macros || {};
-      if (typeof nutrition === 'string') {
-        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
       }
 
-      await query(`
-        INSERT INTO saved_recipes (
-          id, user_id, created_by, creator_name, title, description, recipe_type, cuisine, prep_time, cook_time,
-          servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public,
-          is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-          $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17, $18,
-          $19, $20, $21, $22, $23, $24, NOW()
-        )
+      const safeIngredients = Array.isArray(item.ingredients)
+        ? item.ingredients
+        : (typeof item.ingredients === 'string' ? (() => { try { return JSON.parse(item.ingredients); } catch { return [item.ingredients]; } })() : []);
+
+      const safeInstructions = Array.isArray(item.instructions)
+        ? item.instructions
+        : (Array.isArray(item.directions) ? item.directions : (typeof item.instructions === 'string' ? [item.instructions] : []));
+
+      const safeTags = Array.isArray(item.tags) ? item.tags : [];
+      const safeNutrition = (item.nutrition && typeof item.nutrition === 'object') ? item.nutrition : {};
+
+      const prepMinutes = Number(item.prepTimeMinutes || item.prep_time_minutes) || (parseInt(item.prepTime) || 15);
+      const cookMinutes = Number(item.cookTimeMinutes || item.cook_time_minutes) || (parseInt(item.cookTime) || 10);
+      const recipeType = item.recipeType || item.category || 'Main Dish';
+      const resolvedImg = item.imageUrl || item.image || item.image_url || '';
+
+      const columnData: { col: string; val: any; isJson?: boolean }[] = [
+        { col: 'id', val: id },
+        { col: 'user_id', val: validUserId },
+        { col: 'title', val: item.title || item.name || 'Untitled Recipe' },
+        { col: 'description', val: item.description || '' },
+        { col: 'recipe_type', val: recipeType },
+        { col: 'category', val: recipeType },
+        { col: 'cuisine', val: item.cuisine || '' },
+        { col: 'prep_time', val: String(prepMinutes) + 'm' },
+        { col: 'cook_time', val: String(cookMinutes) + 'm' },
+        { col: 'prep_time_minutes', val: prepMinutes },
+        { col: 'cook_time_minutes', val: cookMinutes },
+        { col: 'servings', val: String(item.servings || '4') },
+        { col: 'difficulty', val: item.difficulty || '' },
+        { col: 'ingredients', val: JSON.stringify(safeIngredients), isJson: true },
+        { col: 'directions', val: JSON.stringify(safeInstructions), isJson: true },
+        { col: 'instructions', val: JSON.stringify(safeInstructions), isJson: true },
+        { col: 'nutrition', val: JSON.stringify(safeNutrition), isJson: true },
+        { col: 'tags', val: JSON.stringify(safeTags), isJson: true },
+        { col: 'image', val: resolvedImg },
+        { col: 'image_url', val: resolvedImg },
+        { col: 'is_favorite', val: Boolean(item.isFavorite ?? item.is_favorite) },
+        { col: 'is_cooked', val: Boolean(item.isCooked ?? item.is_cooked) },
+        { col: 'rating', val: Number(item.rating) || 0 },
+        { col: 'note', val: item.note || '' },
+        { col: 'book_id', val: item.bookId || item.book_id || null },
+        { col: 'source_url', val: item.sourceUrl || item.source_url || '' },
+        { col: 'created_by', val: item.createdBy || item.created_by || validUserId },
+        { col: 'creator_name', val: item.creatorName || item.creator_name || 'You' },
+        { col: 'is_public', val: Boolean(item.isPublic ?? item.is_public) }
+      ];
+
+      // Dynamically filter only columns that physically exist in the PostgreSQL table
+      const validEntries = columnData.filter(entry => existingCols.size === 0 || existingCols.has(entry.col));
+
+      const colNames: string[] = [];
+      const placeholders: string[] = [];
+      const values: any[] = [];
+      const updateClauses: string[] = [];
+
+      validEntries.forEach((entry) => {
+        colNames.push(entry.col);
+        values.push(entry.val);
+        const idx = values.length;
+        placeholders.push(entry.isJson ? `$${idx}::jsonb` : `$${idx}`);
+
+        if (entry.col !== 'id') {
+          if (entry.col === 'image') {
+            updateClauses.push(`image = COALESCE(NULLIF(EXCLUDED.image, ''), saved_recipes.image, EXCLUDED.image_url)`);
+          } else if (entry.col === 'image_url') {
+            updateClauses.push(`image_url = COALESCE(NULLIF(EXCLUDED.image_url, ''), saved_recipes.image_url, EXCLUDED.image)`);
+          } else if (entry.isJson) {
+            updateClauses.push(`${entry.col} = CASE WHEN EXCLUDED.${entry.col} IS NOT NULL AND EXCLUDED.${entry.col} != '[]'::jsonb AND EXCLUDED.${entry.col} != '{}'::jsonb THEN EXCLUDED.${entry.col} ELSE saved_recipes.${entry.col} END`);
+          } else if (['title', 'description', 'recipe_type', 'category', 'cuisine', 'servings', 'difficulty', 'source_url', 'created_by', 'creator_name'].includes(entry.col)) {
+            updateClauses.push(`${entry.col} = COALESCE(NULLIF(EXCLUDED.${entry.col}, ''), saved_recipes.${entry.col})`);
+          } else {
+            updateClauses.push(`${entry.col} = EXCLUDED.${entry.col}`);
+          }
+        }
+      });
+
+      if (existingCols.size === 0 || existingCols.has('updated_at')) {
+        colNames.push('updated_at');
+        placeholders.push('NOW()');
+        updateClauses.push('updated_at = NOW()');
+      }
+
+      const sql = `
+        INSERT INTO saved_recipes (${colNames.join(', ')})
+        VALUES (${placeholders.join(', ')})
         ON CONFLICT (id) DO UPDATE SET
-          user_id = EXCLUDED.user_id,
-          created_by = COALESCE(EXCLUDED.created_by, saved_recipes.created_by),
-          creator_name = COALESCE(EXCLUDED.creator_name, saved_recipes.creator_name),
-          title = EXCLUDED.title,
-          description = EXCLUDED.description,
-          recipe_type = EXCLUDED.recipe_type,
-          cuisine = EXCLUDED.cuisine,
-          prep_time = EXCLUDED.prep_time,
-          cook_time = EXCLUDED.cook_time,
-          servings = EXCLUDED.servings,
-          difficulty = EXCLUDED.difficulty,
-          ingredients = EXCLUDED.ingredients,
-          directions = EXCLUDED.directions,
-          nutrition = EXCLUDED.nutrition,
-          tags = EXCLUDED.tags,
-          image_url = EXCLUDED.image_url,
-          is_public = EXCLUDED.is_public,
-          is_favorite = EXCLUDED.is_favorite,
-          is_cooked = EXCLUDED.is_cooked,
-          rating = EXCLUDED.rating,
-          note = EXCLUDED.note,
-          book_id = EXCLUDED.book_id,
-          source_url = EXCLUDED.source_url,
-          updated_at = NOW();
-      `, [
-        id,
-        targetUserId,
-        createdBy,
-        creatorName,
-        item.title || item.name || 'Untitled Recipe',
-        item.description || '',
-        item.recipeType || item.category || item.recipe_type || 'Main Dish',
-        item.cuisine || '',
-        String(item.prepTime || item.prepTimeMinutes || item.prep_time || '15'),
-        String(item.cookTime || item.cookTimeMinutes || item.cook_time || '25'),
-        String(item.servings || '4'),
-        item.difficulty || 'Medium',
-        JSON.stringify(ingredients),
-        JSON.stringify(directions),
-        JSON.stringify(nutrition),
-        JSON.stringify(tags),
-        item.imageUrl || item.image || item.image_url || '',
-        Boolean(item.isPublic || item.is_public),
-        Boolean(item.isFavorite || item.is_favorite),
-        Boolean(item.isCooked || item.is_cooked),
-        Number(item.rating) || 0,
-        item.note || '',
-        item.bookId || item.book_id || null,
-        item.sourceUrl || item.source_url || ''
-      ]);
+          ${updateClauses.join(',\n          ')};
+      `;
+
+      await query(sql, values);
     }
 
-    return NextResponse.json({ success: true, message: 'Recipe(s) synchronized with PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Recipe(s) persisted to PostgreSQL.' });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
-
-export async function PATCH(req: NextRequest) {
-  try {
-    await ensureColumns();
-    const body = await req.json();
-    const { id, isFavorite, is_favorite, isCooked, is_cooked, rating, note, bookId, book_id, sourceUrl, source_url } = body;
-
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
-    }
-
-    const updates: string[] = [];
-    const params: any[] = [id];
-
-    if (isFavorite !== undefined || is_favorite !== undefined) {
-      params.push(Boolean(isFavorite !== undefined ? isFavorite : is_favorite));
-      updates.push(`is_favorite = $${params.length}`);
-    }
-    if (isCooked !== undefined || is_cooked !== undefined) {
-      params.push(Boolean(isCooked !== undefined ? isCooked : is_cooked));
-      updates.push(`is_cooked = $${params.length}`);
-    }
-    if (rating !== undefined) {
-      params.push(Number(rating));
-      updates.push(`rating = $${params.length}`);
-    }
-    if (note !== undefined) {
-      params.push(String(note));
-      updates.push(`note = $${params.length}`);
-    }
-    if (bookId !== undefined || book_id !== undefined) {
-      params.push(bookId !== undefined ? bookId : book_id);
-      updates.push(`book_id = $${params.length}`);
-    }
-    if (sourceUrl !== undefined || source_url !== undefined) {
-      params.push(sourceUrl !== undefined ? sourceUrl : source_url);
-      updates.push(`source_url = $${params.length}`);
-    }
-
-    if (updates.length > 0) {
-      updates.push('updated_at = NOW()');
-      await query(`UPDATE saved_recipes SET ${updates.join(', ')} WHERE id = $1`, params);
-    }
-
-    return NextResponse.json({ success: true, message: 'Recipe updated in PostgreSQL.' });
-  } catch (err: any) {
+    console.error('[saved_recipes:POST] Error:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function DELETE(req: NextRequest) {
   try {
+    await ensureTableColumns();
     const { searchParams } = new URL(req.url);
     let id = searchParams.get('id');
 
@@ -61443,6 +61756,17 @@ export function executeSocialAuth(profile: SocialProfile): User {
 
 ```
 
+## File: `apps/web/src/lib/utils.ts`
+```typescript
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+```
+
 ## File: `apps/web/src/lib/tokenService.ts`
 ```typescript
 import { query } from '@/lib/db';
@@ -63419,6 +63743,236 @@ export async function registerUser(payload: { email: string; name?: string; pass
   } catch (err: any) {
     return { success: false, error: err.message };
   }
+}
+
+```
+
+## File: `apps/web/src/lib/imageDownloader.ts`
+```typescript
+import fs from 'fs';
+import path from 'path';
+
+export async function downloadAndSaveScrapedImage(
+  imageUrl: string,
+  prefix: string = 'scraped'
+): Promise<string | null> {
+  if (!imageUrl || typeof imageUrl !== 'string') return null;
+  const cleanUrl = imageUrl.trim();
+
+  if (cleanUrl.startsWith('/uploads/') || cleanUrl.startsWith('/images/')) {
+    return cleanUrl;
+  }
+
+  if (cleanUrl.startsWith('data:image/')) {
+    try {
+      const match = cleanUrl.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+      if (match) {
+        let ext = match[1].toLowerCase().replace('jpeg', 'jpg');
+        if (ext.includes('svg')) ext = 'svg';
+        const buffer = Buffer.from(match[2], 'base64');
+        const filename = `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
+        return saveBufferToLocalUploads(buffer, filename);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  if (cleanUrl.includes('#') && !cleanUrl.startsWith('http')) return null;
+  const sanitizedUrl = cleanUrl.split('#')[0];
+
+  if (!/^https?:\/\//i.test(sanitizedUrl)) return null;
+
+  try {
+    const origin = new URL(sanitizedUrl).origin;
+    const response = await fetch(sanitizedUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Referer': origin,
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+      },
+      signal: AbortSignal.timeout(9000),
+      redirect: 'follow'
+    });
+
+    if (!response.ok) return null;
+
+    const contentType = response.headers.get('content-type') || '';
+    let ext = 'jpg';
+    if (contentType.includes('webp')) ext = 'webp';
+    else if (contentType.includes('png')) ext = 'png';
+    else if (contentType.includes('gif')) ext = 'gif';
+    else if (contentType.includes('avif')) ext = 'avif';
+    else {
+      try {
+        const uPath = new URL(sanitizedUrl).pathname;
+        const potentialExt = uPath.split('.').pop()?.toLowerCase();
+        if (potentialExt && ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif'].includes(potentialExt)) {
+          ext = potentialExt === 'jpeg' ? 'jpg' : potentialExt;
+        }
+      } catch (_) {}
+    }
+
+    const arrayBuf = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuf);
+    if (buffer.length < 100) return null;
+
+    const filename = `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
+    return saveBufferToLocalUploads(buffer, filename);
+  } catch (err) {
+    console.warn('[ImageDownloader] Could not save scraped image to localhost:', sanitizedUrl, err);
+    return null;
+  }
+}
+
+export function saveBufferToLocalUploads(buffer: Buffer, filename: string): string {
+  const candidateDirs = [
+    path.join(process.cwd(), 'apps', 'web', 'public', 'uploads', 'recipes'),
+    path.join(process.cwd(), 'public', 'uploads', 'recipes')
+  ];
+
+  let relativePath = `/uploads/recipes/${filename}`;
+  let wroteSuccessfully = false;
+
+  for (const dir of candidateDirs) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, filename), buffer);
+      wroteSuccessfully = true;
+    } catch (_) {}
+  }
+
+  if (!wroteSuccessfully) {
+    const fallbackDir = candidateDirs[0];
+    fs.mkdirSync(fallbackDir, { recursive: true });
+    fs.writeFileSync(path.join(fallbackDir, filename), buffer);
+  }
+
+  return relativePath;
+}
+
+```
+
+## File: `apps/web/src/lib/supabase/middleware.ts`
+```typescript
+import { createServerClient } from '@supabase/ssr'
+import { NextResponse, type NextRequest } from 'next/server'
+
+export async function updateSession(request: NextRequest) {
+  let supabaseResponse = NextResponse.next({
+    request,
+  })
+
+  // With Fluid compute, don't put this client in a global environment
+  // variable. Always create a new one on each request.
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll()
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
+          supabaseResponse = NextResponse.next({
+            request,
+          })
+          cookiesToSet.forEach(({ name, value, options }) =>
+            supabaseResponse.cookies.set(name, value, options)
+          )
+        },
+      },
+    }
+  )
+
+  // Do not run code between createServerClient and
+  // supabase.auth.getClaims(). A simple mistake could make it very hard to debug
+  // issues with users being randomly logged out.
+
+  // IMPORTANT: If you remove getClaims() and you use server-side rendering
+  // with the Supabase client, your users may be randomly logged out.
+  const { data } = await supabase.auth.getClaims()
+  const user = data?.claims
+
+  if (
+    !user &&
+    !request.nextUrl.pathname.startsWith('/login') &&
+    !request.nextUrl.pathname.startsWith('/auth') &&
+    // the OAuth consent route sends unauthenticated visitors to the login page
+    // itself, so that it can preserve the authorization in the `next` parameter
+    request.nextUrl.pathname !== '/oauth/consent'
+  ) {
+    // no user, potentially respond by redirecting the user to the login page
+    const url = request.nextUrl.clone()
+    url.pathname = '/auth/login'
+    return NextResponse.redirect(url)
+  }
+
+  // IMPORTANT: You *must* return the supabaseResponse object as it is.
+  // If you're creating a new response object with NextResponse.next() make sure to:
+  // 1. Pass the request in it, like so:
+  //    const myNewResponse = NextResponse.next({ request })
+  // 2. Copy over the cookies, like so:
+  //    myNewResponse.cookies.setAll(supabaseResponse.cookies.getAll())
+  // 3. Change the myNewResponse object to fit your needs, but avoid changing
+  //    the cookies!
+  // 4. Finally:
+  //    return myNewResponse
+  // If this is not done, you may be causing the browser and server to go out
+  // of sync and terminate the user's session prematurely!
+
+  return supabaseResponse
+}
+
+```
+
+## File: `apps/web/src/lib/supabase/client.ts`
+```typescript
+import { createBrowserClient } from '@supabase/ssr'
+
+export function createClient() {
+  return createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
+  )
+}
+
+```
+
+## File: `apps/web/src/lib/supabase/server.ts`
+```typescript
+import { createServerClient } from '@supabase/ssr'
+import { cookies } from 'next/headers'
+
+/**
+ * If using Fluid compute: Don't put this client in a global variable. Always create a new client within each
+ * function when using it.
+ */
+export async function createClient() {
+  const cookieStore = await cookies()
+
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll()
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            )
+          } catch {
+            // The `setAll` method was called from a Server Component.
+            // This can be ignored if you have middleware refreshing
+            // user sessions.
+          }
+        },
+      },
+    }
+  )
 }
 
 ```

@@ -1,3 +1,4 @@
+import { downloadAndSaveImage } from '@/lib/imageDownloader';
 export interface ScrapedRecipeData {
   title: string;
   description: string;

@@ -179,16 +179,34 @@ export default function ImportPage() {
       setTokenBalance(prev => Math.max(0, prev - consumedTokens));
     }
 
+    // Ensure scraped cover image is saved to localhost /uploads/recipes/
+    const processedRecipe = { ...recipeData };
+    const rawImage = processedRecipe.image || processedRecipe.imageUrl;
+    if (rawImage && (rawImage.startsWith('http://') || rawImage.startsWith('https://'))) {
+      try {
+        const dlRes = await fetch('/api/recipes/save-remote-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: rawImage })
+        });
+        const dlData = await dlRes.json();
+        if (dlData.success && dlData.localUrl) {
+          processedRecipe.image = dlData.localUrl;
+          processedRecipe.imageUrl = dlData.localUrl;
+        }
+      } catch (_) {}
+    }
+
     // Ensure PostgreSQL saved_recipes persistence
     try {
-      await persistSavedRecipe(targetUserId, recipeData, {
+      await persistSavedRecipe(targetUserId, processedRecipe, {
         createdBy: user?.email || targetUserId,
         creatorName: user?.name || 'You'
       });
       await fetch('/api/recipes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(recipeData)
+        body: JSON.stringify(processedRecipe)
       });
     } catch (_) {}
 
@@ -201,7 +219,7 @@ export default function ImportPage() {
         const filtered = Array.isArray(currentList)
           ? currentList.filter((r: any) => (r.id !== recipeData.id && (r.title || r.name)?.toLowerCase() !== recipeData.title?.toLowerCase()))
           : [];
-        localStorage.setItem(key, JSON.stringify([recipeData, ...filtered]));
+        localStorage.setItem(key, JSON.stringify([processedRecipe, ...filtered]));
       } catch (_) {}
     });
 
@@ -212,7 +230,7 @@ export default function ImportPage() {
 
     setStatus({
       type: 'success',
-      msg: `${t('importSuccessToast', 'Successfully imported')} "${recipeData.title}"! -${consumedTokens} ${tokenSymbol} ${t('deductedToast', 'deducted. Redirecting to Saved Recipes...')}`
+      msg: `${t('importSuccessToast', 'Successfully imported')} "${processedRecipe.title}"! -${consumedTokens} ${tokenSymbol} ${t('deductedToast', 'deducted. Redirecting to Saved Recipes...')}`
     });
 
     setTimeout(() => {
