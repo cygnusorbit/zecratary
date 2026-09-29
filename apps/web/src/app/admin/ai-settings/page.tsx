@@ -597,8 +597,8 @@ export default function ChefAISettingsPage() {
   };
 
   // Agent Parameter Handlers
-  const handleAddKnowledgeBase = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleAddKnowledgeBase = (e?: React.FormEvent | React.KeyboardEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     const clean = newKbInput.trim();
     if (!clean) return;
     if (!knowledgeBaseList.includes(clean)) {
@@ -611,8 +611,8 @@ export default function ChefAISettingsPage() {
     setKnowledgeBaseList(knowledgeBaseList.filter((_, i) => i !== idx));
   };
 
-  const handleAddCustomVocabulary = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleAddCustomVocabulary = (e?: React.FormEvent | React.KeyboardEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     const clean = newVocabInput.trim();
     if (!clean) return;
     if (!customVocabularyList.includes(clean)) {
@@ -625,8 +625,8 @@ export default function ChefAISettingsPage() {
     setCustomVocabularyList(customVocabularyList.filter((_, i) => i !== idx));
   };
 
-  const handleAddFilterWord = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleAddFilterWord = (e?: React.FormEvent | React.KeyboardEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     const clean = newFilterInput.trim();
     if (!clean) return;
     if (!filterWordsList.includes(clean)) {
@@ -640,8 +640,8 @@ export default function ChefAISettingsPage() {
   };
 
   // Recommended Recipes Url Handlers
-  const handleAddRecommendedUrls = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleAddRecommendedUrls = (e?: React.FormEvent | React.KeyboardEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     const raw = newRecipeUrlInput.trim();
     if (!raw) return;
 
@@ -759,8 +759,8 @@ export default function ChefAISettingsPage() {
     }
   };
 
-  const handleAddTopicSection = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddTopicSection = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!newTopicTitle.trim()) return;
     const newSec: QuestionnaireSection = {
       id: 'sec_' + Date.now(),
@@ -817,8 +817,8 @@ export default function ChefAISettingsPage() {
     }));
   };
 
-  const handleSave = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleSave = async (e?: React.FormEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (isSaving) return;
     setIsSaving(true);
     setSaveError(null);
@@ -946,6 +946,12 @@ export default function ChefAISettingsPage() {
           caret-color: var(--color-text) !important;
           transition: background-color 50000s ease-in-out 0s !important;
         }
+        .masked-token-security {
+          -webkit-text-security: disc !important;
+        }
+        .unmasked-token-security {
+          -webkit-text-security: none !important;
+        }
       `}} />
 
       {/* TOP HEADER */}
@@ -1039,7 +1045,7 @@ export default function ChefAISettingsPage() {
 
       <div className="space-y-6">
         
-        {/* TAB 1: GENERAL & MODEL CONFIG (Kept in DOM with hidden class to prevent unmounting password prompt) */}
+        {/* TAB 1: GENERAL & MODEL CONFIG */}
         <div className={activeTab === 'general' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
           <div 
             className="border rounded-3xl p-6 space-y-5 shadow-sm transition-colors duration-200"
@@ -1138,31 +1144,35 @@ export default function ChefAISettingsPage() {
                     {provider === 'gemini' ? 'GEMINI_API_KEY' : 'OPENAI_API_KEY'}
                   </span>
                 </div>
+                
+                {/* 100% Non-Credential Field: type="text" with -webkit-text-security: disc */}
                 <div className="relative flex items-center">
                   <input
-                    type={showApiKey ? 'text' : 'password'}
-                    id="cfg_ai_api_key_secret"
-                    name="cfg_ai_api_key_secret"
-                    autoComplete="new-password"
+                    type="text"
+                    id="cfg_ai_provider_token_field"
+                    name="cfg_ai_provider_token_field"
+                    autoComplete="off"
                     autoCorrect="off"
+                    autoCapitalize="off"
                     spellCheck="false"
                     data-lpignore="true"
                     data-1p-ignore="true"
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    inputMode="text"
                     value={apiKey}
                     onChange={(e) => { setApiKey(e.target.value); setTestResult(null); }}
                     placeholder={provider === 'gemini' ? "AIzaSy..." : "sk-..."}
-                    className="settings-input w-full border rounded-xl px-4 py-3 pr-36 font-mono text-xs outline-none transition"
+                    className={`settings-input w-full border rounded-xl px-4 py-3 pr-36 font-mono text-xs outline-none transition ${showApiKey ? 'unmasked-token-security' : 'masked-token-security'}`}
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
+                      color: 'var(--color-text)',
+                      WebkitTextSecurity: showApiKey ? 'none' : 'disc'
                     }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
                     <button
@@ -1278,7 +1288,7 @@ export default function ChefAISettingsPage() {
           </div>
         </div>
 
-        {/* TAB 2: MULTI-TOPIC QUESTIONNAIRE BUILDER (Fully Shielded from Password Managers) */}
+        {/* TAB 2: MULTI-TOPIC QUESTIONNAIRE BUILDER */}
         <div className={activeTab === 'questionnaire' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
           <div 
             className="border rounded-3xl p-6 space-y-5 shadow-sm text-xs transition-colors duration-200"
@@ -1383,7 +1393,7 @@ export default function ChefAISettingsPage() {
                   })}
                 </div>
 
-                {/* ADD NEW TOPIC CARD (Shielded with neutral configuration names) */}
+                {/* ADD NEW TOPIC CARD */}
                 <div 
                   className="p-4 rounded-2xl border space-y-3 mt-4 transition-colors duration-200"
                   style={{
@@ -1406,18 +1416,23 @@ export default function ChefAISettingsPage() {
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
                     placeholder={t('topicTitlePlaceholder', 'Topic Title (e.g. Fitness & Macros)...')}
                     value={newTopicTitle}
                     onChange={(e) => setNewTopicTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddTopicSection();
+                      }
+                    }}
                     className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-card)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-text)'
                     }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                   <input
                     type="text"
@@ -1431,18 +1446,23 @@ export default function ChefAISettingsPage() {
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
                     placeholder={t('topicDescPlaceholder', 'Topic Description...')}
                     value={newTopicDesc}
                     onChange={(e) => setNewTopicDesc(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddTopicSection();
+                      }
+                    }}
                     className="settings-input w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-card)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-text)'
                     }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                   <button
                     type="button"
@@ -1456,7 +1476,7 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* TOPIC QUESTIONS EDITOR (Shielded from Password Autofill Heuristics) */}
+              {/* TOPIC QUESTIONS EDITOR */}
               <div 
                 className="lg:col-span-7 border rounded-3xl p-5 space-y-4 flex flex-col justify-between transition-colors duration-200"
                 style={{
@@ -1482,9 +1502,6 @@ export default function ChefAISettingsPage() {
                           data-bwignore="true"
                           data-form-type="other"
                           role="presentation"
-                          readOnly
-                          onFocus={(e) => { e.currentTarget.readOnly = false; }}
-                          onBlur={(e) => { e.currentTarget.readOnly = true; }}
                           value={activeSection?.topicTitle || ''}
                           onChange={(e) => {
                             const newTitle = e.target.value;
@@ -1518,9 +1535,6 @@ export default function ChefAISettingsPage() {
                         data-bwignore="true"
                         data-form-type="other"
                         role="presentation"
-                        readOnly
-                        onFocus={(e) => { e.currentTarget.readOnly = false; }}
-                        onBlur={(e) => { e.currentTarget.readOnly = true; }}
                         value={activeSection?.description || ''}
                         onChange={(e) => {
                           const newDesc = e.target.value;
@@ -1574,9 +1588,6 @@ export default function ChefAISettingsPage() {
                             data-bwignore="true"
                             data-form-type="other"
                             role="presentation"
-                            readOnly
-                            onFocus={(e) => { e.currentTarget.readOnly = false; }}
-                            onBlur={(e) => { e.currentTarget.readOnly = true; }}
                             value={qText}
                             onChange={(e) => {
                               const updatedQ = e.target.value;
@@ -1620,9 +1631,6 @@ export default function ChefAISettingsPage() {
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
                     placeholder={`${t('addQuestionPrefix', 'Add question to')} "${activeSection?.topicTitle}"...`}
                     value={newQuestionText}
                     onChange={(e) => setNewQuestionText(e.target.value)}
@@ -1633,6 +1641,8 @@ export default function ChefAISettingsPage() {
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-text)'
                     }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                   <button
                     type="button"
@@ -1707,7 +1717,7 @@ export default function ChefAISettingsPage() {
               })}
             </div>
 
-            {/* RESTORED LIVE UI PREVIEW IN /chef CHAT */}
+            {/* LIVE UI PREVIEW IN /chef CHAT */}
             <div 
               className="p-5 rounded-2xl border space-y-4 shadow-inner transition-colors duration-200"
               style={{
@@ -1759,7 +1769,6 @@ export default function ChefAISettingsPage() {
                   </div>
                 </div>
 
-                {/* 1. STANDARD CARDS VIEW PREVIEW */}
                 {resultDisplayMode === 'card' && (
                   <div className="space-y-3">
                     {[
@@ -1856,7 +1865,6 @@ export default function ChefAISettingsPage() {
                   </div>
                 )}
 
-                {/* 2. COMPACT TABLE VIEW PREVIEW */}
                 {resultDisplayMode === 'compact' && (
                   <div className="border rounded-xl overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
                     <div 
@@ -1905,7 +1913,6 @@ export default function ChefAISettingsPage() {
                   </div>
                 )}
 
-                {/* 3. DETAILED MASTER VIEW PREVIEW */}
                 {resultDisplayMode === 'detailed' && (
                   <div className="space-y-3">
                     {[
@@ -1964,7 +1971,6 @@ export default function ChefAISettingsPage() {
                           <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{item.desc}</p>
                         </div>
 
-                        {/* Inline Ingredient Breakdown Tags */}
                         <div className="space-y-1.5 pt-1">
                           <span className="text-[10px] font-extrabold uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
                             Inline Ingredients Breakdown:
@@ -2133,7 +2139,6 @@ export default function ChefAISettingsPage() {
 
         {/* TAB 4: AGENT PARAMETERS & RECOMMENDED RECIPES URL */}
         <div className={activeTab === 'advanced' ? 'space-y-6 animate-in fade-in' : 'hidden'}>
-          {/* AUTONOMOUS CAPABILITIES & SEARCH SCOPE CONTROL */}
           <div 
             className="border rounded-3xl p-6 space-y-4 shadow-sm transition-colors duration-200"
             style={{
@@ -2230,7 +2235,6 @@ export default function ChefAISettingsPage() {
                 </div>
               </div>
 
-              {/* All Saved Recipe Search */}
               <div 
                 onClick={() => setEnableSavedRecipeSearch(!enableSavedRecipeSearch)}
                 className="p-4 rounded-2xl border cursor-pointer transition flex flex-col justify-between space-y-3 shadow-xs hover:opacity-90"
@@ -2259,7 +2263,7 @@ export default function ChefAISettingsPage() {
             </div>
           </div>
 
-          {/* TUNING PARAMETERS, KNOWLEDGE BASE, CUSTOM VOCABULARY & FILTER WORDS */}
+          {/* TUNING PARAMETERS & AGENT CONFIGURATION */}
           <div 
             className="border rounded-3xl p-6 space-y-6 shadow-sm text-xs animate-in fade-in transition-colors duration-200"
             style={{
@@ -2274,7 +2278,6 @@ export default function ChefAISettingsPage() {
               <SlidersHorizontal className="h-4 w-4" /> {t('agentParametersHeader', 'Agent Parameters & Knowledge Tuning')}
             </h2>
 
-            {/* CREATIVITY & MAX PLAN DAYS */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pb-4 border-b transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
               <div className="space-y-2">
                 <div className="flex justify-between font-bold">
@@ -2411,7 +2414,6 @@ export default function ChefAISettingsPage() {
                 </span>
               </div>
 
-              {/* URL List with Index Crawler and Discovered Slugs Drawer */}
               <div className="space-y-2 pt-1">
                 {recommendedRecipeUrls.length === 0 ? (
                   <div 
@@ -2568,7 +2570,6 @@ export default function ChefAISettingsPage() {
                             </div>
                           </div>
 
-                          {/* Collapsible Discovered Slugs Drawer */}
                           {isExpanded && cache && (
                             <div 
                               className="border-t p-3.5 space-y-2.5 transition-colors duration-200"
@@ -2701,7 +2702,12 @@ export default function ChefAISettingsPage() {
                     placeholder={t('knowledgeBasePlaceholder', 'Knowledge Base reference (e.g. Culinary Masterclass DB, Keto Guidelines)...')}
                     value={newKbInput}
                     onChange={(e) => setNewKbInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddKnowledgeBase())}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddKnowledgeBase();
+                      }
+                    }}
                     className="bg-transparent border-none outline-none w-full text-xs font-medium"
                     style={{ color: 'var(--color-text)' }}
                   />
@@ -2780,7 +2786,12 @@ export default function ChefAISettingsPage() {
                     placeholder={t('startTypingToAddVocab', 'Add custom culinary terminology (e.g. Umami, Sous-vide, Chiffonade)...')}
                     value={newVocabInput}
                     onChange={(e) => setNewVocabInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddCustomVocabulary())}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddCustomVocabulary();
+                      }
+                    }}
                     className="bg-transparent border-none outline-none w-full text-xs font-medium"
                     style={{ color: 'var(--color-text)' }}
                   />
@@ -2859,7 +2870,12 @@ export default function ChefAISettingsPage() {
                     placeholder={t('startTypingToAddFilter', 'Add restricted word or prohibited ingredient (e.g. Trans fats, MSG)...')}
                     value={newFilterInput}
                     onChange={(e) => setNewFilterInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddFilterWord())}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddFilterWord();
+                      }
+                    }}
                     className="bg-transparent border-none outline-none w-full text-xs font-medium"
                     style={{ color: 'var(--color-text)' }}
                   />

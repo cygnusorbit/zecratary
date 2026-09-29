@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.6",
+  "version": "8.0.7",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -113,7 +113,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.6",
+  "version": "8.0.7",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -32910,60 +32910,68 @@ import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
+function getMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case '.webp': return 'image/webp';
+    case '.png': return 'image/png';
+    case '.jpg':
+    case '.jpeg': return 'image/jpeg';
+    case '.gif': return 'image/gif';
+    case '.svg': return 'image/svg+xml';
+    default: return 'image/jpeg';
+  }
+}
+
 export async function GET(
-  req: NextRequest,
+  request: Request | NextRequest,
   context: { params: Promise<{ filename: string }> }
 ) {
-  const resolvedParams = await Promise.resolve(context.params);
-  const filename = resolvedParams?.filename;
+  try {
+    const { filename } = await context.params;
+    if (!filename) {
+      return new NextResponse('File parameter missing', { status: 400 });
+    }
 
-  if (!filename) {
-    return new NextResponse('File not found', { status: 404 });
-  }
+    const safeFilename = path.basename(filename);
+    const candidateDirs = [
+      path.join(process.cwd(), 'apps', 'web', 'public', 'uploads', 'recipes'),
+      path.join(process.cwd(), 'public', 'uploads', 'recipes')
+    ];
 
-  const safeFilename = path.basename(filename);
-  const candidateDirs = [
-    path.join(process.cwd(), 'apps', 'web', 'public', 'uploads', 'recipes'),
-    path.join(process.cwd(), 'public', 'uploads', 'recipes')
-  ];
-
-  for (const dir of candidateDirs) {
-    const fullPath = path.join(dir, safeFilename);
-    if (fs.existsSync(fullPath)) {
-      try {
-        const buffer = fs.readFileSync(fullPath);
-        const ext = path.extname(safeFilename).toLowerCase();
-        let contentType = 'image/jpeg';
-        if (ext === '.png') contentType = 'image/png';
-        else if (ext === '.webp') contentType = 'image/webp';
-        else if (ext === '.gif') contentType = 'image/gif';
-        else if (ext === '.svg') contentType = 'image/svg+xml';
-        else if (ext === '.avif') contentType = 'image/avif';
-
-        return new NextResponse(buffer, {
+    for (const dir of candidateDirs) {
+      const fullPath = path.join(dir, safeFilename);
+      if (fs.existsSync(fullPath)) {
+        const fileBuffer = fs.readFileSync(fullPath);
+        return new NextResponse(fileBuffer, {
+          status: 200,
           headers: {
-            'Content-Type': contentType,
+            'Content-Type': getMimeType(fullPath),
             'Cache-Control': 'public, max-age=31536000, immutable'
           }
         });
-      } catch (_) {}
+      }
     }
-  }
 
-  for (const dir of candidateDirs) {
-    const defaultPath = path.join(dir, 'default.jpg');
-    if (fs.existsSync(defaultPath)) {
-      const buffer = fs.readFileSync(defaultPath);
-      return new NextResponse(buffer, {
-        headers: {
-          'Content-Type': 'image/jpeg',
-          'Cache-Control': 'public, max-age=86400'
-        }
-      });
+    // Fallback to default.jpg if target file does not exist
+    for (const dir of candidateDirs) {
+      const defaultPath = path.join(dir, 'default.jpg');
+      if (fs.existsSync(defaultPath)) {
+        const fallbackBuffer = fs.readFileSync(defaultPath);
+        return new NextResponse(fallbackBuffer, {
+          status: 200,
+          headers: {
+            'Content-Type': 'image/jpeg',
+            'Cache-Control': 'public, max-age=3600'
+          }
+        });
+      }
     }
-  }
 
-  return new NextResponse('Not found', { status: 404 });
+    return new NextResponse('Asset Not Found', { status: 404 });
+  } catch (err: any) {
+    return new NextResponse(`Error retrieving asset: ${err.message}`, { status: 500 });
+  }
 }
 
 ```
@@ -49861,30 +49869,21 @@ export async function POST(req: Request) {
 ## File: `apps/web/src/app/api/recipes/save-remote-image/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { downloadAndSaveScrapedImage } from '@/lib/imageDownloader';
+import { downloadAndSaveImage } from '@/lib/imageDownloader';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const imageUrl = body.imageUrl || body.url || '';
-    const prefix = body.prefix || 'scraped';
+    const imageUrl = body.imageUrl || body.url || body.image;
 
     if (!imageUrl || typeof imageUrl !== 'string') {
-      return NextResponse.json({ success: false, error: 'No image URL provided' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Valid imageUrl required' }, { status: 400 });
     }
 
-    if (imageUrl.startsWith('/uploads/')) {
-      return NextResponse.json({ success: true, localPath: imageUrl });
-    }
-
-    const localPath = await downloadAndSaveScrapedImage(imageUrl, prefix);
-    if (!localPath) {
-      return NextResponse.json({ success: false, error: 'Could not download image' }, { status: 422 });
-    }
-
-    return NextResponse.json({ success: true, localPath });
+    const localUrl = await downloadAndSaveImage(imageUrl, 'scraped');
+    return NextResponse.json({ success: true, localUrl });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -55534,16 +55533,34 @@ export default function ImportPage() {
       setTokenBalance(prev => Math.max(0, prev - consumedTokens));
     }
 
+    // Ensure scraped cover image is saved to localhost /uploads/recipes/
+    const processedRecipe = { ...recipeData };
+    const rawImage = processedRecipe.image || processedRecipe.imageUrl;
+    if (rawImage && (rawImage.startsWith('http://') || rawImage.startsWith('https://'))) {
+      try {
+        const dlRes = await fetch('/api/recipes/save-remote-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl: rawImage })
+        });
+        const dlData = await dlRes.json();
+        if (dlData.success && dlData.localUrl) {
+          processedRecipe.image = dlData.localUrl;
+          processedRecipe.imageUrl = dlData.localUrl;
+        }
+      } catch (_) {}
+    }
+
     // Ensure PostgreSQL saved_recipes persistence
     try {
-      await persistSavedRecipe(targetUserId, recipeData, {
+      await persistSavedRecipe(targetUserId, processedRecipe, {
         createdBy: user?.email || targetUserId,
         creatorName: user?.name || 'You'
       });
       await fetch('/api/recipes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(recipeData)
+        body: JSON.stringify(processedRecipe)
       });
     } catch (_) {}
 
@@ -55556,7 +55573,7 @@ export default function ImportPage() {
         const filtered = Array.isArray(currentList)
           ? currentList.filter((r: any) => (r.id !== recipeData.id && (r.title || r.name)?.toLowerCase() !== recipeData.title?.toLowerCase()))
           : [];
-        localStorage.setItem(key, JSON.stringify([recipeData, ...filtered]));
+        localStorage.setItem(key, JSON.stringify([processedRecipe, ...filtered]));
       } catch (_) {}
     });
 
@@ -55567,7 +55584,7 @@ export default function ImportPage() {
 
     setStatus({
       type: 'success',
-      msg: `${t('importSuccessToast', 'Successfully imported')} "${recipeData.title}"! -${consumedTokens} ${tokenSymbol} ${t('deductedToast', 'deducted. Redirecting to Saved Recipes...')}`
+      msg: `${t('importSuccessToast', 'Successfully imported')} "${processedRecipe.title}"! -${consumedTokens} ${tokenSymbol} ${t('deductedToast', 'deducted. Redirecting to Saved Recipes...')}`
     });
 
     setTimeout(() => {
@@ -62600,6 +62617,7 @@ export function ThemeInitializer() {
 
 ## File: `apps/web/src/lib/recipeScraper.ts`
 ```typescript
+import { downloadAndSaveImage } from '@/lib/imageDownloader';
 export interface ScrapedRecipeData {
   title: string;
   description: string;
@@ -63752,102 +63770,84 @@ export async function registerUser(payload: { email: string; name?: string; pass
 import fs from 'fs';
 import path from 'path';
 
-export async function downloadAndSaveScrapedImage(
+/**
+ * Downloads a remote image binary from an external URL and writes it
+ * directly to /uploads/recipes/ on localhost disk storage.
+ * Returns the localhost relative URL: '/uploads/recipes/<filename>'.
+ */
+export async function downloadAndSaveImage(
   imageUrl: string,
   prefix: string = 'scraped'
-): Promise<string | null> {
-  if (!imageUrl || typeof imageUrl !== 'string') return null;
-  const cleanUrl = imageUrl.trim();
+): Promise<string> {
+  const fallbackPath = '/uploads/recipes/default.jpg';
+  if (!imageUrl || typeof imageUrl !== 'string') return fallbackPath;
 
-  if (cleanUrl.startsWith('/uploads/') || cleanUrl.startsWith('/images/')) {
+  const cleanUrl = imageUrl.trim();
+  if (cleanUrl.startsWith('/uploads/recipes/')) {
     return cleanUrl;
   }
-
-  if (cleanUrl.startsWith('data:image/')) {
-    try {
-      const match = cleanUrl.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
-      if (match) {
-        let ext = match[1].toLowerCase().replace('jpeg', 'jpg');
-        if (ext.includes('svg')) ext = 'svg';
-        const buffer = Buffer.from(match[2], 'base64');
-        const filename = `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
-        return saveBufferToLocalUploads(buffer, filename);
-      }
-    } catch (_) {}
-    return null;
+  if (!/^https?:\/\//i.test(cleanUrl)) {
+    return fallbackPath;
   }
 
-  if (cleanUrl.includes('#') && !cleanUrl.startsWith('http')) return null;
-  const sanitizedUrl = cleanUrl.split('#')[0];
-
-  if (!/^https?:\/\//i.test(sanitizedUrl)) return null;
-
   try {
-    const origin = new URL(sanitizedUrl).origin;
-    const response = await fetch(sanitizedUrl, {
+    const origin = new URL(cleanUrl).origin;
+    const response = await fetch(cleanUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         'Referer': origin,
-        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9'
       },
       signal: AbortSignal.timeout(9000),
       redirect: 'follow'
     });
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+      console.warn(`[ImageDownloader] Remote image fetch failed: ${response.status} for ${cleanUrl}`);
+      return fallbackPath;
+    }
 
     const contentType = response.headers.get('content-type') || '';
     let ext = 'jpg';
     if (contentType.includes('webp')) ext = 'webp';
     else if (contentType.includes('png')) ext = 'png';
-    else if (contentType.includes('gif')) ext = 'gif';
-    else if (contentType.includes('avif')) ext = 'avif';
-    else {
+    else if (contentType.includes('jpeg')) ext = 'jpg';
+    else if (cleanUrl.includes('.webp')) ext = 'webp';
+    else if (cleanUrl.includes('.png')) ext = 'png';
+
+    const timestamp = Date.now();
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
+    const filename = `${prefix}_${timestamp}_${randomSuffix}.${ext}`;
+    const relativeUrl = `/uploads/recipes/${filename}`;
+
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // Target multiple candidate public directories across monorepo layouts
+    const targetDirs = [
+      path.join(process.cwd(), 'apps', 'web', 'public', 'uploads', 'recipes'),
+      path.join(process.cwd(), 'public', 'uploads', 'recipes')
+    ];
+
+    let written = false;
+    for (const dir of targetDirs) {
       try {
-        const uPath = new URL(sanitizedUrl).pathname;
-        const potentialExt = uPath.split('.').pop()?.toLowerCase();
-        if (potentialExt && ['jpg', 'jpeg', 'png', 'webp', 'gif', 'avif'].includes(potentialExt)) {
-          ext = potentialExt === 'jpeg' ? 'jpg' : potentialExt;
-        }
+        fs.mkdirSync(dir, { recursive: true });
+        const filePath = path.join(dir, filename);
+        fs.writeFileSync(filePath, buffer);
+        written = true;
       } catch (_) {}
     }
 
-    const arrayBuf = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuf);
-    if (buffer.length < 100) return null;
-
-    const filename = `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
-    return saveBufferToLocalUploads(buffer, filename);
+    if (written) {
+      return relativeUrl;
+    }
   } catch (err) {
-    console.warn('[ImageDownloader] Could not save scraped image to localhost:', sanitizedUrl, err);
-    return null;
-  }
-}
-
-export function saveBufferToLocalUploads(buffer: Buffer, filename: string): string {
-  const candidateDirs = [
-    path.join(process.cwd(), 'apps', 'web', 'public', 'uploads', 'recipes'),
-    path.join(process.cwd(), 'public', 'uploads', 'recipes')
-  ];
-
-  let relativePath = `/uploads/recipes/${filename}`;
-  let wroteSuccessfully = false;
-
-  for (const dir of candidateDirs) {
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, filename), buffer);
-      wroteSuccessfully = true;
-    } catch (_) {}
+    console.warn('[ImageDownloader] Error downloading image:', err);
   }
 
-  if (!wroteSuccessfully) {
-    const fallbackDir = candidateDirs[0];
-    fs.mkdirSync(fallbackDir, { recursive: true });
-    fs.writeFileSync(path.join(fallbackDir, filename), buffer);
-  }
-
-  return relativePath;
+  return fallbackPath;
 }
 
 ```
