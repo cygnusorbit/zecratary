@@ -59,7 +59,7 @@
       }
     ],
     "maxTokens": 4096,
-    "updatedAt": "2026-09-29T16:42:27.093Z",
+    "updatedAt": "2026-09-30T14:15:04.833Z",
     "voiceSpeed": 1,
     "maxPlanDays": 7,
     "temperature": 0.7,
@@ -1277,7 +1277,7 @@
         }
       ],
       "maxTokens": 4096,
-      "updatedAt": "2026-09-29T16:42:27.093Z",
+      "updatedAt": "2026-09-30T14:15:04.833Z",
       "voiceSpeed": 1,
       "maxPlanDays": 7,
       "temperature": 0.7,
@@ -2393,25 +2393,25 @@
     "titlebar_image": "",
     "maintenanceMode": false,
     "paymentSettings": {
-      "activeGateway": "stripe",
-      "currency": "USD",
-      "testMode": true,
-      "stripeConnected": false,
-      "stripeKeysVerified": true,
-      "stripeWebhookVerified": true,
-      "stripe": {
-        "enabled": true,
-        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
-        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
-        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
-      },
       "paypal": {
         "enabled": false,
         "clientId": "",
         "webhookId": "",
         "environment": "sandbox",
         "clientSecret": ""
-      }
+      },
+      "stripe": {
+        "enabled": true,
+        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
+        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
+        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
+      },
+      "currency": "USD",
+      "testMode": true,
+      "activeGateway": "stripe",
+      "stripeConnected": false,
+      "stripeKeysVerified": true,
+      "stripeWebhookVerified": true
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -2625,7 +2625,7 @@
         }
       ],
       "maxTokens": 4096,
-      "updatedAt": "2026-09-29T16:42:27.093Z",
+      "updatedAt": "2026-09-30T14:15:04.833Z",
       "voiceSpeed": 1,
       "maxPlanDays": 7,
       "temperature": 0.7,
@@ -3741,25 +3741,25 @@
     "titlebar_image": "",
     "maintenanceMode": false,
     "paymentSettings": {
-      "activeGateway": "stripe",
-      "currency": "USD",
-      "testMode": true,
-      "stripeConnected": false,
-      "stripeKeysVerified": true,
-      "stripeWebhookVerified": true,
-      "stripe": {
-        "enabled": true,
-        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
-        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
-        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
-      },
       "paypal": {
         "enabled": false,
         "clientId": "",
         "webhookId": "",
         "environment": "sandbox",
         "clientSecret": ""
-      }
+      },
+      "stripe": {
+        "enabled": true,
+        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
+        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
+        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
+      },
+      "currency": "USD",
+      "testMode": true,
+      "activeGateway": "stripe",
+      "stripeConnected": false,
+      "stripeKeysVerified": true,
+      "stripeWebhookVerified": true
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -3867,5 +3867,5 @@
     ],
     "recommendedRecipeUrls": []
   },
-  "updatedAt": "2026-09-30T04:36:28.591Z"
+  "updatedAt": "2026-09-30T14:15:04.936Z"
 }

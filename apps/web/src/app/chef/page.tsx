@@ -1221,36 +1221,7 @@ export default function ChefChatPage() {
               <span className="font-mono">{activeAiModel}</span>
             </div>
 
-            {/* FREE TOKEN MODE BADGE */}
-            {!isTokenEnabled && (
-              <div 
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider text-emerald-400"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                title={t('tokenFreeModeTooltip', 'Token consumption is currently bypassed (Free Mode) in /admin/token-setting')}
-              >
-                <Sparkles className="h-3 w-3" />
-                <span>{t('tokenFreeModeBadge', 'Free Token Mode')}</span>
-              </div>
-            )}
-
-            {/* LIVE WALLET BADGE & TOP UP */}
-            <div 
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border shadow-sm"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-            >
-              <Coins className="h-4 w-4 text-amber-500" />
-              <div className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
-                {tokenBalance} <span className="text-amber-500">{tokenSymbol}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsTokenPurchaseOpen(true)}
-                className="ml-1 text-[10px] font-extrabold px-2 py-0.5 rounded-lg text-white transition hover:opacity-90 cursor-pointer shadow-xs"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-              >
-                {t('topUpBtn', 'Top Up')}
-              </button>
-            </div>
+            
 
             {/* PREFERENCES SLIDERS BUTTON */}
             <button

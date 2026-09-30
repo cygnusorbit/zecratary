@@ -54,7 +54,7 @@ export default function ImportPage() {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Token & AI Settings Telemetry (Synchronized with /admin/token-setting)
+  // Token & AI Settings Telemetry (Synchronized with /admin/token-setting and /admin/ai-settings)
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
@@ -67,8 +67,9 @@ export default function ImportPage() {
   const [tokenPackages, setTokenPackages] = useState<any[]>([]);
   const [isTokenPurchaseOpen, setIsTokenPurchaseOpen] = useState(false);
 
-  // Synced from /admin/ai-settings
-  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-3.5-flash-lite');
+  // Synchronized dynamically from /admin/ai-settings
+  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.5-flash');
+  const [activeAiProvider, setActiveAiProvider] = useState<string>('gemini');
   const [enableWebSearch, setEnableWebSearch] = useState<boolean>(true);
   const [strictDietEnforcement, setStrictDietEnforcement] = useState<boolean>(false);
   const [filterWordsList, setFilterWordsList] = useState<string[]>([]);
@@ -88,34 +89,70 @@ export default function ImportPage() {
       const user = getCurrentUser();
       const queryParam = user?.id ? `?userId=${encodeURIComponent(user.id)}` : user?.email ? `?email=${encodeURIComponent(user.email)}` : '';
       
-      // 1. Fetch user balance & AI telemetry
-      const res = await fetch(`/api/tokens${queryParam}${queryParam ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' });
-      const data = await res.json();
+      // 1. Authoritative synchronization with /admin/ai-settings via /api/admin/settings
+      try {
+        const aiRes = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
+        if (aiRes.ok) {
+          const aiData = await aiRes.json();
+          if (aiData.success || aiData.settings) {
+            const s = aiData.settings || aiData;
+            const chef = aiData.chefAiSettings || s.chefAiSettings || s.aiSettings || {};
+            const resolvedModel = aiData.aiModel || chef.model || s.aiModel || s.model;
+            const resolvedProvider = aiData.aiProvider || chef.provider || s.aiProvider || 'gemini';
 
-      if (data.success) {
-        setTokenBalance(Number(data.balance ?? 0));
-        if (data.tokenSymbol) setTokenSymbol(data.tokenSymbol);
-        if (data.tokenName) setTokenName(data.tokenName);
-        if (data.isEnabled !== undefined) setIsTokenEnabled(Boolean(data.isEnabled));
-        if (data.costs) {
-          setTokenCosts({
-            url: Number(data.costs.importUrl ?? 2),
-            text: Number(data.costs.importText ?? 1),
-            photo: Number(data.costs.importPhoto ?? 3)
-          });
+            if (resolvedModel) {
+              setActiveAiModel(resolvedModel);
+            }
+            if (resolvedProvider) {
+              setActiveAiProvider(resolvedProvider);
+            }
+            if (chef.enableWebSearch !== undefined) {
+              setEnableWebSearch(Boolean(chef.enableWebSearch));
+            } else if (s.enableWebSearch !== undefined) {
+              setEnableWebSearch(Boolean(s.enableWebSearch));
+            }
+            if (chef.strictDietEnforcement !== undefined) {
+              setStrictDietEnforcement(Boolean(chef.strictDietEnforcement));
+            }
+            if (Array.isArray(chef.filterWordsList)) {
+              setFilterWordsList(chef.filterWordsList);
+            }
+          }
         }
-        if (Array.isArray(data.packages) && data.packages.length > 0) {
-          setTokenPackages(data.packages);
-        }
-        if (data.aiSettings) {
-          setActiveAiModel(data.aiSettings.model || 'gemini-3.5-flash-lite');
-          setEnableWebSearch(data.aiSettings.enableWebSearch !== false);
-          setStrictDietEnforcement(Boolean(data.aiSettings.strictDietEnforcement));
-          setFilterWordsList(Array.isArray(data.aiSettings.filterWordsList) ? data.aiSettings.filterWordsList : []);
-        }
-      }
+      } catch (_) {}
 
-      // 2. Direct synchronization with /admin/token-setting endpoint
+      // 2. Fetch user balance & fallback telemetry
+      try {
+        const res = await fetch(`/api/tokens${queryParam}${queryParam ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success) {
+            setTokenBalance(Number(data.balance ?? 0));
+            if (data.tokenSymbol) setTokenSymbol(data.tokenSymbol);
+            if (data.tokenName) setTokenName(data.tokenName);
+            if (data.isEnabled !== undefined) setIsTokenEnabled(Boolean(data.isEnabled));
+            if (data.costs) {
+              setTokenCosts({
+                url: Number(data.costs.importUrl ?? 2),
+                text: Number(data.costs.importText ?? 1),
+                photo: Number(data.costs.importPhoto ?? 3)
+              });
+            }
+            if (Array.isArray(data.packages) && data.packages.length > 0) {
+              setTokenPackages(data.packages);
+            }
+            if (data.aiSettings && !activeAiModel) {
+              if (data.aiSettings.model) setActiveAiModel(data.aiSettings.model);
+              if (data.aiSettings.provider) setActiveAiProvider(data.aiSettings.provider);
+              if (data.aiSettings.enableWebSearch !== undefined) setEnableWebSearch(Boolean(data.aiSettings.enableWebSearch));
+              if (data.aiSettings.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(data.aiSettings.strictDietEnforcement));
+              if (Array.isArray(data.aiSettings.filterWordsList)) setFilterWordsList(data.aiSettings.filterWordsList);
+            }
+          }
+        }
+      } catch (_) {}
+
+      // 3. Direct synchronization with /admin/token-setting endpoint
       try {
         let adminRes = await fetch(`/api/admin/token-setting?t=${Date.now()}`, { cache: 'no-store' });
         if (!adminRes.ok) {
@@ -144,7 +181,7 @@ export default function ImportPage() {
     } finally {
       setFetchingTelemetry(false);
     }
-  }, []);
+  }, [activeAiModel]);
 
   const syncRecipeTypes = () => {
     try {
@@ -181,7 +218,7 @@ export default function ImportPage() {
       applySavedTheme();
     };
 
-    // Global event listeners including /admin/token-setting broadcasts
+    // Global event listeners including /admin/ai-settings and /admin/token-setting broadcasts
     window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_updated', applySavedTheme);
@@ -190,6 +227,8 @@ export default function ImportPage() {
     window.addEventListener('zecratary_plans_updated', handleUpdates);
     window.addEventListener('zecratary_users_updated', handleUpdates);
     window.addEventListener('zecratary_admin_settings_updated', handleUpdates);
+    window.addEventListener('zecratary_settings_updated', handleUpdates);
+    window.addEventListener('zecratary_engine_config_updated', handleUpdates);
     window.addEventListener('storage', handleUpdates);
 
     return () => {
@@ -201,6 +240,8 @@ export default function ImportPage() {
       window.removeEventListener('zecratary_plans_updated', handleUpdates);
       window.removeEventListener('zecratary_users_updated', handleUpdates);
       window.removeEventListener('zecratary_admin_settings_updated', handleUpdates);
+      window.removeEventListener('zecratary_settings_updated', handleUpdates);
+      window.removeEventListener('zecratary_engine_config_updated', handleUpdates);
       window.removeEventListener('storage', handleUpdates);
     };
   }, [fetchTokenAndAiTelemetry, applySavedTheme, t]);
@@ -315,7 +356,9 @@ export default function ImportPage() {
           userId: user?.id,
           userEmail: user?.email,
           userName: user?.name,
-          category: textCategory
+          category: textCategory,
+          model: activeAiModel,
+          provider: activeAiProvider
         })
       });
 
@@ -363,7 +406,9 @@ export default function ImportPage() {
           category: textCategory,
           userId: user?.id,
           userEmail: user?.email,
-          userName: user?.name
+          userName: user?.name,
+          model: activeAiModel,
+          provider: activeAiProvider
         })
       });
 
@@ -442,7 +487,9 @@ export default function ImportPage() {
           category: textCategory,
           userId: user?.id,
           userEmail: user?.email,
-          userName: user?.name
+          userName: user?.name,
+          model: activeAiModel,
+          provider: activeAiProvider
         })
       });
 
@@ -482,7 +529,7 @@ export default function ImportPage() {
           <div 
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-            title="Active Model configured in /admin/ai-settings"
+            title={t('activeModelConfiguredTooltip', 'Active Model configured dynamically in /admin/ai-settings')}
           >
             <Cpu className="h-3.5 w-3.5 text-orange-400" />
             <span className="font-mono">{activeAiModel}</span>
@@ -538,7 +585,7 @@ export default function ImportPage() {
           borderColor: 'var(--color-border)'
         }}
       >
-        {/* Method Tab Bar with Token Cost Pills (Dynamic with /admin/token-setting) */}
+        {/* Method Tab Bar with Token Cost Pills */}
         <div 
           className="flex p-1.5 rounded-2xl border transition-colors duration-200"
           style={{
@@ -603,7 +650,7 @@ export default function ImportPage() {
           </div>
         )}
 
-        {/* TAB 1: URL IMPORT (NO NATIVE FORM) */}
+        {/* TAB 1: URL IMPORT */}
         {activeTab === 'url' && (
           <div className="space-y-4">
             {!enableWebSearch && (
@@ -661,7 +708,7 @@ export default function ImportPage() {
           </div>
         )}
 
-        {/* TAB 2: TEXT IMPORT (NO NATIVE FORM) */}
+        {/* TAB 2: TEXT IMPORT */}
         {activeTab === 'text' && (
           <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -751,7 +798,7 @@ export default function ImportPage() {
           </div>
         )}
 
-        {/* TAB 3: IMAGE / PHOTO IMPORT (NO NATIVE FORM) */}
+        {/* TAB 3: IMAGE / PHOTO IMPORT */}
         {activeTab === 'image' && (
           <div className="space-y-4">
             <div>
