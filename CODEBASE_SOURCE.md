@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.72",
+  "version": "8.0.73",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -113,7 +113,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.72",
+  "version": "8.0.73",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10005,9 +10005,8 @@ import { useRouter } from 'next/navigation';
 import { 
   ChefHat, Globe, ExternalLink, Send, SlidersHorizontal, Edit3, Clock, Users,
   Calendar, CalendarPlus, X, Loader2, User as UserIcon, Check, Sparkles, Bookmark,
-  Plus, Trash2, ChevronDown, ChevronLeft, ChevronRight, CheckCircle2, Layers,
-  Mic, MicOff, Volume2, Square, BookOpen, History, Folder, MessageSquare, Tag,
-  ShoppingCart
+  Plus, Trash2, ChevronDown, CheckCircle2, Layers, Mic, MicOff, Volume2, Square,
+  BookOpen, ShoppingCart, Coins, Cpu
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -10071,22 +10070,6 @@ interface ChatMessage {
   recommendedRecipe?: RecommendedRecipeData;
 }
 
-interface ChatCategory {
-  id: string;
-  name: string;
-  created_at?: string;
-}
-
-interface ChatSessionItem {
-  id: string;
-  title: string;
-  category_id?: string | null;
-  category_name?: string | null;
-  message_count?: number;
-  created_at: string;
-  updated_at: string;
-}
-
 const DIETARY_OPTIONS = [
   'Vegetarian', 'Vegan', 'Gluten-Free', 'Dairy-Free', 'Keto',
   'Paleo', 'Pescatarian', 'Halal', 'Kosher'
@@ -10138,21 +10121,6 @@ export default function ChefChatPage() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Chat History & Categories State (PostgreSQL backed)
-  const [currentSessionId, setCurrentSessionId] = useState<string>(() => 'sess_' + Date.now());
-  const currentSessionIdRef = useRef<string>(currentSessionId);
-  currentSessionIdRef.current = currentSessionId;
-
-  const [showHistoryDrawer, setShowHistoryDrawer] = useState<boolean>(false);
-  const [historySessions, setHistorySessions] = useState<ChatSessionItem[]>([]);
-  const [historyCategories, setHistoryCategories] = useState<ChatCategory[]>([]);
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
-  const [historyPage, setHistoryPage] = useState<number>(1);
-  const [historyTotalPages, setHistoryTotalPages] = useState<number>(1);
-  const [historyTotalCount, setHistoryTotalCount] = useState<number>(0);
-  const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
-  const [newCategoryName, setNewCategoryName] = useState<string>('');
-
   // AI & Voice telemetry settings
   const [questionnaireSections, setQuestionnaireSections] = useState<any[]>(DEFAULT_SECTIONS);
   const [activeTopicTitle, setActiveTopicTitle] = useState<string>('Standard Wizard');
@@ -10176,10 +10144,11 @@ export default function ChefChatPage() {
   const [isListening, setIsListening] = useState<boolean>(false);
   const speechRecognitionRef = useRef<any>(null);
 
-  // Token Telemetry
+  // Token Telemetry (Synchronized with /admin/token-setting & PostgreSQL)
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
+  const [isTokenEnabled, setIsTokenEnabled] = useState<boolean>(true);
   const [chefCost, setChefCost] = useState<number>(1);
   const [tokenPackages, setTokenPackages] = useState<any[]>([]);
   const [isTokenPurchaseOpen, setIsTokenPurchaseOpen] = useState(false);
@@ -10199,7 +10168,7 @@ export default function ChefChatPage() {
   const [wizardStep, setWizardStep] = useState<number | null>(null);
   const [wizardAnswers, setWizardAnswers] = useState<Record<number, string>>({});
 
-  // Recipe Modals & Saved Recipes State (PostgreSQL backed)
+  // Recipe Modals & Saved Recipes State
   const [selectedRecipeForModal, setSelectedRecipeForModal] = useState<RecommendedRecipeData | null>(null);
   const [showRecipeDetailsModal, setShowRecipeDetailsModal] = useState<boolean>(false);
   const [pantryIngredientsList, setPantryIngredientsList] = useState<string[]>([]);
@@ -10234,6 +10203,56 @@ export default function ChefChatPage() {
     }
   };
 
+  // ------------------------------------------------------------------
+  // Active Chat Session Persistence (Maintained Until "New Chat")
+  // ------------------------------------------------------------------
+  const loadActiveChat = useCallback((user: User | null) => {
+    try {
+      if (typeof window === 'undefined') return;
+      const userKey = getUserKey(user);
+      const saved = localStorage.getItem(`zecratary_chef_active_chat_${userKey}`) || 
+                    localStorage.getItem(`zecratary_chef_chat_messages_${userKey}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(parsed);
+          return;
+        }
+      }
+    } catch (_) {}
+  }, [getUserKey]);
+
+  const updateMessages = (newMessages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
+    setMessages(prev => {
+      const updated = typeof newMessages === 'function' ? newMessages(prev) : newMessages;
+      try {
+        if (typeof window !== 'undefined') {
+          const active = currentUserRef.current || getCurrentUser();
+          const userKey = getUserKey(active);
+          localStorage.setItem(`zecratary_chef_active_chat_${userKey}`, JSON.stringify(updated));
+        }
+      } catch (_) {}
+      return updated;
+    });
+  };
+
+  const startNewChat = () => {
+    stopSpeaking();
+    setMessages([]);
+    updateWizardStep(null);
+    setWizardAnswers({});
+    setActiveTopicTitle('Standard Wizard');
+    try {
+      if (typeof window !== 'undefined') {
+        const active = currentUserRef.current || getCurrentUser();
+        const userKey = getUserKey(active);
+        localStorage.removeItem(`zecratary_chef_active_chat_${userKey}`);
+        localStorage.removeItem(`zecratary_chef_chat_messages_${userKey}`);
+      }
+    } catch (_) {}
+    showToast(t('newChatStarted', 'Started a new chat session.'));
+  };
+
   const updateWizardStep = (step: number | null) => {
     setWizardStep(step);
     try {
@@ -10245,177 +10264,6 @@ export default function ChefChatPage() {
       } else {
         localStorage.removeItem(`zecratary_chef_wizard_step_${userKey}`);
       }
-    } catch (_) {}
-  };
-
-  // ------------------------------------------------------------------
-  // Chat History & Category PostgreSQL Operations
-  // ------------------------------------------------------------------
-  const fetchChatHistory = useCallback(async (pageToLoad = historyPage, categoryFilter = selectedCategoryFilter) => {
-    setLoadingHistory(true);
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      const res = await fetch(
-        `/api/chef/history?userId=${encodeURIComponent(userKey)}&categoryId=${encodeURIComponent(categoryFilter)}&page=${pageToLoad}`,
-        { cache: 'no-store' }
-      );
-      const data = await safeJsonParse(res);
-      if (data && data.success) {
-        setHistorySessions(data.sessions || []);
-        setHistoryCategories(data.categories || []);
-        setHistoryPage(data.page || 1);
-        setHistoryTotalPages(data.totalPages || 1);
-        setHistoryTotalCount(data.total || 0);
-      }
-    } catch (err) {
-      console.warn('Failed to load chat history:', err);
-    } finally {
-      setLoadingHistory(false);
-    }
-  }, [getUserKey, historyPage, selectedCategoryFilter]);
-
-  const saveCurrentSessionToDb = useCallback(async (msgs: ChatMessage[]) => {
-    if (msgs.length === 0) return;
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      const firstUserMsg = msgs.find(m => m.role === 'user');
-      const title = firstUserMsg?.content 
-        ? firstUserMsg.content.slice(0, 45) + (firstUserMsg.content.length > 45 ? '...' : '')
-        : 'Chef Conversation';
-
-      await fetch('/api/chef/history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'save_session',
-          userId: userKey,
-          id: currentSessionIdRef.current,
-          title,
-          messages: msgs
-        })
-      });
-    } catch (_) {}
-  }, [getUserKey]);
-
-  const handleCreateCategory = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
-    if (e && 'preventDefault' in e) e.preventDefault();
-    const clean = newCategoryName.trim();
-    if (!clean) return;
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      const res = await fetch('/api/chef/history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'create_category',
-          userId: userKey,
-          name: clean
-        })
-      });
-      const data = await safeJsonParse(res);
-      if (data && data.success) {
-        setNewCategoryName('');
-        showToast(`Category "${clean}" created!`);
-        fetchChatHistory(1, selectedCategoryFilter);
-      }
-    } catch (_) {
-      showToast("Could not create category.");
-    }
-  };
-
-  const handleDeleteCategory = async (categoryId: string, categoryName: string) => {
-    if (!confirm(`Delete category "${categoryName}"? Existing chats will be kept.`)) return;
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      await fetch(
-        `/api/chef/history?action=delete_category&categoryId=${encodeURIComponent(categoryId)}&userId=${encodeURIComponent(userKey)}`,
-        { method: 'DELETE' }
-      );
-      showToast(`Category "${categoryName}" deleted.`);
-      if (selectedCategoryFilter === categoryId) setSelectedCategoryFilter('all');
-      fetchChatHistory(1, 'all');
-    } catch (_) {
-      showToast("Could not delete category.");
-    }
-  };
-
-  const handleDeleteSession = async (sessionId: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (!confirm("Are you sure you want to delete this chat?")) return;
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      await fetch(
-        `/api/chef/history?action=delete_session&sessionId=${encodeURIComponent(sessionId)}&userId=${encodeURIComponent(userKey)}`,
-        { method: 'DELETE' }
-      );
-
-      if (currentSessionIdRef.current === sessionId) {
-        startNewChat();
-      }
-      showToast("Chat deleted.");
-      fetchChatHistory(historyPage, selectedCategoryFilter);
-    } catch (_) {
-      showToast("Could not delete chat.");
-    }
-  };
-
-  const handleSelectSession = async (sessionItem: ChatSessionItem) => {
-    try {
-      const sRes = await fetch(`/api/chef/session?id=${sessionItem.id}`, { cache: 'no-store' }).catch(() => null);
-      let sessionMsgs: ChatMessage[] = [];
-      if (sRes && sRes.ok) {
-        const sData = await safeJsonParse(sRes);
-        sessionMsgs = sData?.messages || [];
-      } else {
-        const local = localStorage.getItem(`zecratary_chef_sess_${sessionItem.id}`);
-        if (local) sessionMsgs = JSON.parse(local);
-      }
-
-      currentSessionIdRef.current = sessionItem.id;
-      setCurrentSessionId(sessionItem.id);
-      setMessages(sessionMsgs);
-      updateWizardStep(null);
-      setShowHistoryDrawer(false);
-      showToast(`Loaded: ${sessionItem.title}`);
-    } catch (_) {
-      showToast("Failed to load chat.");
-    }
-  };
-
-  const startNewChat = () => {
-    stopSpeaking();
-    const newId = 'sess_' + Date.now();
-    currentSessionIdRef.current = newId;
-    setCurrentSessionId(newId);
-    setMessages([]);
-    updateWizardStep(null);
-    setWizardAnswers({});
-    setActiveTopicTitle('Standard Wizard');
-    setShowHistoryDrawer(false);
-    showToast("Started a new chat session.");
-  };
-
-  const handleAssignCategory = async (sessionId: string, categoryId: string) => {
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      await fetch('/api/chef/history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'set_session_category',
-          userId: userKey,
-          sessionId,
-          categoryId: categoryId === 'none' ? null : categoryId
-        })
-      });
-      fetchChatHistory(historyPage, selectedCategoryFilter);
-      showToast("Category updated.");
     } catch (_) {}
   };
 
@@ -10550,7 +10398,9 @@ export default function ChefChatPage() {
   const isRecipeSaved = useCallback((title?: string) => {
     if (!title) return false;
     const cleanTitle = title.trim().toLowerCase();
-    return userSavedRecipes.some(r => (r.title || '').trim().toLowerCase() === cleanTitle);
+    return (Array.isArray(userSavedRecipes) ? userSavedRecipes : []).some(
+      r => (r?.title || '').trim().toLowerCase() === cleanTitle
+    );
   }, [userSavedRecipes]);
 
   const handleSaveRecipe = async (recipe: RecommendedRecipeData) => {
@@ -10613,7 +10463,7 @@ export default function ChefChatPage() {
     try {
       const active = currentUserRef.current || getCurrentUser();
       const userKey = getUserKey(active);
-      const savedMatch = userSavedRecipes.find(r => (r.title || '').trim().toLowerCase() === (recipeToSchedule.title || '').trim().toLowerCase());
+      const savedMatch = userSavedRecipes.find(r => (r?.title || '').trim().toLowerCase() === (recipeToSchedule.title || '').trim().toLowerCase());
 
       await fetch('/api/planner', {
         method: 'POST',
@@ -10685,7 +10535,7 @@ export default function ChefChatPage() {
   };
 
   const handleToggleAllergy = (item: string) => {
-    setSelectedAllergies(prev => prev.includes(item) ? prev.filter(a => a !== item) : [...prev, item]);
+    setSelectedAllergy = (prev => prev.includes(item) ? prev.filter(a => a !== item) : [...prev, item]);
   };
 
   const handleAddAvoid = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
@@ -10768,24 +10618,51 @@ export default function ChefChatPage() {
   };
 
   // ------------------------------------------------------------------
-  // Telemetry & Settings Synchronization
+  // Telemetry & Dynamic Synchronization with /admin/token-setting
   // ------------------------------------------------------------------
   const fetchTelemetry = useCallback(async () => {
     try {
       const active = currentUserRef.current || getCurrentUser();
-      const queryParam = active?.id ? `?userId=${active.id}` : active?.email ? `?email=${encodeURIComponent(active.email)}` : '';
+      const queryParam = active?.id ? `?userId=${encodeURIComponent(active.id)}` : active?.email ? `?email=${encodeURIComponent(active.email)}` : '';
       
-      const res = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
+      // 1. Fetch live user token balance & settings
+      const res = await fetch(`/api/tokens${queryParam}${queryParam ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' });
       const data = await safeJsonParse(res);
       if (data && data.success) {
         setTokenBalance(Number(data.balance ?? 0));
-        setTokenSymbol(data.tokenSymbol || '🪙');
-        setTokenName(data.tokenName || 'Foodie Token');
-        setChefCost(Number(data.costs?.chef ?? 1));
-        if (Array.isArray(data.packages)) setTokenPackages(data.packages);
+        if (data.tokenSymbol) setTokenSymbol(data.tokenSymbol);
+        if (data.tokenName) setTokenName(data.tokenName);
+        if (data.isEnabled !== undefined) setIsTokenEnabled(Boolean(data.isEnabled));
+        if (data.costs?.chef !== undefined) setChefCost(Number(data.costs.chef));
+        else if (data.chefCost !== undefined) setChefCost(Number(data.chefCost));
+        if (Array.isArray(data.packages) && data.packages.length > 0) {
+          setTokenPackages(data.packages);
+        }
       }
 
-      const sRes = await fetch('/api/admin/settings', { cache: 'no-store' });
+      // 2. Direct synchronization with /admin/token-setting endpoint
+      try {
+        let adminTokenRes = await fetch(`/api/admin/token-setting?t=${Date.now()}`, { cache: 'no-store' });
+        if (!adminTokenRes.ok) {
+          adminTokenRes = await fetch(`/api/admin/token-settings?t=${Date.now()}`, { cache: 'no-store' });
+        }
+        if (adminTokenRes.ok) {
+          const adminTokenData = await safeJsonParse(adminTokenRes);
+          const s = adminTokenData?.settings || adminTokenData;
+          if (s) {
+            if (s.tokenSymbol) setTokenSymbol(s.tokenSymbol);
+            if (s.tokenName) setTokenName(s.tokenName);
+            if (s.isEnabled !== undefined) setIsTokenEnabled(Boolean(s.isEnabled));
+            if (s.chefCost !== undefined) setChefCost(Number(s.chefCost));
+            if (Array.isArray(s.packages) && s.packages.length > 0) {
+              setTokenPackages(s.packages);
+            }
+          }
+        }
+      } catch (_) {}
+
+      // 3. AI Settings synchronization from /api/admin/settings
+      const sRes = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
       const sData = await safeJsonParse(sRes);
       const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
       if (chefCfg) {
@@ -10833,10 +10710,10 @@ export default function ChefChatPage() {
     currentUserRef.current = user;
 
     applySavedTheme();
+    loadActiveChat(user);
     loadUserPreferences(user);
     loadUserSavedRecipes(user);
     fetchTelemetry();
-    fetchChatHistory(1, 'all');
 
     const handleSync = () => {
       const active = getCurrentUser();
@@ -10845,34 +10722,32 @@ export default function ChefChatPage() {
       loadUserPreferences(active);
       loadUserSavedRecipes(active);
       fetchTelemetry();
-      fetchChatHistory(1, selectedCategoryFilter);
     };
 
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_theme_updated', applySavedTheme);
     window.addEventListener('zecratary_admin_settings_updated', fetchTelemetry);
+    window.addEventListener('zecratary_token_settings_updated', fetchTelemetry);
+    window.addEventListener('zecratary_tokens_updated', fetchTelemetry);
+    window.addEventListener('zecratary_plans_updated', fetchTelemetry);
+    window.addEventListener('zecratary_users_updated', fetchTelemetry);
+    window.addEventListener('zecratary_chef_ai_settings_updated', fetchTelemetry);
 
     return () => {
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('zecratary_admin_settings_updated', fetchTelemetry);
+      window.removeEventListener('zecratary_token_settings_updated', fetchTelemetry);
+      window.removeEventListener('zecratary_tokens_updated', fetchTelemetry);
+      window.removeEventListener('zecratary_plans_updated', fetchTelemetry);
+      window.removeEventListener('zecratary_users_updated', fetchTelemetry);
+      window.removeEventListener('zecratary_chef_ai_settings_updated', fetchTelemetry);
     };
-  }, [applySavedTheme, fetchTelemetry, loadUserPreferences, loadUserSavedRecipes, fetchChatHistory, selectedCategoryFilter, t]);
+  }, [applySavedTheme, fetchTelemetry, loadActiveChat, loadUserPreferences, loadUserSavedRecipes, t]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
-
-  const updateMessages = (newMessages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
-    setMessages(prev => {
-      const updated = typeof newMessages === 'function' ? newMessages(prev) : newMessages;
-      saveCurrentSessionToDb(updated);
-      try {
-        localStorage.setItem(`zecratary_chef_sess_${currentSessionIdRef.current}`, JSON.stringify(updated));
-      } catch (_) {}
-      return updated;
-    });
-  };
 
   // ------------------------------------------------------------------
   // Questionnaire Flow
@@ -10932,13 +10807,12 @@ export default function ChefChatPage() {
   };
 
   // ------------------------------------------------------------------
-  // High-Precision Contextual Preset Options Matcher
+  // Contextual Preset Options Matcher
   // ------------------------------------------------------------------
   const currentPresetOptions = useMemo(() => {
     if (wizardStep === null || !wizardQuestionsList || !wizardQuestionsList[wizardStep]) return [];
     const q = wizardQuestionsList[wizardStep].toLowerCase().trim();
 
-    // 1. MEAL TYPES (Evaluated BEFORE duration so "each day" won't trigger day counts)
     if (/\b(meal type|meal types|which meal|types of meal|breakfast|lunch|dinner|snack|meals to include)\b/i.test(q)) {
       return [
         'Dinner only',
@@ -10950,7 +10824,6 @@ export default function ChefChatPage() {
       ];
     }
 
-    // 2. START DATE / SCHEDULE (Evaluated BEFORE duration so "today" won't trigger day counts)
     if (/\b(when|start date|starting|start|commence|begin|schedule date)\b/i.test(q) && !/\b(how many days|number of days)\b/i.test(q)) {
       return [
         'Start Today',
@@ -10961,7 +10834,6 @@ export default function ChefChatPage() {
       ];
     }
 
-    // 3. DURATION / NUMBER OF DAYS (Prioritizes 1 Day / Single Day Focus)
     if (/\b(how many days|number of days|duration|days to plan|how long|days would you like)\b/i.test(q) || (/\bdays?\b/i.test(q) && /\b(how many|plan for|total)\b/i.test(q))) {
       const days = [];
       days.push('1 Day (Single Day Focus)');
@@ -10973,7 +10845,6 @@ export default function ChefChatPage() {
       return Array.from(new Set(days));
     }
 
-    // 4. BUDGET & FINANCIAL TARGET
     if (/\b(budget|cost|spend|price|financial|per serving|per meal)\b/i.test(q)) {
       return [
         'Under $5 per serving (Economy)',
@@ -10984,7 +10855,6 @@ export default function ChefChatPage() {
       ];
     }
 
-    // 5. THEMES, PREFERENCES, FLAVORS & CUISINES
     if (/\b(theme|themes|preference|preferences|flavor|flavors|cuisine|cuisines|comfort food|high-protein)\b/i.test(q)) {
       return [
         'High-Protein Wholesome',
@@ -10997,7 +10867,6 @@ export default function ChefChatPage() {
       ];
     }
 
-    // 6. SERVINGS & HOUSEHOLD SIZE
     if (/\b(serving|servings|people|person|household|family|portion|portions)\b/i.test(q)) {
       return [
         '1 Person (Solo Dining)',
@@ -11007,7 +10876,6 @@ export default function ChefChatPage() {
       ];
     }
 
-    // 7. DIETARY RESTRICTIONS
     if (/\b(diet|diets|dietary|vegetarian|vegan|pescatarian|halal|kosher|keto|paleo)\b/i.test(q)) {
       return [
         'Vegetarian (No Meat/Fish)',
@@ -11019,7 +10887,6 @@ export default function ChefChatPage() {
       ];
     }
 
-    // 8. ALLERGIES & PROHIBITED INGREDIENTS
     if (/\b(allerg|allergy|allergies|avoid|avoiding|intoleran|dislike|exclude)\b/i.test(q)) {
       return [
         'No Allergies (Standard)',
@@ -11031,36 +10898,6 @@ export default function ChefChatPage() {
       ];
     }
 
-    // 9. PANTRY & IN-STOCK INGREDIENTS
-    if (/\b(pantry|fridge|in-stock|on hand|stock|inventory|existing ingredients)\b/i.test(q)) {
-      return [
-        'Prioritize in-stock pantry items',
-        'Mix pantry items with fresh groceries',
-        'Start fresh with new grocery items'
-      ];
-    }
-
-    // 10. COOKING TIME & PREP EQUIPMENT
-    if (/\b(cook time|prep time|cooking time|minutes|speed|quick|equipment|air fryer|one-pot|slow cook)\b/i.test(q)) {
-      return [
-        'Speedy (Under 15 mins)',
-        'Moderate (20 - 30 mins)',
-        'One-Pot / Sheet Pan Only',
-        'Air Fryer Friendly',
-        'Weekend Leisure Cooking'
-      ];
-    }
-
-    // 11. BATCH COOKING & LEFTOVERS
-    if (/\b(batch|leftover|leftovers|cook once|bulk)\b/i.test(q)) {
-      return [
-        'Include batch cooking & leftovers',
-        'Fresh cooked meal every day',
-        'Cook once, eat twice (Smart Leftovers)'
-      ];
-    }
-
-    // 12. FALLBACK
     return [
       'Yes, strictly apply',
       'Standard recommended',
@@ -11070,7 +10907,7 @@ export default function ChefChatPage() {
   }, [wizardStep, wizardQuestionsList, maxPlanDays]);
 
   // ------------------------------------------------------------------
-  // Chat Prompt Execution with PostgreSQL Persistence
+  // Chat Prompt Execution
   // ------------------------------------------------------------------
   const handleSend = async (customText?: string) => {
     const textToSend = (customText !== undefined ? customText : prompt).trim();
@@ -11100,8 +10937,10 @@ export default function ChefChatPage() {
       }
     }
 
-    if (tokenBalance < chefCost) {
-      showToast(`Insufficient ${tokenName}. Required: ${chefCost} ${tokenSymbol}, Balance: ${tokenBalance} ${tokenSymbol}`);
+    // Token Balance Check (Bypassed if token consumption is disabled in /admin/token-setting)
+    const cost = isTokenEnabled ? chefCost : 0;
+    if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
+      showToast(`${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}`);
       setIsTokenPurchaseOpen(true);
       return;
     }
@@ -11215,8 +11054,11 @@ export default function ChefChatPage() {
             throw new Error(data?.error || 'Failed to synthesize questionnaire results. Please try again.');
           }
 
-          if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
-          else setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens || chefCost)));
+          if (typeof data.remainingBalance === 'number') {
+            setTokenBalance(data.remainingBalance);
+          } else if (cost > 0) {
+            setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens ?? cost)));
+          }
 
           const planMsg: ChatMessage = {
             id: 'ast_plan_' + Date.now(),
@@ -11266,13 +11108,22 @@ export default function ChefChatPage() {
         throw new Error(data?.error || 'Chef Foodie could not process your query.');
       }
 
-      if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
-      else setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens || chefCost)));
+      if (typeof data.remainingBalance === 'number') {
+        setTokenBalance(data.remainingBalance);
+      } else if (cost > 0) {
+        setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens ?? cost)));
+      }
+
+      const consumed = data.consumedSystemTokens ?? cost;
+      if (consumed > 0) {
+        showToast(`-${consumed} ${tokenSymbol} (${tokenName})`);
+      }
 
       const astMsg: ChatMessage = {
         id: 'ast_' + Date.now(),
         role: 'assistant',
         content: data.reply || data.response || "Here are personalized culinary recommendations based on your preferences.",
+        plan: data.plan || undefined,
         recommendedRecipe: data.recommendedRecipe || data.recipe,
         systemRecommendations: data.systemRecommendations || []
       };
@@ -11311,7 +11162,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOP HEADER WITH HISTORY & CHAT CONTROLS */}
+      {/* TOP HEADER WITH LIVE TOKEN WALLET & TELEMETRY */}
       <div 
         className="space-y-3 border-b pb-3 shrink-0 transition-colors duration-200"
         style={{ borderColor: 'var(--color-border)' }}
@@ -11360,24 +11211,46 @@ export default function ChefChatPage() {
               </div>
             )}
 
-            {/* CHAT HISTORY DRAWER BUTTON */}
-            <button
-              type="button"
-              onClick={() => {
-                setShowHistoryDrawer(true);
-                fetchChatHistory(1, selectedCategoryFilter);
-              }}
-              className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80 flex items-center gap-1.5 text-xs font-bold"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-primary)'
-              }}
-              title="View Chat History & Categories"
+            {/* ACTIVE AI MODEL BADGE */}
+            <div 
+              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              title="Active Model configured in /admin/ai-settings"
             >
-              <History className="h-4 w-4" />
-              <span className="hidden md:inline">History</span>
-            </button>
+              <Cpu className="h-3.5 w-3.5 text-orange-400" />
+              <span className="font-mono">{activeAiModel}</span>
+            </div>
+
+            {/* FREE TOKEN MODE BADGE */}
+            {!isTokenEnabled && (
+              <div 
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider text-emerald-400"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                title={t('tokenFreeModeTooltip', 'Token consumption is currently bypassed (Free Mode) in /admin/token-setting')}
+              >
+                <Sparkles className="h-3 w-3" />
+                <span>{t('tokenFreeModeBadge', 'Free Token Mode')}</span>
+              </div>
+            )}
+
+            {/* LIVE WALLET BADGE & TOP UP */}
+            <div 
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border shadow-sm"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <Coins className="h-4 w-4 text-amber-500" />
+              <div className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
+                {tokenBalance} <span className="text-amber-500">{tokenSymbol}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTokenPurchaseOpen(true)}
+                className="ml-1 text-[10px] font-extrabold px-2 py-0.5 rounded-lg text-white transition hover:opacity-90 cursor-pointer shadow-xs"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {t('topUpBtn', 'Top Up')}
+              </button>
+            </div>
 
             {/* PREFERENCES SLIDERS BUTTON */}
             <button
@@ -11398,15 +11271,16 @@ export default function ChefChatPage() {
             <button
               type="button"
               onClick={startNewChat}
-              className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80"
+              className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80 flex items-center gap-1.5 text-xs font-bold"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
-                color: 'var(--color-text-secondary)'
+                color: 'var(--color-primary)'
               }}
-              title="Start New Chat"
+              title={t('startNewChat', 'Start New Chat')}
             >
               <Edit3 className="h-4 w-4" />
+              <span className="hidden sm:inline">New Chat</span>
             </button>
           </div>
         </div>
@@ -11437,7 +11311,7 @@ export default function ChefChatPage() {
               backgroundColor: 'var(--color-inner-dark)',
               borderColor: 'var(--color-emerald)',
               color: 'var(--color-emerald)'
-}}
+            }}
           >
             {t('servingsLabelPref', 'Servings:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{(t('peopleSuffix', '{count} people')).replace('{count}', String(servings))}</strong>
           </span>
@@ -11571,7 +11445,7 @@ export default function ChefChatPage() {
                   style={{
                     backgroundColor: 'var(--color-card)',
                     borderColor: 'var(--color-border)',
-                    color: 'var(--color-primary)'
+                    color: 'var(--color-text)'
                   }}
                   onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
                   onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
@@ -11673,7 +11547,7 @@ export default function ChefChatPage() {
                     </div>
                   )}
 
-                  {/* RECOMMENDATION RECIPE CARD PREVIEW WITH SAVE & GATED PLANNER ACTIONS */}
+                  {/* RECOMMENDATION RECIPE CARD PREVIEW */}
                   {m.recommendedRecipe && (
                     <div 
                       className="border rounded-2xl p-4 space-y-3.5 shadow-sm transition-all duration-200 hover:shadow-md"
@@ -11741,7 +11615,7 @@ export default function ChefChatPage() {
                         </div>
                       </div>
 
-                      {/* CARD ACTIONS: VIEW FULL DETAILS, SAVE RECIPE, AND GATED PLANNER SUGGESTION */}
+                      {/* CARD ACTIONS */}
                       <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t text-xs" style={{ borderColor: 'var(--color-border)' }}>
                         <button
                           type="button"
@@ -12194,7 +12068,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* PROMPT INPUT BAR */}
+      {/* PROMPT INPUT BAR (DYNAMIC TOKEN BADGE & FREE MODE) */}
       <div 
         className="border rounded-2xl p-1.5 flex items-center gap-2 shrink-0 shadow-xl transition-colors duration-200"
         style={{
@@ -12223,7 +12097,7 @@ export default function ChefChatPage() {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder={isListening ? "Listening to your voice..." : `${t('askPromptPlaceholder', 'Ask recipes, cooking tips, or meal plan requests...')} (${chefCost} ${tokenSymbol})`}
+          placeholder={isListening ? "Listening to your voice..." : `${t('askPromptPlaceholder', 'Ask recipes, cooking tips, or meal plan requests...')} (${isTokenEnabled && chefCost > 0 ? `${chefCost} ${tokenSymbol}` : t('freeBadge', 'Free')})`}
           className="bg-transparent border-none text-sm px-2 flex-1 outline-none font-normal"
           style={{ color: 'var(--color-text)' }}
         />
@@ -12236,9 +12110,9 @@ export default function ChefChatPage() {
               borderColor: 'var(--color-border)',
               color: 'var(--color-text-secondary)'
             }}
-            title={`Each prompt costs ${chefCost} ${tokenName}`}
+            title={isTokenEnabled && chefCost > 0 ? `Each prompt costs ${chefCost} ${tokenName}` : 'Bypass token consumption'}
           >
-            {chefCost} {tokenSymbol}
+            {isTokenEnabled && chefCost > 0 ? `${chefCost} ${tokenSymbol}` : t('freeBadge', 'Free')}
           </span>
 
           <button
@@ -12252,292 +12126,6 @@ export default function ChefChatPage() {
           </button>
         </div>
       </div>
-
-      {/* CHAT HISTORY & CATEGORIES SIDE DRAWER (POSTGRESQL BACKED) */}
-      {showHistoryDrawer && (
-        <div 
-          onClick={() => setShowHistoryDrawer(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-end cursor-pointer animate-in fade-in"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md h-full flex flex-col justify-between border-l p-5 space-y-4 shadow-2xl relative cursor-default animate-in slide-in-from-right duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <div className="space-y-4 flex-1 flex flex-col overflow-hidden">
-              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-                <div className="flex items-center gap-2">
-                  <History className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
-                  <div>
-                    <h2 className="text-base font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                      Chat History ({historyTotalCount})
-                    </h2>
-                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                      Up to 10 chats per page • Filtered by category
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={startNewChat}
-                    className="px-2.5 py-1 rounded-xl text-white text-[11px] font-extrabold flex items-center gap-1 transition cursor-pointer shadow-sm hover:opacity-90"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                    title="New Chat"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> New
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowHistoryDrawer(false)}
-                    className="p-1.5 rounded-xl border hover:opacity-80 transition cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-
-              {/* CATEGORIES SECTION */}
-              <div className="space-y-2.5 pt-1">
-                <div className="flex items-center justify-between text-xs font-bold">
-                  <span className="flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
-                    <Folder className="h-3.5 w-3.5" /> Chat Categories:
-                  </span>
-                </div>
-
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="New category name (e.g. Keto Prep, Dinners)..."
-                    value={newCategoryName}
-                    onChange={(e) => setNewCategoryName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleCreateCategory();
-                      }
-                    }}
-                    className="flex-1 border rounded-xl px-3 py-1.5 text-xs outline-none"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleCreateCategory()}
-                    disabled={!newCategoryName.trim()}
-                    className="px-3 py-1.5 text-white font-bold text-xs rounded-xl transition cursor-pointer disabled:opacity-40 flex items-center gap-1 shadow-xs hover:opacity-90"
-                    style={{ backgroundColor: 'var(--color-emerald)' }}
-                  >
-                    <Plus className="h-3.5 w-3.5" /> Add
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedCategoryFilter('all');
-                      fetchChatHistory(1, 'all');
-                    }}
-                    className="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer shrink-0 shadow-xs"
-                    style={{
-                      backgroundColor: selectedCategoryFilter === 'all' ? 'var(--color-primary)' : 'var(--color-inner-dark)',
-                      borderColor: selectedCategoryFilter === 'all' ? 'var(--color-primary)' : 'var(--color-border)',
-                      color: selectedCategoryFilter === 'all' ? '#ffffff' : 'var(--color-text-secondary)'
-                    }}
-                  >
-                    All Chats
-                  </button>
-
-                  {historyCategories.map((cat) => (
-                    <div
-                      key={cat.id}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer shrink-0 shadow-xs group"
-                      style={{
-                        backgroundColor: selectedCategoryFilter === cat.id ? 'var(--color-primary)' : 'var(--color-inner-dark)',
-                        borderColor: selectedCategoryFilter === cat.id ? 'var(--color-primary)' : 'var(--color-border)',
-                        color: selectedCategoryFilter === cat.id ? '#ffffff' : 'var(--color-text-secondary)'
-                      }}
-                      onClick={() => {
-                        setSelectedCategoryFilter(cat.id);
-                        fetchChatHistory(1, cat.id);
-                      }}
-                    >
-                      <span>{cat.name}</span>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteCategory(cat.id, cat.name);
-                        }}
-                        className="opacity-70 hover:opacity-100 hover:text-red-400 ml-1 cursor-pointer"
-                        title={`Delete category ${cat.name}`}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* SESSIONS LIST */}
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                {loadingHistory ? (
-                  <div className="py-12 text-center text-xs flex items-center justify-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
-                    <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} /> Loading chat sessions...
-                  </div>
-                ) : historySessions.length === 0 ? (
-                  <div className="py-12 text-center text-xs space-y-2" style={{ color: 'var(--color-text-secondary)' }}>
-                    <MessageSquare className="h-8 w-8 mx-auto opacity-30" />
-                    <p>No chat history found under this category.</p>
-                  </div>
-                ) : (
-                  historySessions.map((sess) => {
-                    const isCurrentActive = sess.id === currentSessionId;
-                    const dateFormatted = new Date(sess.updated_at).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    });
-
-                    return (
-                      <div
-                        key={sess.id}
-                        onClick={() => handleSelectSession(sess)}
-                        className="p-3 rounded-2xl border transition cursor-pointer flex items-center justify-between gap-3 shadow-xs hover:scale-[1.01]"
-                        style={{
-                          backgroundColor: isCurrentActive ? 'var(--color-inner-dark)' : 'var(--color-card)',
-                          borderColor: isCurrentActive ? 'var(--color-primary)' : 'var(--color-border)'
-                        }}
-                      >
-                        <div className="space-y-1 min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            {sess.category_name ? (
-                              <span 
-                                className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded border flex items-center gap-1"
-                                style={{
-                                  backgroundColor: 'var(--color-card)',
-                                  borderColor: 'var(--color-border)',
-                                  color: 'var(--color-emerald)'
-                                }}
-                              >
-                                <Tag className="h-2.5 w-2.5" /> {sess.category_name}
-                              </span>
-                            ) : null}
-                            <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
-                              {dateFormatted}
-                            </span>
-                          </div>
-
-                          <h4 
-                            className="font-bold text-xs truncate leading-snug"
-                            style={{ color: isCurrentActive ? 'var(--color-primary)' : 'var(--color-text)' }}
-                          >
-                            {sess.title}
-                          </h4>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                          <select
-                            value={sess.category_id || 'none'}
-                            onChange={(e) => handleAssignCategory(sess.id, e.target.value)}
-                            className="text-[10px] border rounded-lg px-2 py-1 outline-none font-medium appearance-none cursor-pointer"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text)'
-                            }}
-                            title="Assign to Category"
-                          >
-                            <option value="none">No Category</option>
-                            {historyCategories.map(c => (
-                              <option key={c.id} value={c.id}>{c.name}</option>
-                            ))}
-                          </select>
-
-                          <button
-                            type="button"
-                            onClick={(e) => handleDeleteSession(sess.id, e)}
-                            className="p-1.5 rounded-lg border text-red-500 hover:bg-red-500/10 transition cursor-pointer"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)'
-                            }}
-                            title="Delete this chat"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              {/* PAGINATION */}
-              {historyTotalPages > 1 && (
-                <div 
-                  className="pt-3 border-t flex items-center justify-between text-xs font-bold"
-                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
-                >
-                  <span>Page {historyPage} of {historyTotalPages}</span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      disabled={historyPage <= 1}
-                      onClick={() => fetchChatHistory(historyPage - 1, selectedCategoryFilter)}
-                      className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer shadow-xs"
-                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </button>
-
-                    {Array.from({ length: historyTotalPages }, (_, i) => i + 1).map((num) => (
-                      <button
-                        key={num}
-                        type="button"
-                        onClick={() => fetchChatHistory(num, selectedCategoryFilter)}
-                        className="w-7 h-7 rounded-lg text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-xs"
-                        style={historyPage === num ? {
-                          backgroundColor: 'var(--color-primary)',
-                          borderColor: 'var(--color-primary)',
-                          color: '#ffffff'
-                        } : {
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                      >
-                        {num}
-                      </button>
-                    ))}
-
-                    <button
-                      type="button"
-                      disabled={historyPage >= historyTotalPages}
-                      onClick={() => fetchChatHistory(historyPage + 1, selectedCategoryFilter)}
-                      className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer shadow-xs"
-                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* RECIPE PREFERENCES MODAL */}
       {showPreferences && (
@@ -12875,7 +12463,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* RECIPE DETAILS MODAL WITH + ADD TO GROCERY & GATED PLANNER ACTIONS */}
+      {/* RECIPE DETAILS MODAL */}
       {showRecipeDetailsModal && selectedRecipeForModal && (
         <div 
           onClick={() => setShowRecipeDetailsModal(false)}
@@ -13255,7 +12843,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOKEN PURCHASE MODAL */}
+      {/* TOKEN PURCHASE MODAL (SYNCHRONIZED WITH /admin/token-setting) */}
       <TokenPurchaseModal
         isOpen={isTokenPurchaseOpen}
         onClose={() => setIsTokenPurchaseOpen(false)}
@@ -13265,7 +12853,9 @@ export default function ChefChatPage() {
         packages={tokenPackages}
         onPurchased={(newBal) => {
           setTokenBalance(newBal);
-          showToast(`Tokens added! New balance: ${newBal} ${tokenSymbol}`);
+          window.dispatchEvent(new Event('zecratary_tokens_updated'));
+          window.dispatchEvent(new Event('zecratary_users_updated'));
+          showToast(`${t('tokensAddedSuccess', 'Tokens added!')} ${t('newBalance', 'New balance')}: ${newBal} ${tokenSymbol}`);
         }}
       />
     </div>
@@ -33939,7 +33529,7 @@ const DEFAULT_FALLBACK_PLANS: PlanCatalog[] = [
     name: 'Taster',
     monthlyPrice: 0,
     annualPrice: 0,
-    tokenLimit: 50000,
+    tokenLimit: 0,
     trialBadge: 'Free Tier',
     description: 'Free tier with starter AI token quota and standard culinary features.',
     descriptionMonthly: 'Free tier with starter AI token quota and standard culinary features.',
@@ -33957,9 +33547,9 @@ const DEFAULT_FALLBACK_PLANS: PlanCatalog[] = [
     id: 'preset_nutrition_pro',
     slug: 'nutrition-pro',
     name: 'Nutrition Pro',
-    monthlyPrice: 8.99,
-    annualPrice: 59.99,
-    tokenLimit: 1000000,
+    monthlyPrice: 0,
+    annualPrice: 0,
+    tokenLimit: 0,
     monthlyBadge: 'Popular',
     annualBadge: 'Save 44%',
     trialBadge: '7-Day Free Trial',
@@ -36248,6 +35838,7 @@ export default function DashboardPage() {
 
 ## File: `apps/web/src/app/transactions/page.tsx`
 ```typescript
+import { formatSystemTimestamp, getSystemTimezone } from '@/lib/timezone';
 // Generated / Updated by AI Collaborator
 'use client';
 
@@ -38570,7 +38161,8 @@ import {
   AlertCircle, Calendar, LogOut, Check,
   Zap, Sparkles, RefreshCw, Shield,
   Clock, Coins, Link2, Unlink, ArrowRight,
-  Wallet, Plus, Receipt, ArrowDownLeft, ArrowUpRight, Activity
+  Wallet, Plus, Receipt, ArrowDownLeft, ArrowUpRight, Activity,
+  Globe, Compass
 } from 'lucide-react';
 import { getCurrentUser, setCurrentUser, logoutUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -38584,7 +38176,9 @@ interface TokenSettingIdentity {
 
 interface ExtendedUser extends User {
   password?: string;
-
+  country?: string;
+  timezone?: string;
+  timeZone?: string;
   linkedProviders?: SocialProvider[];
   linked_providers?: SocialProvider[];
   provider?: string;
@@ -38599,13 +38193,85 @@ interface ExtendedUser extends User {
   wallet_balance?: number;
   planExpiryDate?: string;
   expiryDate?: string;
-
   [key: string]: any;
 }
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'AU$', JPY: '¥'
 };
+
+const COUNTRY_OPTIONS = [
+  { code: 'US', name: 'United States', flag: '🇺🇸' },
+  { code: 'GB', name: 'United Kingdom', flag: '🇬🇧' },
+  { code: 'CA', name: 'Canada', flag: '🇨🇦' },
+  { code: 'AU', name: 'Australia', flag: '🇦🇺' },
+  { code: 'TH', name: 'Thailand', flag: '🇹🇭' },
+  { code: 'SG', name: 'Singapore', flag: '🇸🇬' },
+  { code: 'JP', name: 'Japan', flag: '🇯🇵' },
+  { code: 'DE', name: 'Germany', flag: '🇩🇪' },
+  { code: 'FR', name: 'France', flag: '🇫🇷' },
+  { code: 'ES', name: 'Spain', flag: '🇪🇸' },
+  { code: 'IT', name: 'Italy', flag: '🇮🇹' },
+  { code: 'NL', name: 'Netherlands', flag: '🇳🇱' },
+  { code: 'CH', name: 'Switzerland', flag: '🇨🇭' },
+  { code: 'SE', name: 'Sweden', flag: '🇸🇪' },
+  { code: 'NO', name: 'Norway', flag: '🇳🇴' },
+  { code: 'DK', name: 'Denmark', flag: '🇩🇰' },
+  { code: 'IE', name: 'Ireland', flag: '🇮🇪' },
+  { code: 'NZ', name: 'New Zealand', flag: '🇳🇿' },
+  { code: 'IN', name: 'India', flag: '🇮🇳' },
+  { code: 'BR', name: 'Brazil', flag: '🇧🇷' },
+  { code: 'MX', name: 'Mexico', flag: '🇲🇽' },
+  { code: 'AE', name: 'United Arab Emirates', flag: '🇦🇪' },
+  { code: 'KR', name: 'South Korea', flag: '🇰🇷' },
+  { code: 'CN', name: 'China', flag: '🇨🇳' },
+  { code: 'ID', name: 'Indonesia', flag: '🇮🇩' },
+  { code: 'MY', name: 'Malaysia', flag: '🇲🇾' },
+  { code: 'PH', name: 'Philippines', flag: '🇵🇭' },
+  { code: 'VN', name: 'Vietnam', flag: '🇻🇳' },
+  { code: 'ZA', name: 'South Africa', flag: '🇿🇦' },
+  { code: 'AR', name: 'Argentina', flag: '🇦🇷' }
+];
+
+const TIMEZONE_OPTIONS = [
+  { value: 'UTC', label: 'UTC (Coordinated Universal Time)' },
+  { value: 'America/New_York', label: 'America/New_York (Eastern Time - US & Canada)' },
+  { value: 'America/Chicago', label: 'America/Chicago (Central Time - US & Canada)' },
+  { value: 'America/Denver', label: 'America/Denver (Mountain Time - US & Canada)' },
+  { value: 'America/Los_Angeles', label: 'America/Los_Angeles (Pacific Time - US & Canada)' },
+  { value: 'America/Anchorage', label: 'America/Anchorage (Alaska Time)' },
+  { value: 'Pacific/Honolulu', label: 'Pacific/Honolulu (Hawaii Time)' },
+  { value: 'America/Toronto', label: 'America/Toronto (Canada Eastern)' },
+  { value: 'America/Vancouver', label: 'America/Vancouver (Canada Pacific)' },
+  { value: 'America/Sao_Paulo', label: 'America/Sao_Paulo (São Paulo, Brazil)' },
+  { value: 'America/Argentina/Buenos_Aires', label: 'America/Buenos_Aires (Argentina)' },
+  { value: 'Europe/London', label: 'Europe/London (London, GMT/BST)' },
+  { value: 'Europe/Paris', label: 'Europe/Paris (Paris, CET/CEST)' },
+  { value: 'Europe/Berlin', label: 'Europe/Berlin (Berlin, CET/CEST)' },
+  { value: 'Europe/Rome', label: 'Europe/Rome (Rome)' },
+  { value: 'Europe/Madrid', label: 'Europe/Madrid (Madrid)' },
+  { value: 'Europe/Amsterdam', label: 'Europe/Amsterdam (Amsterdam)' },
+  { value: 'Europe/Zurich', label: 'Europe/Zurich (Zurich)' },
+  { value: 'Europe/Athens', label: 'Europe/Athens (Athens, EET/EEST)' },
+  { value: 'Africa/Cairo', label: 'Africa/Cairo (Cairo)' },
+  { value: 'Africa/Johannesburg', label: 'Africa/Johannesburg (South Africa)' },
+  { value: 'Asia/Dubai', label: 'Asia/Dubai (Gulf Standard Time)' },
+  { value: 'Asia/Kolkata', label: 'Asia/Kolkata (India Standard Time)' },
+  { value: 'Asia/Bangkok', label: 'Asia/Bangkok (Bangkok, ICT)' },
+  { value: 'Asia/Jakarta', label: 'Asia/Jakarta (Jakarta, WIB)' },
+  { value: 'Asia/Singapore', label: 'Asia/Singapore (Singapore Standard Time)' },
+  { value: 'Asia/Hong_Kong', label: 'Asia/Hong_Kong (Hong Kong Time)' },
+  { value: 'Asia/Shanghai', label: 'Asia/Shanghai (China Standard Time)' },
+  { value: 'Asia/Taipei', label: 'Asia/Taipei (Taipei Time)' },
+  { value: 'Asia/Seoul', label: 'Asia/Seoul (Korea Standard Time)' },
+  { value: 'Asia/Tokyo', label: 'Asia/Tokyo (Japan Standard Time)' },
+  { value: 'Australia/Perth', label: 'Australia/Perth (Western Australia)' },
+  { value: 'Australia/Adelaide', label: 'Australia/Adelaide (South Australia)' },
+  { value: 'Australia/Brisbane', label: 'Australia/Brisbane (Queensland)' },
+  { value: 'Australia/Sydney', label: 'Australia/Sydney (Sydney, AEST/AEDT)' },
+  { value: 'Australia/Melbourne', label: 'Australia/Melbourne (Melbourne)' },
+  { value: 'Pacific/Auckland', label: 'Pacific/Auckland (New Zealand Time)' }
+];
 
 const sanitizeSinglePlan = (planInput?: string | string[]): string => {
   if (!planInput) return 'taster';
@@ -38728,6 +38394,10 @@ export default function ProfilePage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [country, setCountry] = useState('US');
+  const [timezone, setTimezone] = useState('UTC');
+  const [currentTimePreview, setCurrentTimePreview] = useState('');
+
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [processingSocial, setProcessingSocial] = useState<SocialProvider | null>(null);
@@ -38746,6 +38416,49 @@ export default function ProfilePage() {
   // Guards
   const isFetchingProfileRef = useRef(false);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Live Time Zone Clock Formatter
+  useEffect(() => {
+    const updateClock = () => {
+      try {
+        const formatter = new Intl.DateTimeFormat(undefined, {
+          timeZone: timezone || 'UTC',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: true,
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+          timeZoneName: 'short'
+        });
+        setCurrentTimePreview(formatter.format(new Date()));
+      } catch (_) {
+        setCurrentTimePreview(new Date().toUTCString());
+      }
+    };
+
+    updateClock();
+    const timer = setInterval(updateClock, 1000);
+    return () => clearInterval(timer);
+  }, [timezone]);
+
+  // Format date helper respecting configured timezone
+  const formatTzDate = useCallback((dInput?: string | Date | null) => {
+    if (!dInput) return '-';
+    try {
+      const d = typeof dInput === 'string' ? new Date(dInput) : dInput;
+      if (isNaN(d.getTime())) return String(dInput);
+      return new Intl.DateTimeFormat(undefined, {
+        timeZone: timezone || 'UTC',
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      }).format(d);
+    } catch (_) {
+      return new Date(dInput).toLocaleDateString();
+    }
+  }, [timezone]);
 
   // 1. Fetch Token High-Level Balance & Stats
   const fetchTokenSummary = useCallback(async () => {
@@ -38883,10 +38596,27 @@ export default function ProfilePage() {
         freshUser.authProvider = activeSocial;
       }
 
+      // Restore country and timezone preference
+      const resolvedTz = freshUser.timezone || freshUser.timeZone || 
+        (typeof window !== 'undefined' ? localStorage.getItem('zecratary_timezone') : null) || 
+        (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
+      const resolvedCountry = freshUser.country || 
+        (typeof window !== 'undefined' ? localStorage.getItem('zecratary_country') : null) || 'US';
+
+      freshUser.timezone = resolvedTz;
+      freshUser.country = resolvedCountry;
+
       currentUserRef.current = freshUser;
       setUserState(freshUser);
       setName(freshUser.name || '');
       setEmail(freshUser.email || '');
+      setCountry(resolvedCountry);
+      setTimezone(resolvedTz);
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zecratary_timezone', resolvedTz);
+        localStorage.setItem('zecratary_country', resolvedCountry);
+      }
 
       fetchTokenSummary();
       fetchWalletSummary();
@@ -38922,7 +38652,19 @@ export default function ProfilePage() {
     };
   }, [reloadActiveUser, fetchTokenSummary, fetchWalletSummary]);
 
-  // Update Profile Action
+  // Auto-Detect Browser Time Zone
+  const handleAutoDetectTimezone = () => {
+    try {
+      const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (detected) {
+        setTimezone(detected);
+        setSuccessMsg(t('timezoneAutoDetected', `Auto-detected system timezone: ${detected}`));
+        setTimeout(() => setSuccessMsg(''), 3000);
+      }
+    } catch (_) {}
+  };
+
+  // Update Profile Action (Accessible <div>, No Form Autofill)
   const handleUpdateProfile = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
     if (e && 'preventDefault' in e) e.preventDefault();
     setError('');
@@ -38942,6 +38684,9 @@ export default function ProfilePage() {
       ...user,
       name: name.trim(),
       email: email.trim().toLowerCase(),
+      country: country.trim(),
+      timezone: timezone.trim(),
+      timeZone: timezone.trim(),
       password: password ? password : (user as any)?.password,
     };
 
@@ -38951,12 +38696,23 @@ export default function ProfilePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedUser)
       });
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('zecratary_timezone', timezone.trim());
+        localStorage.setItem('zecratary_country', country.trim());
+        localStorage.setItem('zecratary_current_user', JSON.stringify(updatedUser));
+        localStorage.setItem('zecratary_user', JSON.stringify(updatedUser));
+      }
+
       setCurrentUser(updatedUser);
       currentUserRef.current = updatedUser;
       setUserState(updatedUser);
       setPassword('');
       setConfirmPassword('');
-      setSuccessMsg(t('profileSavedSuccess', 'Profile changes saved successfully!'));
+      setSuccessMsg(t('profileSavedSuccess', 'Profile changes and regional settings saved successfully!'));
+
+      // Emit global timezone and user update events
+      window.dispatchEvent(new CustomEvent('zecratary_timezone_updated', { detail: { timezone, country } }));
       window.dispatchEvent(new Event('zecratary_users_updated'));
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err: any) {
@@ -39056,33 +38812,11 @@ export default function ProfilePage() {
             {t('accountProfileTitle', 'Account Profile')}
           </h1>
           <p className="text-xs opacity-70">
-            {t('accountProfileSubtitle', 'Manage your credentials, active AI token quotas, store wallet, and linked accounts')}
+            {t('accountProfileSubtitle', 'Manage your credentials, country, time zone, active AI tokens, and store wallet')}
           </p>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <Link 
-            href="/transactions" 
-            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs bg-[var(--color-card)] border-[var(--color-border)] hover:border-[var(--color-primary)]"
-          >
-            <Receipt className="h-3.5 w-3.5 text-[var(--color-primary)]" /> 
-            <span>{t('viewTransactions', 'Transactions')}</span>
-          </Link>
-
-          {user.role === 'admin' && (
-            <>
-              <Link href="/admin/token-setting" className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs bg-[var(--color-card)] border-[var(--color-border)]">
-                <Coins className="h-3.5 w-3.5 text-amber-500" /> {t('tokenSettings', 'Token Settings')}
-              </Link>
-              <Link href="/admin/wallet-settings" className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs bg-[var(--color-card)] border-[var(--color-border)]">
-                <Wallet className="h-3.5 w-3.5 text-[var(--color-primary)]" /> {t('walletSettings', 'Wallet Settings')}
-              </Link>
-              <Link href="/admin" className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs bg-[var(--color-card)] border-[var(--color-border)]">
-                <Shield className="h-3.5 w-3.5 text-emerald-400" /> {t('adminAccess', 'Admin Access')}
-              </Link>
-            </>
-          )}
-        </div>
+        
       </div>
 
       {/* Notifications */}
@@ -39100,187 +38834,13 @@ export default function ProfilePage() {
         </div>
       )}
 
-      {/* EXECUTIVE SUMMARY KPI BANNER */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 animate-in fade-in">
-        {/* KPI 1: AI Token Spendable Balance */}
-        <div 
-          className="border rounded-2xl p-4 shadow-lg space-y-2 flex flex-col justify-between transition-all duration-200 hover:shadow-xl"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500">
-                <Coins className="h-4 w-4" />
-              </div>
-              <span className="text-xs font-bold opacity-80">{tokenIdentity.tokenName} {t('balanceLabel', 'Balance')}</span>
-            </div>
-            <Link 
-              href="/transactions?tab=tokens" 
-              className="text-[11px] font-bold text-amber-500 hover:underline flex items-center gap-0.5"
-            >
-              <span>{t('ledgerShort', 'Ledger')}</span>
-              <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-          
-          <div>
-            <div className="flex items-baseline gap-1.5" suppressHydrationWarning>
-              <span className="text-2xl sm:text-3xl font-black font-mono text-emerald-400">
-                {ownerTokenBalance.toLocaleString()}
-              </span>
-              <span className="text-sm font-bold text-amber-500 font-mono">
-                {tokenIdentity.tokenSymbol}
-              </span>
-            </div>
-            <p className="text-[10px] opacity-60 mt-0.5">
-              {t('spendableTokensSub', 'Available for AI Chat & recipe parsing')}
-            </p>
-          </div>
+      
+      
 
-          <div className="flex items-center gap-2 pt-1 border-t border-[var(--color-border)] text-[10px] font-mono">
-            <span className="inline-flex items-center gap-1 text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md border border-red-500/20">
-              <ArrowDownLeft className="h-3 w-3" /> -{tokenStats.totalDeducted.toLocaleString()}
-            </span>
-            <span className="inline-flex items-center gap-1 text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
-              <ArrowUpRight className="h-3 w-3" /> +{tokenStats.totalGranted.toLocaleString()}
-            </span>
-          </div>
-        </div>
-
-        {/* KPI 2: Store Wallet Balance */}
-        <div 
-          className="border rounded-2xl p-4 shadow-lg space-y-2 flex flex-col justify-between transition-all duration-200 hover:shadow-xl"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-primary/10 border border-primary/20 text-[var(--color-primary)]">
-                <Wallet className="h-4 w-4" />
-              </div>
-              <span className="text-xs font-bold opacity-80">{t('storeCreditLabel', 'Store Credit')}</span>
-            </div>
-            <Link 
-              href="/wallet" 
-              className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-0.5"
-            >
-              <Plus className="h-3 w-3" />
-              <span>{t('topUp', 'Top Up')}</span>
-            </Link>
-          </div>
-
-          <div>
-            <div className="flex items-baseline gap-1.5" suppressHydrationWarning>
-              <span className="text-2xl sm:text-3xl font-black font-mono text-[var(--color-primary)]">
-                {walletSymbol}{ownerWalletBalance.toFixed(2)}
-              </span>
-              <span className="text-xs font-bold opacity-60 font-mono">
-                {walletCurrency}
-              </span>
-            </div>
-            <p className="text-[10px] opacity-60 mt-0.5">
-              {t('storeCreditSub', 'Spendable for token bundles & plans')}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 pt-1 border-t border-[var(--color-border)] text-[10px] font-mono">
-            <span className="inline-flex items-center gap-1 text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
-              <ArrowUpRight className="h-3 w-3" /> +{walletSymbol}{walletStats.totalDeposited.toFixed(2)}
-            </span>
-            <span className="inline-flex items-center gap-1 text-red-400 bg-red-500/10 px-2 py-0.5 rounded-md border border-red-500/20">
-              <ArrowDownLeft className="h-3 w-3" /> -{walletSymbol}{walletStats.totalSpent.toFixed(2)}
-            </span>
-          </div>
-        </div>
-
-        {/* KPI 3: Membership Plan & Health */}
-        <div 
-          className="border rounded-2xl p-4 shadow-lg space-y-2 flex flex-col justify-between transition-all duration-200 hover:shadow-xl"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
-                {isFreePlan ? <Sparkles className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
-              </div>
-              <span className="text-xs font-bold opacity-80">{t('membershipTierLabel', 'Membership Tier')}</span>
-            </div>
-            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border uppercase ${
-              isFreePlan ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' : 'bg-primary/10 text-primary border-primary/30'
-            }`}>
-              {t('activeStatus', 'Active')}
-            </span>
-          </div>
-
-          <div>
-            <div className="text-2xl sm:text-3xl font-black tracking-tight uppercase">
-              {cleanPlanSlug}
-            </div>
-            <p className="text-[10px] opacity-60 mt-0.5">
-              {user.role === 'admin' ? t('adminRoleLabel', 'Administrator Account') : t('standardUserLabel', 'Standard User Plan')}
-            </p>
-          </div>
-
-          <div className="flex items-center justify-between pt-1 border-t border-[var(--color-border)] text-[10px]">
-            <div className="flex items-center gap-1 opacity-70">
-              <Calendar className="h-3 w-3 text-[var(--color-primary)]" />
-              <span suppressHydrationWarning>{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : 'Active'}</span>
-            </div>
-            {activeExpiryDate ? (
-              <span className="text-emerald-400 font-semibold" suppressHydrationWarning>
-                Exp: {new Date(activeExpiryDate).toLocaleDateString()}
-              </span>
-            ) : (
-              <span className="text-emerald-400 font-semibold">Lifetime Access</span>
-            )}
-          </div>
-        </div>
-
-        {/* KPI 4: Total Activity & Ledger Events */}
-        <div 
-          className="border rounded-2xl p-4 shadow-lg space-y-2 flex flex-col justify-between transition-all duration-200 hover:shadow-xl"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="p-2 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400">
-                <Activity className="h-4 w-4" />
-              </div>
-              <span className="text-xs font-bold opacity-80">{t('totalActivityLabel', 'Total Activity')}</span>
-            </div>
-            <Link 
-              href="/transactions" 
-              className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-0.5"
-            >
-              <span>{t('viewAll', 'View All')}</span>
-              <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-
-          <div>
-            <div className="flex items-baseline gap-1.5" suppressHydrationWarning>
-              <span className="text-2xl sm:text-3xl font-black font-mono">
-                {(tokenStats.totalEvents + walletStats.totalEvents).toLocaleString()}
-              </span>
-              <span className="text-xs font-bold opacity-60">
-                {t('totalEventsUnit', 'records')}
-              </span>
-            </div>
-            <p className="text-[10px] opacity-60 mt-0.5">
-              {t('totalActivitySub', 'Combined token debits & store ledger')}
-            </p>
-          </div>
-
-          <div className="flex items-center justify-between pt-1 border-t border-[var(--color-border)] text-[10px] font-mono opacity-80">
-            <span className="text-amber-500">{tokenStats.totalEvents} {tokenIdentity.tokenName}</span>
-            <span className="text-[var(--color-primary)]">{walletStats.totalEvents} Wallet</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Profile Overview (Credentials, Token & Wallet Summary, Socials) */}
+      {/* Profile Overview (Credentials, Regional Settings, Asset Summary, Socials) */}
       <div className="space-y-6 animate-in fade-in">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left: Profile Credentials Container (No Form) */}
+          {/* Left: Profile Credentials & Regional Container (No Form) */}
           <div 
             className="lg:col-span-7 border rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl flex flex-col justify-between"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -39304,7 +38864,7 @@ export default function ProfilePage() {
               <div className="text-left sm:text-right text-[11px] space-y-1 opacity-80">
                 <div className="flex sm:justify-end items-center gap-1.5">
                   <Calendar className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                  <span suppressHydrationWarning>{t('joinedPrefix', 'Joined: ')} {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : t('activeStatus', 'Active')}</span>
+                  <span suppressHydrationWarning>{t('joinedPrefix', 'Joined: ')} {formatTzDate(user.createdAt)}</span>
                 </div>
                 <div className="flex sm:justify-end items-center gap-1.5 pt-0.5">
                   <span className="font-semibold">{t('activeMembershipLabel', 'Plan:')}</span>
@@ -39318,13 +38878,14 @@ export default function ProfilePage() {
                 {activeExpiryDate && (
                   <div className="flex sm:justify-end items-center gap-1 text-[10px] text-emerald-400 font-semibold pt-0.5">
                     <Clock className="h-3 w-3" />
-                    <span suppressHydrationWarning>Expires: {new Date(activeExpiryDate).toLocaleDateString()}</span>
+                    <span suppressHydrationWarning>Expires: {formatTzDate(activeExpiryDate)}</span>
                   </div>
                 )}
               </div>
             </div>
 
             <div className="space-y-4 text-xs">
+              {/* Full Name & Email */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-bold mb-1.5 opacity-80">{t('fullNameLabel', 'Full Name *')}</label>
@@ -39360,6 +38921,74 @@ export default function ProfilePage() {
                 </div>
               </div>
 
+              {/* Country & Time Zone Fields */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block font-bold opacity-80 flex items-center gap-1.5">
+                      <Globe className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+                      <span>{t('countryLabel', 'Country / Region')}</span>
+                    </label>
+                  </div>
+                  <select
+                    value={country}
+                    onChange={(e) => setCountry(e.target.value)}
+                    className="w-full border rounded-xl px-3.5 py-2.5 text-sm font-bold outline-none bg-[var(--color-inner-dark)] border-[var(--color-border)] cursor-pointer"
+                  >
+                    {COUNTRY_OPTIONS.map((c) => (
+                      <option key={c.code} value={c.code} className="bg-[var(--color-card)] text-[var(--color-text)]">
+                        {c.flag} {c.name} ({c.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block font-bold opacity-80 flex items-center gap-1.5">
+                      <Clock className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+                      <span>{t('timeZoneLabel', 'System Time Zone')}</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleAutoDetectTimezone}
+                      className="text-[10px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <Compass className="h-3 w-3" />
+                      <span>{t('autoDetect', 'Auto-detect')}</span>
+                    </button>
+                  </div>
+                  <select
+                    value={timezone}
+                    onChange={(e) => setTimezone(e.target.value)}
+                    className="w-full border rounded-xl px-3.5 py-2.5 text-sm font-bold outline-none bg-[var(--color-inner-dark)] border-[var(--color-border)] cursor-pointer"
+                  >
+                    {TIMEZONE_OPTIONS.map((tz) => (
+                      <option key={tz.value} value={tz.value} className="bg-[var(--color-card)] text-[var(--color-text)]">
+                        {tz.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Dynamic Live Time Preview Banner */}
+              <div className="p-3 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-inner bg-[var(--color-inner-dark)] border-[var(--color-border)]">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-500">
+                    <Clock className="h-3.5 w-3.5" />
+                  </div>
+                  <div className="text-[11px]">
+                    <span className="opacity-70 font-medium block sm:inline">{t('systemTimePreview', 'System Time Preview')}: </span>
+                    <span className="font-mono font-bold text-emerald-400" suppressHydrationWarning>{currentTimePreview}</span>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md border opacity-80 self-start sm:self-auto bg-primary/10 border-primary/20 text-[var(--color-primary)]">
+                  {timezone}
+                </span>
+              </div>
+
+              {/* Password Fields */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-bold mb-1.5 opacity-80">{t('newPasswordLabel', 'New Password')}</label>
@@ -39397,6 +39026,7 @@ export default function ProfilePage() {
                 </div>
               </div>
 
+              {/* Action Buttons */}
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-[var(--color-border)]">
                 <div className="flex items-center gap-2 w-full sm:w-auto">
                   <button
@@ -39422,7 +39052,7 @@ export default function ProfilePage() {
                   className="w-full sm:w-auto px-6 py-2.5 text-white font-extrabold rounded-xl shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
-                  <Check className="h-4 w-4" /> {t('saveProfileBtn', 'Save Profile')}
+                  <Check className="h-4 w-4" /> {t('saveProfileBtn', 'Save Profile & Settings')}
                 </button>
               </div>
             </div>
@@ -42710,182 +42340,381 @@ export async function DELETE(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/chef/history/route.ts`
 ```typescript
+// Generated / Updated by AI Collaborator
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-async function ensureChefChatTables() {
+// Polymorphic Database Query Adapter (Strictly typed without TS2774 function conditional)
+async function queryDb(text: string, params: any[] = []): Promise<{ rows: any[] }> {
   try {
-    await query(`
+    const res: any = await (query as any)(text, params);
+    if (Array.isArray(res)) {
+      return { rows: res };
+    }
+    if (res && Array.isArray(res.rows)) {
+      return { rows: res.rows };
+    }
+    return { rows: [] };
+  } catch (err) {
+    console.error('[chef/history] queryDb error:', err);
+    return { rows: [] };
+  }
+}
+
+let tablesInitialized = false;
+
+async function ensureHistoryTables(): Promise<void> {
+  if (tablesInitialized) return;
+  try {
+    await queryDb(`
       CREATE TABLE IF NOT EXISTS chef_chat_categories (
-        id VARCHAR(64) PRIMARY KEY,
-        user_id VARCHAR(128) NOT NULL,
-        name VARCHAR(128) NOT NULL,
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        icon VARCHAR(64) DEFAULT 'Utensils',
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+    `);
 
+    await queryDb(`
       CREATE TABLE IF NOT EXISTS chef_chat_sessions (
-        id VARCHAR(64) PRIMARY KEY,
-        user_id VARCHAR(128) NOT NULL,
-        category_id VARCHAR(64) REFERENCES chef_chat_categories(id) ON DELETE SET NULL,
-        title VARCHAR(255) NOT NULL,
-        messages JSONB NOT NULL DEFAULT '[]'::jsonb,
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        category_id VARCHAR(255),
+        title VARCHAR(255) DEFAULT 'New Culinary Consultation',
+        messages JSONB DEFAULT '[]'::jsonb,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
-
-      CREATE INDEX IF NOT EXISTS idx_chef_sessions_user ON chef_chat_sessions(user_id, updated_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_chef_categories_user ON chef_chat_categories(user_id, created_at ASC);
     `);
+
+    await queryDb(`
+      ALTER TABLE chef_chat_sessions 
+      ADD COLUMN IF NOT EXISTS category_id VARCHAR(255);
+    `);
+
+    await queryDb(`
+      ALTER TABLE chef_chat_sessions 
+      ADD COLUMN IF NOT EXISTS title VARCHAR(255) DEFAULT 'New Culinary Consultation';
+    `);
+
+    tablesInitialized = true;
   } catch (err) {
-    console.error('Error initializing chef chat tables:', err);
+    console.warn('[chef/history] Table initialization warning:', err);
   }
 }
 
 export async function GET(req: NextRequest) {
   try {
-    await ensureChefChatTables();
+    await ensureHistoryTables();
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId') || 'guest';
-    const categoryId = searchParams.get('categoryId') || 'all';
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-    const limit = 10;
-    const offset = (page - 1) * limit;
+    const userId = (searchParams.get('userId') || searchParams.get('email') || '').trim();
 
-    // Fetch categories
-    const categories = await query(
-      `SELECT * FROM chef_chat_categories WHERE user_id = $1 ORDER BY created_at ASC`,
-      [userId]
-    );
-
-    // Fetch sessions matching filter
-    let sessionQuery = `
-      SELECT s.id, s.title, s.category_id, s.created_at, s.updated_at,
-             jsonb_array_length(s.messages) as message_count,
-             c.name as category_name
-      FROM chef_chat_sessions s
-      LEFT JOIN chef_chat_categories c ON s.category_id = c.id
-      WHERE s.user_id = $1
-    `;
-    const params: any[] = [userId];
-
-    if (categoryId !== 'all') {
-      if (categoryId === 'uncategorized') {
-        sessionQuery += ` AND s.category_id IS NULL`;
-      } else {
-        params.push(categoryId);
-        sessionQuery += ` AND s.category_id = $${params.length}`;
-      }
+    if (!userId) {
+      return NextResponse.json({
+        success: true,
+        sessions: [],
+        categories: [],
+        pagination: { page: 1, limit: 20, total: 0, totalPages: 0 }
+      });
     }
 
-    // Count total
-    const countQuery = `SELECT COUNT(*) as total FROM (${sessionQuery}) as filtered`;
-    const countRes = await query(countQuery, params);
-    const total = parseInt(countRes[0]?.total || '0');
-    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const categoryId = searchParams.get('categoryId') || 'all';
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const limit = Math.max(1, Math.min(100, parseInt(searchParams.get('limit') || '20', 10)));
+    const offset = (page - 1) * limit;
+    const search = (searchParams.get('search') || '').trim();
 
-    // Paginated results
-    sessionQuery += ` ORDER BY s.updated_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(limit, offset);
+    // 1. Fetch categories
+    const categoriesRes = await queryDb(
+      `SELECT id, user_id, name, icon, created_at 
+       FROM chef_chat_categories 
+       WHERE user_id = $1 
+       ORDER BY name ASC`,
+      [userId]
+    );
+    const categories = categoriesRes.rows || [];
 
-    const sessions = await query(sessionQuery, params);
+    // 2. Query sessions
+    const whereClauses: string[] = ['user_id = $1'];
+    const queryParams: any[] = [userId];
+
+    if (categoryId && categoryId !== 'all') {
+      queryParams.push(categoryId);
+      whereClauses.push(`category_id = $${queryParams.length}`);
+    }
+
+    if (search) {
+      queryParams.push(`%${search}%`);
+      whereClauses.push(`title ILIKE $${queryParams.length}`);
+    }
+
+    const whereStr = whereClauses.join(' AND ');
+
+    const countRes = await queryDb(
+      `SELECT COUNT(*) as total FROM chef_chat_sessions WHERE ${whereStr}`,
+      queryParams
+    );
+    const countRow = (countRes.rows || [])[0] || {};
+    const total = Number(countRow.total ?? countRow.count ?? 0);
+
+    queryParams.push(limit);
+    const limitParamIdx = queryParams.length;
+    queryParams.push(offset);
+    const offsetParamIdx = queryParams.length;
+
+    const sessionsRes = await queryDb(
+      `SELECT id, user_id, category_id, title, messages, created_at, updated_at 
+       FROM chef_chat_sessions 
+       WHERE ${whereStr} 
+       ORDER BY updated_at DESC 
+       LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}`,
+      queryParams
+    );
+
+    const sessions = (sessionsRes.rows || []).map((session: any) => {
+      let parsedMessages: any[] = [];
+      try {
+        if (typeof session.messages === 'string') {
+          parsedMessages = JSON.parse(session.messages);
+        } else if (Array.isArray(session.messages)) {
+          parsedMessages = session.messages;
+        } else if (session.messages) {
+          parsedMessages = [session.messages];
+        }
+      } catch (_) {
+        parsedMessages = [];
+      }
+
+      return {
+        id: session.id,
+        userId: session.user_id,
+        categoryId: session.category_id,
+        title: session.title || 'Culinary Consultation',
+        messages: parsedMessages,
+        messageCount: parsedMessages.length,
+        createdAt: session.created_at,
+        updatedAt: session.updated_at
+      };
+    });
 
     return NextResponse.json({
       success: true,
       sessions,
       categories,
-      page,
-      limit,
-      total,
-      totalPages
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
     });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    console.error('[chef/history] GET error:', err);
+    return NextResponse.json(
+      { success: false, error: err.message || 'Internal server error' },
+      { status: 500 }
+    );
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureChefChatTables();
+    await ensureHistoryTables();
     const body = await req.json();
-    const { action, userId = 'guest' } = body;
+    const { action, userId, sessionId, categoryId, title, name, icon, messages } = body;
 
-    if (action === 'create_category') {
-      const name = (body.name || '').trim();
-      if (!name) {
-        return NextResponse.json({ success: false, error: 'Category name is required' }, { status: 400 });
-      }
-      const catId = 'cat_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
-      await query(
-        `INSERT INTO chef_chat_categories (id, user_id, name) VALUES ($1, $2, $3)`,
-        [catId, userId, name]
-      );
-      return NextResponse.json({ success: true, categoryId: catId, name });
+    const targetUserId = (userId || body.user_id || '').trim();
+    if (!targetUserId) {
+      return NextResponse.json({ success: false, error: 'User ID is required' }, { status: 400 });
     }
 
-    if (action === 'save_session') {
-      const { id, title = 'New Conversation', messages = [], categoryId = null } = body;
-      if (!id) {
-        return NextResponse.json({ success: false, error: 'Session ID is required' }, { status: 400 });
-      }
-
-      await query(
-        `INSERT INTO chef_chat_sessions (id, user_id, category_id, title, messages, updated_at)
-         VALUES ($1, $2, $3, $4, $5::jsonb, NOW())
-         ON CONFLICT (id) DO UPDATE SET
-           title = EXCLUDED.title,
-           category_id = COALESCE(EXCLUDED.category_id, chef_chat_sessions.category_id),
-           messages = EXCLUDED.messages,
-           updated_at = NOW()`,
-        [id, userId, categoryId || null, title, JSON.stringify(messages)]
+    if (action === 'create_category' || (!sessionId && name)) {
+      const catId = categoryId || 'cat_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      await queryDb(
+        `INSERT INTO chef_chat_categories (id, user_id, name, icon, created_at)
+         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, icon = EXCLUDED.icon`,
+        [catId, targetUserId, name || 'Custom Category', icon || 'Utensils']
       );
-
-      return NextResponse.json({ success: true, sessionId: id });
+      return NextResponse.json({ success: true, category: { id: catId, name, icon } });
     }
 
-    if (action === 'set_session_category') {
-      const { sessionId, categoryId } = body;
-      await query(
-        `UPDATE chef_chat_sessions SET category_id = $1, updated_at = NOW() WHERE id = $2 AND user_id = $3`,
-        [categoryId || null, sessionId, userId]
-      );
-      return NextResponse.json({ success: true });
-    }
+    const targetSessionId = sessionId || ('sess_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
+    const safeMessages = JSON.stringify(Array.isArray(messages) ? messages : []);
+    const sessionTitle = title || 'Culinary Consultation';
 
-    return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 });
+    await queryDb(
+      `INSERT INTO chef_chat_sessions (id, user_id, category_id, title, messages, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT (id) DO UPDATE SET 
+         title = COALESCE(EXCLUDED.title, chef_chat_sessions.title),
+         category_id = COALESCE(EXCLUDED.category_id, chef_chat_sessions.category_id),
+         messages = EXCLUDED.messages,
+         updated_at = CURRENT_TIMESTAMP`,
+      [targetSessionId, targetUserId, categoryId || null, sessionTitle, safeMessages]
+    );
+
+    return NextResponse.json({
+      success: true,
+      sessionId: targetSessionId,
+      title: sessionTitle
+    });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    console.error('[chef/history] POST error:', err);
+    return NextResponse.json({ success: false, error: err.message || 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    await ensureHistoryTables();
+    const body = await req.json();
+    const { sessionId, title, categoryId, userId } = body;
+
+    if (!sessionId) {
+      return NextResponse.json({ success: false, error: 'Session ID is required' }, { status: 400 });
+    }
+
+    const updates: string[] = ['updated_at = CURRENT_TIMESTAMP'];
+    const params: any[] = [sessionId];
+
+    if (title !== undefined) {
+      params.push(title);
+      updates.push(`title = $${params.length}`);
+    }
+
+    if (categoryId !== undefined) {
+      params.push(categoryId === 'all' || categoryId === '' ? null : categoryId);
+      updates.push(`category_id = $${params.length}`);
+    }
+
+    if (userId) {
+      params.push(userId);
+      await queryDb(
+        `UPDATE chef_chat_sessions SET ${updates.join(', ')} WHERE id = $1 AND user_id = $${params.length}`,
+        params
+      );
+    } else {
+      await queryDb(
+        `UPDATE chef_chat_sessions SET ${updates.join(', ')} WHERE id = $1`,
+        params
+      );
+    }
+
+    return NextResponse.json({ success: true, sessionId });
+  } catch (err: any) {
+    console.error('[chef/history] PATCH error:', err);
+    return NextResponse.json({ success: false, error: err.message || 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function DELETE(req: NextRequest) {
   try {
-    await ensureChefChatTables();
+    await ensureHistoryTables();
     const { searchParams } = new URL(req.url);
-    const action = searchParams.get('action');
-    const userId = searchParams.get('userId') || 'guest';
+    const sessionId = searchParams.get('sessionId') || searchParams.get('id');
+    const userId = searchParams.get('userId');
+    const clearAll = searchParams.get('clearAll') === 'true';
 
-    if (action === 'delete_session') {
-      const sessionId = searchParams.get('sessionId');
-      if (!sessionId) return NextResponse.json({ error: 'Session ID required' }, { status: 400 });
-
-      await query(`DELETE FROM chef_chat_sessions WHERE id = $1 AND user_id = $2`, [sessionId, userId]);
-      return NextResponse.json({ success: true, message: 'Chat deleted' });
+    if (clearAll && userId) {
+      await queryDb(`DELETE FROM chef_chat_sessions WHERE user_id = $1`, [userId]);
+      return NextResponse.json({ success: true, message: 'All sessions deleted' });
     }
 
-    if (action === 'delete_category') {
-      const categoryId = searchParams.get('categoryId');
-      if (!categoryId) return NextResponse.json({ error: 'Category ID required' }, { status: 400 });
-
-      await query(`UPDATE chef_chat_sessions SET category_id = NULL WHERE category_id = $1`, [categoryId]);
-      await query(`DELETE FROM chef_chat_categories WHERE id = $1 AND user_id = $2`, [categoryId, userId]);
-      return NextResponse.json({ success: true, message: 'Category deleted' });
+    if (!sessionId) {
+      return NextResponse.json({ success: false, error: 'Session ID is required' }, { status: 400 });
     }
 
-    return NextResponse.json({ success: false, error: 'Invalid delete action' }, { status: 400 });
+    if (userId) {
+      await queryDb(`DELETE FROM chef_chat_sessions WHERE id = $1 AND user_id = $2`, [sessionId, userId]);
+    } else {
+      await queryDb(`DELETE FROM chef_chat_sessions WHERE id = $1`, [sessionId]);
+    }
+
+    return NextResponse.json({ success: true, sessionId });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    console.error('[chef/history] DELETE error:', err);
+    return NextResponse.json({ success: false, error: err.message || 'Internal server error' }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/chef/session/route.ts`
+```typescript
+// Generated / Updated by AI Collaborator
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+async function queryDb(text: string, params: any[] = []): Promise<{ rows: any[] }> {
+  try {
+    const res: any = await (query as any)(text, params);
+    if (Array.isArray(res)) return { rows: res };
+    if (res && Array.isArray(res.rows)) return { rows: res.rows };
+    return { rows: [] };
+  } catch (err) {
+    console.error('[chef/session] queryDb error:', err);
+    return { rows: [] };
+  }
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const sessionId = searchParams.get('sessionId') || searchParams.get('id');
+    const userId = searchParams.get('userId');
+
+    if (!sessionId) {
+      return NextResponse.json({ success: false, error: 'Session ID is required' }, { status: 400 });
+    }
+
+    const params: any[] = [sessionId];
+    let sql = `SELECT id, user_id, category_id, title, messages, created_at, updated_at FROM chef_chat_sessions WHERE id = $1`;
+    if (userId) {
+      params.push(userId);
+      sql += ` AND user_id = $2`;
+    }
+
+    const res = await queryDb(sql, params);
+    const session = (res.rows || [])[0];
+
+    if (!session) {
+      return NextResponse.json({ success: false, error: 'Session not found' }, { status: 404 });
+    }
+
+    let parsedMessages: any[] = [];
+    try {
+      if (typeof session.messages === 'string') {
+        parsedMessages = JSON.parse(session.messages);
+      } else if (Array.isArray(session.messages)) {
+        parsedMessages = session.messages;
+      } else if (session.messages) {
+        parsedMessages = [session.messages];
+      }
+    } catch (_) {
+      parsedMessages = [];
+    }
+
+    return NextResponse.json({
+      success: true,
+      session: {
+        id: session.id,
+        userId: session.user_id,
+        categoryId: session.category_id,
+        title: session.title || 'Culinary Consultation',
+        messages: parsedMessages,
+        createdAt: session.created_at,
+        updatedAt: session.updated_at
+      }
+    });
+  } catch (err: any) {
+    console.error('[chef/session] GET error:', err);
+    return NextResponse.json({ success: false, error: err.message || 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -50991,7 +50820,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       recipe: parsedRecipe,
-      consumedSystemTokens: importCost,
+      consumedSystemTokens: (tokenSettings.isEnabled && importCost > 0) ? (deduction.deducted ?? importCost) : 0,
       tokenSymbol: tokenSettings.tokenSymbol,
       remainingBalance: deduction.currentBalance,
       activeModel,
@@ -55423,10 +55252,11 @@ export default function ImportPage() {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Token & AI Settings Telemetry
+  // Token & AI Settings Telemetry (Synchronized with /admin/token-setting)
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
+  const [isTokenEnabled, setIsTokenEnabled] = useState<boolean>(true);
   const [tokenCosts, setTokenCosts] = useState<{ url: number; text: number; photo: number }>({
     url: 2,
     text: 1,
@@ -55454,14 +55284,17 @@ export default function ImportPage() {
   const fetchTokenAndAiTelemetry = useCallback(async () => {
     try {
       const user = getCurrentUser();
-      const queryParam = user?.id ? `?userId=${user.id}` : user?.email ? `?email=${encodeURIComponent(user.email)}` : '';
-      const res = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
+      const queryParam = user?.id ? `?userId=${encodeURIComponent(user.id)}` : user?.email ? `?email=${encodeURIComponent(user.email)}` : '';
+      
+      // 1. Fetch user balance & AI telemetry
+      const res = await fetch(`/api/tokens${queryParam}${queryParam ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
 
       if (data.success) {
         setTokenBalance(Number(data.balance ?? 0));
-        setTokenSymbol(data.tokenSymbol || '🪙');
-        setTokenName(data.tokenName || 'Foodie Token');
+        if (data.tokenSymbol) setTokenSymbol(data.tokenSymbol);
+        if (data.tokenName) setTokenName(data.tokenName);
+        if (data.isEnabled !== undefined) setIsTokenEnabled(Boolean(data.isEnabled));
         if (data.costs) {
           setTokenCosts({
             url: Number(data.costs.importUrl ?? 2),
@@ -55469,7 +55302,7 @@ export default function ImportPage() {
             photo: Number(data.costs.importPhoto ?? 3)
           });
         }
-        if (data.packages) {
+        if (Array.isArray(data.packages) && data.packages.length > 0) {
           setTokenPackages(data.packages);
         }
         if (data.aiSettings) {
@@ -55479,6 +55312,31 @@ export default function ImportPage() {
           setFilterWordsList(Array.isArray(data.aiSettings.filterWordsList) ? data.aiSettings.filterWordsList : []);
         }
       }
+
+      // 2. Direct synchronization with /admin/token-setting endpoint
+      try {
+        let adminRes = await fetch(`/api/admin/token-setting?t=${Date.now()}`, { cache: 'no-store' });
+        if (!adminRes.ok) {
+          adminRes = await fetch(`/api/admin/token-settings?t=${Date.now()}`, { cache: 'no-store' });
+        }
+        if (adminRes.ok) {
+          const adminData = await adminRes.json();
+          const s = adminData.settings || adminData;
+          if (s) {
+            if (s.tokenSymbol) setTokenSymbol(s.tokenSymbol);
+            if (s.tokenName) setTokenName(s.tokenName);
+            if (s.isEnabled !== undefined) setIsTokenEnabled(Boolean(s.isEnabled));
+            setTokenCosts({
+              url: Number(s.importUrlCost ?? 2),
+              text: Number(s.importTextCost ?? 1),
+              photo: Number(s.importPhotoCost ?? 3)
+            });
+            if (Array.isArray(s.packages) && s.packages.length > 0) {
+              setTokenPackages(s.packages);
+            }
+          }
+        }
+      } catch (_) {}
     } catch (err) {
       console.warn('Failed to load token and AI telemetry on /import:', err);
     } finally {
@@ -55521,9 +55379,13 @@ export default function ImportPage() {
       applySavedTheme();
     };
 
+    // Global event listeners including /admin/token-setting broadcasts
     window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_updated', applySavedTheme);
+    window.addEventListener('zecratary_token_settings_updated', handleUpdates);
+    window.addEventListener('zecratary_tokens_updated', handleUpdates);
+    window.addEventListener('zecratary_plans_updated', handleUpdates);
     window.addEventListener('zecratary_users_updated', handleUpdates);
     window.addEventListener('zecratary_admin_settings_updated', handleUpdates);
     window.addEventListener('storage', handleUpdates);
@@ -55532,6 +55394,9 @@ export default function ImportPage() {
       window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
+      window.removeEventListener('zecratary_token_settings_updated', handleUpdates);
+      window.removeEventListener('zecratary_tokens_updated', handleUpdates);
+      window.removeEventListener('zecratary_plans_updated', handleUpdates);
       window.removeEventListener('zecratary_users_updated', handleUpdates);
       window.removeEventListener('zecratary_admin_settings_updated', handleUpdates);
       window.removeEventListener('storage', handleUpdates);
@@ -55544,7 +55409,7 @@ export default function ImportPage() {
 
     if (typeof newBalance === 'number') {
       setTokenBalance(newBalance);
-    } else {
+    } else if (consumedTokens > 0) {
       setTokenBalance(prev => Math.max(0, prev - consumedTokens));
     }
 
@@ -55594,12 +55459,17 @@ export default function ImportPage() {
 
     window.dispatchEvent(new Event('zecratary_recipes_updated'));
     window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+    window.dispatchEvent(new Event('zecratary_tokens_updated'));
     window.dispatchEvent(new Event('zecratary_users_updated'));
     window.dispatchEvent(new Event('storage'));
 
+    const deductionMsg = consumedTokens > 0
+      ? ` -${consumedTokens} ${tokenSymbol} ${t('deductedToast', 'deducted. Redirecting to Saved Recipes...')}`
+      : ` ${t('redirectingToSaved', 'Redirecting to Saved Recipes...')}`;
+
     setStatus({
       type: 'success',
-      msg: `${t('importSuccessToast', 'Successfully imported')} "${processedRecipe.title}"! -${consumedTokens} ${tokenSymbol} ${t('deductedToast', 'deducted. Redirecting to Saved Recipes...')}`
+      msg: `${t('importSuccessToast', 'Successfully imported')} "${processedRecipe.title}"!${deductionMsg}`
     });
 
     setTimeout(() => {
@@ -55619,8 +55489,8 @@ export default function ImportPage() {
       return;
     }
 
-    const cost = tokenCosts.url;
-    if (tokenBalance < cost) {
+    const cost = isTokenEnabled ? tokenCosts.url : 0;
+    if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
       setStatus({
         type: 'error',
         msg: `${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}.`
@@ -55655,7 +55525,7 @@ export default function ImportPage() {
         throw new Error(data.error || t('failedToExtractUrl', 'Failed to extract recipe from URL.'));
       }
 
-      await handlePostImportSuccess(data.recipe, data.consumedSystemTokens || cost, data.remainingBalance);
+      await handlePostImportSuccess(data.recipe, data.consumedSystemTokens ?? cost, data.remainingBalance);
     } catch (err: any) {
       setStatus({ type: 'error', msg: err.message || t('networkError', 'Network error during URL import.') });
       setLoading(false);
@@ -55666,8 +55536,8 @@ export default function ImportPage() {
     if (e && 'preventDefault' in e) e.preventDefault();
     if (!rawText.trim()) return;
 
-    const cost = tokenCosts.text;
-    if (tokenBalance < cost) {
+    const cost = isTokenEnabled ? tokenCosts.text : 0;
+    if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
       setStatus({
         type: 'error',
         msg: `${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}.`
@@ -55703,7 +55573,7 @@ export default function ImportPage() {
         throw new Error(data.error || t('failedToParseText', 'Failed to parse recipe text.'));
       }
 
-      await handlePostImportSuccess(data.recipe, data.consumedSystemTokens || cost, data.remainingBalance);
+      await handlePostImportSuccess(data.recipe, data.consumedSystemTokens ?? cost, data.remainingBalance);
     } catch (err: any) {
       setStatus({ type: 'error', msg: err.message || t('networkError', 'Network error during text import.') });
       setLoading(false);
@@ -55731,8 +55601,8 @@ export default function ImportPage() {
     if (e && 'preventDefault' in e) e.preventDefault();
     if (selectedFiles.length === 0) return;
 
-    const cost = tokenCosts.photo;
-    if (tokenBalance < cost) {
+    const cost = isTokenEnabled ? tokenCosts.photo : 0;
+    if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
       setStatus({
         type: 'error',
         msg: `${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}.`
@@ -55782,7 +55652,7 @@ export default function ImportPage() {
         throw new Error(data.error || t('failedToProcessPhoto', 'Failed to process recipe image.'));
       }
 
-      await handlePostImportSuccess(data.recipe, data.consumedSystemTokens || cost, data.remainingBalance);
+      await handlePostImportSuccess(data.recipe, data.consumedSystemTokens ?? cost, data.remainingBalance);
     } catch (err: any) {
       setStatus({ type: 'error', msg: err.message || t('imageAnalysisFailed', 'Image analysis failed.') });
       setLoading(false);
@@ -55815,6 +55685,17 @@ export default function ImportPage() {
             <Cpu className="h-3.5 w-3.5 text-orange-400" />
             <span className="font-mono">{activeAiModel}</span>
           </div>
+
+          {!isTokenEnabled && (
+            <div 
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider text-emerald-400"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              title={t('tokenFreeModeTooltip', 'Token consumption is currently bypassed (Free Mode) in /admin/token-setting')}
+            >
+              <Sparkles className="h-3 w-3" />
+              <span>{t('tokenFreeModeBadge', 'Free Token Mode')}</span>
+            </div>
+          )}
 
           {strictDietEnforcement && (
             <div 
@@ -55855,7 +55736,7 @@ export default function ImportPage() {
           borderColor: 'var(--color-border)'
         }}
       >
-        {/* Method Tab Bar with Token Cost Pills */}
+        {/* Method Tab Bar with Token Cost Pills (Dynamic with /admin/token-setting) */}
         <div 
           className="flex p-1.5 rounded-2xl border transition-colors duration-200"
           style={{
@@ -55898,7 +55779,7 @@ export default function ImportPage() {
                     color: 'var(--color-text)'
                   }}
                 >
-                  {tab.cost} {tokenSymbol}
+                  {isTokenEnabled && tab.cost > 0 ? `${tab.cost} ${tokenSymbol}` : t('freeBadge', 'Free')}
                 </span>
               </button>
             );
@@ -55971,7 +55852,9 @@ export default function ImportPage() {
               <Sparkles className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {loading 
                 ? t('downloadingPhotoParsingSteps', 'Parsing recipe & deducting tokens...') 
-                : `${t('importRecipeBtn', 'Import Recipe')} (${tokenCosts.url} ${tokenSymbol})`}
+                : isTokenEnabled && tokenCosts.url > 0
+                  ? `${t('importRecipeBtn', 'Import Recipe')} (${tokenCosts.url} ${tokenSymbol})`
+                  : `${t('importRecipeBtn', 'Import Recipe')} (${t('freeBadge', 'Free')})`}
             </button>
           </div>
         )}
@@ -56059,7 +55942,9 @@ export default function ImportPage() {
               <Sparkles className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {loading 
                 ? t('processingSavingRecipe', 'Processing & saving recipe...') 
-                : `${t('saveAndImportRecipe', 'Save & Import Recipe')} (${tokenCosts.text} ${tokenSymbol})`}
+                : isTokenEnabled && tokenCosts.text > 0
+                  ? `${t('saveAndImportRecipe', 'Save & Import Recipe')} (${tokenCosts.text} ${tokenSymbol})`
+                  : `${t('saveAndImportRecipe', 'Save & Import Recipe')} (${t('freeBadge', 'Free')})`}
             </button>
           </div>
         )}
@@ -56149,7 +56034,9 @@ export default function ImportPage() {
               <Upload className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {loading 
                 ? t('aiSearchingRecipeImporting', 'AI OCR analyzing & importing...') 
-                : `${t('importRecipeFromImages', 'Import Recipe from Images')} (${tokenCosts.photo} ${tokenSymbol})`}
+                : isTokenEnabled && tokenCosts.photo > 0
+                  ? `${t('importRecipeFromImages', 'Import Recipe from Images')} (${tokenCosts.photo} ${tokenSymbol})`
+                  : `${t('importRecipeFromImages', 'Import Recipe from Images')} (${t('freeBadge', 'Free')})`}
             </button>
           </div>
         )}
@@ -61370,6 +61257,63 @@ export async function fetchAndApplyServerTheme(): Promise<void> {
       }
     }
   } catch (_) {}
+}
+
+```
+
+## File: `apps/web/src/lib/timezone.ts`
+```typescript
+// Generated by AI Collaborator - Universal Timezone Formatter
+export function getSystemTimezone(): string {
+  if (typeof window !== 'undefined') {
+    try {
+      const saved = localStorage.getItem('zecratary_timezone');
+      if (saved && saved.trim()) return saved.trim();
+      const userRaw = localStorage.getItem('zecratary_current_user') || localStorage.getItem('zecratary_user');
+      if (userRaw) {
+        const u = JSON.parse(userRaw);
+        if (u.timezone || u.timeZone) return u.timezone || u.timeZone;
+      }
+    } catch (_) {}
+  }
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch (_) {
+    return 'UTC';
+  }
+}
+
+export function formatSystemTimestamp(
+  dateInput: string | number | Date | null | undefined,
+  options?: Intl.DateTimeFormatOptions,
+  customTimezone?: string
+): string {
+  if (!dateInput) return '-';
+  const tz = customTimezone || getSystemTimezone();
+  try {
+    const d = typeof dateInput === 'string' || typeof dateInput === 'number' ? new Date(dateInput) : dateInput;
+    if (isNaN(d.getTime())) return String(dateInput);
+    return new Intl.DateTimeFormat(undefined, {
+      timeZone: tz,
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+      ...options
+    }).format(d);
+  } catch (_) {
+    return new Date(dateInput).toLocaleString();
+  }
+}
+
+export function formatSystemDate(
+  dateInput: string | number | Date | null | undefined,
+  customTimezone?: string
+): string {
+  return formatSystemTimestamp(dateInput, { hour: undefined, minute: undefined, second: undefined }, customTimezone);
 }
 
 ```
