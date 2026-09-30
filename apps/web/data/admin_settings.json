@@ -2,38 +2,38 @@
   "aiProvider": "gemini",
   "aiModel": "gemini-3.6-flash",
   "themeColors": {
-    "accent": "#f755bb",
-    "primary": "#38bdf8",
-    "cardBorder": "#172554",
-    "accentColor": "#f755bb",
-    "sidebarIcon": "#38bdf8",
-    "primaryColor": "#38bdf8",
-    "primaryHover": "#0284c7",
-    "accentEmerald": "#f755bb",
-    "textSecondary": "#7dd3fc",
-    "backgroundDark": "#020617",
-    "cardBackground": "#080e22",
-    "backgroundColor": "#020617",
-    "sidebarIconColor": "#38bdf8"
+    "accent": "#ec4899",
+    "primary": "#8b5cf6",
+    "cardBorder": "#2a1650",
+    "accentColor": "#ec4899",
+    "sidebarIcon": "#c084fc",
+    "primaryColor": "#8b5cf6",
+    "primaryHover": "#7c3aed",
+    "accentEmerald": "#ec4899",
+    "textSecondary": "#d8b4fe",
+    "backgroundDark": "#0f081c",
+    "cardBackground": "#180d2e",
+    "backgroundColor": "#0f081c",
+    "sidebarIconColor": "#c084fc"
   },
   "theme_colors": {
-    "accent": "#f755bb",
-    "primary": "#38bdf8",
-    "cardBorder": "#172554",
-    "accentColor": "#f755bb",
-    "sidebarIcon": "#38bdf8",
-    "primaryColor": "#38bdf8",
-    "primaryHover": "#0284c7",
-    "accentEmerald": "#f755bb",
-    "textSecondary": "#7dd3fc",
-    "backgroundDark": "#020617",
-    "cardBackground": "#080e22",
-    "backgroundColor": "#020617",
-    "sidebarIconColor": "#38bdf8"
+    "accent": "#ec4899",
+    "primary": "#8b5cf6",
+    "cardBorder": "#2a1650",
+    "accentColor": "#ec4899",
+    "sidebarIcon": "#c084fc",
+    "primaryColor": "#8b5cf6",
+    "primaryHover": "#7c3aed",
+    "accentEmerald": "#ec4899",
+    "textSecondary": "#d8b4fe",
+    "backgroundDark": "#0f081c",
+    "cardBackground": "#180d2e",
+    "backgroundColor": "#0f081c",
+    "sidebarIconColor": "#c084fc"
   },
   "chefAiSettings": {
     "model": "gemini-3.6-flash",
-    "apiKey": "AQ.Ab8RN6IV413r-my3ha0UekHmrrFtKz1f9il12r2QUqnVh7pisg",
+    "apiKey": "AQ.Ab8RN6JBqR1t4oS0LpYKrRt-9MLJS5l9pTJOdYdBZY4-n4lSVQ",
     "provider": "gemini",
     "sections": [
       {
@@ -59,12 +59,12 @@
       }
     ],
     "maxTokens": 4096,
-    "updatedAt": "2026-09-22T14:13:13.704Z",
+    "updatedAt": "2026-09-29T16:42:27.093Z",
     "voiceSpeed": 1,
     "maxPlanDays": 7,
     "temperature": 0.7,
     "voiceEngine": "version2",
-    "systemPrompt": "You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, but you must strictly focus on and prioritize Recommended Recipes Url. ultimately you must guide user to create recipe, and make plan for each recipe.",
+    "systemPrompt": "You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, ultimately you must guide user to create recipe, and make plan for each recipe.",
     "voiceAutoPlay": false,
     "enableWebSearch": true,
     "filterWordsList": [
@@ -356,10 +356,7 @@
         "label": "GPT-3.5 Turbo (High Speed)"
       }
     ],
-    "recommendedRecipeUrls": [
-      "https://www.recipetineats.com/recipes/",
-      "https://www.taste.com.au/recipes"
-    ],
+    "recommendedRecipeUrls": [],
     "strictDietEnforcement": true,
     "discoveredRecipesCache": {
       "https://www.taste.com.au/recipes": {
@@ -1173,10 +1170,7 @@
     "enableVoiceInteraction": true,
     "enableSavedRecipeSearch": true
   },
-  "recommendedRecipeUrls": [
-    "https://www.recipetineats.com/recipes/",
-    "https://www.taste.com.au/recipes"
-  ],
+  "recommendedRecipeUrls": [],
   "value": {
     "aiModel": "gemini-3.6-flash",
     "taxRate": 0,
@@ -1210,46 +1204,46 @@
       "appleClientId": "",
       "facebookAppId": "",
       "googleEnabled": true,
-      "googleClientId": "",
+      "googleClientId": "479443923058-jeajhc080ad3kb0b57ighm8k101ip7q6.apps.googleusercontent.com",
       "facebookEnabled": false,
       "facebookClientId": "",
       "facebookAppSecret": "",
-      "googleClientSecret": "",
+      "googleClientSecret": "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",
       "facebookClientSecret": "",
       "allowSocialRegistration": true,
       "requireEmailVerification": true
     },
     "themeColors": {
-      "accent": "#f755bb",
-      "primary": "#38bdf8",
-      "cardBorder": "#172554",
-      "accentColor": "#f755bb",
-      "sidebarIcon": "#38bdf8",
-      "primaryColor": "#38bdf8",
-      "primaryHover": "#0284c7",
-      "accentEmerald": "#f755bb",
-      "textSecondary": "#7dd3fc",
-      "backgroundDark": "#020617",
-      "cardBackground": "#080e22",
-      "backgroundColor": "#020617",
-      "sidebarIconColor": "#38bdf8"
+      "accent": "#ec4899",
+      "primary": "#8b5cf6",
+      "cardBorder": "#2a1650",
+      "accentColor": "#ec4899",
+      "sidebarIcon": "#c084fc",
+      "primaryColor": "#8b5cf6",
+      "primaryHover": "#7c3aed",
+      "accentEmerald": "#ec4899",
+      "textSecondary": "#d8b4fe",
+      "backgroundDark": "#0f081c",
+      "cardBackground": "#180d2e",
+      "backgroundColor": "#0f081c",
+      "sidebarIconColor": "#c084fc"
     },
     "faviconEmoji": "🍳",
     "faviconImage": "",
     "theme_colors": {
-      "accent": "#f755bb",
-      "primary": "#38bdf8",
-      "cardBorder": "#172554",
-      "accentColor": "#f755bb",
-      "sidebarIcon": "#38bdf8",
-      "primaryColor": "#38bdf8",
-      "primaryHover": "#0284c7",
-      "accentEmerald": "#f755bb",
-      "textSecondary": "#7dd3fc",
-      "backgroundDark": "#020617",
-      "cardBackground": "#080e22",
-      "backgroundColor": "#020617",
-      "sidebarIconColor": "#38bdf8"
+      "accent": "#ec4899",
+      "primary": "#8b5cf6",
+      "cardBorder": "#2a1650",
+      "accentColor": "#ec4899",
+      "sidebarIcon": "#c084fc",
+      "primaryColor": "#8b5cf6",
+      "primaryHover": "#7c3aed",
+      "accentEmerald": "#ec4899",
+      "textSecondary": "#d8b4fe",
+      "backgroundDark": "#0f081c",
+      "cardBackground": "#180d2e",
+      "backgroundColor": "#0f081c",
+      "sidebarIconColor": "#c084fc"
     },
     "favicon_emoji": "🍳",
     "favicon_image": "",
@@ -1257,7 +1251,7 @@
     "titlebarImage": "",
     "chefAiSettings": {
       "model": "gemini-3.6-flash",
-      "apiKey": "AQ.Ab8RN6IV413r-my3ha0UekHmrrFtKz1f9il12r2QUqnVh7pisg",
+      "apiKey": "AQ.Ab8RN6JBqR1t4oS0LpYKrRt-9MLJS5l9pTJOdYdBZY4-n4lSVQ",
       "provider": "gemini",
       "sections": [
         {
@@ -1283,12 +1277,12 @@
         }
       ],
       "maxTokens": 4096,
-      "updatedAt": "2026-09-22T14:13:13.704Z",
+      "updatedAt": "2026-09-29T16:42:27.093Z",
       "voiceSpeed": 1,
       "maxPlanDays": 7,
       "temperature": 0.7,
       "voiceEngine": "version2",
-      "systemPrompt": "You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, but you must strictly focus on and prioritize Recommended Recipes Url. ultimately you must guide user to create recipe, and make plan for each recipe.",
+      "systemPrompt": "You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, ultimately you must guide user to create recipe, and make plan for each recipe.",
       "voiceAutoPlay": false,
       "enableWebSearch": true,
       "filterWordsList": [
@@ -1580,10 +1574,7 @@
           "label": "GPT-3.5 Turbo (High Speed)"
         }
       ],
-      "recommendedRecipeUrls": [
-        "https://www.recipetineats.com/recipes/",
-        "https://www.taste.com.au/recipes"
-      ],
+      "recommendedRecipeUrls": [],
       "strictDietEnforcement": true,
       "discoveredRecipesCache": {
         "https://www.taste.com.au/recipes": {
@@ -2402,28 +2393,25 @@
     "titlebar_image": "",
     "maintenanceMode": false,
     "paymentSettings": {
-      "email": "admin@zecratary.com",
-      "action": "cancel_user_transactions",
-      "paypal": {
-        "enabled": false,
-        "clientId": "a",
-        "webhookId": "",
-        "environment": "sandbox",
-        "clientSecret": ""
-      },
+      "activeGateway": "stripe",
+      "currency": "USD",
+      "testMode": true,
+      "stripeConnected": false,
+      "stripeKeysVerified": true,
+      "stripeWebhookVerified": true,
       "stripe": {
         "enabled": true,
         "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
         "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
         "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
       },
-      "currency": "USD",
-      "testMode": true,
-      "activeGateway": "stripe",
-      "preserveExpiry": true,
-      "stripeConnected": false,
-      "stripeKeysVerified": false,
-      "stripeWebhookVerified": false
+      "paypal": {
+        "enabled": false,
+        "clientId": "",
+        "webhookId": "",
+        "environment": "sandbox",
+        "clientSecret": ""
+      }
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -2529,10 +2517,7 @@
       "Condiments & Sauces",
       "Oils & Vinegars"
     ],
-    "recommendedRecipeUrls": [
-      "https://www.recipetineats.com/recipes/",
-      "https://www.taste.com.au/recipes"
-    ]
+    "recommendedRecipeUrls": []
   },
   "settings": {
     "aiModel": "gemini-3.6-flash",
@@ -2567,46 +2552,46 @@
       "appleClientId": "",
       "facebookAppId": "",
       "googleEnabled": true,
-      "googleClientId": "",
+      "googleClientId": "479443923058-jeajhc080ad3kb0b57ighm8k101ip7q6.apps.googleusercontent.com",
       "facebookEnabled": false,
       "facebookClientId": "",
       "facebookAppSecret": "",
-      "googleClientSecret": "",
+      "googleClientSecret": "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",
       "facebookClientSecret": "",
       "allowSocialRegistration": true,
       "requireEmailVerification": true
     },
     "themeColors": {
-      "accent": "#f755bb",
-      "primary": "#38bdf8",
-      "cardBorder": "#172554",
-      "accentColor": "#f755bb",
-      "sidebarIcon": "#38bdf8",
-      "primaryColor": "#38bdf8",
-      "primaryHover": "#0284c7",
-      "accentEmerald": "#f755bb",
-      "textSecondary": "#7dd3fc",
-      "backgroundDark": "#020617",
-      "cardBackground": "#080e22",
-      "backgroundColor": "#020617",
-      "sidebarIconColor": "#38bdf8"
+      "accent": "#ec4899",
+      "primary": "#8b5cf6",
+      "cardBorder": "#2a1650",
+      "accentColor": "#ec4899",
+      "sidebarIcon": "#c084fc",
+      "primaryColor": "#8b5cf6",
+      "primaryHover": "#7c3aed",
+      "accentEmerald": "#ec4899",
+      "textSecondary": "#d8b4fe",
+      "backgroundDark": "#0f081c",
+      "cardBackground": "#180d2e",
+      "backgroundColor": "#0f081c",
+      "sidebarIconColor": "#c084fc"
     },
     "faviconEmoji": "🍳",
     "faviconImage": "",
     "theme_colors": {
-      "accent": "#f755bb",
-      "primary": "#38bdf8",
-      "cardBorder": "#172554",
-      "accentColor": "#f755bb",
-      "sidebarIcon": "#38bdf8",
-      "primaryColor": "#38bdf8",
-      "primaryHover": "#0284c7",
-      "accentEmerald": "#f755bb",
-      "textSecondary": "#7dd3fc",
-      "backgroundDark": "#020617",
-      "cardBackground": "#080e22",
-      "backgroundColor": "#020617",
-      "sidebarIconColor": "#38bdf8"
+      "accent": "#ec4899",
+      "primary": "#8b5cf6",
+      "cardBorder": "#2a1650",
+      "accentColor": "#ec4899",
+      "sidebarIcon": "#c084fc",
+      "primaryColor": "#8b5cf6",
+      "primaryHover": "#7c3aed",
+      "accentEmerald": "#ec4899",
+      "textSecondary": "#d8b4fe",
+      "backgroundDark": "#0f081c",
+      "cardBackground": "#180d2e",
+      "backgroundColor": "#0f081c",
+      "sidebarIconColor": "#c084fc"
     },
     "favicon_emoji": "🍳",
     "favicon_image": "",
@@ -2614,7 +2599,7 @@
     "titlebarImage": "",
     "chefAiSettings": {
       "model": "gemini-3.6-flash",
-      "apiKey": "AQ.Ab8RN6IV413r-my3ha0UekHmrrFtKz1f9il12r2QUqnVh7pisg",
+      "apiKey": "AQ.Ab8RN6JBqR1t4oS0LpYKrRt-9MLJS5l9pTJOdYdBZY4-n4lSVQ",
       "provider": "gemini",
       "sections": [
         {
@@ -2640,12 +2625,12 @@
         }
       ],
       "maxTokens": 4096,
-      "updatedAt": "2026-09-22T14:13:13.704Z",
+      "updatedAt": "2026-09-29T16:42:27.093Z",
       "voiceSpeed": 1,
       "maxPlanDays": 7,
       "temperature": 0.7,
       "voiceEngine": "version2",
-      "systemPrompt": "You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, but you must strictly focus on and prioritize Recommended Recipes Url. ultimately you must guide user to create recipe, and make plan for each recipe.",
+      "systemPrompt": "You are Chef Foodie, an expert autonomous culinary AI assistant. You can handle any questions the user asks, ultimately you must guide user to create recipe, and make plan for each recipe.",
       "voiceAutoPlay": false,
       "enableWebSearch": true,
       "filterWordsList": [
@@ -2937,10 +2922,7 @@
           "label": "GPT-3.5 Turbo (High Speed)"
         }
       ],
-      "recommendedRecipeUrls": [
-        "https://www.recipetineats.com/recipes/",
-        "https://www.taste.com.au/recipes"
-      ],
+      "recommendedRecipeUrls": [],
       "strictDietEnforcement": true,
       "discoveredRecipesCache": {
         "https://www.taste.com.au/recipes": {
@@ -3759,28 +3741,25 @@
     "titlebar_image": "",
     "maintenanceMode": false,
     "paymentSettings": {
-      "email": "admin@zecratary.com",
-      "action": "cancel_user_transactions",
-      "paypal": {
-        "enabled": false,
-        "clientId": "a",
-        "webhookId": "",
-        "environment": "sandbox",
-        "clientSecret": ""
-      },
+      "activeGateway": "stripe",
+      "currency": "USD",
+      "testMode": true,
+      "stripeConnected": false,
+      "stripeKeysVerified": true,
+      "stripeWebhookVerified": true,
       "stripe": {
         "enabled": true,
         "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
         "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
         "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
       },
-      "currency": "USD",
-      "testMode": true,
-      "activeGateway": "stripe",
-      "preserveExpiry": true,
-      "stripeConnected": false,
-      "stripeKeysVerified": false,
-      "stripeWebhookVerified": false
+      "paypal": {
+        "enabled": false,
+        "clientId": "",
+        "webhookId": "",
+        "environment": "sandbox",
+        "clientSecret": ""
+      }
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -3886,10 +3865,7 @@
       "Condiments & Sauces",
       "Oils & Vinegars"
     ],
-    "recommendedRecipeUrls": [
-      "https://www.recipetineats.com/recipes/",
-      "https://www.taste.com.au/recipes"
-    ]
+    "recommendedRecipeUrls": []
   },
-  "updatedAt": "2026-09-27T16:54:21.044Z"
+  "updatedAt": "2026-09-30T04:36:28.591Z"
 }

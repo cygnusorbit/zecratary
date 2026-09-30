@@ -261,7 +261,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       recipe: parsedRecipe,
-      consumedSystemTokens: importCost,
+      consumedSystemTokens: (tokenSettings.isEnabled && importCost > 0) ? (deduction.deducted ?? importCost) : 0,
       tokenSymbol: tokenSettings.tokenSymbol,
       remainingBalance: deduction.currentBalance,
       activeModel,

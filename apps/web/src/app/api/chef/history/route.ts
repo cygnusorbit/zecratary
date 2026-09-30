@@ -1,178 +1,300 @@
+// Generated / Updated by AI Collaborator
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-async function ensureChefChatTables() {
+// Polymorphic Database Query Adapter (Strictly typed without TS2774 function conditional)
+async function queryDb(text: string, params: any[] = []): Promise<{ rows: any[] }> {
   try {
-    await query(`
+    const res: any = await (query as any)(text, params);
+    if (Array.isArray(res)) {
+      return { rows: res };
+    }
+    if (res && Array.isArray(res.rows)) {
+      return { rows: res.rows };
+    }
+    return { rows: [] };
+  } catch (err) {
+    console.error('[chef/history] queryDb error:', err);
+    return { rows: [] };
+  }
+}
+
+let tablesInitialized = false;
+
+async function ensureHistoryTables(): Promise<void> {
+  if (tablesInitialized) return;
+  try {
+    await queryDb(`
       CREATE TABLE IF NOT EXISTS chef_chat_categories (
-        id VARCHAR(64) PRIMARY KEY,
-        user_id VARCHAR(128) NOT NULL,
-        name VARCHAR(128) NOT NULL,
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        icon VARCHAR(64) DEFAULT 'Utensils',
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
+    `);
 
+    await queryDb(`
       CREATE TABLE IF NOT EXISTS chef_chat_sessions (
-        id VARCHAR(64) PRIMARY KEY,
-        user_id VARCHAR(128) NOT NULL,
-        category_id VARCHAR(64) REFERENCES chef_chat_categories(id) ON DELETE SET NULL,
-        title VARCHAR(255) NOT NULL,
-        messages JSONB NOT NULL DEFAULT '[]'::jsonb,
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255) NOT NULL,
+        category_id VARCHAR(255),
+        title VARCHAR(255) DEFAULT 'New Culinary Consultation',
+        messages JSONB DEFAULT '[]'::jsonb,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
-
-      CREATE INDEX IF NOT EXISTS idx_chef_sessions_user ON chef_chat_sessions(user_id, updated_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_chef_categories_user ON chef_chat_categories(user_id, created_at ASC);
     `);
+
+    await queryDb(`
+      ALTER TABLE chef_chat_sessions 
+      ADD COLUMN IF NOT EXISTS category_id VARCHAR(255);
+    `);
+
+    await queryDb(`
+      ALTER TABLE chef_chat_sessions 
+      ADD COLUMN IF NOT EXISTS title VARCHAR(255) DEFAULT 'New Culinary Consultation';
+    `);
+
+    tablesInitialized = true;
   } catch (err) {
-    console.error('Error initializing chef chat tables:', err);
+    console.warn('[chef/history] Table initialization warning:', err);
   }
 }
 
 export async function GET(req: NextRequest) {
   try {
-    await ensureChefChatTables();
+    await ensureHistoryTables();
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId') || 'guest';
-    const categoryId = searchParams.get('categoryId') || 'all';
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
-    const limit = 10;
-    const offset = (page - 1) * limit;
+    const userId = (searchParams.get('userId') || searchParams.get('email') || '').trim();
 
-    // Fetch categories
-    const categories = await query(
-      `SELECT * FROM chef_chat_categories WHERE user_id = $1 ORDER BY created_at ASC`,
-      [userId]
-    );
-
-    // Fetch sessions matching filter
-    let sessionQuery = `
-      SELECT s.id, s.title, s.category_id, s.created_at, s.updated_at,
-             jsonb_array_length(s.messages) as message_count,
-             c.name as category_name
-      FROM chef_chat_sessions s
-      LEFT JOIN chef_chat_categories c ON s.category_id = c.id
-      WHERE s.user_id = $1
-    `;
-    const params: any[] = [userId];
-
-    if (categoryId !== 'all') {
-      if (categoryId === 'uncategorized') {
-        sessionQuery += ` AND s.category_id IS NULL`;
-      } else {
-        params.push(categoryId);
-        sessionQuery += ` AND s.category_id = $${params.length}`;
-      }
+    if (!userId) {
+      return NextResponse.json({
+        success: true,
+        sessions: [],
+        categories: [],
+        pagination: { page: 1, limit: 20, total: 0, totalPages: 0 }
+      });
     }
 
-    // Count total
-    const countQuery = `SELECT COUNT(*) as total FROM (${sessionQuery}) as filtered`;
-    const countRes = await query(countQuery, params);
-    const total = parseInt(countRes[0]?.total || '0');
-    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const categoryId = searchParams.get('categoryId') || 'all';
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const limit = Math.max(1, Math.min(100, parseInt(searchParams.get('limit') || '20', 10)));
+    const offset = (page - 1) * limit;
+    const search = (searchParams.get('search') || '').trim();
 
-    // Paginated results
-    sessionQuery += ` ORDER BY s.updated_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-    params.push(limit, offset);
+    // 1. Fetch categories
+    const categoriesRes = await queryDb(
+      `SELECT id, user_id, name, icon, created_at 
+       FROM chef_chat_categories 
+       WHERE user_id = $1 
+       ORDER BY name ASC`,
+      [userId]
+    );
+    const categories = categoriesRes.rows || [];
 
-    const sessions = await query(sessionQuery, params);
+    // 2. Query sessions
+    const whereClauses: string[] = ['user_id = $1'];
+    const queryParams: any[] = [userId];
+
+    if (categoryId && categoryId !== 'all') {
+      queryParams.push(categoryId);
+      whereClauses.push(`category_id = $${queryParams.length}`);
+    }
+
+    if (search) {
+      queryParams.push(`%${search}%`);
+      whereClauses.push(`title ILIKE $${queryParams.length}`);
+    }
+
+    const whereStr = whereClauses.join(' AND ');
+
+    const countRes = await queryDb(
+      `SELECT COUNT(*) as total FROM chef_chat_sessions WHERE ${whereStr}`,
+      queryParams
+    );
+    const countRow = (countRes.rows || [])[0] || {};
+    const total = Number(countRow.total ?? countRow.count ?? 0);
+
+    queryParams.push(limit);
+    const limitParamIdx = queryParams.length;
+    queryParams.push(offset);
+    const offsetParamIdx = queryParams.length;
+
+    const sessionsRes = await queryDb(
+      `SELECT id, user_id, category_id, title, messages, created_at, updated_at 
+       FROM chef_chat_sessions 
+       WHERE ${whereStr} 
+       ORDER BY updated_at DESC 
+       LIMIT $${limitParamIdx} OFFSET $${offsetParamIdx}`,
+      queryParams
+    );
+
+    const sessions = (sessionsRes.rows || []).map((session: any) => {
+      let parsedMessages: any[] = [];
+      try {
+        if (typeof session.messages === 'string') {
+          parsedMessages = JSON.parse(session.messages);
+        } else if (Array.isArray(session.messages)) {
+          parsedMessages = session.messages;
+        } else if (session.messages) {
+          parsedMessages = [session.messages];
+        }
+      } catch (_) {
+        parsedMessages = [];
+      }
+
+      return {
+        id: session.id,
+        userId: session.user_id,
+        categoryId: session.category_id,
+        title: session.title || 'Culinary Consultation',
+        messages: parsedMessages,
+        messageCount: parsedMessages.length,
+        createdAt: session.created_at,
+        updatedAt: session.updated_at
+      };
+    });
 
     return NextResponse.json({
       success: true,
       sessions,
       categories,
-      page,
-      limit,
-      total,
-      totalPages
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
     });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    console.error('[chef/history] GET error:', err);
+    return NextResponse.json(
+      { success: false, error: err.message || 'Internal server error' },
+      { status: 500 }
+    );
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureChefChatTables();
+    await ensureHistoryTables();
     const body = await req.json();
-    const { action, userId = 'guest' } = body;
+    const { action, userId, sessionId, categoryId, title, name, icon, messages } = body;
 
-    if (action === 'create_category') {
-      const name = (body.name || '').trim();
-      if (!name) {
-        return NextResponse.json({ success: false, error: 'Category name is required' }, { status: 400 });
-      }
-      const catId = 'cat_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6);
-      await query(
-        `INSERT INTO chef_chat_categories (id, user_id, name) VALUES ($1, $2, $3)`,
-        [catId, userId, name]
-      );
-      return NextResponse.json({ success: true, categoryId: catId, name });
+    const targetUserId = (userId || body.user_id || '').trim();
+    if (!targetUserId) {
+      return NextResponse.json({ success: false, error: 'User ID is required' }, { status: 400 });
     }
 
-    if (action === 'save_session') {
-      const { id, title = 'New Conversation', messages = [], categoryId = null } = body;
-      if (!id) {
-        return NextResponse.json({ success: false, error: 'Session ID is required' }, { status: 400 });
-      }
-
-      await query(
-        `INSERT INTO chef_chat_sessions (id, user_id, category_id, title, messages, updated_at)
-         VALUES ($1, $2, $3, $4, $5::jsonb, NOW())
-         ON CONFLICT (id) DO UPDATE SET
-           title = EXCLUDED.title,
-           category_id = COALESCE(EXCLUDED.category_id, chef_chat_sessions.category_id),
-           messages = EXCLUDED.messages,
-           updated_at = NOW()`,
-        [id, userId, categoryId || null, title, JSON.stringify(messages)]
+    if (action === 'create_category' || (!sessionId && name)) {
+      const catId = categoryId || 'cat_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      await queryDb(
+        `INSERT INTO chef_chat_categories (id, user_id, name, icon, created_at)
+         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, icon = EXCLUDED.icon`,
+        [catId, targetUserId, name || 'Custom Category', icon || 'Utensils']
       );
-
-      return NextResponse.json({ success: true, sessionId: id });
+      return NextResponse.json({ success: true, category: { id: catId, name, icon } });
     }
 
-    if (action === 'set_session_category') {
-      const { sessionId, categoryId } = body;
-      await query(
-        `UPDATE chef_chat_sessions SET category_id = $1, updated_at = NOW() WHERE id = $2 AND user_id = $3`,
-        [categoryId || null, sessionId, userId]
-      );
-      return NextResponse.json({ success: true });
-    }
+    const targetSessionId = sessionId || ('sess_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
+    const safeMessages = JSON.stringify(Array.isArray(messages) ? messages : []);
+    const sessionTitle = title || 'Culinary Consultation';
 
-    return NextResponse.json({ success: false, error: 'Invalid action' }, { status: 400 });
+    await queryDb(
+      `INSERT INTO chef_chat_sessions (id, user_id, category_id, title, messages, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT (id) DO UPDATE SET 
+         title = COALESCE(EXCLUDED.title, chef_chat_sessions.title),
+         category_id = COALESCE(EXCLUDED.category_id, chef_chat_sessions.category_id),
+         messages = EXCLUDED.messages,
+         updated_at = CURRENT_TIMESTAMP`,
+      [targetSessionId, targetUserId, categoryId || null, sessionTitle, safeMessages]
+    );
+
+    return NextResponse.json({
+      success: true,
+      sessionId: targetSessionId,
+      title: sessionTitle
+    });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    console.error('[chef/history] POST error:', err);
+    return NextResponse.json({ success: false, error: err.message || 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    await ensureHistoryTables();
+    const body = await req.json();
+    const { sessionId, title, categoryId, userId } = body;
+
+    if (!sessionId) {
+      return NextResponse.json({ success: false, error: 'Session ID is required' }, { status: 400 });
+    }
+
+    const updates: string[] = ['updated_at = CURRENT_TIMESTAMP'];
+    const params: any[] = [sessionId];
+
+    if (title !== undefined) {
+      params.push(title);
+      updates.push(`title = $${params.length}`);
+    }
+
+    if (categoryId !== undefined) {
+      params.push(categoryId === 'all' || categoryId === '' ? null : categoryId);
+      updates.push(`category_id = $${params.length}`);
+    }
+
+    if (userId) {
+      params.push(userId);
+      await queryDb(
+        `UPDATE chef_chat_sessions SET ${updates.join(', ')} WHERE id = $1 AND user_id = $${params.length}`,
+        params
+      );
+    } else {
+      await queryDb(
+        `UPDATE chef_chat_sessions SET ${updates.join(', ')} WHERE id = $1`,
+        params
+      );
+    }
+
+    return NextResponse.json({ success: true, sessionId });
+  } catch (err: any) {
+    console.error('[chef/history] PATCH error:', err);
+    return NextResponse.json({ success: false, error: err.message || 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function DELETE(req: NextRequest) {
   try {
-    await ensureChefChatTables();
+    await ensureHistoryTables();
     const { searchParams } = new URL(req.url);
-    const action = searchParams.get('action');
-    const userId = searchParams.get('userId') || 'guest';
+    const sessionId = searchParams.get('sessionId') || searchParams.get('id');
+    const userId = searchParams.get('userId');
+    const clearAll = searchParams.get('clearAll') === 'true';
 
-    if (action === 'delete_session') {
-      const sessionId = searchParams.get('sessionId');
-      if (!sessionId) return NextResponse.json({ error: 'Session ID required' }, { status: 400 });
-
-      await query(`DELETE FROM chef_chat_sessions WHERE id = $1 AND user_id = $2`, [sessionId, userId]);
-      return NextResponse.json({ success: true, message: 'Chat deleted' });
+    if (clearAll && userId) {
+      await queryDb(`DELETE FROM chef_chat_sessions WHERE user_id = $1`, [userId]);
+      return NextResponse.json({ success: true, message: 'All sessions deleted' });
     }
 
-    if (action === 'delete_category') {
-      const categoryId = searchParams.get('categoryId');
-      if (!categoryId) return NextResponse.json({ error: 'Category ID required' }, { status: 400 });
-
-      await query(`UPDATE chef_chat_sessions SET category_id = NULL WHERE category_id = $1`, [categoryId]);
-      await query(`DELETE FROM chef_chat_categories WHERE id = $1 AND user_id = $2`, [categoryId, userId]);
-      return NextResponse.json({ success: true, message: 'Category deleted' });
+    if (!sessionId) {
+      return NextResponse.json({ success: false, error: 'Session ID is required' }, { status: 400 });
     }
 
-    return NextResponse.json({ success: false, error: 'Invalid delete action' }, { status: 400 });
+    if (userId) {
+      await queryDb(`DELETE FROM chef_chat_sessions WHERE id = $1 AND user_id = $2`, [sessionId, userId]);
+    } else {
+      await queryDb(`DELETE FROM chef_chat_sessions WHERE id = $1`, [sessionId]);
+    }
+
+    return NextResponse.json({ success: true, sessionId });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    console.error('[chef/history] DELETE error:', err);
+    return NextResponse.json({ success: false, error: err.message || 'Internal server error' }, { status: 500 });
   }
 }

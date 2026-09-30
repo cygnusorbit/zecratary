@@ -54,10 +54,11 @@ export default function ImportPage() {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Token & AI Settings Telemetry
+  // Token & AI Settings Telemetry (Synchronized with /admin/token-setting)
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
+  const [isTokenEnabled, setIsTokenEnabled] = useState<boolean>(true);
   const [tokenCosts, setTokenCosts] = useState<{ url: number; text: number; photo: number }>({
     url: 2,
     text: 1,
@@ -85,14 +86,17 @@ export default function ImportPage() {
   const fetchTokenAndAiTelemetry = useCallback(async () => {
     try {
       const user = getCurrentUser();
-      const queryParam = user?.id ? `?userId=${user.id}` : user?.email ? `?email=${encodeURIComponent(user.email)}` : '';
-      const res = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
+      const queryParam = user?.id ? `?userId=${encodeURIComponent(user.id)}` : user?.email ? `?email=${encodeURIComponent(user.email)}` : '';
+      
+      // 1. Fetch user balance & AI telemetry
+      const res = await fetch(`/api/tokens${queryParam}${queryParam ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' });
       const data = await res.json();
 
       if (data.success) {
         setTokenBalance(Number(data.balance ?? 0));
-        setTokenSymbol(data.tokenSymbol || '🪙');
-        setTokenName(data.tokenName || 'Foodie Token');
+        if (data.tokenSymbol) setTokenSymbol(data.tokenSymbol);
+        if (data.tokenName) setTokenName(data.tokenName);
+        if (data.isEnabled !== undefined) setIsTokenEnabled(Boolean(data.isEnabled));
         if (data.costs) {
           setTokenCosts({
             url: Number(data.costs.importUrl ?? 2),
@@ -100,7 +104,7 @@ export default function ImportPage() {
             photo: Number(data.costs.importPhoto ?? 3)
           });
         }
-        if (data.packages) {
+        if (Array.isArray(data.packages) && data.packages.length > 0) {
           setTokenPackages(data.packages);
         }
         if (data.aiSettings) {
@@ -110,6 +114,31 @@ export default function ImportPage() {
           setFilterWordsList(Array.isArray(data.aiSettings.filterWordsList) ? data.aiSettings.filterWordsList : []);
         }
       }
+
+      // 2. Direct synchronization with /admin/token-setting endpoint
+      try {
+        let adminRes = await fetch(`/api/admin/token-setting?t=${Date.now()}`, { cache: 'no-store' });
+        if (!adminRes.ok) {
+          adminRes = await fetch(`/api/admin/token-settings?t=${Date.now()}`, { cache: 'no-store' });
+        }
+        if (adminRes.ok) {
+          const adminData = await adminRes.json();
+          const s = adminData.settings || adminData;
+          if (s) {
+            if (s.tokenSymbol) setTokenSymbol(s.tokenSymbol);
+            if (s.tokenName) setTokenName(s.tokenName);
+            if (s.isEnabled !== undefined) setIsTokenEnabled(Boolean(s.isEnabled));
+            setTokenCosts({
+              url: Number(s.importUrlCost ?? 2),
+              text: Number(s.importTextCost ?? 1),
+              photo: Number(s.importPhotoCost ?? 3)
+            });
+            if (Array.isArray(s.packages) && s.packages.length > 0) {
+              setTokenPackages(s.packages);
+            }
+          }
+        }
+      } catch (_) {}
     } catch (err) {
       console.warn('Failed to load token and AI telemetry on /import:', err);
     } finally {
@@ -152,9 +181,13 @@ export default function ImportPage() {
       applySavedTheme();
     };
 
+    // Global event listeners including /admin/token-setting broadcasts
     window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_updated', applySavedTheme);
+    window.addEventListener('zecratary_token_settings_updated', handleUpdates);
+    window.addEventListener('zecratary_tokens_updated', handleUpdates);
+    window.addEventListener('zecratary_plans_updated', handleUpdates);
     window.addEventListener('zecratary_users_updated', handleUpdates);
     window.addEventListener('zecratary_admin_settings_updated', handleUpdates);
     window.addEventListener('storage', handleUpdates);
@@ -163,6 +196,9 @@ export default function ImportPage() {
       window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_updated', applySavedTheme);
+      window.removeEventListener('zecratary_token_settings_updated', handleUpdates);
+      window.removeEventListener('zecratary_tokens_updated', handleUpdates);
+      window.removeEventListener('zecratary_plans_updated', handleUpdates);
       window.removeEventListener('zecratary_users_updated', handleUpdates);
       window.removeEventListener('zecratary_admin_settings_updated', handleUpdates);
       window.removeEventListener('storage', handleUpdates);
@@ -175,7 +211,7 @@ export default function ImportPage() {
 
     if (typeof newBalance === 'number') {
       setTokenBalance(newBalance);
-    } else {
+    } else if (consumedTokens > 0) {
       setTokenBalance(prev => Math.max(0, prev - consumedTokens));
     }
 
@@ -225,12 +261,17 @@ export default function ImportPage() {
 
     window.dispatchEvent(new Event('zecratary_recipes_updated'));
     window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+    window.dispatchEvent(new Event('zecratary_tokens_updated'));
     window.dispatchEvent(new Event('zecratary_users_updated'));
     window.dispatchEvent(new Event('storage'));
 
+    const deductionMsg = consumedTokens > 0
+      ? ` -${consumedTokens} ${tokenSymbol} ${t('deductedToast', 'deducted. Redirecting to Saved Recipes...')}`
+      : ` ${t('redirectingToSaved', 'Redirecting to Saved Recipes...')}`;
+
     setStatus({
       type: 'success',
-      msg: `${t('importSuccessToast', 'Successfully imported')} "${processedRecipe.title}"! -${consumedTokens} ${tokenSymbol} ${t('deductedToast', 'deducted. Redirecting to Saved Recipes...')}`
+      msg: `${t('importSuccessToast', 'Successfully imported')} "${processedRecipe.title}"!${deductionMsg}`
     });
 
     setTimeout(() => {
@@ -250,8 +291,8 @@ export default function ImportPage() {
       return;
     }
 
-    const cost = tokenCosts.url;
-    if (tokenBalance < cost) {
+    const cost = isTokenEnabled ? tokenCosts.url : 0;
+    if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
       setStatus({
         type: 'error',
         msg: `${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}.`
@@ -286,7 +327,7 @@ export default function ImportPage() {
         throw new Error(data.error || t('failedToExtractUrl', 'Failed to extract recipe from URL.'));
       }
 
-      await handlePostImportSuccess(data.recipe, data.consumedSystemTokens || cost, data.remainingBalance);
+      await handlePostImportSuccess(data.recipe, data.consumedSystemTokens ?? cost, data.remainingBalance);
     } catch (err: any) {
       setStatus({ type: 'error', msg: err.message || t('networkError', 'Network error during URL import.') });
       setLoading(false);
@@ -297,8 +338,8 @@ export default function ImportPage() {
     if (e && 'preventDefault' in e) e.preventDefault();
     if (!rawText.trim()) return;
 
-    const cost = tokenCosts.text;
-    if (tokenBalance < cost) {
+    const cost = isTokenEnabled ? tokenCosts.text : 0;
+    if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
       setStatus({
         type: 'error',
         msg: `${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}.`
@@ -334,7 +375,7 @@ export default function ImportPage() {
         throw new Error(data.error || t('failedToParseText', 'Failed to parse recipe text.'));
       }
 
-      await handlePostImportSuccess(data.recipe, data.consumedSystemTokens || cost, data.remainingBalance);
+      await handlePostImportSuccess(data.recipe, data.consumedSystemTokens ?? cost, data.remainingBalance);
     } catch (err: any) {
       setStatus({ type: 'error', msg: err.message || t('networkError', 'Network error during text import.') });
       setLoading(false);
@@ -362,8 +403,8 @@ export default function ImportPage() {
     if (e && 'preventDefault' in e) e.preventDefault();
     if (selectedFiles.length === 0) return;
 
-    const cost = tokenCosts.photo;
-    if (tokenBalance < cost) {
+    const cost = isTokenEnabled ? tokenCosts.photo : 0;
+    if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
       setStatus({
         type: 'error',
         msg: `${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}.`
@@ -413,7 +454,7 @@ export default function ImportPage() {
         throw new Error(data.error || t('failedToProcessPhoto', 'Failed to process recipe image.'));
       }
 
-      await handlePostImportSuccess(data.recipe, data.consumedSystemTokens || cost, data.remainingBalance);
+      await handlePostImportSuccess(data.recipe, data.consumedSystemTokens ?? cost, data.remainingBalance);
     } catch (err: any) {
       setStatus({ type: 'error', msg: err.message || t('imageAnalysisFailed', 'Image analysis failed.') });
       setLoading(false);
@@ -446,6 +487,17 @@ export default function ImportPage() {
             <Cpu className="h-3.5 w-3.5 text-orange-400" />
             <span className="font-mono">{activeAiModel}</span>
           </div>
+
+          {!isTokenEnabled && (
+            <div 
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider text-emerald-400"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              title={t('tokenFreeModeTooltip', 'Token consumption is currently bypassed (Free Mode) in /admin/token-setting')}
+            >
+              <Sparkles className="h-3 w-3" />
+              <span>{t('tokenFreeModeBadge', 'Free Token Mode')}</span>
+            </div>
+          )}
 
           {strictDietEnforcement && (
             <div 
@@ -486,7 +538,7 @@ export default function ImportPage() {
           borderColor: 'var(--color-border)'
         }}
       >
-        {/* Method Tab Bar with Token Cost Pills */}
+        {/* Method Tab Bar with Token Cost Pills (Dynamic with /admin/token-setting) */}
         <div 
           className="flex p-1.5 rounded-2xl border transition-colors duration-200"
           style={{
@@ -529,7 +581,7 @@ export default function ImportPage() {
                     color: 'var(--color-text)'
                   }}
                 >
-                  {tab.cost} {tokenSymbol}
+                  {isTokenEnabled && tab.cost > 0 ? `${tab.cost} ${tokenSymbol}` : t('freeBadge', 'Free')}
                 </span>
               </button>
             );
@@ -602,7 +654,9 @@ export default function ImportPage() {
               <Sparkles className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {loading 
                 ? t('downloadingPhotoParsingSteps', 'Parsing recipe & deducting tokens...') 
-                : `${t('importRecipeBtn', 'Import Recipe')} (${tokenCosts.url} ${tokenSymbol})`}
+                : isTokenEnabled && tokenCosts.url > 0
+                  ? `${t('importRecipeBtn', 'Import Recipe')} (${tokenCosts.url} ${tokenSymbol})`
+                  : `${t('importRecipeBtn', 'Import Recipe')} (${t('freeBadge', 'Free')})`}
             </button>
           </div>
         )}
@@ -690,7 +744,9 @@ export default function ImportPage() {
               <Sparkles className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {loading 
                 ? t('processingSavingRecipe', 'Processing & saving recipe...') 
-                : `${t('saveAndImportRecipe', 'Save & Import Recipe')} (${tokenCosts.text} ${tokenSymbol})`}
+                : isTokenEnabled && tokenCosts.text > 0
+                  ? `${t('saveAndImportRecipe', 'Save & Import Recipe')} (${tokenCosts.text} ${tokenSymbol})`
+                  : `${t('saveAndImportRecipe', 'Save & Import Recipe')} (${t('freeBadge', 'Free')})`}
             </button>
           </div>
         )}
@@ -780,7 +836,9 @@ export default function ImportPage() {
               <Upload className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {loading 
                 ? t('aiSearchingRecipeImporting', 'AI OCR analyzing & importing...') 
-                : `${t('importRecipeFromImages', 'Import Recipe from Images')} (${tokenCosts.photo} ${tokenSymbol})`}
+                : isTokenEnabled && tokenCosts.photo > 0
+                  ? `${t('importRecipeFromImages', 'Import Recipe from Images')} (${tokenCosts.photo} ${tokenSymbol})`
+                  : `${t('importRecipeFromImages', 'Import Recipe from Images')} (${t('freeBadge', 'Free')})`}
             </button>
           </div>
         )}
