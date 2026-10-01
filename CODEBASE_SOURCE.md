@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.81",
+  "version": "8.0.82",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.81",
+  "version": "8.0.82",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -461,6 +461,7 @@ import {
   PanelBottom
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
+import { getSiteConfig, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON } from '@/lib/siteConfig';
 import { useTranslation } from '@/components/LanguageProvider';
 
 export type ElementType = 'title' | 'content' | 'column' | 'picture' | 'box' | 'recipe' | 'subscription';
@@ -636,6 +637,42 @@ export default function DynamicHomePage() {
   const routeSlug = rawSlug ? (rawSlug.startsWith('/') ? rawSlug : `/${rawSlug}`) : '/';
 
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [siteBranding, setSiteBranding] = useState<{
+    siteName: string;
+    titlebarEmoji: string;
+    titlebarImage: string;
+  }>({
+    siteName: 'Zecratary',
+    titlebarEmoji: '🍳',
+    titlebarImage: '',
+  });
+
+  const fetchSiteBranding = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/settings', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const payload = data.settings || data;
+        setSiteBranding({
+          siteName: payload.siteName || payload.site_name || 'Zecratary',
+          titlebarEmoji: payload.titlebarEmoji || payload.titlebar_emoji || '🍳',
+          titlebarImage: payload.titlebarImage || payload.titlebar_image || '',
+        });
+        return;
+      }
+    } catch (_) {}
+
+    try {
+      const cfg = getSiteConfig();
+      if (cfg) {
+        setSiteBranding({
+          siteName: cfg.siteName || 'Zecratary',
+          titlebarEmoji: cfg.titlebarEmoji || '🍳',
+          titlebarImage: cfg.titlebarImage || '',
+        });
+      }
+    } catch (_) {}
+  }, []);
   const [allPages, setAllPages] = useState<FrontendPage[]>([]);
   const [activePage, setActivePage] = useState<FrontendPage | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -771,11 +808,13 @@ export default function DynamicHomePage() {
   useEffect(() => {
     initAuthStorage();
     setCurrentUser(getCurrentUser());
+    fetchSiteBranding();
     fetchFrontendSettings();
     fetchLivePlans();
     fetchAllRecipes();
 
     const handleSync = () => {
+      fetchSiteBranding();
       fetchFrontendSettings();
       fetchAllRecipes();
       fetchLivePlans();
@@ -786,6 +825,8 @@ export default function DynamicHomePage() {
     window.addEventListener('zecratary_saved_recipes_updated', handleSync);
     window.addEventListener('zecratary_theme_updated', handleSync);
     window.addEventListener('zecratary_site_config_updated', handleSync);
+    window.addEventListener('zecratary_site_settings_changed', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('storage', handleSync);
 
@@ -815,6 +856,36 @@ export default function DynamicHomePage() {
     } catch {
       return urlStr.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0] || 'source link';
     }
+  };
+
+  const renderDynamicBrandLogo = (sizeCls = 'w-10 h-10', iconCls = 'w-5 h-5') => {
+    if (siteBranding.titlebarImage) {
+      return (
+        <img 
+          src={siteBranding.titlebarImage} 
+          alt={siteBranding.siteName} 
+          className={`${sizeCls} rounded-2xl object-contain shadow-md`}
+        />
+      );
+    }
+    if (siteBranding.titlebarEmoji) {
+      return (
+        <div 
+          className={`${sizeCls} rounded-2xl flex items-center justify-center text-white shadow-md text-xl`}
+          style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+        >
+          <span>{siteBranding.titlebarEmoji}</span>
+        </div>
+      );
+    }
+    return (
+      <div 
+        className={`${sizeCls} rounded-2xl flex items-center justify-center text-white shadow-md`}
+        style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+      >
+        <ChefHat className={iconCls} />
+      </div>
+    );
   };
 
   const menuPages = allPages.filter((p) => p.is_published);
@@ -917,15 +988,10 @@ export default function DynamicHomePage() {
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
           <Link href="/" className="flex items-center gap-2.5 cursor-pointer">
-            <div 
-              className="w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-md"
-              style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-            >
-              <ChefHat className="h-5 w-5" />
-            </div>
+            {renderDynamicBrandLogo('w-10 h-10', 'h-5 w-5')}
             <div>
               <span className="text-lg font-black tracking-tight" style={{ color: 'var(--color-text, #f1f5f9)' }}>
-                Zecratary
+                {siteBranding.siteName || 'Zecratary'}
               </span>
               <span className="block text-[9px] font-bold uppercase tracking-widest text-[var(--color-primary)]">
                 Culinary AI
@@ -1406,13 +1472,10 @@ export default function DynamicHomePage() {
               {/* Brand and Description */}
               <div className="md:col-span-2 space-y-3">
                 <div className="flex items-center gap-2.5">
-                  <div 
-                    className="w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-md"
-                    style={{ backgroundColor: activePage?.footer?.accentColor || 'var(--color-primary, #E05638)' }}
-                  >
-                    <ChefHat className="h-5 w-5" />
-                  </div>
-                  <span className="text-lg font-black tracking-tight">Zecratary</span>
+                  {renderDynamicBrandLogo('w-9 h-9', 'h-4 w-4')}
+                  <span className="text-lg font-black tracking-tight">
+                    {siteBranding.siteName || 'Zecratary'}
+                  </span>
                 </div>
                 <p className="text-xs sm:text-sm leading-relaxed opacity-75 max-w-md">
                   {activePage?.footer?.aboutText || 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.'}
@@ -23150,6 +23213,7 @@ import {
   Moon
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
+import { getSiteConfig } from '@/lib/siteConfig';
 
 export type ElementType = 'title' | 'content' | 'column' | 'picture' | 'box' | 'recipe' | 'subscription';
 
@@ -23357,6 +23421,42 @@ export default function AdminFrontendSettingsPage() {
   const [newPageDesc, setNewPageDesc] = useState<string>('');
 
   const imageFileInputRef = useRef<HTMLInputElement>(null);
+  const [siteBranding, setSiteBranding] = useState<{
+    siteName: string;
+    titlebarEmoji: string;
+    titlebarImage: string;
+  }>({
+    siteName: 'Zecratary',
+    titlebarEmoji: '🍳',
+    titlebarImage: '',
+  });
+
+  const fetchSiteBranding = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/settings', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const payload = data.settings || data;
+        setSiteBranding({
+          siteName: payload.siteName || payload.site_name || 'Zecratary',
+          titlebarEmoji: payload.titlebarEmoji || payload.titlebar_emoji || '🍳',
+          titlebarImage: payload.titlebarImage || payload.titlebar_image || '',
+        });
+        return;
+      }
+    } catch (_) {}
+
+    try {
+      const cfg = getSiteConfig();
+      if (cfg) {
+        setSiteBranding({
+          siteName: cfg.siteName || 'Zecratary',
+          titlebarEmoji: cfg.titlebarEmoji || '🍳',
+          titlebarImage: cfg.titlebarImage || '',
+        });
+      }
+    } catch (_) {}
+  }, []);
   const [activeImageUploadElementId, setActiveImageUploadElementId] = useState<{ id: string; target: 'imageUrl' } | null>(null);
 
   // 1. Fetch Subscription Plans
@@ -23444,6 +23544,7 @@ export default function AdminFrontendSettingsPage() {
 
   useEffect(() => {
     fetchPages();
+    fetchSiteBranding();
     fetchLivePlans();
     fetchAllSavedRecipes();
   }, [fetchPages, fetchLivePlans, fetchAllSavedRecipes]);
@@ -23721,6 +23822,36 @@ export default function AdminFrontendSettingsPage() {
     const num = Number(rawAmt);
     const scaled = (num / (baseServings || 2)) * currentServings;
     return Number.isInteger(scaled) ? scaled : Number(scaled.toFixed(2));
+  };
+
+  const renderDynamicBrandLogo = (sizeCls = 'w-8 h-8', iconCls = 'h-4 w-4') => {
+    if (siteBranding.titlebarImage) {
+      return (
+        <img 
+          src={siteBranding.titlebarImage} 
+          alt={siteBranding.siteName} 
+          className={`${sizeCls} rounded-xl object-contain shadow-md`}
+        />
+      );
+    }
+    if (siteBranding.titlebarEmoji) {
+      return (
+        <div 
+          className={`${sizeCls} rounded-xl flex items-center justify-center text-white shadow-md text-base`}
+          style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+        >
+          <span>{siteBranding.titlebarEmoji}</span>
+        </div>
+      );
+    }
+    return (
+      <div 
+        className={`${sizeCls} rounded-xl flex items-center justify-center text-white`}
+        style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+      >
+        <ChefHat className={iconCls} />
+      </div>
+    );
   };
 
   const publishedMenuPages = pages.filter((p) => p.is_published);
@@ -24009,10 +24140,10 @@ export default function AdminFrontendSettingsPage() {
                     }}
                   >
                     <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
-                        <ChefHat className="h-4 w-4" />
-                      </div>
-                      <span className="font-black text-sm tracking-tight">Zecratary</span>
+                      {renderDynamicBrandLogo('w-8 h-8', 'h-4 w-4')}
+                      <span className="font-black text-sm tracking-tight">
+                        {siteBranding.siteName || 'Zecratary'}
+                      </span>
                     </div>
 
                     <div className="hidden sm:flex items-center gap-2 text-xs font-bold">
