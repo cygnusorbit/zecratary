@@ -52,6 +52,7 @@ import {
   Moon
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
+import { getSiteConfig } from '@/lib/siteConfig';
 
 export type ElementType = 'title' | 'content' | 'column' | 'picture' | 'box' | 'recipe' | 'subscription';
 
@@ -259,6 +260,42 @@ export default function AdminFrontendSettingsPage() {
   const [newPageDesc, setNewPageDesc] = useState<string>('');
 
   const imageFileInputRef = useRef<HTMLInputElement>(null);
+  const [siteBranding, setSiteBranding] = useState<{
+    siteName: string;
+    titlebarEmoji: string;
+    titlebarImage: string;
+  }>({
+    siteName: 'Zecratary',
+    titlebarEmoji: '🍳',
+    titlebarImage: '',
+  });
+
+  const fetchSiteBranding = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/settings', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const payload = data.settings || data;
+        setSiteBranding({
+          siteName: payload.siteName || payload.site_name || 'Zecratary',
+          titlebarEmoji: payload.titlebarEmoji || payload.titlebar_emoji || '🍳',
+          titlebarImage: payload.titlebarImage || payload.titlebar_image || '',
+        });
+        return;
+      }
+    } catch (_) {}
+
+    try {
+      const cfg = getSiteConfig();
+      if (cfg) {
+        setSiteBranding({
+          siteName: cfg.siteName || 'Zecratary',
+          titlebarEmoji: cfg.titlebarEmoji || '🍳',
+          titlebarImage: cfg.titlebarImage || '',
+        });
+      }
+    } catch (_) {}
+  }, []);
   const [activeImageUploadElementId, setActiveImageUploadElementId] = useState<{ id: string; target: 'imageUrl' } | null>(null);
 
   // 1. Fetch Subscription Plans
@@ -346,6 +383,7 @@ export default function AdminFrontendSettingsPage() {
 
   useEffect(() => {
     fetchPages();
+    fetchSiteBranding();
     fetchLivePlans();
     fetchAllSavedRecipes();
   }, [fetchPages, fetchLivePlans, fetchAllSavedRecipes]);
@@ -623,6 +661,36 @@ export default function AdminFrontendSettingsPage() {
     const num = Number(rawAmt);
     const scaled = (num / (baseServings || 2)) * currentServings;
     return Number.isInteger(scaled) ? scaled : Number(scaled.toFixed(2));
+  };
+
+  const renderDynamicBrandLogo = (sizeCls = 'w-8 h-8', iconCls = 'h-4 w-4') => {
+    if (siteBranding.titlebarImage) {
+      return (
+        <img 
+          src={siteBranding.titlebarImage} 
+          alt={siteBranding.siteName} 
+          className={`${sizeCls} rounded-xl object-contain shadow-md`}
+        />
+      );
+    }
+    if (siteBranding.titlebarEmoji) {
+      return (
+        <div 
+          className={`${sizeCls} rounded-xl flex items-center justify-center text-white shadow-md text-base`}
+          style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+        >
+          <span>{siteBranding.titlebarEmoji}</span>
+        </div>
+      );
+    }
+    return (
+      <div 
+        className={`${sizeCls} rounded-xl flex items-center justify-center text-white`}
+        style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+      >
+        <ChefHat className={iconCls} />
+      </div>
+    );
   };
 
   const publishedMenuPages = pages.filter((p) => p.is_published);
@@ -911,10 +979,10 @@ export default function AdminFrontendSettingsPage() {
                     }}
                   >
                     <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
-                        <ChefHat className="h-4 w-4" />
-                      </div>
-                      <span className="font-black text-sm tracking-tight">Zecratary</span>
+                      {renderDynamicBrandLogo('w-8 h-8', 'h-4 w-4')}
+                      <span className="font-black text-sm tracking-tight">
+                        {siteBranding.siteName || 'Zecratary'}
+                      </span>
                     </div>
 
                     <div className="hidden sm:flex items-center gap-2 text-xs font-bold">
