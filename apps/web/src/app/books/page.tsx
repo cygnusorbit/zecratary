@@ -352,7 +352,7 @@ export default function BooksPage() {
         </div>
       </div>
 
-      {/* Search Bar */}
+      {/* Search Bar with Full Day/Dark Mode Theme Bindings */}
       <div className="relative">
         <Search 
           className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none" 
@@ -388,8 +388,12 @@ export default function BooksPage() {
           }}
         >
           <div 
-            className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto shadow-sm"
-            style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' }}
+            className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto shadow-sm border"
+            style={{ 
+              backgroundColor: 'var(--color-card)', 
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-primary)' 
+            }}
           >
             <Book className="h-6 w-6"/>
           </div>
@@ -402,8 +406,10 @@ export default function BooksPage() {
           <button
             type="button"
             onClick={() => setShowAddModal(true)}
-            className="text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow-sm inline-flex items-center gap-1.5"
+            className="text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow-sm inline-flex items-center gap-1.5 cursor-pointer"
             style={{ backgroundColor: 'var(--color-primary)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
             <Plus className="h-4 w-4" /> {t('createFirstCookbook') || 'Create First Cookbook'}
           </button>
@@ -422,16 +428,31 @@ export default function BooksPage() {
             >
               <div>
                 <div className={`h-28 w-full bg-gradient-to-r ${b.coverColor || COVER_GRADIENTS[0].className} p-4 flex flex-col justify-between relative`}>
-                  <div className="flex items-center justify-between text-white">
-                    <span className="text-xs font-black uppercase tracking-wider bg-black/40 backdrop-blur-md px-2.5 py-0.5 rounded-full flex items-center gap-1 border border-white/20">
-                      <BookOpen className="h-3 w-3" /> {(t('recipesCountSuffix') || '{count} Recipes').replace('{count}', String(b.recipeCount || 0))}
+                  <div className="flex items-center justify-between">
+                    {/* High-Contrast Dynamic Badge for Day Mode */}
+                    <span 
+                      className="text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full flex items-center gap-1.5 border shadow-sm backdrop-blur-md transition"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      <BookOpen className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> 
+                      {(t('recipesCountSuffix') || '{count} Recipes').replace('{count}', String(b.recipeCount || 0))}
                     </span>
 
+                    {/* High-Contrast Action Buttons for Day Mode */}
                     <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
                         onClick={(e) => handleOpenEdit(e, b)}
-                        className="p-1.5 rounded-lg bg-black/40 hover:bg-black/60 text-white backdrop-blur-md transition cursor-pointer border border-white/20"
+                        className="p-1.5 rounded-lg border backdrop-blur-md transition cursor-pointer shadow-sm"
+                        style={{
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
+                        }}
                         title={t('editCookbookTooltip') || 'Edit Cookbook'}
                       >
                         <Edit3 className="h-3.5 w-3.5" />
@@ -439,7 +460,20 @@ export default function BooksPage() {
                       <button
                         type="button"
                         onClick={(e) => handleDeleteBook(e, b.id)}
-                        className="p-1.5 rounded-lg bg-black/40 hover:bg-red-600/80 text-white backdrop-blur-md transition cursor-pointer border border-white/20"
+                        className="p-1.5 rounded-lg border backdrop-blur-md transition cursor-pointer shadow-sm"
+                        style={{
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.color = '#ef4444';
+                          e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.color = 'var(--color-text)';
+                          e.currentTarget.style.borderColor = 'var(--color-border)';
+                        }}
                         title={t('deleteCookbookTooltip') || 'Delete Cookbook'}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -475,7 +509,9 @@ export default function BooksPage() {
       {selectedBook && (
         <div 
           onClick={() => setSelectedBook(null)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
+          role="dialog"
+          aria-modal="true"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
@@ -490,19 +526,32 @@ export default function BooksPage() {
               <button 
                 type="button"
                 onClick={() => setSelectedBook(null)} 
-                className="absolute top-4 right-4 p-2 rounded-full bg-black/40 hover:bg-black/60 text-white transition cursor-pointer border border-white/20"
+                className="absolute top-4 right-4 p-2 rounded-xl border backdrop-blur-md transition cursor-pointer shadow-md"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
               >
                 <X className="h-4 w-4" />
               </button>
 
               <div className="flex items-center gap-2">
-                <span className="text-xs font-black uppercase tracking-wider bg-black/40 backdrop-blur-md px-2.5 py-0.5 rounded-full border border-white/20">
+                <span 
+                  className="text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border shadow-sm backdrop-blur-md flex items-center gap-1.5"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  <BookOpen className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
                   {(t('recipesCountSuffix') || '{count} Recipes').replace('{count}', String(selectedBookRecipes.length))}
                 </span>
               </div>
-              <h2 className="text-2xl font-black tracking-tight">{selectedBook.title}</h2>
+              <h2 className="text-2xl font-black tracking-tight drop-shadow-md">{selectedBook.title}</h2>
               {selectedBook.description && (
-                <p className="text-xs text-white/90 leading-relaxed max-w-lg">{selectedBook.description}</p>
+                <p className="text-xs text-white/90 leading-relaxed max-w-lg drop-shadow-sm">{selectedBook.description}</p>
               )}
             </div>
 
@@ -524,7 +573,7 @@ export default function BooksPage() {
                   <div
                     key={r.id}
                     onClick={() => router.push('/saved')}
-                    className="p-3 rounded-xl border flex items-center justify-between gap-3 transition cursor-pointer hover:scale-[1.01]"
+                    className="p-3 rounded-xl border flex items-center justify-between gap-3 transition cursor-pointer hover:scale-[1.01] shadow-xs"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)'
@@ -553,11 +602,21 @@ export default function BooksPage() {
                         e.stopPropagation();
                         router.push('/saved');
                       }}
-                      className="px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer"
+                      className="px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer shadow-xs"
                       style={{
                         backgroundColor: 'var(--color-card)',
                         borderColor: 'var(--color-border)',
                         color: 'var(--color-primary)'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = 'var(--color-primary)';
+                        e.currentTarget.style.borderColor = 'var(--color-primary)';
+                        e.currentTarget.style.color = '#ffffff';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'var(--color-card)';
+                        e.currentTarget.style.borderColor = 'var(--color-border)';
+                        e.currentTarget.style.color = 'var(--color-primary)';
                       }}
                     >
                       {t('openRecipeBtn') || 'Open'}
@@ -571,7 +630,7 @@ export default function BooksPage() {
               <button
                 type="button"
                 onClick={() => setSelectedBook(null)}
-                className="px-5 py-2 rounded-xl border font-bold text-xs transition cursor-pointer"
+                className="px-5 py-2 rounded-xl border font-bold text-xs transition cursor-pointer shadow-xs"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -585,11 +644,13 @@ export default function BooksPage() {
         </div>
       )}
 
-      {/* CREATE COOKBOOK MODAL (NO NATIVE FORM) */}
+      {/* CREATE COOKBOOK MODAL (NO NATIVE FORM - AUTOFILL SAFE) */}
       {showAddModal && (
         <div 
           onClick={() => setShowAddModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+          role="dialog"
+          aria-modal="true"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
@@ -603,9 +664,10 @@ export default function BooksPage() {
             <button 
               type="button"
               onClick={() => setShowAddModal(false)} 
-              className="absolute top-4 right-4 p-2 rounded-xl transition cursor-pointer"
+              className="absolute top-4 right-4 p-2 rounded-xl border transition cursor-pointer shadow-xs"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
                 color: 'var(--color-text)'
               }}
             >
@@ -624,7 +686,7 @@ export default function BooksPage() {
 
             <div className="space-y-4">
               <div>
-                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
                   {t('cookbookTitleLabel') || 'Cookbook Title *'}
                 </label>
                 <input
@@ -651,7 +713,7 @@ export default function BooksPage() {
               </div>
 
               <div>
-                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
                   {t('descriptionLabel') || 'Description'}
                 </label>
                 <textarea
@@ -671,7 +733,7 @@ export default function BooksPage() {
               </div>
 
               <div>
-                <label className="block font-semibold mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                <label className="block font-bold mb-2" style={{ color: 'var(--color-text)' }}>
                   {t('coverGradientLabel') || 'Cover Theme'}
                 </label>
                 <div className="grid grid-cols-3 gap-2">
@@ -682,11 +744,11 @@ export default function BooksPage() {
                       onClick={() => setNewCoverGradient(g.className)}
                       className={`h-10 rounded-xl bg-gradient-to-r ${g.className} transition flex items-center justify-center border-2 cursor-pointer shadow-xs`}
                       style={{
-                        borderColor: newCoverGradient === g.className ? 'var(--color-primary)' : 'transparent'
+                        borderColor: newCoverGradient === g.className ? 'var(--color-primary)' : 'var(--color-border)'
                       }}
                       title={g.label}
                     >
-                      {newCoverGradient === g.className && <Check className="h-4 w-4 text-white stroke-[3]" />}
+                      {newCoverGradient === g.className && <Check className="h-4 w-4 text-white stroke-[3] drop-shadow-md" />}
                     </button>
                   ))}
                 </div>
@@ -696,11 +758,11 @@ export default function BooksPage() {
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
+                  className="px-4 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer shadow-xs"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
-                    color: 'var(--color-text-secondary)'
+                    color: 'var(--color-text)'
                   }}
                 >
                   {t('cancel') || 'Cancel'}
@@ -721,11 +783,13 @@ export default function BooksPage() {
         </div>
       )}
 
-      {/* EDIT COOKBOOK MODAL (NO NATIVE FORM) */}
+      {/* EDIT COOKBOOK MODAL (NO NATIVE FORM - AUTOFILL SAFE) */}
       {showEditModal && (
         <div 
           onClick={() => setShowEditModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+          role="dialog"
+          aria-modal="true"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
@@ -739,9 +803,10 @@ export default function BooksPage() {
             <button 
               type="button"
               onClick={() => setShowEditModal(false)} 
-              className="absolute top-4 right-4 p-2 rounded-xl transition cursor-pointer"
+              className="absolute top-4 right-4 p-2 rounded-xl border transition cursor-pointer shadow-xs"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
                 color: 'var(--color-text)'
               }}
             >
@@ -760,7 +825,7 @@ export default function BooksPage() {
 
             <div className="space-y-4">
               <div>
-                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
                   {t('cookbookTitleLabel') || 'Cookbook Title *'}
                 </label>
                 <input
@@ -786,7 +851,7 @@ export default function BooksPage() {
               </div>
 
               <div>
-                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
                   {t('descriptionLabel') || 'Description'}
                 </label>
                 <textarea
@@ -805,7 +870,7 @@ export default function BooksPage() {
               </div>
 
               <div>
-                <label className="block font-semibold mb-2" style={{ color: 'var(--color-text-secondary)' }}>
+                <label className="block font-bold mb-2" style={{ color: 'var(--color-text)' }}>
                   {t('coverGradientLabel') || 'Cover Theme'}
                 </label>
                 <div className="grid grid-cols-3 gap-2">
@@ -816,11 +881,11 @@ export default function BooksPage() {
                       onClick={() => setEditCoverGradient(g.className)}
                       className={`h-10 rounded-xl bg-gradient-to-r ${g.className} transition flex items-center justify-center border-2 cursor-pointer shadow-xs`}
                       style={{
-                        borderColor: editCoverGradient === g.className ? 'var(--color-primary)' : 'transparent'
+                        borderColor: editCoverGradient === g.className ? 'var(--color-primary)' : 'var(--color-border)'
                       }}
                       title={g.label}
                     >
-                      {editCoverGradient === g.className && <Check className="h-4 w-4 text-white stroke-[3]" />}
+                      {editCoverGradient === g.className && <Check className="h-4 w-4 text-white stroke-[3] drop-shadow-md" />}
                     </button>
                   ))}
                 </div>
@@ -830,11 +895,11 @@ export default function BooksPage() {
                 <button
                   type="button"
                   onClick={() => setShowEditModal(false)}
-                  className="px-4 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
+                  className="px-4 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer shadow-xs"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
-                    color: 'var(--color-text-secondary)'
+                    color: 'var(--color-text)'
                   }}
                 >
                   {t('cancel') || 'Cancel'}
