@@ -1,7 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import React from 'react';
 import DynamicHomePage from '../page';
 
 export default function DynamicCustomSlugPage() {

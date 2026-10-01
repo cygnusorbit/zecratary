@@ -521,6 +521,10 @@ export default function AdminFrontendSettingsPage() {
         setToastMessage(t('pageSavedSuccess') || 'Page layout, padding settings, and footer saved to PostgreSQL.');
         setTimeout(() => setToastMessage(null), 4000);
         await fetchPages(selectedPage.id);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_frontend_pages_updated'));
+          localStorage.setItem('zecratary_frontend_updated_at', Date.now().toString());
+        }
       } else {
         setErrorMessage(data.error || 'Failed to save page configuration.');
       }
@@ -545,6 +549,10 @@ export default function AdminFrontendSettingsPage() {
         setToastMessage('Default homepage updated.');
         setTimeout(() => setToastMessage(null), 3000);
         await fetchPages(pageId);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_frontend_pages_updated'));
+          localStorage.setItem('zecratary_frontend_updated_at', Date.now().toString());
+        }
       }
     } catch (err: any) {
       alert(err.message || 'Error setting default page.');
@@ -575,6 +583,10 @@ export default function AdminFrontendSettingsPage() {
         setToastMessage('Page deleted successfully.');
         setTimeout(() => setToastMessage(null), 3000);
         await fetchPages();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_frontend_pages_updated'));
+          localStorage.setItem('zecratary_frontend_updated_at', Date.now().toString());
+        }
       }
     } catch (err: any) {
       alert(err.message || 'Error deleting page.');
