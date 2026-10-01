@@ -52,6 +52,8 @@ export type ElementType = 'title' | 'content' | 'column' | 'picture' | 'box' | '
 export interface PagePaddingSettings {
   top?: string;
   bottom?: string;
+  left?: string;
+  right?: string;
   x?: string;
   maxWidth?: 'max-w-5xl' | 'max-w-6xl' | 'max-w-7xl' | 'max-w-full';
 }
@@ -794,8 +796,9 @@ export default function AdminFrontendSettingsPage() {
                 style={{
                   paddingTop: selectedPage.padding?.top || '2.5rem',
                   paddingBottom: selectedPage.padding?.bottom || '4rem',
-                  paddingLeft: selectedPage.padding?.x || '1.5rem',
-                  paddingRight: selectedPage.padding?.x || '1.5rem'
+                  paddingLeft: selectedPage.padding?.left || selectedPage.padding?.x || '1.5rem',
+                  paddingRight: selectedPage.padding?.right || selectedPage.padding?.x || '1.5rem',
+                  boxSizing: 'border-box'
                 }}
               >
                 {selectedPage.elements.map((elem) => {
@@ -1076,7 +1079,7 @@ export default function AdminFrontendSettingsPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 text-xs pt-1">
                   <div>
                     <label className="block font-bold mb-1 opacity-70">Top Padding (Clearance)</label>
                     <input 
@@ -1102,11 +1105,26 @@ export default function AdminFrontendSettingsPage() {
                   </div>
 
                   <div>
-                    <label className="block font-bold mb-1 opacity-70">Horizontal Padding (X)</label>
+                    <label className="block font-bold mb-1 opacity-70">Left Padding</label>
                     <input 
                       type="text" 
-                      value={selectedPage.padding?.x || '1.5rem'}
-                      onChange={(e) => handlePaddingChange('x', e.target.value)}
+                      value={selectedPage.padding?.left || selectedPage.padding?.x || '1.5rem'}
+                      onChange={(e) => {
+                        handlePaddingChange('left', e.target.value);
+                        handlePaddingChange('x', e.target.value);
+                      }}
+                      placeholder="e.g. 1.5rem or 24px"
+                      className="w-full px-3 py-2 rounded-xl border font-mono font-bold"
+                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold mb-1 opacity-70">Right Padding</label>
+                    <input 
+                      type="text" 
+                      value={selectedPage.padding?.right || selectedPage.padding?.x || '1.5rem'}
+                      onChange={(e) => handlePaddingChange('right', e.target.value)}
                       placeholder="e.g. 1.5rem or 24px"
                       className="w-full px-3 py-2 rounded-xl border font-mono font-bold"
                       style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}

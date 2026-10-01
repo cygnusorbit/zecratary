@@ -34,6 +34,8 @@ async function ensureFrontendPagesTable() {
 const defaultPadding = {
   top: '2.5rem',
   bottom: '4rem',
+  left: '1.5rem',
+  right: '1.5rem',
   x: '1.5rem',
   maxWidth: 'max-w-7xl'
 };
@@ -238,7 +240,12 @@ export async function GET(req: NextRequest) {
       is_default: Boolean(r.is_default),
       is_published: Boolean(r.is_published),
       elements: typeof r.elements === 'string' ? JSON.parse(r.elements) : (r.elements || []),
-      padding: typeof r.padding === 'string' ? JSON.parse(r.padding) : (r.padding || defaultPadding),
+      padding: (() => {
+        const p = typeof r.padding === 'string' ? JSON.parse(r.padding) : (r.padding || defaultPadding);
+        if (!p.left && p.x) p.left = p.x;
+        if (!p.right && p.x) p.right = p.x;
+        return p;
+      })(),
       footer: typeof r.footer === 'string' ? JSON.parse(r.footer) : (r.footer || defaultFooter),
       created_at: r.created_at,
       updated_at: r.updated_at

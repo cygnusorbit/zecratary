@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.77",
+  "version": "8.0.79",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.77",
+  "version": "8.0.79",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -429,668 +429,1202 @@ export default function RootLayout({
 ## File: `apps/web/src/app/page.tsx`
 ```typescript
 'use client';
-import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { 
   ChefHat, 
-  Calendar, 
-  Sparkles,
-  Clock,
-  Utensils,
+  Sparkles, 
+  Clock, 
+  Flame, 
+  Utensils, 
+  ChevronRight, 
+  ChevronLeft, 
+  Check, 
+  Bookmark, 
+  Users, 
+  Star, 
+  X, 
+  Heart, 
+  Coins, 
+  ExternalLink, 
+  Menu, 
+  Sun, 
+  Moon, 
+  Globe, 
   ArrowRight,
-  RefreshCw,
+  Shield,
+  Layers,
   CheckCircle2,
-  BookOpen,
-  Package,
-  ShoppingCart
+  Sliders,
+  PanelBottom
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
-export default function DashboardPage() {
-  const router = useRouter();
-  const { t } = useTranslation();
+export type ElementType = 'title' | 'content' | 'column' | 'picture' | 'box' | 'recipe' | 'subscription';
+
+export interface PagePaddingSettings {
+  top?: string;
+  bottom?: string;
+  x?: string;
+  maxWidth?: 'max-w-5xl' | 'max-w-6xl' | 'max-w-7xl' | 'max-w-full';
+}
+
+export interface FooterLink {
+  id: string;
+  label: string;
+  url: string;
+}
+
+export interface FooterColumn {
+  id: string;
+  title: string;
+  links: FooterLink[];
+}
+
+export interface PageFooterSettings {
+  enabled?: boolean;
+  aboutText?: string;
+  copyrightText?: string;
+  columns?: FooterColumn[];
+  socials?: {
+    twitter?: string;
+    github?: string;
+    discord?: string;
+    instagram?: string;
+    youtube?: string;
+  };
+  bgColor?: string;
+  textColor?: string;
+  borderColor?: string;
+  accentColor?: string;
+}
+
+export interface SavedRecipeRecord {
+  id: string;
+  title: string;
+  name?: string;
+  description?: string;
+  image?: string;
+  imageUrl?: string;
+  image_url?: string;
+  prepTime?: string;
+  cookTime?: string;
+  prepTimeMinutes?: number;
+  cookTimeMinutes?: number;
+  calories?: string | number;
+  servings?: string | number;
+  category?: string;
+  recipeType?: string;
+  ingredients?: any;
+  instructions?: any;
+  directions?: any;
+  sourceUrl?: string;
+  source_url?: string;
+  rating?: number;
+  isFavorite?: boolean;
+  isCooked?: boolean;
+  creatorName?: string;
+}
+
+export interface PageElement {
+  id: string;
+  type: ElementType;
+  title?: string;
+  subtitle?: string;
+  content?: string;
+  level?: 'h1' | 'h2' | 'h3';
+  alignment?: 'left' | 'center' | 'right';
+  boxStyle?: 'highlight' | 'border' | 'subtle';
+  badge?: string;
+  buttonText?: string;
+  buttonUrl?: string;
+  imageUrl?: string;
+  altText?: string;
+  caption?: string;
+  layout?: 'full' | 'card' | 'contained';
+  columnsCount?: number;
+  columns?: Array<{ id: string; title: string; content: string }>;
+  bgColor?: string;
+  textColor?: string;
+  accentColor?: string;
+  borderColor?: string;
+  recipeGridDensity?: number;
+  recipeLimit?: number;
+  recipeCategoryFilter?: string;
+  planSlug?: string;
+  planBillingInterval?: 'MONTH' | 'YEAR';
+  planShowTokens?: boolean;
+  planShowAiModels?: boolean;
+  planCtaText?: string;
+  planCtaUrl?: string;
+}
+
+export interface FrontendPage {
+  id: string;
+  title: string;
+  slug: string;
+  description: string;
+  is_default: boolean;
+  is_published: boolean;
+  elements: PageElement[];
+  padding?: PagePaddingSettings;
+  footer?: PageFooterSettings;
+}
+
+interface PlanCatalog {
+  id: string;
+  slug: string;
+  name: string;
+  monthlyPrice: number;
+  annualPrice: number;
+  tokenLimit: number;
+  tokenReimburseFrequency?: string;
+  monthlyBadge?: string;
+  annualBadge?: string;
+  trialBadge?: string;
+  descriptionMonthly?: string;
+  descriptionAnnual?: string;
+  allowedAiModels?: string[];
+  features: string[];
+  isFree?: boolean;
+}
+
+const DEFAULT_FALLBACK_PLANS: PlanCatalog[] = [
+  {
+    id: 'preset_taster',
+    slug: 'taster',
+    name: 'Taster',
+    monthlyPrice: 0,
+    annualPrice: 0,
+    tokenLimit: 50000,
+    tokenReimburseFrequency: 'monthly',
+    trialBadge: 'Free Tier',
+    descriptionMonthly: 'Essential AI cooking quota and pantry tracking for home cooks.',
+    descriptionAnnual: 'Essential AI cooking quota and pantry tracking for home cooks.',
+    allowedAiModels: ['gemini-3.5-flash-lite', 'gpt-3.5-turbo'],
+    features: ['5 AI-powered recipes per month', 'Personal recipe library', 'Automated shopping list creation'],
+    isFree: true
+  },
+  {
+    id: 'preset_nutrition_pro',
+    slug: 'nutrition-pro',
+    name: 'Nutrition Pro',
+    monthlyPrice: 8.99,
+    annualPrice: 59.99,
+    tokenLimit: 1000000,
+    tokenReimburseFrequency: 'monthly',
+    monthlyBadge: 'Most Popular',
+    annualBadge: 'Save 44%',
+    trialBadge: '7-Day Free Trial',
+    descriptionMonthly: 'Complete culinary intelligence suite with unlimited AI recipes and deep macro telemetry.',
+    descriptionAnnual: 'Best value - all premium culinary features, billed annually.',
+    allowedAiModels: ['gemini-3.6-flash', 'gpt-4o'],
+    features: ['Unlimited AI-powered recipe generation', 'Macro & vitamin nutrition breakdown', 'Priority Chef processing & cloud sync'],
+    isFree: false
+  }
+];
+
+export default function DynamicHomePage() {
+  const { t, locale, setLanguage } = useTranslation();
+  const params = useParams();
+  const rawSlug = params?.slug ? (typeof params.slug === 'string' ? params.slug : params.slug[0]) : '';
+  const routeSlug = rawSlug ? (rawSlug.startsWith('/') ? rawSlug : `/${rawSlug}`) : '/';
+
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [recipesCount, setRecipesCount] = useState<number>(0);
-  const [recipeBooksCount, setRecipeBooksCount] = useState<number>(0);
-  const [pantryStockCount, setPantryStockCount] = useState<number>(0);
-  const [groceryItemsCount, setGroceryItemsCount] = useState<number>(0);
-  const [upcomingMeal, setUpcomingMeal] = useState<{
-    mealType: string;
-    title: string;
-    timeOrTags: string;
-    notes?: string;
-    imageUrl?: string;
-  } | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [refreshFeedback, setRefreshFeedback] = useState(false);
+  const [allPages, setAllPages] = useState<FrontendPage[]>([]);
+  const [activePage, setActivePage] = useState<FrontendPage | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
 
-  // Apply and listen for global admin theme updates and Day / Night mode toggling
-  const applyGlobalTheme = useCallback(() => {
+  // Dynamic Catalogs
+  const [availablePlans, setAvailablePlans] = useState<PlanCatalog[]>(DEFAULT_FALLBACK_PLANS);
+  const [allRecipesList, setAllRecipesList] = useState<SavedRecipeRecord[]>([]);
+  const [planBillingInterval, setPlanBillingInterval] = useState<'MONTH' | 'YEAR'>('MONTH');
+  const [recipeElementPages, setRecipeElementPages] = useState<Record<string, number>>({});
+
+  // Recipe Modal
+  const [activeRecipeModal, setActiveRecipeModal] = useState<SavedRecipeRecord | null>(null);
+  const [modalServingsMultiplier, setModalServingsMultiplier] = useState<number>(1);
+  const [modalCompletedSteps, setModalCompletedSteps] = useState<number[]>([]);
+  const [modalFontSizeScale, setModalFontSizeScale] = useState<number>(100);
+
+  // Sync Theme State & Body Class
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const mode = localStorage.getItem('zecratary_theme_mode');
+      const dark = mode !== 'light';
+      setIsDarkMode(dark);
+      document.documentElement.classList.toggle('dark', dark);
+      document.body.classList.add('is-homepage-view');
+      return () => {
+        document.body.classList.remove('is-homepage-view');
+      };
+    }
+  }, []);
+
+  const toggleTheme = () => {
+    const nextDark = !isDarkMode;
+    setIsDarkMode(nextDark);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('zecratary_theme_mode', nextDark ? 'dark' : 'light');
+      document.documentElement.classList.toggle('dark', nextDark);
+      window.dispatchEvent(new Event('zecratary_theme_mode_changed'));
+    }
+  };
+
+  // 1. Fetch Dynamic Pages from /api/admin/frontend
+  const fetchFrontendSettings = useCallback(async () => {
     try {
-      const isDay = typeof window !== 'undefined' && (
-        localStorage.getItem('zecratary_theme_mode') === 'light' || 
-        !document.documentElement.classList.contains('dark')
-      );
+      setLoading(true);
+      const res = await fetch('/api/admin/frontend', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.pages)) {
+          setAllPages(data.pages);
 
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      const cfg = stored ? JSON.parse(stored) : {};
-      const root = document.documentElement;
+          let targetPage: FrontendPage | null = null;
+          if (routeSlug && routeSlug !== '/') {
+            targetPage = data.pages.find((p: FrontendPage) => p.slug === routeSlug) || null;
+          }
+          if (!targetPage) {
+            targetPage = data.pages.find((p: FrontendPage) => p.is_default) || 
+                         data.pages.find((p: FrontendPage) => p.slug === '/') || 
+                         data.pages[0] || null;
+          }
+          setActivePage(targetPage);
+          if (targetPage && typeof document !== 'undefined') {
+            document.title = `${targetPage.title} - Zecratary`;
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load frontend settings:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [routeSlug]);
 
-      if (isDay) {
-        // DAY MODE INVERTED PALETTE
-        root.style.setProperty('--color-primary', cfg.primary || cfg.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', cfg.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', cfg.accentEmerald || cfg.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', cfg.accentEmerald || cfg.accentColor || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-      } else {
-        // NIGHT / DARK MODE PALETTE
-        root.style.setProperty('--color-primary', cfg.primary || cfg.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', cfg.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', cfg.backgroundDark || cfg.backgroundColor || '#070b13');
-        root.style.setProperty('--color-background', cfg.backgroundDark || cfg.backgroundColor || '#070b13');
-        root.style.setProperty('--color-bg', cfg.backgroundDark || cfg.backgroundColor || '#070b13');
-        root.style.setProperty('--color-card-dark', cfg.cardDark || cfg.cardBackground || '#111726');
-        root.style.setProperty('--color-card', cfg.cardDark || cfg.cardBackground || '#111726');
-        root.style.setProperty('--color-inner-dark', cfg.innerDark || cfg.backgroundColor || '#0B101D');
-        root.style.setProperty('--color-border', cfg.borderColor || cfg.cardBorder || '#1e293b');
-        root.style.setProperty('--color-emerald', cfg.accentEmerald || cfg.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', cfg.accentEmerald || cfg.accentColor || '#10b981');
-        root.style.setProperty('--color-text', cfg.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', cfg.textSecondary || '#94a3b8');
+  // 2. Fetch Subscription Plans
+  const fetchLivePlans = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data?.packages || data?.plans || data?.configs);
+        if (Array.isArray(list) && list.length > 0) {
+          const parsed: PlanCatalog[] = list.map((p: any) => ({
+            id: String(p.id || p.slug || 'plan'),
+            slug: String(p.slug || p.id || 'plan').toLowerCase().trim(),
+            name: String(p.name || 'Subscription Plan'),
+            monthlyPrice: Number(p.monthlyPriceDollars ?? p.monthlyPrice ?? 0),
+            annualPrice: Number(p.annualPriceDollars ?? p.annualPrice ?? 0),
+            tokenLimit: Number(p.tokenLimit ?? 500000),
+            tokenReimburseFrequency: p.tokenReimburseFrequency || 'monthly',
+            monthlyBadge: p.monthlyBadge || '',
+            annualBadge: p.annualBadge || '',
+            trialBadge: p.trialBadge || (p.isFree ? 'Free Tier' : ''),
+            descriptionMonthly: p.descriptionMonthly || p.description || 'Full kitchen intelligence access',
+            descriptionAnnual: p.descriptionAnnual || 'Best value, billed annually',
+            allowedAiModels: Array.isArray(p.allowedAiModels) ? p.allowedAiModels : ['gemini-3.6-flash', 'gpt-4o'],
+            features: Array.isArray(p.features) ? p.features : ['AI-Powered Recipe Generation', 'Pantry Sync'],
+            isFree: Boolean(p.isFree || (Number(p.monthlyPriceDollars) === 0 && Number(p.annualPriceDollars) === 0))
+          }));
+          setAvailablePlans(parsed);
+        }
       }
     } catch (_) {}
   }, []);
 
-  useEffect(() => {
-    applyGlobalTheme();
-    window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_updated', applyGlobalTheme);
-    window.addEventListener('storage', applyGlobalTheme);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
-      window.removeEventListener('storage', applyGlobalTheme);
-    };
-  }, [applyGlobalTheme]);
-
-  const getExactSavedRecipes = useCallback((user: User | null): any[] => {
-    if (typeof window === 'undefined') return [];
+  // 3. Fetch Recipes from PostgreSQL
+  const fetchAllRecipes = useCallback(async () => {
     try {
-      const raw = localStorage.getItem('zecratary_saved_recipes') || localStorage.getItem('zecratary_recipes');
-      if (!raw) return [];
-
-      const list = JSON.parse(raw);
-      if (!Array.isArray(list)) return [];
-
-      const seen = new Set<string>();
-      const userList: any[] = [];
-
-      for (const item of list) {
-        const key = String(item.id || item.title || item.name || '').trim();
-        if (!key || seen.has(key)) continue;
-
-        const isOwner = user
-          ? (item.userId === user.id || item.createdBy === user.email)
-          : true;
-
-        if (isOwner) {
-          seen.add(key);
-          userList.push(item);
+      const res = await fetch('/api/admin/frontend?all_recipes=true', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.recipes)) {
+          setAllRecipesList(data.recipes);
+          return;
         }
       }
+    } catch (_) {}
 
-      return userList;
-    } catch {
-      return [];
-    }
+    // Fallback to /api/recipes/saved
+    try {
+      const res2 = await fetch('/api/recipes/saved', { cache: 'no-store' });
+      if (res2.ok) {
+        const data2 = await res2.json();
+        const list2 = Array.isArray(data2) ? data2 : (data2?.recipes || []);
+        if (Array.isArray(list2) && list2.length > 0) {
+          setAllRecipesList(list2);
+        }
+      }
+    } catch (_) {}
   }, []);
 
-  const computeMetrics = useCallback((user: User | null) => {
-    if (!user) return;
-
-    // 1. Saved Recipes
-    const userRecipes = getExactSavedRecipes(user);
-    setRecipesCount(userRecipes.length);
-
-    // 2. Recipe Books
-    try {
-      const booksRaw = localStorage.getItem('zecratary_recipe_books');
-      if (booksRaw) {
-        const parsedBooks = JSON.parse(booksRaw);
-        if (Array.isArray(parsedBooks) && parsedBooks.length > 0) {
-          const userBooks = parsedBooks.filter((b: any) => 
-            b.userId === user.id || b.createdBy === user.email
-          );
-          if (userBooks.length > 0) {
-            setRecipeBooksCount(userBooks.length);
-          } else {
-            const categories = new Set(userRecipes.map((r: any) => r.category || r.recipeType || r.tags?.[0] || 'Main Dish'));
-            setRecipeBooksCount(userRecipes.length > 0 ? categories.size : 0);
-          }
-        } else {
-          const categories = new Set(userRecipes.map((r: any) => r.category || r.recipeType || r.tags?.[0] || 'Main Dish'));
-          setRecipeBooksCount(userRecipes.length > 0 ? categories.size : 0);
-        }
-      } else {
-        const categories = new Set(userRecipes.map((r: any) => r.category || r.recipeType || r.tags?.[0] || 'Main Dish'));
-        setRecipeBooksCount(userRecipes.length > 0 ? categories.size : 0);
-      }
-    } catch {
-      setRecipeBooksCount(0);
-    }
-
-    // 3. Pantry Stock
-    try {
-      const pantryRaw = localStorage.getItem('zecratary_pantry_items') || localStorage.getItem('zecratary_pantry');
-      if (pantryRaw) {
-        const parsedPantry = JSON.parse(pantryRaw);
-        if (Array.isArray(parsedPantry)) {
-          const userPantry = parsedPantry.filter((p: any) => 
-            p.userId === user.id || p.createdBy === user.email
-          );
-          setPantryStockCount(userPantry.length);
-        } else {
-          setPantryStockCount(0);
-        }
-      } else {
-        setPantryStockCount(0);
-      }
-    } catch {
-      setPantryStockCount(0);
-    }
-
-    // 4. Grocery Items
-    try {
-      const shopRaw = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
-      if (shopRaw) {
-        const parsedShop = JSON.parse(shopRaw);
-        if (Array.isArray(parsedShop)) {
-          const userShop = parsedShop.filter((i: any) => 
-            (i.userId === user.id || i.createdBy === user.email) && !i.checked
-          );
-          setGroceryItemsCount(userShop.length);
-        } else {
-          setGroceryItemsCount(0);
-        }
-      } else {
-        setGroceryItemsCount(0);
-      }
-    } catch {
-      setGroceryItemsCount(0);
-    }
-
-    // 5. Upcoming Meal with Photo Thumbnail
-    try {
-      const planRaw = localStorage.getItem('zecratary_meal_plan');
-      const now = new Date();
-      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-
-      if (planRaw) {
-        const parsedPlan = JSON.parse(planRaw);
-        if (Array.isArray(parsedPlan) && parsedPlan.length > 0) {
-          const userPlan = parsedPlan.filter((m: any) => 
-            m.userId === user.id || m.createdBy === user.email
-          );
-
-          if (userPlan.length > 0) {
-            const todayMeals = userPlan.filter((m: any) => m.date === todayStr);
-            const mealToDisplay = todayMeals.length > 0 ? todayMeals[0] : userPlan[0];
-            const mealTitle = mealToDisplay.recipeName || mealToDisplay.title || 'Planned Dish';
-
-            // Find matching recipe for photo if available
-            const matchingRecipe = userRecipes.find((r: any) => 
-              (r.title || r.name)?.toLowerCase() === mealTitle.toLowerCase()
-            );
-
-            const imageUrl = mealToDisplay.imageUrl || mealToDisplay.image || matchingRecipe?.imageUrl || matchingRecipe?.image;
-
-            setUpcomingMeal({
-              mealType: (mealToDisplay.mealType || 'Dinner').toUpperCase(),
-              title: mealTitle,
-              timeOrTags: mealToDisplay.time ? `${mealToDisplay.time} • ${t('scheduledLabel') || 'Scheduled'}` : `40 mins • ${t('scheduledLabel') || 'Scheduled'}`,
-              notes: mealToDisplay.notes,
-              imageUrl
-            });
-            return;
-          }
-        }
-      }
-
-      if (userRecipes.length > 0) {
-        const first = userRecipes[0];
-        const prep = parseInt(first.prepTimeMinutes || first.prepTime) || 15;
-        const cook = parseInt(first.cookTimeMinutes || first.cookTime) || 20;
-        setUpcomingMeal({
-          mealType: (first.category || first.recipeType || 'Dinner').toUpperCase(),
-          title: first.title || first.name || 'Saved Dish',
-          timeOrTags: `${prep + cook} mins • ${first.tags?.[0] || 'Favorite'}`,
-          imageUrl: first.imageUrl || first.image
-        });
-      } else {
-        setUpcomingMeal(null);
-      }
-    } catch {
-      setUpcomingMeal(null);
-    }
-  }, [getExactSavedRecipes, t]);
-
-  // Comprehensive Live Refresh Handler
-  const handleManualRefresh = () => {
-    if (loading) return;
-    setLoading(true);
-    setRefreshFeedback(false);
-
-    initAuthStorage();
-    const activeUser = getCurrentUser();
-
-    if (!activeUser) {
-      router.replace('/login');
-      return;
-    }
-
-    setCurrentUser(activeUser);
-    applyGlobalTheme();
-    computeMetrics(activeUser);
-
-    window.dispatchEvent(new Event('storage'));
-    window.dispatchEvent(new Event('zecratary_recipes_updated'));
-    window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
-    window.dispatchEvent(new Event('zecratary_pantry_updated'));
-    window.dispatchEvent(new Event('zecratary_shopping_updated'));
-    window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
-
-    setTimeout(() => {
-      setLoading(false);
-      setRefreshFeedback(true);
-      setTimeout(() => setRefreshFeedback(false), 2500);
-    }, 600);
-  };
-
+  // Hydration & Event Listeners
   useEffect(() => {
-    document.title = `${t('dashboard') || 'Dashboard'} - Zecratary`;
     initAuthStorage();
-    const user = getCurrentUser();
-
-    if (!user) {
-      router.replace('/login');
-      return;
-    }
-
-    setCurrentUser(user);
-    computeMetrics(user);
+    setCurrentUser(getCurrentUser());
+    fetchFrontendSettings();
+    fetchLivePlans();
+    fetchAllRecipes();
 
     const handleSync = () => {
-      const active = getCurrentUser();
-      if (!active) {
-        router.replace('/login');
-        return;
-      }
-      setCurrentUser(active);
-      computeMetrics(active);
+      fetchFrontendSettings();
+      fetchAllRecipes();
+      fetchLivePlans();
+      setCurrentUser(getCurrentUser());
     };
 
-    window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_recipes_updated', handleSync);
+    window.addEventListener('zecratary_frontend_pages_updated', handleSync);
     window.addEventListener('zecratary_saved_recipes_updated', handleSync);
-    window.addEventListener('zecratary_pantry_updated', handleSync);
-    window.addEventListener('zecratary_shopping_updated', handleSync);
-    window.addEventListener('zecratary_meal_plan_updated', handleSync);
-    window.addEventListener('zecratary_planner_updated', handleSync);
+    window.addEventListener('zecratary_theme_updated', handleSync);
+    window.addEventListener('zecratary_site_config_updated', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
+    window.addEventListener('storage', handleSync);
 
     return () => {
-      window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_frontend_pages_updated', handleSync);
       window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_pantry_updated', handleSync);
-      window.removeEventListener('zecratary_shopping_updated', handleSync);
-      window.removeEventListener('zecratary_meal_plan_updated', handleSync);
-      window.removeEventListener('zecratary_planner_updated', handleSync);
+      window.removeEventListener('zecratary_theme_updated', handleSync);
+      window.removeEventListener('zecratary_site_config_updated', handleSync);
       window.removeEventListener('zecratary_auth_changed', handleSync);
+      window.removeEventListener('storage', handleSync);
     };
-  }, [computeMetrics, router, t]);
+  }, [fetchFrontendSettings, fetchLivePlans, fetchAllRecipes]);
 
-  if (!currentUser) {
-    return (
-      <div className="min-h-[70vh] flex items-center justify-center">
-        <div 
-          className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
-          style={{ borderColor: 'var(--color-primary, #E05638)', borderTopColor: 'transparent' }}
-        />
-      </div>
-    );
-  }
+  // Scaled Recipe Amount Helper
+  const calculateScaledAmount = (rawAmt: any, baseServings: number, currentServings: number) => {
+    if (!rawAmt || isNaN(Number(rawAmt))) return rawAmt;
+    const num = Number(rawAmt);
+    const scaled = (num / (baseServings || 2)) * currentServings;
+    return Number.isInteger(scaled) ? scaled : Number(scaled.toFixed(2));
+  };
+
+  const getSafeHostname = (urlStr?: string | null) => {
+    if (!urlStr || typeof urlStr !== 'string') return 'source link';
+    try {
+      const normalized = urlStr.startsWith('http://') || urlStr.startsWith('https://') ? urlStr : `https://${urlStr}`;
+      return new URL(normalized).hostname.replace('www.', '');
+    } catch {
+      return urlStr.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0] || 'source link';
+    }
+  };
+
+  const menuPages = allPages.filter((p) => p.is_published);
+
+  // Resolved Page Padding Values from /admin/frontend
+  const padTop = activePage?.padding?.top || '2.5rem';
+  const padBottom = activePage?.padding?.bottom || '4rem';
+  const padX = activePage?.padding?.x || '1.5rem';
+  const maxWCls = activePage?.padding?.maxWidth || 'max-w-7xl';
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-8 pb-16 px-2 sm:px-4 transition-colors duration-200"
-      style={{ color: 'var(--color-text, #0f172a)' }}
+      id="zecratary-homepage-root"
+      className="min-h-screen w-full transition-colors duration-200 flex flex-col justify-between"
+      style={{
+        backgroundColor: 'var(--color-bg, #070b13)',
+        color: 'var(--color-text, #f1f5f9)'
+      }}
     >
-      {/* Top Heading */}
-      <div className="flex items-center justify-between pt-2">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-            {t('dashboard') || 'Dashboard'}
-          </h1>
-          <p 
-            className="text-sm"
-            style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-          >
-            {(t('dashboardWelcomePrefix') || 'Welcome back, {name}!').replace('{name}', currentUser?.name || currentUser?.email || 'Chef')} {t('dashboardSubtitle') || 'Autonomous culinary planning and pantry tracking.'}
-          </p>
-        </div>
+      {/* Global CSS Reset: suppress sidebar/topbar on homepage */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        body.is-homepage-view,
+        body:has(#zecratary-homepage-root) {
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+        body.is-homepage-view main,
+        body.is-homepage-view [role="main"],
+        body.is-homepage-view #zecratary-main-content,
+        body.is-homepage-view .main-content,
+        body:has(#zecratary-homepage-root) main,
+        body:has(#zecratary-homepage-root) [role="main"],
+        body:has(#zecratary-homepage-root) #zecratary-main-content,
+        body:has(#zecratary-homepage-root) .main-content {
+          padding-top: 0 !important;
+          padding-left: 0 !important;
+          padding-right: 0 !important;
+          margin-left: 0 !important;
+          margin-right: 0 !important;
+          width: 100% !important;
+          max-width: 100% !important;
+        }
+        body.is-homepage-view aside,
+        body.is-homepage-view #zecratary-desktop-topbar,
+        body.is-homepage-view .zecratary-mobile-topbar,
+        body:has(#zecratary-homepage-root) aside,
+        body:has(#zecratary-homepage-root) #zecratary-desktop-topbar,
+        body:has(#zecratary-homepage-root) .zecratary-mobile-topbar {
+          display: none !important;
+        }
+      ` }} />
 
-        {/* FUNCTIONAL REFRESH BUTTON */}
-        <div className="flex items-center gap-2">
-          {refreshFeedback && (
-            <span 
-              className="text-xs font-bold flex items-center gap-1.5 animate-in fade-in transition duration-300"
-              style={{ color: 'var(--color-emerald, #10b981)' }}
+      {/* DYNAMIC TOP NAVIGATION MENU */}
+      <header 
+        className="sticky top-0 z-40 backdrop-blur-md border-b transition-colors"
+        style={{
+          backgroundColor: isDarkMode ? 'rgba(11, 15, 23, 0.85)' : 'rgba(255, 255, 255, 0.85)',
+          borderColor: 'var(--color-border, #1e293b)'
+        }}
+      >
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+          <Link href="/" className="flex items-center gap-2.5 cursor-pointer">
+            <div 
+              className="w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-md"
+              style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
             >
-              <CheckCircle2 className="h-3.5 w-3.5" /> {t('refreshed') || 'Refreshed'}
-            </span>
-          )}
+              <ChefHat className="h-5 w-5" />
+            </div>
+            <div>
+              <span className="text-lg font-black tracking-tight" style={{ color: 'var(--color-text, #f1f5f9)' }}>
+                Zecratary
+              </span>
+              <span className="block text-[9px] font-bold uppercase tracking-widest text-[var(--color-primary)]">
+                Culinary AI
+              </span>
+            </div>
+          </Link>
 
-          <button
-            type="button"
-            onClick={handleManualRefresh}
-            disabled={loading}
-            className="p-2.5 px-4 rounded-xl border transition flex items-center gap-2 text-xs font-bold cursor-pointer disabled:opacity-70 shadow-sm"
-            style={{
-              backgroundColor: 'var(--color-card, #ffffff)',
-              borderColor: 'var(--color-border, #e2e8f0)',
-              color: 'var(--color-text, #0f172a)'
-            }}
-            title="Reload live metrics from storage"
-          >
-            <RefreshCw 
-              className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} 
-              style={{ color: 'var(--color-emerald, #10b981)' }}
-            />
-            <span>{loading ? (t('refreshing') || 'Refreshing...') : (t('refresh') || 'Refresh')}</span>
-          </button>
-        </div>
-      </div>
+          {/* Dynamic Menu items from /admin/frontend */}
+          <nav className="hidden md:flex items-center gap-1.5">
+            {menuPages.map((page) => {
+              const isCurrent = (activePage?.slug === page.slug) || (page.is_default && activePage?.is_default);
+              return (
+                <Link
+                  key={page.id}
+                  href={page.is_default ? '/' : page.slug}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition ${
+                    isCurrent ? 'text-[var(--color-primary)] shadow-xs' : 'opacity-70 hover:opacity-100 hover:bg-white/5'
+                  }`}
+                  style={{ backgroundColor: isCurrent ? 'var(--color-inner-dark, #0e1422)' : 'transparent' }}
+                >
+                  {page.title}
+                </Link>
+              );
+            })}
+          </nav>
 
-      {/* Top 4 Stats Metric Cards with Dynamic CSS Theme Variables */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Saved Recipes */}
-        <Link 
-          href="/saved" 
-          className="p-5 rounded-2xl block border transition shadow-sm group"
-          style={{
-            backgroundColor: 'var(--color-card, #ffffff)',
-            borderColor: 'var(--color-border, #e2e8f0)'
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)')}
-        >
-          <span 
-            className="text-xs block uppercase font-bold tracking-wider"
-            style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-          >
-            {t('savedRecipes') || 'Saved Recipes'}
-          </span>
-          <span 
-            className="text-3xl font-black mt-1 block"
-            style={{ color: 'var(--color-primary, #E05638)' }}
-          >
-            {loading ? '...' : recipesCount}
-          </span>
-        </Link>
-
-        {/* Recipe Books */}
-        <Link 
-          href="/books" 
-          className="p-5 rounded-2xl block border transition shadow-sm group"
-          style={{
-            backgroundColor: 'var(--color-card, #ffffff)',
-            borderColor: 'var(--color-border, #e2e8f0)'
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-emerald, #10b981)')}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)')}
-        >
-          <span 
-            className="text-xs block uppercase font-bold tracking-wider"
-            style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-          >
-            {t('books') || 'Recipe Books'}
-          </span>
-          <span 
-            className="text-3xl font-black mt-1 block"
-            style={{ color: 'var(--color-emerald, #10b981)' }}
-          >
-            {loading ? '...' : recipeBooksCount}
-          </span>
-        </Link>
-
-        {/* Pantry Stock */}
-        <Link 
-          href="/pantry" 
-          className="p-5 rounded-2xl block border transition shadow-sm group"
-          style={{
-            backgroundColor: 'var(--color-card, #ffffff)',
-            borderColor: 'var(--color-border, #e2e8f0)'
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)')}
-        >
-          <span 
-            className="text-xs block uppercase font-bold tracking-wider"
-            style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-          >
-            {t('pantryStock') || 'Pantry Stock'}
-          </span>
-          <span 
-            className="text-3xl font-black mt-1 block"
-            style={{ color: 'var(--color-text, #0f172a)' }}
-          >
-            {loading ? '...' : pantryStockCount}
-          </span>
-        </Link>
-
-        {/* Grocery Items */}
-        <Link 
-          href="/shopping" 
-          className="p-5 rounded-2xl block border transition shadow-sm group"
-          style={{
-            backgroundColor: 'var(--color-card, #ffffff)',
-            borderColor: 'var(--color-border, #e2e8f0)'
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-emerald, #10b981)')}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)')}
-        >
-          <span 
-            className="text-xs block uppercase font-bold tracking-wider"
-            style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-          >
-            {t('groceryItems') || 'Grocery Items'}
-          </span>
-          <span 
-            className="text-3xl font-black mt-1 block"
-            style={{ color: 'var(--color-text, #0f172a)' }}
-          >
-            {loading ? '...' : groceryItemsCount}
-          </span>
-        </Link>
-      </div>
-
-      {/* Center 2-Column Section */}
-      <div className="grid md:grid-cols-2 gap-6">
-        {/* Upcoming Meal Card with Recipe Photo */}
-        <div 
-          className="p-6 rounded-2xl space-y-4 shadow-sm flex flex-col justify-between border"
-          style={{
-            backgroundColor: 'var(--color-card, #ffffff)',
-            borderColor: 'var(--color-border, #e2e8f0)'
-          }}
-        >
-          <div 
-            className="flex items-center justify-between border-b pb-3"
-            style={{ borderColor: 'var(--color-border, #e2e8f0)' }}
-          >
-            <h2 
-              className="text-base font-bold flex items-center gap-2"
-              style={{ color: 'var(--color-text, #0f172a)' }}
-            >
-              <Calendar className="h-5 w-5" style={{ color: 'var(--color-primary, #E05638)' }} /> {t('upcomingMeal') || 'Upcoming Meal'}
-            </h2>
-            <Link 
-              href="/planner" 
-              className="text-xs font-bold hover:underline flex items-center gap-1"
-              style={{ color: 'var(--color-primary, #E05638)' }}
-            >
-              {t('viewPlanner') || 'View Planner'} <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
-          </div>
-
-          <div className="flex-1 flex flex-col justify-center my-2">
-            {upcomingMeal ? (
-              <div 
-                className="p-4 rounded-xl border flex items-center gap-4 shadow-inner"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                  borderColor: 'var(--color-border, #e2e8f0)'
-                }}
+          <div className="hidden sm:flex items-center gap-2.5">
+            {/* Language Picker */}
+            <div className="relative group">
+              <button
+                type="button"
+                className="px-2.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 cursor-pointer hover:bg-white/5"
+                style={{ borderColor: 'var(--color-border, #1e293b)' }}
               >
-                {upcomingMeal.imageUrl ? (
-                  <img
-                    src={upcomingMeal.imageUrl}
-                    alt={upcomingMeal.title}
-                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover border border-slate-700/80 shrink-0 shadow-md"
-                  />
-                ) : (
-                  <div 
-                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl border border-slate-700/80 shrink-0 flex items-center justify-center bg-slate-800/40"
+                <Globe className="h-3.5 w-3.5 opacity-70" />
+                <span className="uppercase">{locale || 'en'}</span>
+              </button>
+              <div 
+                className="absolute right-0 mt-1 w-32 border rounded-2xl p-1.5 shadow-2xl hidden group-hover:block z-50 animate-in fade-in"
+                style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+              >
+                {[
+                  { code: 'en', label: 'English', flag: '🇺🇸' },
+                  { code: 'es', label: 'Español', flag: '🇪🇸' },
+                  { code: 'fr', label: 'Français', flag: '🇫🇷' },
+                  { code: 'th', label: 'ไทย', flag: '🇹🇭' }
+                ].map((l) => (
+                  <button
+                    key={l.code}
+                    type="button"
+                    onClick={() => setLanguage && setLanguage(l.code as any)}
+                    className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-white/10 cursor-pointer"
                   >
-                    <Utensils className="h-6 w-6 opacity-50" />
-                  </div>
-                )}
+                    <span>{l.flag}</span>
+                    <span>{l.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
-                <div className="space-y-1 flex-1 min-w-0">
-                  <span 
-                    className="text-xs font-bold uppercase tracking-wide flex items-center gap-1.5"
-                    style={{ color: 'var(--color-emerald, #10b981)' }}
+            {/* Day / Dark Theme Switcher */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="p-2 rounded-xl border transition cursor-pointer hover:bg-white/5"
+              style={{ borderColor: 'var(--color-border, #1e293b)' }}
+              title="Toggle Theme"
+            >
+              {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-700" />}
+            </button>
+
+            {/* Auth status action */}
+            {currentUser ? (
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/dashboard"
+                  className="px-4 py-2 rounded-xl text-xs font-black text-white shadow-md transition hover:opacity-90 flex items-center gap-1.5"
+                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  <span>{t('dashboard') || 'Dashboard'}</span>
+                </Link>
+                {currentUser.role === 'admin' && (
+                  <Link
+                    href="/admin/frontend"
+                    className="p-2 rounded-xl border text-xs font-bold transition hover:bg-white/10 text-amber-400 border-amber-500/30"
+                    title="Edit in Admin Frontend Builder"
                   >
-                    <Utensils className="h-3 w-3" /> {(t('todayMealPrefix') || 'Today • {mealType}').replace('{mealType}', upcomingMeal.mealType)}
-                  </span>
-                  <h3 
-                    className="font-bold text-base leading-tight mt-1 truncate"
-                    style={{ color: 'var(--color-text, #0f172a)' }}
-                  >
-                    {upcomingMeal.title}
-                  </h3>
-                  <span 
-                    className="text-xs flex items-center gap-1 pt-0.5"
-                    style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-                  >
-                    <Clock className="h-3.5 w-3.5" /> {upcomingMeal.timeOrTags}
-                  </span>
-                  {upcomingMeal.notes && (
-                    <p 
-                      className="text-xs italic mt-1 opacity-80 line-clamp-1"
-                      style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-                    >
-                      "{upcomingMeal.notes}"
-                    </p>
-                  )}
-                </div>
+                    <Shield className="h-4 w-4" />
+                  </Link>
+                )}
               </div>
             ) : (
-              <div 
-                className="p-4 rounded-xl border flex items-center justify-between text-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                  borderColor: 'var(--color-border, #e2e8f0)',
-                  color: 'var(--color-text-secondary, #94a3b8)'
-                }}
-              >
-                <span>{t('noMealsScheduledToday') || 'No meals scheduled for today.'}</span>
-                <Link 
-                  href="/planner" 
-                  className="text-xs font-bold hover:underline"
-                  style={{ color: 'var(--color-primary, #E05638)' }}
-                >
-                  {t('planMeal') || 'Plan Meal'}
+              <div className="flex items-center gap-2">
+                <Link href="/login" className="px-3.5 py-2 rounded-xl text-xs font-bold border hover:bg-white/5" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                  {t('signIn') || 'Sign In'}
+                </Link>
+                <Link href="/register" className="px-4 py-2 rounded-xl text-xs font-black text-white shadow-md hover:opacity-90" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
+                  {t('getStarted') || 'Get Started'}
                 </Link>
               </div>
             )}
           </div>
+
+          {/* Mobile Hamburger */}
+          <div className="flex items-center gap-2 md:hidden">
+            <button type="button" onClick={toggleTheme} className="p-2 rounded-xl border" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+              {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-700" />}
+            </button>
+            <button type="button" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="p-2 rounded-xl border" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+              {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
+          </div>
         </div>
 
-        {/* Quick Actions Card */}
-        <div 
-          className="p-6 rounded-2xl space-y-4 shadow-sm flex flex-col justify-between border"
+        {mobileMenuOpen && (
+          <div className="md:hidden border-b p-4 space-y-3" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}>
+            <div className="space-y-1">
+              {menuPages.map((p) => (
+                <Link key={p.id} href={p.is_default ? '/' : p.slug} onClick={() => setMobileMenuOpen(false)} className="block px-3 py-2 rounded-xl text-xs font-bold hover:bg-white/10">
+                  {p.title}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+      </header>
+
+      {/* DYNAMIC CONTENT CANVAS (Applying Page Padding Settings) */}
+      <main 
+        className={`${maxWCls} mx-auto w-full space-y-12 sm:space-y-16 flex-1`}
+        style={{
+          paddingTop: padTop,
+          paddingBottom: padBottom,
+          paddingLeft: padX,
+          paddingRight: padX
+        }}
+      >
+        {loading ? (
+          <div className="min-h-[50vh] flex flex-col items-center justify-center space-y-3">
+            <div className="w-10 h-10 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--color-primary, #E05638)', borderTopColor: 'transparent' }} />
+            <p className="text-xs opacity-60">Synchronizing settings from PostgreSQL...</p>
+          </div>
+        ) : !activePage || (activePage.elements && activePage.elements.length === 0) ? (
+          <div className="py-24 text-center space-y-4">
+            <ChefHat className="h-12 w-12 mx-auto text-[var(--color-primary)]" />
+            <h2 className="text-2xl font-black">Welcome to Zecratary</h2>
+            <p className="text-xs max-w-md mx-auto opacity-70">
+              Customize this page layout, padding, and elements dynamically at <code className="font-mono text-amber-400">/admin/frontend</code>.
+            </p>
+          </div>
+        ) : (
+          activePage.elements.map((elem) => {
+            const elemBg = elem.bgColor || 'transparent';
+            const elemText = elem.textColor || 'inherit';
+            const elemBorder = elem.borderColor || 'var(--color-border, #1e293b)';
+            const elemAccent = elem.accentColor || 'var(--color-primary, #E05638)';
+
+            // 1. TITLE
+            if (elem.type === 'title') {
+              const alignCls = elem.alignment === 'center' ? 'text-center' : elem.alignment === 'right' ? 'text-right' : 'text-left';
+              return (
+                <div key={elem.id} className={`space-y-3 py-6 px-4 rounded-3xl transition ${alignCls}`} style={{ backgroundColor: elemBg, color: elemText }}>
+                  {elem.level === 'h1' ? (
+                    <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-tight" style={{ color: elemAccent }}>{elem.title}</h1>
+                  ) : elem.level === 'h3' ? (
+                    <h3 className="text-xl sm:text-2xl font-bold tracking-tight">{elem.title}</h3>
+                  ) : (
+                    <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">{elem.title}</h2>
+                  )}
+                  {elem.subtitle && <p className="text-sm sm:text-base max-w-3xl mx-auto opacity-80 leading-relaxed">{elem.subtitle}</p>}
+                </div>
+              );
+            }
+
+            // 2. TEXT CONTENT
+            if (elem.type === 'content') {
+              const alignCls = elem.alignment === 'center' ? 'text-center' : elem.alignment === 'right' ? 'text-right' : 'text-left';
+              return (
+                <div key={elem.id} className={`p-6 sm:p-8 rounded-3xl border space-y-3 shadow-lg ${alignCls}`} style={{ backgroundColor: elem.bgColor || 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: elemText }}>
+                  {elem.title && <h3 className="text-xl font-black" style={{ color: elemAccent }}>{elem.title}</h3>}
+                  <p className="text-xs sm:text-sm leading-relaxed opacity-90 whitespace-pre-line">{elem.content}</p>
+                </div>
+              );
+            }
+
+            // 3. MULTI-COLUMN GRID
+            if (elem.type === 'column') {
+              const gridCols = elem.columnsCount === 2 ? 'sm:grid-cols-2' : elem.columnsCount === 4 ? 'sm:grid-cols-2 md:grid-cols-4' : 'sm:grid-cols-3';
+              return (
+                <div key={elem.id} className="space-y-6 py-2">
+                  {elem.title && <h3 className="text-2xl font-black text-center tracking-tight" style={{ color: elemAccent }}>{elem.title}</h3>}
+                  <div className={`grid grid-cols-1 ${gridCols} gap-5 sm:gap-6`}>
+                    {(elem.columns || []).map((col) => (
+                      <div key={col.id} className="p-6 rounded-3xl border space-y-2.5 shadow-md transition hover:-translate-y-1" style={{ backgroundColor: elem.bgColor || 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: elemText }}>
+                        <h4 className="text-base font-bold" style={{ color: elemAccent }}>{col.title}</h4>
+                        <p className="text-xs sm:text-sm leading-relaxed opacity-80">{col.content}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            }
+
+            // 4. PICTURE
+            if (elem.type === 'picture') {
+              return (
+                <div key={elem.id} className="space-y-3 py-2 p-2 rounded-3xl" style={{ backgroundColor: elemBg }}>
+                  {elem.title && <h4 className="text-lg font-bold text-center mb-2" style={{ color: elemAccent }}>{elem.title}</h4>}
+                  <div className="rounded-3xl overflow-hidden border max-h-[500px] w-full flex items-center justify-center bg-black/40 shadow-2xl" style={{ borderColor: elemBorder }}>
+                    {elem.imageUrl ? <img src={elem.imageUrl} alt={elem.altText || 'Media'} className="w-full h-auto object-cover max-h-[500px]" /> : null}
+                  </div>
+                  {elem.caption && <p className="text-center text-xs italic opacity-75">{elem.caption}</p>}
+                </div>
+              );
+            }
+
+            // 5. CALLOUT BOX / CARD
+            if (elem.type === 'box') {
+              return (
+                <div key={elem.id} className="p-7 sm:p-9 rounded-3xl border shadow-xl space-y-4 transition" style={{ backgroundColor: elem.bgColor || (elem.boxStyle === 'highlight' ? 'rgba(224, 86, 56, 0.08)' : 'var(--color-inner-dark, #0e1422)'), borderColor: elemBorder, color: elemText }}>
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-xl sm:text-2xl font-black tracking-tight" style={{ color: elemAccent }}>{elem.title}</h3>
+                    {elem.badge && (
+                      <span className="px-3 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                        {elem.badge}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs sm:text-sm leading-relaxed opacity-90 max-w-3xl">{elem.content}</p>
+                  {elem.buttonText && (
+                    <Link href={elem.buttonUrl || '#'} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black text-white shadow-md transition hover:opacity-90" style={{ backgroundColor: elemAccent }}>
+                      <span>{elem.buttonText}</span>
+                      <ChevronRight className="h-4 w-4" />
+                    </Link>
+                  )}
+                </div>
+              );
+            }
+
+            // 6. RECIPE GRID WITH POPUP MODAL
+            if (elem.type === 'recipe') {
+              let list = allRecipesList;
+              if (elem.recipeCategoryFilter && elem.recipeCategoryFilter !== 'all') {
+                const cat = elem.recipeCategoryFilter.toLowerCase().trim();
+                list = list.filter((r) => (r.category || r.recipeType || '').toLowerCase().includes(cat));
+              }
+
+              const totalCount = list.length;
+              const itemsPerPage = elem.recipeLimit ? Number(elem.recipeLimit) : 6;
+              const totalPages = Math.max(1, Math.ceil(totalCount / itemsPerPage));
+              const currentPage = Math.min(Math.max(1, recipeElementPages[elem.id] || 1), totalPages);
+              const startIndex = (currentPage - 1) * itemsPerPage;
+              const endIndex = Math.min(startIndex + itemsPerPage, totalCount);
+              const paginatedSlice = list.slice(startIndex, endIndex);
+
+              const density = elem.recipeGridDensity || 3;
+              const gridColsCls = density === 2 ? 'grid-cols-1 sm:grid-cols-2' : density === 4 ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3';
+
+              return (
+                <div key={elem.id} className="p-6 sm:p-8 rounded-3xl border shadow-xl space-y-6 transition" style={{ backgroundColor: elem.bgColor || 'var(--color-card, #0b0f17)', borderColor: elemBorder, color: elemText }}>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: elemBorder }}>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border inline-flex items-center gap-1.5" style={{ borderColor: elemAccent, color: elemAccent }}>
+                          <Bookmark className="h-3 w-3" />
+                          Community Recipes
+                        </span>
+                        <span className="text-xs font-bold opacity-60">({totalCount} dishes)</span>
+                      </div>
+                      <h3 className="text-2xl font-black tracking-tight mt-1.5" style={{ color: elemAccent }}>
+                        {elem.title || 'Community Recipes Gallery'}
+                      </h3>
+                      {elem.subtitle && <p className="text-xs opacity-75 mt-0.5 max-w-2xl">{elem.subtitle}</p>}
+                    </div>
+
+                    {elem.buttonText && (
+                      <Link href={elem.buttonUrl || '/chef'} className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md transition hover:opacity-90 flex items-center gap-1.5 w-fit" style={{ backgroundColor: elemAccent }}>
+                        <Sparkles className="h-3.5 w-3.5" />
+                        <span>{elem.buttonText}</span>
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </Link>
+                    )}
+                  </div>
+
+                  <div className={`grid ${gridColsCls} gap-4 sm:gap-5`}>
+                    {paginatedSlice.map((r) => (
+                      <div
+                        key={r.id}
+                        onClick={() => {
+                          setActiveRecipeModal(r);
+                          setModalServingsMultiplier(1);
+                          setModalCompletedSteps([]);
+                          setModalFontSizeScale(100);
+                        }}
+                        className="border rounded-2xl overflow-hidden transition cursor-pointer group shadow-sm hover:shadow-md relative flex flex-col justify-between"
+                        style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder }}
+                      >
+                        <div>
+                          <div className="relative h-44 w-full overflow-hidden bg-black/20">
+                            <img src={r.imageUrl || r.image || r.image_url || '/uploads/recipes/default.jpg'} alt={r.title || r.name} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
+                            <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10">
+                              {r.isCooked && <span className="p-1.5 rounded-full backdrop-blur-md shadow-md border text-white bg-emerald-500 border-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /></span>}
+                              {r.isFavorite && <span className="p-1.5 rounded-full backdrop-blur-md shadow-md border" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: elemAccent, color: elemAccent }}><Heart className="h-3.5 w-3.5 fill-current" /></span>}
+                            </div>
+                          </div>
+                          <div className="p-3.5 space-y-1.5">
+                            <h4 className="font-bold text-sm leading-snug line-clamp-2" style={{ color: 'var(--color-text, #f1f5f9)' }}>{r.title || r.name}</h4>
+                            {r.description && <p className="text-[11px] line-clamp-2 opacity-75 leading-relaxed" style={{ color: 'var(--color-subtext, #94a3b8)' }}>{r.description}</p>}
+                          </div>
+                        </div>
+
+                        <div className="px-3.5 pb-3.5 pt-0 flex items-center justify-between gap-1 border-t mt-2 pt-2.5" style={{ borderColor: elemBorder }}>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: elemAccent }}>
+                              {r.category || r.recipeType || 'Main Dish'}
+                            </span>
+                            {r.creatorName && (
+                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 border" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: elemBorder, color: 'var(--color-subtext, #94a3b8)' }}>
+                                By {r.creatorName}
+                              </span>
+                            )}
+                            {(r.rating || 0) > 0 && (
+                              <span className="flex items-center gap-0.5 text-amber-500 text-[11px] font-bold bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/20 shadow-xs">
+                                <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-500"/> {r.rating}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] flex items-center gap-1 shrink-0 font-semibold" style={{ color: 'var(--color-text, #f1f5f9)' }}>
+                            <Clock className="h-3 w-3" style={{ color: elemAccent }}/> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Pagination Bar */}
+                  {totalPages > 1 && (
+                    <div className="pt-4 border-t flex flex-wrap items-center justify-between gap-3 text-xs" style={{ borderColor: elemBorder }}>
+                      <span style={{ color: 'var(--color-subtext, #94a3b8)' }}>
+                        Showing {startIndex + 1} - {endIndex} of {totalCount} recipes
+                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button type="button" disabled={currentPage <= 1} onClick={() => setRecipeElementPages((prev) => ({ ...prev, [elem.id]: Math.max(1, currentPage - 1) }))} className="p-2 rounded-xl border disabled:opacity-30 transition cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: 'var(--color-text, #f1f5f9)' }}>
+                          <ChevronLeft className="h-4 w-4" />
+                        </button>
+                        {Array.from({ length: totalPages }, (_, i) => i + 1).map((num) => (
+                          <button key={num} type="button" onClick={() => setRecipeElementPages((prev) => ({ ...prev, [elem.id]: num }))} className="min-w-[32px] h-8 rounded-xl text-xs font-bold transition flex items-center justify-center border cursor-pointer" style={currentPage === num ? { backgroundColor: elemAccent, borderColor: elemAccent, color: '#ffffff' } : { backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: 'var(--color-text, #f1f5f9)' }}>
+                            {num}
+                          </button>
+                        ))}
+                        <button type="button" disabled={currentPage >= totalPages} onClick={() => setRecipeElementPages((prev) => ({ ...prev, [elem.id]: Math.min(totalPages, currentPage + 1) }))} className="p-2 rounded-xl border disabled:opacity-30 transition cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: 'var(--color-text, #f1f5f9)' }}>
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            // 7. SUBSCRIPTION PLANS
+            if (elem.type === 'subscription') {
+              const filteredPlans = elem.planSlug && elem.planSlug !== 'all' ? availablePlans.filter((p) => p.slug === elem.planSlug) : availablePlans;
+              const interval = planBillingInterval;
+
+              return (
+                <div key={elem.id} className="p-6 sm:p-8 rounded-3xl border shadow-xl space-y-6 transition" style={{ backgroundColor: elem.bgColor || 'var(--color-card, #0b0f17)', borderColor: elemBorder, color: elemText }}>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: elemBorder }}>
+                    <div>
+                      <h3 className="text-2xl font-black tracking-tight" style={{ color: elemAccent }}>{elem.title || 'Choose Your Culinary Plan'}</h3>
+                      {elem.subtitle && <p className="text-xs opacity-75 mt-0.5">{elem.subtitle}</p>}
+                    </div>
+                    <div className="rounded-full p-1 border shadow-xs flex items-center self-start sm:self-auto" style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder }}>
+                      <button type="button" onClick={() => setPlanBillingInterval('MONTH')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${interval === 'MONTH' ? 'bg-[var(--color-primary,#E05638)] text-white shadow-sm' : 'opacity-70 hover:opacity-100'}`}>Monthly</button>
+                      <button type="button" onClick={() => setPlanBillingInterval('YEAR')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${interval === 'YEAR' ? 'bg-[var(--color-primary,#E05638)] text-white shadow-sm' : 'opacity-70 hover:opacity-100'}`}>Annual</button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6 max-w-4xl mx-auto pt-2">
+                    {filteredPlans.map((plan) => {
+                      const isAnnual = interval === 'YEAR';
+                      const price = isAnnual ? plan.annualPrice : plan.monthlyPrice;
+                      const badge = isAnnual ? (plan.annualBadge || plan.trialBadge) : (plan.monthlyBadge || plan.trialBadge);
+                      const annualMonthlyEq = plan.annualPrice > 0 ? (plan.annualPrice / 12).toFixed(2) : '0.00';
+                      const calculatedSavings = plan.monthlyPrice > 0 && plan.annualPrice > 0 ? Math.max(0, Math.round((1 - (plan.annualPrice / (plan.monthlyPrice * 12))) * 100)) : 0;
+
+                      return (
+                        <div key={plan.id} className="rounded-3xl border-2 p-6 sm:p-7 relative flex flex-col justify-between space-y-5 shadow-md transition hover:shadow-xl" style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: plan.isFree ? elemBorder : elemAccent }}>
+                          {badge && <div className="absolute -top-3.5 right-6 px-3.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider text-white shadow-md" style={{ backgroundColor: plan.isFree ? '#10b981' : elemAccent }}>{badge}</div>}
+                          <div className="space-y-4">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <h4 className="text-2xl font-black tracking-tight" style={{ color: elemAccent }}>{plan.name}</h4>
+                                <span className="text-[10px] font-mono opacity-50 block mt-0.5 font-bold">ID: {plan.id || plan.slug}</span>
+                              </div>
+                              {elem.planShowTokens !== false && (
+                                <span className="text-[11px] font-mono font-bold px-3 py-1 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center gap-1 shadow-xs">
+                                  <Coins className="h-3.5 w-3.5" />
+                                  <span>+{(plan.tokenLimit || 500000).toLocaleString()} 🪙 / {plan.tokenReimburseFrequency || 'cycle'}</span>
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="py-2 border-y" style={{ borderColor: elemBorder }}>
+                              {plan.isFree ? (
+                                <div><div className="text-4xl font-black" style={{ color: elemAccent }}>Free</div><p className="text-xs opacity-70 mt-1">{plan.descriptionMonthly}</p></div>
+                              ) : isAnnual ? (
+                                <div>
+                                  <div className="flex items-baseline gap-1"><span className="text-4xl font-black" style={{ color: elemAccent }}>${plan.annualPrice.toFixed(2)}</span><span className="text-xs opacity-60 font-semibold">/year</span></div>
+                                  <div className="flex items-center gap-2 text-xs font-bold mt-1"><span className="text-emerald-400">${annualMonthlyEq}/mo eq.</span>{calculatedSavings > 0 && <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Save {calculatedSavings}%</span>}</div>
+                                  <p className="text-xs opacity-70 mt-2">{plan.descriptionAnnual}</p>
+                                </div>
+                              ) : (
+                                <div>
+                                  <div className="flex items-baseline gap-1"><span className="text-4xl font-black" style={{ color: elemAccent }}>${plan.monthlyPrice.toFixed(2)}</span><span className="text-xs opacity-60 font-semibold">/month</span></div>
+                                  <p className="text-xs opacity-70 mt-2">{plan.descriptionMonthly}</p>
+                                </div>
+                              )}
+                            </div>
+
+                            {elem.planShowAiModels !== false && plan.allowedAiModels && (
+                              <div className="space-y-1">
+                                <span className="text-[10px] font-bold uppercase tracking-wider opacity-60 block">Allowed AI Models:</span>
+                                <div className="flex flex-wrap gap-1">
+                                  {plan.allowedAiModels.map((m, mIdx) => (
+                                    <span key={mIdx} className="text-[9px] font-mono px-2 py-0.5 rounded-full border border-slate-700 bg-black/40 text-slate-300 font-bold">{m}</span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="space-y-2 pt-1 text-xs">
+                              {plan.features.map((feat, fIdx) => (
+                                <div key={fIdx} className="flex items-start gap-2 opacity-90">
+                                  <Check className="h-4 w-4 shrink-0 mt-0.5 text-emerald-400" />
+                                  <span className="leading-snug">{feat}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="pt-2">
+                            <Link href={elem.planCtaUrl || '/subscriptions'} className="w-full py-3 rounded-2xl text-xs font-black flex items-center justify-center gap-2 text-white shadow-lg transition hover:opacity-90 cursor-pointer" style={{ backgroundColor: plan.isFree ? '#10b981' : elemAccent }}>
+                              <span>{elem.planCtaText || (plan.isFree ? 'Manage Plan' : 'Choose Plan')}</span>
+                              <ChevronRight className="h-4 w-4" />
+                            </Link>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            }
+
+            return null;
+          })
+        )}
+      </main>
+
+      {/* DYNAMIC FOOTER (Rendered with active page footer settings) */}
+      {activePage?.footer?.enabled !== false && (
+        <footer 
+          className="border-t transition-colors mt-16"
           style={{
-            backgroundColor: 'var(--color-card, #ffffff)',
-            borderColor: 'var(--color-border, #e2e8f0)'
+            backgroundColor: activePage?.footer?.bgColor || 'var(--color-inner-dark, #0b0f17)',
+            borderColor: activePage?.footer?.borderColor || 'var(--color-border, #1e293b)',
+            color: activePage?.footer?.textColor || 'var(--color-text, #f1f5f9)'
           }}
         >
-          <div 
-            className="border-b pb-3"
-            style={{ borderColor: 'var(--color-border, #e2e8f0)' }}
-          >
-            <h2 
-              className="text-base font-bold flex items-center gap-2"
-              style={{ color: 'var(--color-text, #0f172a)' }}
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-8">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+              {/* Brand and Description */}
+              <div className="md:col-span-2 space-y-3">
+                <div className="flex items-center gap-2.5">
+                  <div 
+                    className="w-9 h-9 rounded-xl flex items-center justify-center text-white shadow-md"
+                    style={{ backgroundColor: activePage?.footer?.accentColor || 'var(--color-primary, #E05638)' }}
+                  >
+                    <ChefHat className="h-5 w-5" />
+                  </div>
+                  <span className="text-lg font-black tracking-tight">Zecratary</span>
+                </div>
+                <p className="text-xs sm:text-sm leading-relaxed opacity-75 max-w-md">
+                  {activePage?.footer?.aboutText || 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.'}
+                </p>
+
+                {/* Social Links */}
+                {activePage?.footer?.socials && Object.values(activePage.footer.socials).some(Boolean) && (
+                  <div className="flex items-center gap-3 pt-2">
+                    {activePage.footer.socials.twitter && (
+                      <a href={activePage.footer.socials.twitter} target="_blank" rel="noreferrer" className="p-2 rounded-xl border hover:opacity-80 transition" style={{ borderColor: activePage.footer.borderColor || 'var(--color-border, #1e293b)' }} title="X / Twitter">
+                        <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                      </a>
+                    )}
+                    {activePage.footer.socials.github && (
+                      <a href={activePage.footer.socials.github} target="_blank" rel="noreferrer" className="p-2 rounded-xl border hover:opacity-80 transition" style={{ borderColor: activePage.footer.borderColor || 'var(--color-border, #1e293b)' }} title="GitHub">
+                        <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+                      </a>
+                    )}
+                    {activePage.footer.socials.discord && (
+                      <a href={activePage.footer.socials.discord} target="_blank" rel="noreferrer" className="p-2 rounded-xl border hover:opacity-80 transition" style={{ borderColor: activePage.footer.borderColor || 'var(--color-border, #1e293b)' }} title="Discord">
+                        <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.894.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Dynamic Footer Link Columns */}
+              {(activePage?.footer?.columns || []).map((col) => (
+                <div key={col.id} className="space-y-3">
+                  <h4 
+                    className="text-xs font-black uppercase tracking-wider"
+                    style={{ color: activePage?.footer?.accentColor || 'var(--color-primary, #E05638)' }}
+                  >
+                    {col.title}
+                  </h4>
+                  <ul className="space-y-2 text-xs opacity-75">
+                    {col.links.map((link) => (
+                      <li key={link.id}>
+                        <Link href={link.url} className="hover:underline transition hover:opacity-100">
+                          {link.label}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+
+            {/* Bottom Copyright & PostgreSQL Status Bar */}
+            <div 
+              className="border-t pt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs opacity-60"
+              style={{ borderColor: activePage?.footer?.borderColor || 'var(--color-border, #1e293b)' }}
             >
-              <ChefHat className="h-5 w-5" style={{ color: 'var(--color-emerald, #10b981)' }} /> {t('quickActions') || 'Quick Actions'}
-            </h2>
+              <span>{activePage?.footer?.copyrightText || '© 2026 Zecratary. All rights reserved.'}</span>
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse" />
+                <span>PostgreSQL Synced & Active</span>
+              </span>
+            </div>
           </div>
+        </footer>
+      )}
 
-          <div className="grid grid-cols-2 gap-3 text-xs font-bold my-auto">
-            <Link 
-              href="/chef" 
-              className="p-3.5 rounded-xl text-center flex items-center justify-center gap-2 transition group border"
+      {/* FULL RECIPE POPUP MODAL (Exact /saved consistency, read-only on frontend) */}
+      {activeRecipeModal && (
+        <div 
+          onClick={() => setActiveRecipeModal(null)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer animate-in fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative cursor-default transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card, #0b0f17)',
+              borderColor: 'var(--color-border, #1e293b)',
+              color: 'var(--color-text, #f1f5f9)'
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setActiveRecipeModal(null)}
+              className="absolute top-4 right-4 z-30 p-2 rounded-xl border transition cursor-pointer shadow-md hover:opacity-80"
               style={{
-                backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                borderColor: 'var(--color-border, #e2e8f0)',
-                color: 'var(--color-text, #0f172a)'
+                backgroundColor: 'var(--color-card, #0b0f17)',
+                borderColor: 'var(--color-border, #1e293b)',
+                color: 'var(--color-text, #f1f5f9)'
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-emerald, #10b981)')}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)')}
             >
-              <ChefHat 
-                className="h-4 w-4 group-hover:scale-110 transition" 
-                style={{ color: 'var(--color-emerald, #10b981)' }}
-              /> 
-              <span>{t('askChefAi') || 'Ask Chef AI'}</span>
-            </Link>
+              <X className="h-5 w-5"/>
+            </button>
 
-            <Link 
-              href="/manual" 
-              className="p-3.5 rounded-xl text-center flex items-center justify-center gap-2 transition group border"
-              style={{
-                backgroundColor: 'var(--color-inner-dark, #f1f5f9)',
-                borderColor: 'var(--color-border, #e2e8f0)',
-                color: 'var(--color-text, #0f172a)'
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #E05638)')}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #e2e8f0)')}
-            >
-              <Sparkles 
-                className="h-4 w-4 group-hover:scale-110 transition" 
-                style={{ color: 'var(--color-primary, #E05638)' }}
-              /> 
-              <span>{t('createRecipe') || 'Create Recipe'}</span>
-            </Link>
+            <div className="overflow-y-auto flex-1 space-y-5 pb-6">
+              <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
+                <img
+                  src={activeRecipeModal.imageUrl || activeRecipeModal.image || activeRecipeModal.image_url || '/uploads/recipes/default.jpg'}
+                  alt={activeRecipeModal.title || activeRecipeModal.name}
+                  referrerPolicy="no-referrer"
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
+
+                <div className="relative z-10 space-y-3">
+                  <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
+                    {activeRecipeModal.title || activeRecipeModal.name}
+                  </h2>
+
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                    <span className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 backdrop-blur-md" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}>
+                      <Clock className="h-3.5 w-3.5 text-emerald-400" />
+                      <span className="font-bold">Cook: {activeRecipeModal.cookTime || `${activeRecipeModal.cookTimeMinutes || 20}m`}</span>
+                    </span>
+                    <span className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 backdrop-blur-md" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}>
+                      <Clock className="h-3.5 w-3.5 text-blue-400" />
+                      <span className="font-bold">Prep: {activeRecipeModal.prepTime || `${activeRecipeModal.prepTimeMinutes || 15}m`}</span>
+                    </span>
+                    <span className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 backdrop-blur-md" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}>
+                      <Utensils className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+                      <span className="font-bold">{activeRecipeModal.category || activeRecipeModal.recipeType || 'Main Dish'}</span>
+                    </span>
+                    {activeRecipeModal.calories && (
+                      <span className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 backdrop-blur-md bg-amber-500/15 border-amber-500/30 text-amber-400">
+                        <Flame className="h-3.5 w-3.5" />
+                        <span className="font-bold">{activeRecipeModal.calories}</span>
+                      </span>
+                    )}
+                    <span className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 backdrop-blur-md" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}>
+                      <Users className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+                      <span className="font-bold">By {activeRecipeModal.creatorName || 'Community Chef'}</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Servings Stepper */}
+              <div className="px-6 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-bold flex items-center gap-1.5 text-[var(--color-primary)]">
+                    <Users className="h-4 w-4"/> {t('servingsLabel') || 'Servings'}
+                  </span>
+                  <div className="flex items-center border rounded-lg overflow-hidden shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
+                    <button type="button" onClick={() => setModalServingsMultiplier(Math.max(1, modalServingsMultiplier - 1))} className="px-2.5 py-1 font-bold cursor-pointer hover:bg-white/10">-</button>
+                    <span className="px-3 py-1 text-xs font-bold min-w-[32px] text-center">
+                      {Number(activeRecipeModal.servings || 2) * modalServingsMultiplier}
+                    </span>
+                    <button type="button" onClick={() => setModalServingsMultiplier(modalServingsMultiplier + 1)} className="px-2.5 py-1 font-bold cursor-pointer hover:bg-white/10">+</button>
+                  </div>
+                </div>
+
+                {(activeRecipeModal.rating || 0) > 0 && (
+                  <div className="flex items-center gap-1">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <Star key={star} className="h-4 w-4" style={{ color: (activeRecipeModal.rating || 0) >= star ? 'var(--color-primary, #E05638)' : 'var(--color-border, #1e293b)', fill: (activeRecipeModal.rating || 0) >= star ? 'var(--color-primary, #E05638)' : 'transparent' }} />
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {activeRecipeModal.description && (
+                <div className="px-6 text-xs leading-relaxed opacity-80" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
+                  {activeRecipeModal.description}
+                </div>
+              )}
+
+              <div className="border-t mx-6" style={{ borderColor: 'var(--color-border, #1e293b)' }} />
+
+              {/* Ingredients */}
+              <div className="px-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-black">{t('ingredientsHeading') || 'Ingredients'}</h3>
+                  <div className="flex items-center border rounded-lg overflow-hidden text-xs shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
+                    <button type="button" onClick={() => setModalFontSizeScale(Math.max(70, modalFontSizeScale - 10))} className="px-2.5 py-1 font-bold cursor-pointer hover:bg-white/10">-</button>
+                    <span className="px-2.5 py-1 font-bold min-w-[42px] text-center">{modalFontSizeScale}%</span>
+                    <button type="button" onClick={() => setModalFontSizeScale(Math.min(130, modalFontSizeScale + 10))} className="px-2.5 py-1 font-bold cursor-pointer hover:bg-white/10">+</button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2.5" style={{ fontSize: `${modalFontSizeScale}%` }}>
+                  {Array.isArray(activeRecipeModal.ingredients) && activeRecipeModal.ingredients.map((ing: any, idx: number) => {
+                    const rawAmt = typeof ing === 'string' ? '' : ing.amount || ing.quantity || '';
+                    const scaledAmt = calculateScaledAmount(rawAmt, Number(activeRecipeModal.servings || 2), Number(activeRecipeModal.servings || 2) * modalServingsMultiplier);
+                    const unit = typeof ing === 'string' ? '' : ing.unit || '';
+                    const name = typeof ing === 'string' ? ing : ing.item || ing.name || '';
+                    return (
+                      <div key={idx} className="flex items-start gap-2.5 leading-snug">
+                        <span className="w-2 h-2 rounded-full inline-block shrink-0 mt-1.5" style={{ backgroundColor: 'var(--color-primary, #E05638)' }} />
+                        <span>
+                          {(scaledAmt !== '' || unit) && (
+                            <strong className="font-semibold">{scaledAmt} {unit && unit !== 'unit' && unit !== 'Unit' ? unit : ''}{' '}</strong>
+                          )}
+                          <span>{name}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="border-t mx-6" style={{ borderColor: 'var(--color-border, #1e293b)' }} />
+
+              {/* Instructions */}
+              <div className="px-6 space-y-4">
+                <h3 className="text-lg font-black">{t('instructionsHeading') || 'Instructions'}</h3>
+                <div className="space-y-3.5" style={{ fontSize: `${modalFontSizeScale}%` }}>
+                  {Array.isArray(activeRecipeModal.instructions || activeRecipeModal.directions) && 
+                   (activeRecipeModal.instructions || activeRecipeModal.directions).map((step: string, idx: number) => {
+                    const isDone = modalCompletedSteps.includes(idx);
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => {
+                          if (modalCompletedSteps.includes(idx)) {
+                            setModalCompletedSteps(modalCompletedSteps.filter(i => i !== idx));
+                          } else {
+                            setModalCompletedSteps([...modalCompletedSteps, idx]);
+                          }
+                        }}
+                        className={`flex items-start gap-3 p-3.5 rounded-2xl border cursor-pointer transition select-none shadow-xs ${isDone ? 'opacity-50' : ''}`}
+                        style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}
+                      >
+                        <div className="w-4 h-4 rounded border flex items-center justify-center shrink-0 mt-0.5 transition" style={isDone ? { backgroundColor: 'var(--color-primary, #E05638)', borderColor: 'var(--color-primary, #E05638)', color: '#ffffff' } : { borderColor: 'var(--color-primary, #E05638)', backgroundColor: 'transparent' }}>
+                          {isDone && <Check className="h-3.5 w-3.5 stroke-[3]"/>}
+                        </div>
+                        <span className="font-extrabold shrink-0 text-sm" style={{ color: 'var(--color-primary, #E05638)' }}>{idx + 1}.</span>
+                        <span className={`leading-relaxed flex-1 ${isDone ? 'line-through opacity-50' : ''}`}>{step}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="border-t mx-6" style={{ borderColor: 'var(--color-border, #1e293b)' }} />
+
+              {/* Modal Footer */}
+              <div className="px-6 flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
+                <Link href="/chef" className="px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 text-white transition shadow-md hover:opacity-90" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
+                  <Sparkles className="h-4 w-4" />
+                  <span>{t('cookWithChef') || 'Cook with AI Chef'}</span>
+                </Link>
+
+                <div className="flex items-center gap-2 ml-auto text-xs">
+                  <span className="font-semibold" style={{ color: 'var(--color-subtext, #94a3b8)' }}>Source:</span>
+                  {activeRecipeModal.sourceUrl || activeRecipeModal.source_url ? (
+                    <a href={activeRecipeModal.sourceUrl || activeRecipeModal.source_url || '#'} target="_blank" rel="noreferrer" className="font-bold text-xs hover:underline inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition shadow-xs text-[var(--color-primary)]" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
+                      <span>{getSafeHostname(activeRecipeModal.sourceUrl || activeRecipeModal.source_url || '')}</span>
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  ) : (
+                    <span className="px-3 py-1.5 rounded-xl border text-xs font-medium" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)', color: 'var(--color-subtext, #94a3b8)' }}>
+                      Created manually
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -22514,6 +23048,1550 @@ export default function ChefAISettingsPage() {
 
 ```
 
+## File: `apps/web/src/app/admin/frontend/page.tsx`
+```typescript
+'use client';
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import Link from 'next/link';
+import { 
+  LayoutTemplate, 
+  Plus, 
+  GripVertical, 
+  Trash2, 
+  Copy, 
+  Save, 
+  Eye, 
+  Edit3, 
+  ChevronUp, 
+  ChevronDown, 
+  Type, 
+  AlignLeft, 
+  Columns, 
+  Image as ImageIcon, 
+  Layers, 
+  CheckCircle2, 
+  AlertCircle, 
+  RefreshCw, 
+  Upload, 
+  Globe, 
+  Home, 
+  ChevronRight, 
+  ChevronLeft,
+  Utensils, 
+  CreditCard, 
+  Palette, 
+  Clock, 
+  Flame, 
+  Check, 
+  Sparkles, 
+  Coins, 
+  RotateCcw, 
+  Bookmark, 
+  ExternalLink,
+  Users,
+  Star,
+  X,
+  Heart,
+  PanelBottom,
+  Sliders,
+  Settings
+} from 'lucide-react';
+import { useTranslation } from '@/components/LanguageProvider';
+
+export type ElementType = 'title' | 'content' | 'column' | 'picture' | 'box' | 'recipe' | 'subscription';
+
+export interface PagePaddingSettings {
+  top?: string;
+  bottom?: string;
+  x?: string;
+  maxWidth?: 'max-w-5xl' | 'max-w-6xl' | 'max-w-7xl' | 'max-w-full';
+}
+
+export interface FooterLink {
+  id: string;
+  label: string;
+  url: string;
+}
+
+export interface FooterColumn {
+  id: string;
+  title: string;
+  links: FooterLink[];
+}
+
+export interface PageFooterSettings {
+  enabled?: boolean;
+  aboutText?: string;
+  copyrightText?: string;
+  columns?: FooterColumn[];
+  socials?: {
+    twitter?: string;
+    github?: string;
+    discord?: string;
+    instagram?: string;
+    youtube?: string;
+  };
+  bgColor?: string;
+  textColor?: string;
+  borderColor?: string;
+  accentColor?: string;
+}
+
+export interface SavedRecipeRecord {
+  id: string;
+  title: string;
+  description?: string;
+  image?: string;
+  imageUrl?: string;
+  image_url?: string;
+  prepTime?: string;
+  cookTime?: string;
+  prepTimeMinutes?: number;
+  cookTimeMinutes?: number;
+  calories?: string | number;
+  servings?: string | number;
+  category?: string;
+  recipeType?: string;
+  ingredients?: any;
+  instructions?: any;
+  directions?: any;
+  sourceUrl?: string;
+  rating?: number;
+  isFavorite?: boolean;
+  isCooked?: boolean;
+  creatorName?: string;
+}
+
+export interface PageElement {
+  id: string;
+  type: ElementType;
+  title?: string;
+  subtitle?: string;
+  content?: string;
+  level?: 'h1' | 'h2' | 'h3';
+  alignment?: 'left' | 'center' | 'right';
+  boxStyle?: 'highlight' | 'border' | 'subtle';
+  badge?: string;
+  buttonText?: string;
+  buttonUrl?: string;
+  imageUrl?: string;
+  altText?: string;
+  caption?: string;
+  layout?: 'full' | 'card' | 'contained';
+  columnsCount?: number;
+  columns?: Array<{ id: string; title: string; content: string }>;
+  bgColor?: string;
+  textColor?: string;
+  accentColor?: string;
+  borderColor?: string;
+  recipeGridDensity?: number;
+  recipeLimit?: number;
+  recipeCategoryFilter?: string;
+  planSlug?: string;
+  planBillingInterval?: 'MONTH' | 'YEAR';
+  planShowTokens?: boolean;
+  planShowAiModels?: boolean;
+  planCtaText?: string;
+  planCtaUrl?: string;
+}
+
+export interface FrontendPage {
+  id: string;
+  title: string;
+  slug: string;
+  description: string;
+  is_default: boolean;
+  is_published: boolean;
+  elements: PageElement[];
+  padding?: PagePaddingSettings;
+  footer?: PageFooterSettings;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface PlanCatalog {
+  id: string;
+  slug: string;
+  name: string;
+  monthlyPrice: number;
+  annualPrice: number;
+  tokenLimit: number;
+  tokenReimburseFrequency?: string;
+  monthlyBadge?: string;
+  annualBadge?: string;
+  trialBadge?: string;
+  descriptionMonthly?: string;
+  descriptionAnnual?: string;
+  allowedAiModels?: string[];
+  features: string[];
+  isFree?: boolean;
+}
+
+const DEFAULT_FALLBACK_PLANS: PlanCatalog[] = [
+  {
+    id: 'preset_taster',
+    slug: 'taster',
+    name: 'Taster',
+    monthlyPrice: 0,
+    annualPrice: 0,
+    tokenLimit: 50000,
+    tokenReimburseFrequency: 'monthly',
+    trialBadge: 'Free Tier',
+    descriptionMonthly: 'Free plan with limited features for home cooks.',
+    descriptionAnnual: 'Free plan with limited features for home cooks.',
+    allowedAiModels: ['gemini-3.5-flash-lite', 'gpt-3.5-turbo'],
+    features: ['Create up to 5 AI-powered recipes per month', 'Personal recipe library (25 total recipes)', 'Automated shopping list creation'],
+    isFree: true
+  },
+  {
+    id: 'preset_nutrition_pro',
+    slug: 'nutrition-pro',
+    name: 'Nutrition Pro',
+    monthlyPrice: 8.99,
+    annualPrice: 59.99,
+    tokenLimit: 1000000,
+    tokenReimburseFrequency: 'monthly',
+    monthlyBadge: 'Billed Immediately',
+    annualBadge: 'Save 44%',
+    trialBadge: '7-Day Free Trial',
+    descriptionMonthly: 'Full premium kitchen access, billed monthly.',
+    descriptionAnnual: 'Best value - all premium features, billed annually.',
+    allowedAiModels: ['gemini-3.6-flash', 'gpt-4o'],
+    features: ['Unlimited AI-powered recipe generation', 'Unlimited personal recipe library', 'Priority AI Chef processing & cloud sync'],
+    isFree: false
+  }
+];
+
+export default function AdminFrontendSettingsPage() {
+  const { t } = useTranslation();
+  const [pages, setPages] = useState<FrontendPage[]>([]);
+  const [selectedPageId, setSelectedPageId] = useState<string>('');
+  const [selectedPage, setSelectedPage] = useState<FrontendPage | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [saving, setSaving] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [previewMode, setPreviewMode] = useState<boolean>(false);
+  const [expandedElementId, setExpandedElementId] = useState<string | null>(null);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+
+  // Dedicated Workspace Sub-Tabs: 'elements' vs 'settings'
+  const [activePageTab, setActivePageTab] = useState<'elements' | 'settings'>('elements');
+
+  // Dynamic system catalogs
+  const [availablePlans, setAvailablePlans] = useState<PlanCatalog[]>(DEFAULT_FALLBACK_PLANS);
+  const [savedRecipesList, setSavedRecipesList] = useState<SavedRecipeRecord[]>([]);
+  const [planPreviewInterval, setPlanPreviewInterval] = useState<'MONTH' | 'YEAR'>('MONTH');
+  const [recipeElementPages, setRecipeElementPages] = useState<Record<string, number>>({});
+
+  // Full Recipe Popup Modal States
+  const [activeRecipeModal, setActiveRecipeModal] = useState<SavedRecipeRecord | null>(null);
+  const [modalServingsMultiplier, setModalServingsMultiplier] = useState<number>(1);
+  const [modalCompletedSteps, setModalCompletedSteps] = useState<number[]>([]);
+  const [modalFontSizeScale, setModalFontSizeScale] = useState<number>(100);
+
+  // New Page Modal State
+  const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
+  const [newPageTitle, setNewPageTitle] = useState<string>('');
+  const [newPageSlug, setNewPageSlug] = useState<string>('');
+  const [newPageDesc, setNewPageDesc] = useState<string>('');
+
+  const imageFileInputRef = useRef<HTMLInputElement>(null);
+  const [activeImageUploadElementId, setActiveImageUploadElementId] = useState<{ id: string; target: 'imageUrl' } | null>(null);
+
+  // 1. Fetch Subscription Plans
+  const fetchLivePlans = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data?.packages || data?.plans || data?.configs);
+        if (Array.isArray(list) && list.length > 0) {
+          const parsed: PlanCatalog[] = list.map((p: any) => ({
+            id: String(p.id || p.slug || 'plan'),
+            slug: String(p.slug || p.id || 'plan').toLowerCase().trim(),
+            name: String(p.name || 'Subscription Plan'),
+            monthlyPrice: Number(p.monthlyPriceDollars ?? p.monthlyPrice ?? 0),
+            annualPrice: Number(p.annualPriceDollars ?? p.annualPrice ?? 0),
+            tokenLimit: Number(p.tokenLimit ?? 500000),
+            tokenReimburseFrequency: p.tokenReimburseFrequency || 'monthly',
+            monthlyBadge: p.monthlyBadge || '',
+            annualBadge: p.annualBadge || '',
+            trialBadge: p.trialBadge || (p.isFree ? 'Free Tier' : ''),
+            descriptionMonthly: p.descriptionMonthly || p.description || 'Full kitchen access, billed monthly',
+            descriptionAnnual: p.descriptionAnnual || 'Best value - all premium features, billed annually',
+            allowedAiModels: Array.isArray(p.allowedAiModels) ? p.allowedAiModels : ['gemini-3.6-flash'],
+            features: Array.isArray(p.features) ? p.features : ['AI-Powered Recipe Generation'],
+            isFree: Boolean(p.isFree || (Number(p.monthlyPriceDollars) === 0 && Number(p.annualPriceDollars) === 0))
+          }));
+          setAvailablePlans(parsed);
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  // 2. Fetch Recipes from PostgreSQL
+  const fetchAllSavedRecipes = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/frontend?all_recipes=true', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data?.recipes || []);
+        if (Array.isArray(list) && list.length > 0) {
+          setSavedRecipesList(list);
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  // 3. Fetch Admin Frontend Pages
+  const fetchPages = useCallback(async (selectIdAfter?: string) => {
+    try {
+      setLoading(true);
+      const res = await fetch('/api/admin/frontend', { cache: 'no-store' });
+      const data = await res.json();
+      if (data.success && data.pages) {
+        setPages(data.pages);
+        const targetId = selectIdAfter || (data.pages.length > 0 ? data.pages[0].id : '');
+        setSelectedPageId(targetId);
+        const cur = data.pages.find((p: FrontendPage) => p.id === targetId) || data.pages[0] || null;
+        if (cur) {
+          const clone: FrontendPage = JSON.parse(JSON.stringify(cur));
+          if (!clone.padding) {
+            clone.padding = { top: '2.5rem', bottom: '4rem', x: '1.5rem', maxWidth: 'max-w-7xl' };
+          }
+          if (!clone.footer) {
+            clone.footer = {
+              enabled: true,
+              aboutText: 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.',
+              copyrightText: '© 2026 Zecratary. All rights reserved.',
+              columns: [
+                { id: 'col_platform', title: 'Platform', links: [{ id: 'l_1', label: 'AI Chef', url: '/chef' }, { id: 'l_2', label: 'Saved Recipes', url: '/saved' }] },
+                { id: 'col_company', title: 'Company', links: [{ id: 'l_3', label: 'About Us', url: '/about' }, { id: 'l_4', label: 'Pricing Plans', url: '/subscriptions' }] }
+              ],
+              socials: { twitter: 'https://x.com', github: 'https://github.com' }
+            };
+          }
+          setSelectedPage(clone);
+        }
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Error loading frontend pages.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPages();
+    fetchLivePlans();
+    fetchAllSavedRecipes();
+  }, [fetchPages, fetchLivePlans, fetchAllSavedRecipes]);
+
+  const handleSelectPage = (id: string) => {
+    setSelectedPageId(id);
+    const target = pages.find((p) => p.id === id);
+    if (target) {
+      const clone = JSON.parse(JSON.stringify(target));
+      if (!clone.padding) clone.padding = { top: '2.5rem', bottom: '4rem', x: '1.5rem', maxWidth: 'max-w-7xl' };
+      if (!clone.footer) clone.footer = { enabled: true, columns: [] };
+      setSelectedPage(clone);
+      setExpandedElementId(null);
+    }
+  };
+
+  const handleBasicPageChange = (field: keyof FrontendPage, value: any) => {
+    if (!selectedPage) return;
+    setSelectedPage((prev) => prev ? { ...prev, [field]: value } : null);
+  };
+
+  const handlePaddingChange = (field: keyof PagePaddingSettings, value: any) => {
+    if (!selectedPage) return;
+    setSelectedPage((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        padding: {
+          ...(prev.padding || { top: '2.5rem', bottom: '4rem', x: '1.5rem', maxWidth: 'max-w-7xl' }),
+          [field]: value
+        }
+      };
+    });
+  };
+
+  const handleFooterChange = (field: keyof PageFooterSettings, value: any) => {
+    if (!selectedPage) return;
+    setSelectedPage((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        footer: {
+          ...(prev.footer || { enabled: true, columns: [] }),
+          [field]: value
+        }
+      };
+    });
+  };
+
+  // Drag and Drop
+  const handleDragStart = (index: number) => {
+    setDraggedIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === index || !selectedPage) return;
+    const list = [...selectedPage.elements];
+    const item = list[draggedIndex];
+    list.splice(draggedIndex, 1);
+    list.splice(index, 0, item);
+    setSelectedPage({ ...selectedPage, elements: list });
+    setDraggedIndex(index);
+  };
+
+  const handleDrop = () => {
+    setDraggedIndex(null);
+  };
+
+  const moveElement = (index: number, direction: 'up' | 'down') => {
+    if (!selectedPage) return;
+    const newIndex = direction === 'up' ? index - 1 : index + 1;
+    if (newIndex < 0 || newIndex >= selectedPage.elements.length) return;
+    const list = [...selectedPage.elements];
+    const item = list[index];
+    list.splice(index, 1);
+    list.splice(newIndex, 0, item);
+    setSelectedPage({ ...selectedPage, elements: list });
+  };
+
+  // Add Element
+  const handleAddElement = (type: ElementType) => {
+    if (!selectedPage) return;
+    const id = `elem_${type}_${Date.now()}`;
+    let newElem: PageElement = { id, type };
+
+    if (type === 'title') {
+      newElem = { id, type, title: 'New Section Header', subtitle: 'Add an informative subtitle describing this section of the page.', level: 'h2', alignment: 'center', accentColor: 'var(--color-primary, #E05638)' };
+    } else if (type === 'content') {
+      newElem = { id, type, title: 'Detailed Overview', content: 'Write rich, engaging content here to highlight unique features, instructions, or brand messaging.', alignment: 'left' };
+    } else if (type === 'column') {
+      newElem = {
+        id, type, title: 'Core Highlights', columnsCount: 3,
+        columns: [
+          { id: `c_${Date.now()}_1`, title: 'Smart AI Chef', content: 'Tailored recipes from your pantry.' },
+          { id: `c_${Date.now()}_2`, title: 'Macro Telemetry', content: 'Track real-time protein, carbs, and calories.' },
+          { id: `c_${Date.now()}_3`, title: 'Automated Cart', content: 'Export necessary groceries instantly.' }
+        ],
+        accentColor: 'var(--color-primary, #E05638)'
+      };
+    } else if (type === 'picture') {
+      newElem = { id, type, title: 'Showcase Media', imageUrl: 'https://images.unsplash.com/photo-1498837167922-ddd27525d352?auto=format&fit=crop&w=1200&q=80', caption: 'High resolution visual preview', layout: 'full' };
+    } else if (type === 'box') {
+      newElem = { id, type, title: 'Highlighted Callout', content: 'Spotlight promotions, seasonal meal routines, or account upgrade notices.', boxStyle: 'highlight', badge: 'Special Notice', buttonText: 'Learn More', buttonUrl: '/dashboard', accentColor: 'var(--color-primary, #E05638)' };
+    } else if (type === 'recipe') {
+      newElem = { id, type, title: 'Community Recipes Gallery', subtitle: 'Explore recipes synchronized directly from your saved library.', recipeGridDensity: 3, recipeLimit: 6, recipeCategoryFilter: 'all', buttonText: 'Cook with AI Chef', buttonUrl: '/chef', accentColor: 'var(--color-primary, #E05638)' };
+    } else if (type === 'subscription') {
+      newElem = { id, type, title: 'Choose Your Culinary Plan', subtitle: 'Unlock premium AI Chef recommendations and deep macro telemetry.', planSlug: 'all', planBillingInterval: 'MONTH', planShowTokens: true, planShowAiModels: true, planCtaText: 'Choose Plan', planCtaUrl: '/subscriptions', accentColor: 'var(--color-primary, #E05638)', borderColor: 'var(--color-border, #1e293b)' };
+    }
+
+    const updatedElements = [...selectedPage.elements, newElem];
+    setSelectedPage({ ...selectedPage, elements: updatedElements });
+    setExpandedElementId(id);
+  };
+
+  const handleUpdateElement = (index: number, updatedFields: Partial<PageElement>) => {
+    if (!selectedPage) return;
+    const list = [...selectedPage.elements];
+    list[index] = { ...list[index], ...updatedFields };
+    setSelectedPage({ ...selectedPage, elements: list });
+  };
+
+  const handleDeleteElement = (index: number) => {
+    if (!selectedPage) return;
+    const list = [...selectedPage.elements];
+    list.splice(index, 1);
+    setSelectedPage({ ...selectedPage, elements: list });
+  };
+
+  const handleDuplicateElement = (index: number) => {
+    if (!selectedPage) return;
+    const list = [...selectedPage.elements];
+    const source = list[index];
+    const copy: PageElement = { ...JSON.parse(JSON.stringify(source)), id: `elem_${source.type}_${Date.now()}` };
+    list.splice(index + 1, 0, copy);
+    setSelectedPage({ ...selectedPage, elements: list });
+    setExpandedElementId(copy.id);
+  };
+
+  // Footer Column helpers
+  const addFooterColumn = () => {
+    if (!selectedPage) return;
+    const cols = [...(selectedPage.footer?.columns || [])];
+    cols.push({
+      id: `col_${Date.now()}`,
+      title: 'New Column',
+      links: [{ id: `l_${Date.now()}_1`, label: 'Link Item', url: '#' }]
+    });
+    handleFooterChange('columns', cols);
+  };
+
+  const removeFooterColumn = (colIndex: number) => {
+    if (!selectedPage) return;
+    const cols = [...(selectedPage.footer?.columns || [])];
+    cols.splice(colIndex, 1);
+    handleFooterChange('columns', cols);
+  };
+
+  const addFooterLink = (colIndex: number) => {
+    if (!selectedPage) return;
+    const cols = [...(selectedPage.footer?.columns || [])];
+    cols[colIndex].links.push({ id: `l_${Date.now()}`, label: 'New Link', url: '#' });
+    handleFooterChange('columns', cols);
+  };
+
+  const removeFooterLink = (colIndex: number, linkIndex: number) => {
+    if (!selectedPage) return;
+    const cols = [...(selectedPage.footer?.columns || [])];
+    cols[colIndex].links.splice(linkIndex, 1);
+    handleFooterChange('columns', cols);
+  };
+
+  // Save Page to PostgreSQL
+  const handleSavePage = async () => {
+    if (!selectedPage) return;
+    try {
+      setSaving(true);
+      setErrorMessage(null);
+      const res = await fetch('/api/admin/frontend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save_page', page: selectedPage })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setToastMessage(t('pageSavedSuccess') || 'Page layout, padding settings, and footer saved to PostgreSQL.');
+        setTimeout(() => setToastMessage(null), 4000);
+        await fetchPages(selectedPage.id);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_frontend_pages_updated'));
+          localStorage.setItem('zecratary_frontend_updated_at', Date.now().toString());
+        }
+      } else {
+        setErrorMessage(data.error || 'Failed to save page configuration.');
+      }
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Error occurred while persisting page.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Set Default Homepage
+  const handleSetDefaultHomepage = async (pageId: string) => {
+    try {
+      setSaving(true);
+      const res = await fetch('/api/admin/frontend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set_default', newDefaultId: pageId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setToastMessage('Default homepage updated.');
+        setTimeout(() => setToastMessage(null), 3000);
+        await fetchPages(pageId);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_frontend_pages_updated'));
+          localStorage.setItem('zecratary_frontend_updated_at', Date.now().toString());
+        }
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error setting default page.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Delete Page
+  const handleDeletePage = async (pageId: string) => {
+    const pageToDelete = pages.find((p) => p.id === pageId);
+    if (!pageToDelete) return;
+    if (pageToDelete.is_default) {
+      alert('The default homepage cannot be deleted.');
+      return;
+    }
+    if (!confirm(`Are you sure you want to delete "${pageToDelete.title}"?`)) return;
+
+    try {
+      setSaving(true);
+      const res = await fetch('/api/admin/frontend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_page', id: pageId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setToastMessage('Page deleted successfully.');
+        setTimeout(() => setToastMessage(null), 3000);
+        await fetchPages();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_frontend_pages_updated'));
+          localStorage.setItem('zecratary_frontend_updated_at', Date.now().toString());
+        }
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error deleting page.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div 
+      className="min-h-screen p-4 sm:p-8 space-y-8 transition-colors duration-200"
+      style={{
+        backgroundColor: 'var(--color-bg, #070b13)',
+        color: 'var(--color-text, #f1f5f9)'
+      }}
+    >
+      {/* HEADER BAR */}
+      <div 
+        className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-6"
+        style={{ borderColor: 'var(--color-border, #1e293b)' }}
+      >
+        <div className="flex items-center gap-3">
+          <div 
+            className="p-3 rounded-2xl flex items-center justify-center border shadow-sm"
+            style={{
+              backgroundColor: 'var(--color-card, #0b0f17)',
+              borderColor: 'var(--color-border, #1e293b)',
+              color: 'var(--color-primary, #E05638)'
+            }}
+          >
+            <LayoutTemplate className="h-6 w-6" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-black tracking-tight">
+                {t('frontendSettingsTitle') || 'Frontend Pages & Layout Builder'}
+              </h1>
+              <span 
+                className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border shadow-xs"
+                style={{
+                  backgroundColor: 'rgba(224, 86, 56, 0.1)',
+                  borderColor: 'var(--color-primary, #E05638)',
+                  color: 'var(--color-primary, #E05638)'
+                }}
+              >
+                PostgreSQL Synced
+              </span>
+            </div>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
+              Configure page padding, design dynamic footers, customize elements, and arrange with drag & drop.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center flex-wrap gap-2.5">
+          <button
+            type="button"
+            onClick={() => setPreviewMode(!previewMode)}
+            className="px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 border transition shadow-xs cursor-pointer hover:opacity-80"
+            style={{
+              backgroundColor: 'var(--color-card, #0b0f17)',
+              borderColor: 'var(--color-border, #1e293b)',
+              color: 'var(--color-text, #f1f5f9)'
+            }}
+          >
+            {previewMode ? <Edit3 className="h-4 w-4 text-amber-500" /> : <Eye className="h-4 w-4 text-blue-500" />}
+            <span>{previewMode ? (t('editMode') || 'Canvas Editor') : (t('livePreview') || 'Live Preview')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSavePage}
+            disabled={saving || loading || !selectedPage}
+            className="px-5 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition shadow-lg cursor-pointer text-white disabled:opacity-50 hover:opacity-90"
+            style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+          >
+            {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            <span>{saving ? (t('saving') || 'Saving...') : (t('savePage') || 'Save Page Changes')}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* FEEDBACK TOASTS */}
+      {toastMessage && (
+        <div className="p-4 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in transition bg-emerald-500/15 border-emerald-500 text-emerald-400">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="p-4 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in transition text-red-400 bg-red-500/15 border-red-500">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{errorMessage}</span>
+        </div>
+      )}
+
+      {/* PAGE SELECTOR TABS */}
+      <div 
+        className="p-3 rounded-2xl border flex items-center gap-2 overflow-x-auto shadow-sm"
+        style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+      >
+        <span className="text-[11px] font-bold px-2 uppercase tracking-wider shrink-0" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
+          {t('availablePages') || 'Pages'}:
+        </span>
+        {pages.map((p) => {
+          const isSelected = p.id === selectedPageId;
+          return (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => handleSelectPage(p.id)}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-2 transition shrink-0 cursor-pointer border ${
+                isSelected ? 'ring-2 ring-[var(--color-primary)]' : 'hover:opacity-80'
+              }`}
+              style={{
+                backgroundColor: isSelected ? 'var(--color-inner-dark, #0e1422)' : 'transparent',
+                borderColor: isSelected ? 'var(--color-primary, #E05638)' : 'transparent',
+                color: isSelected ? 'var(--color-primary, #E05638)' : 'var(--color-text, #f1f5f9)'
+              }}
+            >
+              {p.is_default ? <Home className="h-3.5 w-3.5 text-amber-400" /> : <Globe className="h-3.5 w-3.5 opacity-60" />}
+              <span>{p.title}</span>
+              {p.is_default && (
+                <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                  Default
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {selectedPage && (
+        <div className="space-y-6">
+          {/* WORKSPACE SUB-TABS: "Page Elements" vs "Settings" */}
+          {!previewMode && (
+            <div 
+              className="flex items-center gap-2 border-b pb-3"
+              style={{ borderColor: 'var(--color-border, #1e293b)' }}
+            >
+              <button
+                type="button"
+                onClick={() => setActivePageTab('elements')}
+                className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition cursor-pointer border ${
+                  activePageTab === 'elements'
+                    ? 'text-white shadow-md'
+                    : 'opacity-70 hover:opacity-100 hover:bg-white/5'
+                }`}
+                style={{
+                  backgroundColor: activePageTab === 'elements' ? 'var(--color-primary, #E05638)' : 'transparent',
+                  borderColor: activePageTab === 'elements' ? 'var(--color-primary, #E05638)' : 'var(--color-border, #1e293b)'
+                }}
+              >
+                <Layers className="h-4 w-4" />
+                <span>{t('pageElementsTab') || 'Page Elements & Blocks'}</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-black/30 text-white font-mono font-bold">
+                  {selectedPage.elements.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActivePageTab('settings')}
+                className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition cursor-pointer border ${
+                  activePageTab === 'settings'
+                    ? 'text-white shadow-md'
+                    : 'opacity-70 hover:opacity-100 hover:bg-white/5'
+                }`}
+                style={{
+                  backgroundColor: activePageTab === 'settings' ? 'var(--color-primary, #E05638)' : 'transparent',
+                  borderColor: activePageTab === 'settings' ? 'var(--color-primary, #E05638)' : 'var(--color-border, #1e293b)'
+                }}
+              >
+                <Sliders className="h-4 w-4" />
+                <span>{t('settingsTab') || 'Settings'}</span>
+                {(selectedPage.footer?.enabled !== false || selectedPage.padding) && (
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* VIEW MODE: LIVE PREVIEW */}
+          {previewMode ? (
+            /* LIVE PREVIEW CANVAS */
+            <div 
+              className="border rounded-3xl p-8 shadow-2xl space-y-12 animate-in fade-in"
+              style={{
+                backgroundColor: 'var(--color-card, #0b0f17)',
+                borderColor: 'var(--color-border, #1e293b)'
+              }}
+            >
+              <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping" />
+                  <span className="text-xs font-extrabold uppercase tracking-wider text-emerald-400">Live Client View Preview</span>
+                </div>
+                <span className="text-xs font-mono opacity-60">{selectedPage.slug}</span>
+              </div>
+
+              {/* Page Container with applied padding settings */}
+              <div 
+                className={`${selectedPage.padding?.maxWidth || 'max-w-7xl'} mx-auto space-y-8`}
+                style={{
+                  paddingTop: selectedPage.padding?.top || '2.5rem',
+                  paddingBottom: selectedPage.padding?.bottom || '4rem',
+                  paddingLeft: selectedPage.padding?.x || '1.5rem',
+                  paddingRight: selectedPage.padding?.x || '1.5rem'
+                }}
+              >
+                {selectedPage.elements.map((elem) => {
+                  const elemBg = elem.bgColor || 'transparent';
+                  const elemText = elem.textColor || 'inherit';
+                  const elemBorder = elem.borderColor || 'var(--color-border, #1e293b)';
+                  const elemAccent = elem.accentColor || 'var(--color-primary, #E05638)';
+
+                  if (elem.type === 'title') {
+                    const alignCls = elem.alignment === 'center' ? 'text-center' : elem.alignment === 'right' ? 'text-right' : 'text-left';
+                    return (
+                      <div key={elem.id} className={`space-y-2 py-4 px-6 rounded-2xl ${alignCls}`} style={{ backgroundColor: elemBg, color: elemText }}>
+                        {elem.level === 'h1' ? (
+                          <h1 className="text-3xl sm:text-4xl font-black tracking-tight" style={{ color: elemAccent }}>{elem.title}</h1>
+                        ) : elem.level === 'h3' ? (
+                          <h3 className="text-xl font-bold tracking-tight">{elem.title}</h3>
+                        ) : (
+                          <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight">{elem.title}</h2>
+                        )}
+                        {elem.subtitle && <p className="text-sm max-w-3xl mx-auto opacity-80">{elem.subtitle}</p>}
+                      </div>
+                    );
+                  }
+
+                  if (elem.type === 'content') {
+                    return (
+                      <div key={elem.id} className="p-6 rounded-2xl border space-y-2 shadow-xs" style={{ backgroundColor: elem.bgColor || 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: elemText }}>
+                        {elem.title && <h3 className="text-lg font-bold" style={{ color: elemAccent }}>{elem.title}</h3>}
+                        <p className="text-xs leading-relaxed opacity-90 whitespace-pre-line">{elem.content}</p>
+                      </div>
+                    );
+                  }
+
+                  if (elem.type === 'column') {
+                    const gridCols = elem.columnsCount === 2 ? 'sm:grid-cols-2' : elem.columnsCount === 4 ? 'sm:grid-cols-2 md:grid-cols-4' : 'sm:grid-cols-3';
+                    return (
+                      <div key={elem.id} className="space-y-4 py-2">
+                        {elem.title && <h3 className="text-lg font-black text-center" style={{ color: elemAccent }}>{elem.title}</h3>}
+                        <div className={`grid grid-cols-1 ${gridCols} gap-4`}>
+                          {(elem.columns || []).map((col) => (
+                            <div key={col.id} className="p-5 rounded-2xl border space-y-2 shadow-xs" style={{ backgroundColor: elem.bgColor || 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: elemText }}>
+                              <h4 className="text-sm font-bold" style={{ color: elemAccent }}>{col.title}</h4>
+                              <p className="text-xs leading-relaxed opacity-80">{col.content}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (elem.type === 'picture') {
+                    return (
+                      <div key={elem.id} className="space-y-2 py-2 p-4 rounded-3xl" style={{ backgroundColor: elemBg }}>
+                        {elem.title && <h4 className="text-sm font-bold text-center mb-2" style={{ color: elemAccent }}>{elem.title}</h4>}
+                        <div className="rounded-3xl overflow-hidden border max-h-96 w-full flex items-center justify-center bg-black/30" style={{ borderColor: elemBorder }}>
+                          {elem.imageUrl ? <img src={elem.imageUrl} alt={elem.altText || 'Media'} className="w-full h-auto object-cover max-h-96" /> : <div className="py-16 text-center text-xs opacity-50">No picture provided</div>}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (elem.type === 'box') {
+                    return (
+                      <div key={elem.id} className="p-6 rounded-3xl border shadow-lg space-y-3" style={{ backgroundColor: elem.bgColor || 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: elemText }}>
+                        <h3 className="text-base font-black tracking-tight" style={{ color: elemAccent }}>{elem.title}</h3>
+                        <p className="text-xs leading-relaxed opacity-85">{elem.content}</p>
+                      </div>
+                    );
+                  }
+
+                  return null;
+                })}
+              </div>
+
+              {/* Dynamic Footer in Live Preview */}
+              {selectedPage.footer?.enabled !== false && (
+                <footer 
+                  className="border-t pt-8 pb-4 space-y-6 rounded-2xl p-6"
+                  style={{
+                    backgroundColor: selectedPage.footer?.bgColor || 'var(--color-inner-dark, #0e1422)',
+                    borderColor: selectedPage.footer?.borderColor || 'var(--color-border, #1e293b)',
+                    color: selectedPage.footer?.textColor || 'var(--color-text, #f1f5f9)'
+                  }}
+                >
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div className="md:col-span-2 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white" style={{ backgroundColor: selectedPage.footer?.accentColor || 'var(--color-primary, #E05638)' }}>
+                          <Utensils className="h-4 w-4" />
+                        </div>
+                        <span className="font-black text-sm">Zecratary</span>
+                      </div>
+                      <p className="text-xs opacity-70 max-w-sm">{selectedPage.footer?.aboutText}</p>
+                    </div>
+
+                    {(selectedPage.footer?.columns || []).map((col) => (
+                      <div key={col.id} className="space-y-2">
+                        <h4 className="font-bold text-xs uppercase tracking-wider" style={{ color: selectedPage.footer?.accentColor || 'var(--color-primary, #E05638)' }}>{col.title}</h4>
+                        <ul className="space-y-1 text-xs opacity-75">
+                          {col.links.map((l) => (
+                            <li key={l.id}>{l.label}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="border-t pt-4 flex flex-wrap items-center justify-between text-[11px] opacity-60" style={{ borderColor: selectedPage.footer?.borderColor || 'var(--color-border, #1e293b)' }}>
+                    <span>{selectedPage.footer?.copyrightText}</span>
+                    <span>Preview Canvas Mode</span>
+                  </div>
+                </footer>
+              )}
+            </div>
+          ) : activePageTab === 'settings' ? (
+            /* ───────────────────────────────────────────────────────────── */
+            /* "SETTINGS" TAB: Basic Properties, Spacing & Padding, Footer   */
+            /* ───────────────────────────────────────────────────────────── */
+            <div className="space-y-6 animate-in fade-in duration-200">
+              {/* A. PAGE BASIC PROPERTIES & ROUTING */}
+              <div 
+                className="border rounded-3xl p-6 shadow-xl space-y-4"
+                style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                  <div>
+                    <h2 className="text-sm font-black uppercase tracking-wide flex items-center gap-2">
+                      <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
+                      {t('pageBasicSettings') || 'Page Properties & Routing'}
+                    </h2>
+                    <p className="text-xs" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
+                      Manage the routing slug, display title, and publication status for this view.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    {!selectedPage.is_default && (
+                      <button
+                        type="button"
+                        onClick={() => handleSetDefaultHomepage(selectedPage.id)}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer hover:bg-amber-500/10 text-amber-400 border-amber-500/30"
+                      >
+                        <Home className="h-3.5 w-3.5" />
+                        <span>Set as Default Homepage</span>
+                      </button>
+                    )}
+
+                    {!selectedPage.is_default && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePage(selectedPage.id)}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer text-red-400 border-red-500/30 hover:bg-red-500/10"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span>Delete Page</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+                  <div>
+                    <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
+                      {t('pageTitle') || 'Page Title'}
+                    </label>
+                    <input 
+                      type="text"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      value={selectedPage.title}
+                      onChange={(e) => handleBasicPageChange('title', e.target.value)}
+                      className="w-full px-3.5 py-2 rounded-xl text-xs border font-bold outline-none"
+                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)', color: 'var(--color-text, #f1f5f9)' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
+                      {t('pageSlug') || 'URL Slug / Route'}
+                    </label>
+                    <input 
+                      type="text"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      disabled={selectedPage.is_default}
+                      value={selectedPage.is_default ? '/' : selectedPage.slug}
+                      onChange={(e) => handleBasicPageChange('slug', e.target.value)}
+                      className="w-full px-3.5 py-2 rounded-xl text-xs border font-mono font-bold outline-none disabled:opacity-60"
+                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)', color: 'var(--color-text, #f1f5f9)' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
+                      {t('publicationStatus') || 'Publication Status'}
+                    </label>
+                    <div className="flex items-center gap-3 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => handleBasicPageChange('is_published', !selectedPage.is_published)}
+                        className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
+                          selectedPage.is_published ? 'bg-emerald-600' : 'bg-slate-700'
+                        }`}
+                      >
+                        <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                          selectedPage.is_published ? 'translate-x-5' : 'translate-x-0'
+                        }`} />
+                      </button>
+                      <span className="text-xs font-bold">
+                        {selectedPage.is_published ? (t('published') || 'Live & Published') : (t('draft') || 'Draft (Hidden)')}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* B. PAGE SPACING & PADDING SETTINGS */}
+              <div 
+                className="border rounded-3xl p-6 shadow-xl space-y-4"
+                style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                  <div>
+                    <h2 className="text-sm font-black uppercase tracking-wide flex items-center gap-2">
+                      <Sliders className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
+                      Page Spacing & Padding Settings
+                    </h2>
+                    <p className="text-xs" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
+                      Configure top, bottom, and horizontal margins and container width for this page.
+                    </p>
+                  </div>
+
+                  {/* Quick Spacing Presets */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] font-bold uppercase opacity-60">Presets:</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPage({
+                        ...selectedPage,
+                        padding: { top: '1.5rem', bottom: '2.5rem', x: '1rem', maxWidth: 'max-w-6xl' }
+                      })}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold border hover:bg-white/10"
+                      style={{ borderColor: 'var(--color-border, #1e293b)' }}
+                    >
+                      Compact
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPage({
+                        ...selectedPage,
+                        padding: { top: '2.5rem', bottom: '4rem', x: '1.5rem', maxWidth: 'max-w-7xl' }
+                      })}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold border hover:bg-white/10 text-emerald-400 border-emerald-500/30"
+                    >
+                      Balanced (Default)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPage({
+                        ...selectedPage,
+                        padding: { top: '4rem', bottom: '6rem', x: '2rem', maxWidth: 'max-w-7xl' }
+                      })}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold border hover:bg-white/10 text-amber-400 border-amber-500/30"
+                    >
+                      Spacious
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPage({
+                        ...selectedPage,
+                        padding: { top: '0', bottom: '4rem', x: '0', maxWidth: 'max-w-full' }
+                      })}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold border hover:bg-white/10"
+                      style={{ borderColor: 'var(--color-border, #1e293b)' }}
+                    >
+                      Full-Width Flush
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs pt-1">
+                  <div>
+                    <label className="block font-bold mb-1 opacity-70">Top Padding (Clearance)</label>
+                    <input 
+                      type="text" 
+                      value={selectedPage.padding?.top || '2.5rem'}
+                      onChange={(e) => handlePaddingChange('top', e.target.value)}
+                      placeholder="e.g. 2.5rem or 40px"
+                      className="w-full px-3 py-2 rounded-xl border font-mono font-bold"
+                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold mb-1 opacity-70">Bottom Padding</label>
+                    <input 
+                      type="text" 
+                      value={selectedPage.padding?.bottom || '4rem'}
+                      onChange={(e) => handlePaddingChange('bottom', e.target.value)}
+                      placeholder="e.g. 4rem or 64px"
+                      className="w-full px-3 py-2 rounded-xl border font-mono font-bold"
+                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold mb-1 opacity-70">Horizontal Padding (X)</label>
+                    <input 
+                      type="text" 
+                      value={selectedPage.padding?.x || '1.5rem'}
+                      onChange={(e) => handlePaddingChange('x', e.target.value)}
+                      placeholder="e.g. 1.5rem or 24px"
+                      className="w-full px-3 py-2 rounded-xl border font-mono font-bold"
+                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold mb-1 opacity-70">Container Max Width</label>
+                    <select 
+                      value={selectedPage.padding?.maxWidth || 'max-w-7xl'}
+                      onChange={(e) => handlePaddingChange('maxWidth', e.target.value as any)}
+                      className="w-full px-3 py-2 rounded-xl border font-bold"
+                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                    >
+                      <option value="max-w-5xl">5XL (1024px)</option>
+                      <option value="max-w-6xl">6XL (1152px)</option>
+                      <option value="max-w-7xl">7XL (1280px - Default)</option>
+                      <option value="max-w-full">Full Width (100% Edge-to-Edge)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* C. FOOTER SETTINGS & NAVIGATION COLUMNS */}
+              <div 
+                className="border rounded-3xl p-6 shadow-xl space-y-4"
+                style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                  <div>
+                    <h2 className="text-sm font-black uppercase tracking-wide flex items-center gap-2">
+                      <PanelBottom className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
+                      Footer Settings & Navigation Columns
+                    </h2>
+                    <p className="text-xs" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
+                      Configure the footer banner, multi-column navigation links, and copyright statement.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleFooterChange('enabled', !(selectedPage.footer?.enabled !== false))}
+                      className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
+                        selectedPage.footer?.enabled !== false ? 'bg-emerald-600' : 'bg-slate-700'
+                      }`}
+                    >
+                      <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                        selectedPage.footer?.enabled !== false ? 'translate-x-5' : 'translate-x-0'
+                      }`} />
+                    </button>
+                    <span className="text-xs font-bold">
+                      {selectedPage.footer?.enabled !== false ? 'Footer Enabled' : 'Footer Hidden'}
+                    </span>
+                  </div>
+                </div>
+
+                {selectedPage.footer?.enabled !== false && (
+                  <div className="space-y-5 text-xs pt-1">
+                    {/* Brand About & Copyright */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block font-bold mb-1 opacity-70">Brand Description / About</label>
+                        <textarea 
+                          rows={2}
+                          value={selectedPage.footer?.aboutText || ''}
+                          onChange={(e) => handleFooterChange('aboutText', e.target.value)}
+                          placeholder="Brief company mission or platform statement..."
+                          className="w-full px-3 py-2 rounded-xl border leading-relaxed"
+                          style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1 opacity-70">Copyright Statement</label>
+                        <input 
+                          type="text" 
+                          value={selectedPage.footer?.copyrightText || ''}
+                          onChange={(e) => handleFooterChange('copyrightText', e.target.value)}
+                          placeholder="© 2026 Zecratary. All rights reserved."
+                          className="w-full px-3 py-2 rounded-xl border font-bold"
+                          style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Footer Colors */}
+                    <div 
+                      className="p-4 rounded-2xl border space-y-3"
+                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Palette className="h-4 w-4 text-emerald-400" />
+                        <span className="font-bold text-[11px] uppercase tracking-wider">Footer Color Customization</span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div>
+                          <label className="block text-[10px] font-bold mb-1 opacity-70">Footer Background</label>
+                          <input 
+                            type="text" 
+                            placeholder="Default / CSS"
+                            value={selectedPage.footer?.bgColor || ''}
+                            onChange={(e) => handleFooterChange('bgColor', e.target.value)}
+                            className="w-full px-2.5 py-1 rounded-lg border font-mono text-xs"
+                            style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold mb-1 opacity-70">Footer Text</label>
+                          <input 
+                            type="text" 
+                            placeholder="Default / CSS"
+                            value={selectedPage.footer?.textColor || ''}
+                            onChange={(e) => handleFooterChange('textColor', e.target.value)}
+                            className="w-full px-2.5 py-1 rounded-lg border font-mono text-xs"
+                            style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold mb-1 opacity-70">Footer Border</label>
+                          <input 
+                            type="text" 
+                            placeholder="Default / CSS"
+                            value={selectedPage.footer?.borderColor || ''}
+                            onChange={(e) => handleFooterChange('borderColor', e.target.value)}
+                            className="w-full px-2.5 py-1 rounded-lg border font-mono text-xs"
+                            style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold mb-1 opacity-70">Accent Highlight</label>
+                          <input 
+                            type="text" 
+                            placeholder="Default / CSS"
+                            value={selectedPage.footer?.accentColor || ''}
+                            onChange={(e) => handleFooterChange('accentColor', e.target.value)}
+                            className="w-full px-2.5 py-1 rounded-lg border font-mono text-xs"
+                            style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Footer Navigation Columns */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[11px] uppercase tracking-wider opacity-80">Footer Navigation Columns</span>
+                        <button
+                          type="button"
+                          onClick={addFooterColumn}
+                          className="px-3 py-1 rounded-xl text-xs font-bold border flex items-center gap-1.5 hover:bg-white/10"
+                          style={{ borderColor: 'var(--color-border, #1e293b)' }}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          <span>Add Column</span>
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {(selectedPage.footer?.columns || []).map((col, colIdx) => (
+                          <div 
+                            key={col.id} 
+                            className="p-4 rounded-2xl border space-y-3"
+                            style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                          >
+                            <div className="flex items-center justify-between gap-2 border-b pb-2" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                              <input 
+                                type="text"
+                                value={col.title}
+                                onChange={(e) => {
+                                  const cols = [...(selectedPage.footer?.columns || [])];
+                                  cols[colIdx].title = e.target.value;
+                                  handleFooterChange('columns', cols);
+                                }}
+                                className="font-bold text-xs px-2 py-1 rounded-lg border w-full max-w-xs"
+                                style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeFooterColumn(colIdx)}
+                                className="p-1 rounded text-red-400 hover:bg-red-500/10 cursor-pointer"
+                                title="Remove Column"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+
+                            {/* Column Links */}
+                            <div className="space-y-2">
+                              {col.links.map((link, linkIdx) => (
+                                <div key={link.id} className="flex items-center gap-2">
+                                  <input 
+                                    type="text"
+                                    placeholder="Link Label"
+                                    value={link.label}
+                                    onChange={(e) => {
+                                      const cols = [...(selectedPage.footer?.columns || [])];
+                                      cols[colIdx].links[linkIdx].label = e.target.value;
+                                      handleFooterChange('columns', cols);
+                                    }}
+                                    className="px-2 py-1 rounded-lg border text-xs w-1/2"
+                                    style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+                                  />
+                                  <input 
+                                    type="text"
+                                    placeholder="URL (e.g. /about)"
+                                    value={link.url}
+                                    onChange={(e) => {
+                                      const cols = [...(selectedPage.footer?.columns || [])];
+                                      cols[colIdx].links[linkIdx].url = e.target.value;
+                                      handleFooterChange('columns', cols);
+                                    }}
+                                    className="px-2 py-1 rounded-lg border text-xs font-mono w-1/2"
+                                    style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => removeFooterLink(colIdx, linkIdx)}
+                                    className="p-1 text-slate-400 hover:text-red-400 cursor-pointer"
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              ))}
+
+                              <button
+                                type="button"
+                                onClick={() => addFooterLink(colIdx)}
+                                className="text-[10px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 pt-1"
+                              >
+                                <Plus className="h-3 w-3" />
+                                <span>Add Link to this column</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            /* ───────────────────────────────────────────────────────────── */
+            /* "ELEMENTS & BLOCKS" TAB: Palette Toolbar + Canvas Reorder     */
+            /* ───────────────────────────────────────────────────────────── */
+            <div className="space-y-4 animate-in fade-in duration-200">
+              <div 
+                className="p-4 rounded-3xl border shadow-md flex flex-wrap items-center justify-between gap-3"
+                style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+              >
+                <div className="flex items-center gap-2">
+                  <Layers className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
+                  <span className="text-xs font-black uppercase tracking-wider">{t('addElement') || 'Insert Page Element'}:</span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleAddElement('recipe')}
+                    className="px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 border transition cursor-pointer shadow-xs hover:bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                    style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)' }}
+                  >
+                    <Bookmark className="h-3.5 w-3.5" />
+                    <span>+ Recipe Grid</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleAddElement('subscription')}
+                    className="px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 border transition cursor-pointer shadow-xs hover:bg-blue-500/10 text-blue-400 border-blue-500/30"
+                    style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)' }}
+                  >
+                    <CreditCard className="h-3.5 w-3.5" />
+                    <span>+ Plan Card</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleAddElement('title')}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition cursor-pointer hover:bg-white/5"
+                    style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                  >
+                    <Type className="h-3.5 w-3.5 text-blue-400" />
+                    <span>+ Title</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleAddElement('content')}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition cursor-pointer hover:bg-white/5"
+                    style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                  >
+                    <AlignLeft className="h-3.5 w-3.5 text-purple-400" />
+                    <span>+ Content</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleAddElement('column')}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition cursor-pointer hover:bg-white/5"
+                    style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                  >
+                    <Columns className="h-3.5 w-3.5 text-amber-400" />
+                    <span>+ Multi-Column</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleAddElement('picture')}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition cursor-pointer hover:bg-white/5"
+                    style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                  >
+                    <ImageIcon className="h-3.5 w-3.5 text-emerald-400" />
+                    <span>+ Picture</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleAddElement('box')}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 border transition cursor-pointer hover:bg-white/5"
+                    style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                  >
+                    <Layers className="h-3.5 w-3.5 text-rose-400" />
+                    <span>+ Box / Card</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Elements Draggable List */}
+              <div className="space-y-3">
+                {selectedPage.elements.length === 0 ? (
+                  <div 
+                    className="p-12 text-center rounded-3xl border border-dashed space-y-3"
+                    style={{ borderColor: 'var(--color-border, #1e293b)' }}
+                  >
+                    <LayoutTemplate className="h-10 w-10 mx-auto opacity-30" />
+                    <p className="text-sm font-bold">This page does not contain any layout elements yet.</p>
+                    <p className="text-xs opacity-60">Click on any block type in the toolbar above to append titles, recipe grids, subscription plans, columns, or media.</p>
+                  </div>
+                ) : (
+                  selectedPage.elements.map((elem, index) => {
+                    const isExpanded = expandedElementId === elem.id;
+                    const isDragged = draggedIndex === index;
+
+                    return (
+                      <div
+                        key={elem.id}
+                        draggable
+                        onDragStart={() => handleDragStart(index)}
+                        onDragOver={(e) => handleDragOver(e, index)}
+                        onDrop={handleDrop}
+                        onDragEnd={handleDrop}
+                        className={`rounded-2xl border transition-all duration-150 ${isDragged ? 'opacity-40 scale-[0.99] border-blue-500' : 'opacity-100'}`}
+                        style={{
+                          backgroundColor: 'var(--color-card, #0b0f17)',
+                          borderColor: isExpanded ? 'var(--color-primary, #E05638)' : 'var(--color-border, #1e293b)'
+                        }}
+                      >
+                        <div className="p-3.5 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="cursor-grab active:cursor-grabbing p-1 rounded hover:bg-white/10 text-slate-500 hover:text-slate-200">
+                              <GripVertical className="h-5 w-5" />
+                            </div>
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider border" style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}>
+                              {elem.type}
+                            </span>
+                            <span className="text-xs font-bold truncate max-w-xs sm:max-w-md">
+                              {elem.title || `Unnamed ${elem.type}`}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <button type="button" onClick={() => moveElement(index, 'up')} disabled={index === 0} className="p-1 rounded hover:bg-white/10 disabled:opacity-30 cursor-pointer">
+                              <ChevronUp className="h-4 w-4" />
+                            </button>
+                            <button type="button" onClick={() => moveElement(index, 'down')} disabled={index === selectedPage.elements.length - 1} className="p-1 rounded hover:bg-white/10 disabled:opacity-30 cursor-pointer">
+                              <ChevronDown className="h-4 w-4" />
+                            </button>
+                            <button type="button" onClick={() => handleDuplicateElement(index)} className="p-1.5 rounded hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer">
+                              <Copy className="h-4 w-4" />
+                            </button>
+                            <button type="button" onClick={() => handleDeleteElement(index)} className="p-1.5 rounded hover:bg-red-500/10 text-red-400 cursor-pointer">
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                            <button type="button" onClick={() => setExpandedElementId(isExpanded ? null : elem.id)} className="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer hover:bg-white/5" style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}>
+                              {isExpanded ? 'Done' : 'Configure'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {isExpanded && (
+                          <div className="p-5 border-t space-y-4 text-xs" style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}>
+                            <div>
+                              <label className="block font-bold mb-1 opacity-70">Element Title</label>
+                              <input 
+                                type="text" 
+                                value={elem.title || ''}
+                                onChange={(e) => handleUpdateElement(index, { title: e.target.value })}
+                                className="w-full px-3 py-2 rounded-xl border font-bold"
+                                style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+                              />
+                            </div>
+
+                            {(elem.type === 'title' || elem.type === 'content' || elem.type === 'box') && (
+                              <div>
+                                <label className="block font-bold mb-1 opacity-70">Content / Subtitle</label>
+                                <textarea 
+                                  rows={3}
+                                  value={elem.content || elem.subtitle || ''}
+                                  onChange={(e) => handleUpdateElement(index, elem.type === 'title' ? { subtitle: e.target.value } : { content: e.target.value })}
+                                  className="w-full px-3 py-2 rounded-xl border leading-relaxed"
+                                  style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+```
+
 ## File: `apps/web/src/app/admin/plans/page.tsx`
 ```typescript
 // Generated / Updated by AI Collaborator
@@ -35403,6 +37481,7 @@ export default function SubscriptionsPage() {
 ## File: `apps/web/src/app/dashboard/page.tsx`
 ```typescript
 'use client';
+
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -35440,54 +37519,24 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(false);
   const [refreshFeedback, setRefreshFeedback] = useState(false);
 
-  // Apply and listen for global admin theme updates and Day / Night mode toggling
-  const applyGlobalTheme = useCallback(() => {
-    try {
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
-    } catch (_) {}
-  }, []);
-
-  useEffect(() => {
-    applyGlobalTheme();
-    window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_updated', applyGlobalTheme);
-    window.addEventListener('storage', applyGlobalTheme);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
-      window.removeEventListener('storage', applyGlobalTheme);
-    };
-  }, [applyGlobalTheme]);
-
   const getExactSavedRecipes = useCallback((user: User | null): any[] => {
     if (typeof window === 'undefined') return [];
     try {
       const raw = localStorage.getItem('zecratary_saved_recipes') || localStorage.getItem('zecratary_recipes');
       if (!raw) return [];
-
       const list = JSON.parse(raw);
       if (!Array.isArray(list)) return [];
-
       const seen = new Set<string>();
       const userList: any[] = [];
-
       for (const item of list) {
         const key = String(item.id || item.title || item.name || '').trim();
         if (!key || seen.has(key)) continue;
-
-        const isOwner = user
-          ? (item.userId === user.id || item.createdBy === user.email)
-          : true;
-
+        const isOwner = user ? (item.userId === user.id || item.createdBy === user.email) : true;
         if (isOwner) {
           seen.add(key);
           userList.push(item);
         }
       }
-
       return userList;
     } catch {
       return [];
@@ -35496,205 +37545,75 @@ export default function DashboardPage() {
 
   const computeMetrics = useCallback((user: User | null) => {
     if (!user) return;
-
-    // 1. Saved Recipes
     const userRecipes = getExactSavedRecipes(user);
     setRecipesCount(userRecipes.length);
 
-    // 2. Recipe Books
     try {
       const booksRaw = localStorage.getItem('zecratary_recipe_books');
       if (booksRaw) {
         const parsedBooks = JSON.parse(booksRaw);
         if (Array.isArray(parsedBooks) && parsedBooks.length > 0) {
-          const userBooks = parsedBooks.filter((b: any) => 
-            b.userId === user.id || b.createdBy === user.email
-          );
-          if (userBooks.length > 0) {
-            setRecipeBooksCount(userBooks.length);
-          } else {
-            const categories = new Set(userRecipes.map((r: any) => r.category || r.recipeType || r.tags?.[0] || 'Main Dish'));
-            setRecipeBooksCount(userRecipes.length > 0 ? categories.size : 0);
-          }
+          const userBooks = parsedBooks.filter((b: any) => b.userId === user.id || b.createdBy === user.email);
+          setRecipeBooksCount(userBooks.length);
         } else {
-          const categories = new Set(userRecipes.map((r: any) => r.category || r.recipeType || r.tags?.[0] || 'Main Dish'));
-          setRecipeBooksCount(userRecipes.length > 0 ? categories.size : 0);
+          setRecipeBooksCount(0);
         }
-      } else {
-        const categories = new Set(userRecipes.map((r: any) => r.category || r.recipeType || r.tags?.[0] || 'Main Dish'));
-        setRecipeBooksCount(userRecipes.length > 0 ? categories.size : 0);
       }
     } catch {
       setRecipeBooksCount(0);
     }
 
-    // 3. Pantry Stock
     try {
       const pantryRaw = localStorage.getItem('zecratary_pantry_items') || localStorage.getItem('zecratary_pantry');
       if (pantryRaw) {
         const parsedPantry = JSON.parse(pantryRaw);
         if (Array.isArray(parsedPantry)) {
-          const userPantry = parsedPantry.filter((p: any) => 
-            p.userId === user.id || p.createdBy === user.email
-          );
+          const userPantry = parsedPantry.filter((p: any) => p.userId === user.id || p.createdBy === user.email);
           setPantryStockCount(userPantry.length);
-        } else {
-          setPantryStockCount(0);
         }
-      } else {
-        setPantryStockCount(0);
       }
     } catch {
       setPantryStockCount(0);
     }
 
-    // 4. Grocery Items
     try {
       const shopRaw = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
       if (shopRaw) {
         const parsedShop = JSON.parse(shopRaw);
         if (Array.isArray(parsedShop)) {
-          const userShop = parsedShop.filter((i: any) => 
-            (i.userId === user.id || i.createdBy === user.email) && !i.checked
-          );
+          const userShop = parsedShop.filter((i: any) => (i.userId === user.id || i.createdBy === user.email) && !i.checked);
           setGroceryItemsCount(userShop.length);
-        } else {
-          setGroceryItemsCount(0);
         }
-      } else {
-        setGroceryItemsCount(0);
       }
     } catch {
       setGroceryItemsCount(0);
     }
 
-    // 5. Upcoming Meal with Photo Thumbnail
-    try {
-      const planRaw = localStorage.getItem('zecratary_meal_plan');
-      const now = new Date();
-      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-
-      if (planRaw) {
-        const parsedPlan = JSON.parse(planRaw);
-        if (Array.isArray(parsedPlan) && parsedPlan.length > 0) {
-          const userPlan = parsedPlan.filter((m: any) => 
-            m.userId === user.id || m.createdBy === user.email
-          );
-
-          if (userPlan.length > 0) {
-            const todayMeals = userPlan.filter((m: any) => m.date === todayStr);
-            const mealToDisplay = todayMeals.length > 0 ? todayMeals[0] : userPlan[0];
-            const mealTitle = mealToDisplay.recipeName || mealToDisplay.title || 'Planned Dish';
-
-            const matchingRecipe = userRecipes.find((r: any) => 
-              (r.title || r.name)?.toLowerCase() === mealTitle.toLowerCase()
-            );
-
-            const imageUrl = mealToDisplay.imageUrl || mealToDisplay.image || matchingRecipe?.imageUrl || matchingRecipe?.image;
-
-            setUpcomingMeal({
-              mealType: (mealToDisplay.mealType || 'Dinner').toUpperCase(),
-              title: mealTitle,
-              timeOrTags: mealToDisplay.time ? `${mealToDisplay.time} • ${t('scheduledLabel') || 'Scheduled'}` : `40 mins • ${t('scheduledLabel') || 'Scheduled'}`,
-              notes: mealToDisplay.notes,
-              imageUrl
-            });
-            return;
-          }
-        }
-      }
-
-      if (userRecipes.length > 0) {
-        const first = userRecipes[0];
-        const prep = parseInt(first.prepTimeMinutes || first.prepTime) || 15;
-        const cook = parseInt(first.cookTimeMinutes || first.cookTime) || 20;
-        setUpcomingMeal({
-          mealType: (first.category || first.recipeType || 'Dinner').toUpperCase(),
-          title: first.title || first.name || 'Saved Dish',
-          timeOrTags: `${prep + cook} mins • ${first.tags?.[0] || 'Favorite'}`,
-          imageUrl: first.imageUrl || first.image
-        });
-      } else {
-        setUpcomingMeal(null);
-      }
-    } catch {
+    if (userRecipes.length > 0) {
+      const first = userRecipes[0];
+      const prep = parseInt(first.prepTimeMinutes || first.prepTime) || 15;
+      const cook = parseInt(first.cookTimeMinutes || first.cookTime) || 20;
+      setUpcomingMeal({
+        mealType: (first.category || first.recipeType || 'Dinner').toUpperCase(),
+        title: first.title || first.name || 'Saved Dish',
+        timeOrTags: `${prep + cook} mins • ${first.tags?.[0] || 'Favorite'}`,
+        imageUrl: first.imageUrl || first.image
+      });
+    } else {
       setUpcomingMeal(null);
     }
-  }, [getExactSavedRecipes, t]);
-
-  const handleManualRefresh = () => {
-    if (loading) return;
-    setLoading(true);
-    setRefreshFeedback(false);
-
-    initAuthStorage();
-    const activeUser = getCurrentUser();
-
-    if (!activeUser) {
-      router.replace('/login');
-      return;
-    }
-
-    setCurrentUser(activeUser);
-    applyGlobalTheme();
-    computeMetrics(activeUser);
-
-    window.dispatchEvent(new Event('storage'));
-    window.dispatchEvent(new Event('zecratary_recipes_updated'));
-    window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
-    window.dispatchEvent(new Event('zecratary_pantry_updated'));
-    window.dispatchEvent(new Event('zecratary_shopping_updated'));
-    window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
-
-    setTimeout(() => {
-      setLoading(false);
-      setRefreshFeedback(true);
-      setTimeout(() => setRefreshFeedback(false), 2500);
-    }, 600);
-  };
+  }, [getExactSavedRecipes]);
 
   useEffect(() => {
     document.title = `${t('dashboard') || 'Dashboard'} - Zecratary`;
     initAuthStorage();
     const user = getCurrentUser();
-
     if (!user) {
       router.replace('/login');
       return;
     }
-
     setCurrentUser(user);
     computeMetrics(user);
-
-    const handleSync = () => {
-      const active = getCurrentUser();
-      if (!active) {
-        router.replace('/login');
-        return;
-      }
-      setCurrentUser(active);
-      computeMetrics(active);
-    };
-
-    window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_recipes_updated', handleSync);
-    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
-    window.addEventListener('zecratary_pantry_updated', handleSync);
-    window.addEventListener('zecratary_shopping_updated', handleSync);
-    window.addEventListener('zecratary_meal_plan_updated', handleSync);
-    window.addEventListener('zecratary_planner_updated', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
-
-    return () => {
-      window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_pantry_updated', handleSync);
-      window.removeEventListener('zecratary_shopping_updated', handleSync);
-      window.removeEventListener('zecratary_meal_plan_updated', handleSync);
-      window.removeEventListener('zecratary_planner_updated', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
-    };
   }, [computeMetrics, router, t]);
 
   if (!currentUser) {
@@ -35702,7 +37621,7 @@ export default function DashboardPage() {
       <div className="min-h-[70vh] flex items-center justify-center">
         <div 
           className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
-          style={{ borderColor: 'var(--color-primary)', borderTopColor: 'transparent' }}
+          style={{ borderColor: 'var(--color-primary, #E05638)', borderTopColor: 'transparent' }}
         />
       </div>
     );
@@ -35711,319 +37630,149 @@ export default function DashboardPage() {
   return (
     <div 
       className="max-w-6xl mx-auto space-y-8 pb-16 px-2 sm:px-4 transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
+      style={{ color: 'var(--color-text, #0f172a)' }}
     >
-      {/* Top Heading */}
       <div className="flex items-center justify-between pt-2">
         <div className="space-y-1">
-          <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
             {t('dashboard') || 'Dashboard'}
           </h1>
-          <p 
-            className="text-sm"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
+          <p className="text-sm" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
             {(t('dashboardWelcomePrefix') || 'Welcome back, {name}!').replace('{name}', currentUser?.name || currentUser?.email || 'Chef')} {t('dashboardSubtitle') || 'Autonomous culinary planning and pantry tracking.'}
           </p>
         </div>
 
-        {/* FUNCTIONAL REFRESH BUTTON */}
-        <div className="flex items-center gap-2">
-          {refreshFeedback && (
-            <span 
-              className="text-xs font-bold flex items-center gap-1.5 animate-in fade-in transition duration-300"
-              style={{ color: 'var(--color-emerald)' }}
-            >
-              <CheckCircle2 className="h-3.5 w-3.5" /> {t('refreshed') || 'Refreshed'}
-            </span>
-          )}
-
-          <button
-            type="button"
-            onClick={handleManualRefresh}
-            disabled={loading}
-            className="p-2.5 px-4 rounded-xl border transition flex items-center gap-2 text-xs font-bold cursor-pointer disabled:opacity-70 shadow-sm"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-            title="Reload live metrics from storage"
-          >
-            <RefreshCw 
-              className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} 
-              style={{ color: 'var(--color-emerald)' }}
-            />
-            <span>{loading ? (t('refreshing') || 'Refreshing...') : (t('refresh') || 'Refresh')}</span>
-          </button>
-        </div>
+        <Link
+          href="/"
+          className="px-4 py-2 rounded-xl text-xs font-bold border transition hover:opacity-80 flex items-center gap-1.5"
+          style={{ backgroundColor: 'var(--color-card, #ffffff)', borderColor: 'var(--color-border, #e2e8f0)', color: 'var(--color-text, #0f172a)' }}
+        >
+          <span>{t('viewHomepage') || 'View Public Home'}</span>
+          <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
       </div>
 
-      {/* Top 4 Stats Metric Cards with Dynamic CSS Theme Variables */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Saved Recipes */}
         <Link 
           href="/saved" 
           className="p-5 rounded-2xl block border transition shadow-sm group"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)'
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+          style={{ backgroundColor: 'var(--color-card, #ffffff)', borderColor: 'var(--color-border, #e2e8f0)' }}
         >
-          <span 
-            className="text-xs block uppercase font-bold tracking-wider"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
+          <span className="text-xs block uppercase font-bold tracking-wider" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
             {t('savedRecipes') || 'Saved Recipes'}
           </span>
-          <span 
-            className="text-3xl font-black mt-1 block"
-            style={{ color: 'var(--color-primary)' }}
-          >
-            {loading ? '...' : recipesCount}
+          <span className="text-3xl font-black mt-1 block" style={{ color: 'var(--color-primary, #E05638)' }}>
+            {recipesCount}
           </span>
         </Link>
 
-        {/* Recipe Books */}
         <Link 
           href="/books" 
           className="p-5 rounded-2xl block border transition shadow-sm group"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)'
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-emerald)')}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+          style={{ backgroundColor: 'var(--color-card, #ffffff)', borderColor: 'var(--color-border, #e2e8f0)' }}
         >
-          <span 
-            className="text-xs block uppercase font-bold tracking-wider"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
+          <span className="text-xs block uppercase font-bold tracking-wider" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
             {t('books') || 'Recipe Books'}
           </span>
-          <span 
-            className="text-3xl font-black mt-1 block"
-            style={{ color: 'var(--color-emerald)' }}
-          >
-            {loading ? '...' : recipeBooksCount}
+          <span className="text-3xl font-black mt-1 block text-emerald-500">
+            {recipeBooksCount}
           </span>
         </Link>
 
-        {/* Pantry Stock */}
         <Link 
           href="/pantry" 
           className="p-5 rounded-2xl block border transition shadow-sm group"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)'
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+          style={{ backgroundColor: 'var(--color-card, #ffffff)', borderColor: 'var(--color-border, #e2e8f0)' }}
         >
-          <span 
-            className="text-xs block uppercase font-bold tracking-wider"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
+          <span className="text-xs block uppercase font-bold tracking-wider" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
             {t('pantryStock') || 'Pantry Stock'}
           </span>
-          <span 
-            className="text-3xl font-black mt-1 block"
-            style={{ color: 'var(--color-text)' }}
-          >
-            {loading ? '...' : pantryStockCount}
+          <span className="text-3xl font-black mt-1 block" style={{ color: 'var(--color-text, #0f172a)' }}>
+            {pantryStockCount}
           </span>
         </Link>
 
-        {/* Grocery Items */}
         <Link 
           href="/shopping" 
           className="p-5 rounded-2xl block border transition shadow-sm group"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)'
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-emerald)')}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+          style={{ backgroundColor: 'var(--color-card, #ffffff)', borderColor: 'var(--color-border, #e2e8f0)' }}
         >
-          <span 
-            className="text-xs block uppercase font-bold tracking-wider"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
+          <span className="text-xs block uppercase font-bold tracking-wider" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
             {t('groceryItems') || 'Grocery Items'}
           </span>
-          <span 
-            className="text-3xl font-black mt-1 block"
-            style={{ color: 'var(--color-text)' }}
-          >
-            {loading ? '...' : groceryItemsCount}
+          <span className="text-3xl font-black mt-1 block" style={{ color: 'var(--color-text, #0f172a)' }}>
+            {groceryItemsCount}
           </span>
         </Link>
       </div>
 
-      {/* Center 2-Column Section */}
       <div className="grid md:grid-cols-2 gap-6">
-        {/* Upcoming Meal Card with Recipe Photo */}
         <div 
           className="p-6 rounded-2xl space-y-4 shadow-sm flex flex-col justify-between border"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)'
-          }}
+          style={{ backgroundColor: 'var(--color-card, #ffffff)', borderColor: 'var(--color-border, #e2e8f0)' }}
         >
-          <div 
-            className="flex items-center justify-between border-b pb-3"
-            style={{ borderColor: 'var(--color-border)' }}
-          >
-            <h2 
-              className="text-base font-bold flex items-center gap-2"
-              style={{ color: 'var(--color-text)' }}
-            >
-              <Calendar className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('upcomingMeal') || 'Upcoming Meal'}
+          <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border, #e2e8f0)' }}>
+            <h2 className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--color-text, #0f172a)' }}>
+              <Calendar className="h-5 w-5 text-[var(--color-primary)]" /> {t('upcomingMeal') || 'Upcoming Meal'}
             </h2>
-            <Link 
-              href="/planner" 
-              className="text-xs font-bold hover:underline flex items-center gap-1"
-              style={{ color: 'var(--color-primary)' }}
-            >
+            <Link href="/planner" className="text-xs font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1">
               {t('viewPlanner') || 'View Planner'} <ArrowRight className="h-3.5 w-3.5" />
             </Link>
           </div>
 
-          <div className="flex-1 flex flex-col justify-center my-2">
+          <div className="my-2">
             {upcomingMeal ? (
               <div 
                 className="p-4 rounded-xl border flex items-center gap-4 shadow-inner"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)'
-                }}
+                style={{ backgroundColor: 'var(--color-inner-dark, #f1f5f9)', borderColor: 'var(--color-border, #e2e8f0)' }}
               >
                 {upcomingMeal.imageUrl ? (
-                  <img
-                    src={upcomingMeal.imageUrl}
-                    alt={upcomingMeal.title}
-                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover border shrink-0 shadow-md"
-                    style={{ borderColor: 'var(--color-border)' }}
-                  />
+                  <img src={upcomingMeal.imageUrl} alt={upcomingMeal.title} className="w-16 h-16 rounded-xl object-cover border shrink-0" />
                 ) : (
-                  <div 
-                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl border shrink-0 flex items-center justify-center opacity-70"
-                    style={{ 
-                      borderColor: 'var(--color-border)',
-                      backgroundColor: 'var(--color-inner-dark)'
-                    }}
-                  >
-                    <Utensils className="h-6 w-6 opacity-70" />
+                  <div className="w-16 h-16 rounded-xl border shrink-0 flex items-center justify-center bg-black/10">
+                    <Utensils className="h-6 w-6 opacity-50" />
                   </div>
                 )}
-
-                <div className="space-y-1 flex-1 min-w-0">
-                  <span 
-                    className="text-xs font-bold uppercase tracking-wide flex items-center gap-1.5"
-                    style={{ color: 'var(--color-emerald)' }}
-                  >
-                    <Utensils className="h-3 w-3" /> {(t('todayMealPrefix') || 'Today • {mealType}').replace('{name}', upcomingMeal.mealType || 'Dinner')}
-                  </span>
-                  <h3 
-                    className="font-bold text-base leading-tight mt-1 truncate"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    {upcomingMeal.title}
-                  </h3>
-                  <span 
-                    className="text-xs flex items-center gap-1 pt-0.5"
-                    style={{ color: 'var(--color-text-secondary)' }}
-                  >
-                    <Clock className="h-3.5 w-3.5" /> {upcomingMeal.timeOrTags}
-                  </span>
-                  {upcomingMeal.notes && (
-                    <p 
-                      className="text-xs italic mt-1 opacity-80 line-clamp-1"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                    >
-                      "{upcomingMeal.notes}"
-                    </p>
-                  )}
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-500">{upcomingMeal.mealType}</span>
+                  <h3 className="font-bold text-sm truncate">{upcomingMeal.title}</h3>
+                  <span className="text-xs opacity-75">{upcomingMeal.timeOrTags}</span>
                 </div>
               </div>
             ) : (
-              <div 
-                className="p-4 rounded-xl border flex items-center justify-between text-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text-secondary)'
-                }}
-              >
-                <span>{t('noMealsScheduledToday') || 'No meals scheduled for today.'}</span>
-                <Link 
-                  href="/planner" 
-                  className="text-xs font-bold hover:underline"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {t('planMeal') || 'Plan Meal'}
-                </Link>
+              <div className="p-4 rounded-xl border text-xs opacity-60 text-center">
+                {t('noMealsScheduledToday') || 'No meals scheduled for today.'}
               </div>
             )}
           </div>
         </div>
 
-        {/* Quick Actions Card */}
         <div 
           className="p-6 rounded-2xl space-y-4 shadow-sm flex flex-col justify-between border"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)'
-          }}
+          style={{ backgroundColor: 'var(--color-card, #ffffff)', borderColor: 'var(--color-border, #e2e8f0)' }}
         >
-          <div 
-            className="border-b pb-3"
-            style={{ borderColor: 'var(--color-border)' }}
-          >
-            <h2 
-              className="text-base font-bold flex items-center gap-2"
-              style={{ color: 'var(--color-text)' }}
-            >
-              <ChefHat className="h-5 w-5" style={{ color: 'var(--color-emerald)' }} /> {t('quickActions') || 'Quick Actions'}
+          <div className="border-b pb-3" style={{ borderColor: 'var(--color-border, #e2e8f0)' }}>
+            <h2 className="text-base font-bold flex items-center gap-2" style={{ color: 'var(--color-text, #0f172a)' }}>
+              <ChefHat className="h-5 w-5 text-emerald-500" /> {t('quickActions') || 'Quick Actions'}
             </h2>
           </div>
 
           <div className="grid grid-cols-2 gap-3 text-xs font-bold my-auto">
             <Link 
               href="/chef" 
-              className="p-3.5 rounded-xl text-center flex items-center justify-center gap-2 transition group border"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-emerald)')}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              className="p-3.5 rounded-xl text-center flex items-center justify-center gap-2 transition border hover:bg-black/5"
+              style={{ backgroundColor: 'var(--color-inner-dark, #f1f5f9)', borderColor: 'var(--color-border, #e2e8f0)' }}
             >
-              <ChefHat 
-                className="h-4 w-4 group-hover:scale-110 transition" 
-                style={{ color: 'var(--color-emerald)' }}
-              /> 
+              <ChefHat className="h-4 w-4 text-emerald-500" />
               <span>{t('askChefAi') || 'Ask Chef AI'}</span>
             </Link>
 
             <Link 
               href="/manual" 
-              className="p-3.5 rounded-xl text-center flex items-center justify-center gap-2 transition group border"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              className="p-3.5 rounded-xl text-center flex items-center justify-center gap-2 transition border hover:bg-black/5"
+              style={{ backgroundColor: 'var(--color-inner-dark, #f1f5f9)', borderColor: 'var(--color-border, #e2e8f0)' }}
             >
-              <Sparkles 
-                className="h-4 w-4 group-hover:scale-110 transition" 
-                style={{ color: 'var(--color-primary)' }}
-              /> 
+              <Sparkles className="h-4 w-4 text-[var(--color-primary)]" />
               <span>{t('createRecipe') || 'Create Recipe'}</span>
             </Link>
           </div>
@@ -43968,6 +45717,330 @@ export const dynamic = 'force-dynamic';
 export const GET = baseGET;
 export const POST = basePOST;
 export const PUT = basePUT;
+
+```
+
+## File: `apps/web/src/app/api/admin/frontend/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+async function ensureFrontendPagesTable() {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS frontend_pages (
+        id VARCHAR(64) PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        slug VARCHAR(255) NOT NULL UNIQUE,
+        description TEXT DEFAULT '',
+        is_default BOOLEAN DEFAULT FALSE,
+        is_published BOOLEAN DEFAULT TRUE,
+        elements JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await query(`
+      ALTER TABLE frontend_pages 
+      ADD COLUMN IF NOT EXISTS padding JSONB DEFAULT '{"top": "2.5rem", "bottom": "4rem", "x": "1.5rem", "maxWidth": "max-w-7xl"}'::jsonb;
+    `);
+    await query(`
+      ALTER TABLE frontend_pages 
+      ADD COLUMN IF NOT EXISTS footer JSONB DEFAULT '{"enabled": true, "aboutText": "Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.", "copyrightText": "© 2026 Zecratary. All rights reserved.", "columns": [{"id": "col_platform", "title": "Platform", "links": [{"id": "l_1", "label": "AI Chef", "url": "/chef"}, {"id": "l_2", "label": "Saved Recipes", "url": "/saved"}, {"id": "l_3", "label": "Meal Planner", "url": "/planner"}]}, {"id": "col_company", "title": "Company", "links": [{"id": "l_4", "label": "About Us", "url": "/about"}, {"id": "l_5", "label": "Subscription Plans", "url": "/subscriptions"}, {"id": "l_6", "label": "Privacy Policy", "url": "/privacy"}, {"id": "l_7", "label": "Terms of Service", "url": "/terms"}]}], "socials": {"twitter": "https://x.com", "github": "https://github.com", "discord": "https://discord.com"}}'::jsonb;
+    `);
+  } catch (err) {
+    console.error('Error ensuring frontend_pages table schema:', err);
+  }
+}
+
+const defaultPadding = {
+  top: '2.5rem',
+  bottom: '4rem',
+  x: '1.5rem',
+  maxWidth: 'max-w-7xl'
+};
+
+const defaultFooter = {
+  enabled: true,
+  aboutText: 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.',
+  copyrightText: '© 2026 Zecratary. All rights reserved.',
+  columns: [
+    {
+      id: 'col_platform',
+      title: 'Platform',
+      links: [
+        { id: 'l_1', label: 'AI Chef', url: '/chef' },
+        { id: 'l_2', label: 'Saved Recipes', url: '/saved' },
+        { id: 'l_3', label: 'Meal Planner', url: '/planner' }
+      ]
+    },
+    {
+      id: 'col_company',
+      title: 'Company',
+      links: [
+        { id: 'l_4', label: 'About Us', url: '/about' },
+        { id: 'l_5', label: 'Subscription Plans', url: '/subscriptions' },
+        { id: 'l_6', label: 'Privacy Policy', url: '/privacy' },
+        { id: 'l_7', label: 'Terms of Service', url: '/terms' }
+      ]
+    }
+  ],
+  socials: {
+    twitter: 'https://x.com',
+    github: 'https://github.com',
+    discord: 'https://discord.com'
+  }
+};
+
+const defaultElements = [
+  {
+    id: 'elem_hero_title',
+    type: 'title',
+    title: 'Autonomous Culinary Intelligence & Precision Meal Planning',
+    subtitle: 'Discover hyper-personalized recipes, pantry inventory management, and automated nutritional balancing.',
+    level: 'h1',
+    alignment: 'center',
+    accentColor: 'var(--color-primary, #E05638)'
+  },
+  {
+    id: 'elem_recipes_grid',
+    type: 'recipe',
+    title: 'Community Recipes Gallery',
+    subtitle: 'Explore recipes synchronized directly from your saved library. Click any card to view detailed ingredients and cooking steps.',
+    recipeGridDensity: 3,
+    recipeLimit: 6,
+    recipeCategoryFilter: 'all',
+    buttonText: 'Cook with AI Chef',
+    buttonUrl: '/chef',
+    bgColor: 'transparent',
+    borderColor: 'var(--color-border, #1e293b)',
+    accentColor: 'var(--color-primary, #E05638)'
+  },
+  {
+    id: 'elem_features_grid',
+    type: 'column',
+    title: 'Engineered for Peak Nutrition',
+    columnsCount: 3,
+    columns: [
+      { id: 'col_1', title: 'Smart AI Chef', content: 'Generate tailored culinary creations based exclusively on ingredients currently available in your pantry.' },
+      { id: 'col_2', title: 'Real-time Macro Breakdown', content: 'Track calories, protein, carbs, and micronutrient ratios seamlessly across all scheduled meals.' },
+      { id: 'col_3', title: 'Zero Food Waste', content: 'Intelligent shelf-life monitors proactively notify you when stored groceries approach expiration.' }
+    ],
+    accentColor: 'var(--color-primary, #E05638)'
+  },
+  {
+    id: 'elem_plans_catalog',
+    type: 'subscription',
+    title: 'Flexible Membership & Culinary AI Plans',
+    subtitle: 'Select between monthly or annual membership to power your personal kitchen assistant.',
+    planSlug: 'all',
+    planBillingInterval: 'MONTH',
+    planShowTokens: true,
+    planShowAiModels: true,
+    planCtaText: 'Choose Plan',
+    planCtaUrl: '/subscriptions',
+    bgColor: 'var(--color-card, #0b0f17)',
+    borderColor: 'var(--color-border, #1e293b)',
+    accentColor: 'var(--color-primary, #E05638)'
+  }
+];
+
+export async function GET(req: NextRequest) {
+  await ensureFrontendPagesTable();
+  const { searchParams } = new URL(req.url);
+
+  // Return all authentic saved recipes from PostgreSQL saved_recipes
+  if (searchParams.get('all_recipes') === 'true' || searchParams.get('recipes') === 'true') {
+    try {
+      const rawRecipes: any = await query(`
+        SELECT * FROM saved_recipes ORDER BY created_at DESC;
+      `);
+      const rows = Array.isArray(rawRecipes) ? rawRecipes : (rawRecipes?.rows || []);
+
+      const formatted = rows.map((r: any) => {
+        let ingredients = r.ingredients;
+        if (typeof ingredients === 'string') {
+          try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = []; }
+        }
+
+        let directions = r.directions || r.instructions || r.steps;
+        if (typeof directions === 'string') {
+          try { directions = JSON.parse(directions); } catch (_) { directions = []; }
+        }
+
+        let nutrition = r.nutrition;
+        if (typeof nutrition === 'string') {
+          try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
+        }
+
+        const prepNum = parseInt(String(r.prep_time || r.prepTime || '15'), 10) || 15;
+        const cookNum = parseInt(String(r.cook_time || r.cookTime || '20'), 10) || 20;
+
+        return {
+          id: String(r.id),
+          userId: r.user_id || r.userId || 'usr_admin_1',
+          user_id: r.user_id || r.userId || 'usr_admin_1',
+          title: r.title || r.name || 'Saved Recipe',
+          name: r.title || r.name || 'Saved Recipe',
+          description: r.description || '',
+          recipeType: r.recipe_type || r.category || 'Main Dish',
+          category: r.recipe_type || r.category || 'Main Dish',
+          recipe_type: r.recipe_type || r.category || 'Main Dish',
+          cuisine: r.cuisine || '',
+          prepTime: r.prep_time ? `${r.prep_time} mins` : '15 mins',
+          cookTime: r.cook_time ? `${r.cook_time} mins` : '20 mins',
+          prepTimeMinutes: prepNum,
+          cookTimeMinutes: cookNum,
+          calories: r.calories || nutrition?.calories || '450 kcal',
+          servings: Number(r.servings) || 2,
+          difficulty: r.difficulty || 'Medium',
+          ingredients: Array.isArray(ingredients) ? ingredients : [],
+          directions: Array.isArray(directions) ? directions : [],
+          instructions: Array.isArray(directions) ? directions : [],
+          steps: Array.isArray(directions) ? directions : [],
+          imageUrl: r.image_url || r.imageUrl || r.image || '',
+          image: r.image_url || r.imageUrl || r.image || '',
+          image_url: r.image_url || r.imageUrl || r.image || '',
+          sourceUrl: r.source_url || r.sourceUrl || '',
+          source_url: r.source_url || r.sourceUrl || '',
+          rating: Number(r.rating) || 5,
+          isFavorite: Boolean(r.is_favorite || r.isFavorite),
+          is_favorite: Boolean(r.is_favorite || r.isFavorite),
+          isCooked: Boolean(r.is_cooked || r.isCooked),
+          is_cooked: Boolean(r.is_cooked || r.isCooked),
+          creatorName: r.creator_name || r.creatorName || (r.created_by ? r.created_by.split('@')[0] : 'Chef AI'),
+          created_at: r.created_at || new Date().toISOString()
+        };
+      });
+
+      return NextResponse.json(
+        { success: true, recipes: formatted },
+        { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+      );
+    } catch (err: any) {
+      console.warn('Could not query saved_recipes table:', err.message);
+      return NextResponse.json({ success: true, recipes: [] });
+    }
+  }
+
+  try {
+    const rawResult: any = await query(`
+      SELECT * FROM frontend_pages ORDER BY is_default DESC, created_at ASC;
+    `);
+    let rows = Array.isArray(rawResult) ? rawResult : (rawResult?.rows || []);
+
+    if (!rows || rows.length === 0) {
+      await query(`
+        INSERT INTO frontend_pages (
+          id, title, slug, description, is_default, is_published, elements, padding, footer, created_at, updated_at
+        ) VALUES (
+          'page_home',
+          'Homepage',
+          '/',
+          'Default landing and home experience for visitors and members.',
+          true,
+          true,
+          $1::jsonb,
+          $2::jsonb,
+          $3::jsonb,
+          NOW(),
+          NOW()
+        ) ON CONFLICT (id) DO NOTHING;
+      `, [JSON.stringify(defaultElements), JSON.stringify(defaultPadding), JSON.stringify(defaultFooter)]);
+
+      const fresh: any = await query(`SELECT * FROM frontend_pages ORDER BY is_default DESC;`);
+      rows = Array.isArray(fresh) ? fresh : (fresh?.rows || []);
+    }
+
+    const pages = rows.map((r: any) => ({
+      id: r.id,
+      title: r.title,
+      slug: r.slug,
+      description: r.description || '',
+      is_default: Boolean(r.is_default),
+      is_published: Boolean(r.is_published),
+      elements: typeof r.elements === 'string' ? JSON.parse(r.elements) : (r.elements || []),
+      padding: typeof r.padding === 'string' ? JSON.parse(r.padding) : (r.padding || defaultPadding),
+      footer: typeof r.footer === 'string' ? JSON.parse(r.footer) : (r.footer || defaultFooter),
+      created_at: r.created_at,
+      updated_at: r.updated_at
+    }));
+
+    return NextResponse.json(
+      { success: true, pages },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  await ensureFrontendPagesTable();
+  try {
+    const body = await req.json();
+    const { action, page, id, newDefaultId } = body;
+
+    if (action === 'save_page' && page) {
+      const pageId = page.id || `page_${Date.now()}`;
+      const title = page.title || 'Untitled Page';
+      let slug = page.slug ? page.slug.trim() : '/';
+      if (!slug.startsWith('/')) slug = `/${slug}`;
+      const description = page.description || '';
+      const isDefault = Boolean(page.is_default);
+      const isPublished = page.is_published !== undefined ? Boolean(page.is_published) : true;
+      const elementsJson = JSON.stringify(page.elements || []);
+      const paddingJson = JSON.stringify(page.padding || defaultPadding);
+      const footerJson = JSON.stringify(page.footer || defaultFooter);
+
+      if (isDefault) {
+        await query(`UPDATE frontend_pages SET is_default = FALSE WHERE id != $1;`, [pageId]);
+      }
+
+      await query(`
+        INSERT INTO frontend_pages (
+          id, title, slug, description, is_default, is_published, elements, padding, footer, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, NOW()
+        ) ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          slug = EXCLUDED.slug,
+          description = EXCLUDED.description,
+          is_default = EXCLUDED.is_default,
+          is_published = EXCLUDED.is_published,
+          elements = EXCLUDED.elements,
+          padding = EXCLUDED.padding,
+          footer = EXCLUDED.footer,
+          updated_at = NOW();
+      `, [pageId, title, slug, description, isDefault, isPublished, elementsJson, paddingJson, footerJson]);
+
+      return NextResponse.json({ success: true, message: 'Page configuration, padding, and footer saved successfully.' });
+    }
+
+    if (action === 'delete_page' && id) {
+      const check: any = await query(`SELECT is_default FROM frontend_pages WHERE id = $1;`, [id]);
+      const rows = Array.isArray(check) ? check : (check?.rows || []);
+      if (rows.length > 0 && rows[0].is_default) {
+        return NextResponse.json({ success: false, error: 'Cannot delete the default homepage.' }, { status: 400 });
+      }
+
+      await query(`DELETE FROM frontend_pages WHERE id = $1;`, [id]);
+      return NextResponse.json({ success: true, message: 'Page deleted successfully.' });
+    }
+
+    if (action === 'set_default' && newDefaultId) {
+      await query(`UPDATE frontend_pages SET is_default = FALSE;`);
+      await query(`UPDATE frontend_pages SET is_default = TRUE WHERE id = $1;`, [newDefaultId]);
+      return NextResponse.json({ success: true, message: 'Default homepage updated.' });
+    }
+
+    return NextResponse.json({ success: false, error: 'Invalid action specified.' }, { status: 400 });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
 
 ```
 
@@ -56351,6 +58424,19 @@ export default function ImportPage() {
 
 ```
 
+## File: `apps/web/src/app/[slug]/page.tsx`
+```typescript
+'use client';
+
+import React from 'react';
+import DynamicHomePage from '../page';
+
+export default function DynamicCustomSlugPage() {
+  return <DynamicHomePage />;
+}
+
+```
+
 ## File: `apps/web/src/app/cookbooks/page.tsx`
 ```typescript
 'use client';
@@ -59170,8 +61256,8 @@ function formatNotificationTime(timestampStr: string): string {
 export default function Sidebar() {
   const pathname = usePathname();
   const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
-  if (isAuthRoute) return null;
-
+  const isHomePage = pathname === '/' || pathname === '' || pathname === '/index';
+  if (isAuthRoute || isHomePage) return null;
   const { t, locale, setLocale } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);

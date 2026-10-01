@@ -38,6 +38,8 @@ export type ElementType = 'title' | 'content' | 'column' | 'picture' | 'box' | '
 export interface PagePaddingSettings {
   top?: string;
   bottom?: string;
+  left?: string;
+  right?: string;
   x?: string;
   maxWidth?: 'max-w-5xl' | 'max-w-6xl' | 'max-w-7xl' | 'max-w-full';
 }
@@ -387,10 +389,11 @@ export default function DynamicHomePage() {
 
   const menuPages = allPages.filter((p) => p.is_published);
 
-  // Resolved Page Padding Values from /admin/frontend
+  // Resolved Page Padding & Margin Values from /admin/frontend
   const padTop = activePage?.padding?.top || '2.5rem';
   const padBottom = activePage?.padding?.bottom || '4rem';
-  const padX = activePage?.padding?.x || '1.5rem';
+  const padLeft = activePage?.padding?.left || activePage?.padding?.x || '1.5rem';
+  const padRight = activePage?.padding?.right || activePage?.padding?.x || '1.5rem';
   const maxWCls = activePage?.padding?.maxWidth || 'max-w-7xl';
 
   return (
@@ -402,21 +405,50 @@ export default function DynamicHomePage() {
         color: 'var(--color-text, #f1f5f9)'
       }}
     >
-      {/* Global CSS Reset: suppress sidebar/topbar on homepage */}
+      {/* Global CSS Reset for Homepage: Remove sidebar offsets & top clearance from layout shell */}
       <style dangerouslySetInnerHTML={{ __html: `
         body.is-homepage-view,
         body:has(#zecratary-homepage-root) {
           margin: 0 !important;
           padding: 0 !important;
+          overflow-x: hidden !important;
         }
-        body.is-homepage-view main,
-        body.is-homepage-view [role="main"],
-        body.is-homepage-view #zecratary-main-content,
-        body.is-homepage-view .main-content,
-        body:has(#zecratary-homepage-root) main,
-        body:has(#zecratary-homepage-root) [role="main"],
-        body:has(#zecratary-homepage-root) #zecratary-main-content,
-        body:has(#zecratary-homepage-root) .main-content {
+
+        /* Strip outer layout shell classes so sidebar & topbar clearance don't push the homepage */
+        body.is-homepage-view .md\:pl-64,
+        body.is-homepage-view .md\:pl-20,
+        body.is-homepage-view [class*="pl-64"],
+        body.is-homepage-view [class*="pl-20"],
+        body.is-homepage-view [class*="ml-64"],
+        body.is-homepage-view [class*="ml-20"],
+        body.is-homepage-view .md\:pt-16,
+        body.is-homepage-view .md\:pt-20,
+        body.is-homepage-view [class*="pt-16"],
+        body.is-homepage-view [class*="pt-20"],
+        body:has(#zecratary-homepage-root) .md\:pl-64,
+        body:has(#zecratary-homepage-root) .md\:pl-20,
+        body:has(#zecratary-homepage-root) [class*="pl-64"],
+        body:has(#zecratary-homepage-root) [class*="pl-20"],
+        body:has(#zecratary-homepage-root) [class*="ml-64"],
+        body:has(#zecratary-homepage-root) [class*="ml-20"],
+        body:has(#zecratary-homepage-root) .md\:pt-16,
+        body:has(#zecratary-homepage-root) .md\:pt-20,
+        body:has(#zecratary-homepage-root) [class*="pt-16"],
+        body:has(#zecratary-homepage-root) [class*="pt-20"] {
+          padding-left: 0 !important;
+          padding-top: 0 !important;
+          margin-left: 0 !important;
+        }
+
+        /* Outer layout wrapper reset - ONLY the outer layout wrapper, NOT the inner homepage canvas */
+        body.is-homepage-view > div > main,
+        body.is-homepage-view > div > div > main,
+        body.is-homepage-view main:not(#zecratary-homepage-canvas),
+        body.is-homepage-view [role="main"]:not(#zecratary-homepage-canvas),
+        body:has(#zecratary-homepage-root) > div > main,
+        body:has(#zecratary-homepage-root) > div > div > main,
+        body:has(#zecratary-homepage-root) main:not(#zecratary-homepage-canvas),
+        body:has(#zecratary-homepage-root) [role="main"]:not(#zecratary-homepage-canvas) {
           padding-top: 0 !important;
           padding-left: 0 !important;
           padding-right: 0 !important;
@@ -425,6 +457,8 @@ export default function DynamicHomePage() {
           width: 100% !important;
           max-width: 100% !important;
         }
+
+        /* Suppress dashboard sidebar and topbars on homepage */
         body.is-homepage-view aside,
         body.is-homepage-view #zecratary-desktop-topbar,
         body.is-homepage-view .zecratary-mobile-topbar,
@@ -432,6 +466,14 @@ export default function DynamicHomePage() {
         body:has(#zecratary-homepage-root) #zecratary-desktop-topbar,
         body:has(#zecratary-homepage-root) .zecratary-mobile-topbar {
           display: none !important;
+        }
+
+        /* Enforce side margins & container width centering on the Homepage Canvas */
+        #zecratary-homepage-canvas {
+          margin-left: auto !important;
+          margin-right: auto !important;
+          box-sizing: border-box !important;
+          width: 100% !important;
         }
       ` }} />
 
@@ -583,13 +625,17 @@ export default function DynamicHomePage() {
       </header>
 
       {/* DYNAMIC CONTENT CANVAS (Applying Page Padding Settings) */}
-      <main 
+      <div 
+        id="zecratary-homepage-canvas"
+        role="region"
+        aria-label="Homepage Content"
         className={`${maxWCls} mx-auto w-full space-y-12 sm:space-y-16 flex-1`}
         style={{
           paddingTop: padTop,
           paddingBottom: padBottom,
-          paddingLeft: padX,
-          paddingRight: padX
+          paddingLeft: padLeft,
+          paddingRight: padRight,
+          boxSizing: 'border-box'
         }}
       >
         {loading ? (
@@ -913,7 +959,7 @@ export default function DynamicHomePage() {
             return null;
           })
         )}
-      </main>
+      </div>
 
       {/* DYNAMIC FOOTER (Rendered with active page footer settings) */}
       {activePage?.footer?.enabled !== false && (
