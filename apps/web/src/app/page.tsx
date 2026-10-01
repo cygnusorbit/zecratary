@@ -211,10 +211,13 @@ export default function DynamicHomePage() {
     siteName: string;
     titlebarEmoji: string;
     titlebarImage: string;
+    tagline: string;
   }>({
+    
     siteName: 'Zecratary',
     titlebarEmoji: '🍳',
     titlebarImage: '',
+    tagline: 'Culinary AI',
   });
 
   const fetchSiteBranding = useCallback(async () => {
@@ -227,6 +230,7 @@ export default function DynamicHomePage() {
           siteName: payload.siteName || payload.site_name || 'Zecratary',
           titlebarEmoji: payload.titlebarEmoji || payload.titlebar_emoji || '🍳',
           titlebarImage: payload.titlebarImage || payload.titlebar_image || '',
+          tagline: payload.tagline || payload.siteTagline || payload.site_tagline || 'Culinary AI',
         });
         return;
       }
@@ -239,6 +243,7 @@ export default function DynamicHomePage() {
           siteName: cfg.siteName || 'Zecratary',
           titlebarEmoji: cfg.titlebarEmoji || '🍳',
           titlebarImage: cfg.titlebarImage || '',
+          tagline: (cfg as any).tagline || (cfg as any).siteTagline || 'Culinary AI',
         });
       }
     } catch (_) {}
@@ -383,7 +388,19 @@ export default function DynamicHomePage() {
     fetchLivePlans();
     fetchAllRecipes();
 
-    const handleSync = () => {
+    const handleSync = (e?: any) => {
+      if (e?.detail) {
+        const detail = e.detail;
+        if (detail.siteName || detail.titlebarEmoji || detail.titlebarImage !== undefined || detail.tagline !== undefined || detail.siteTagline !== undefined) {
+          setSiteBranding((prev) => ({
+            ...prev,
+            siteName: detail.siteName || detail.site_name || prev.siteName,
+            titlebarEmoji: detail.titlebarEmoji || detail.titlebar_emoji || prev.titlebarEmoji,
+            titlebarImage: detail.titlebarImage !== undefined ? detail.titlebarImage : prev.titlebarImage,
+            tagline: detail.tagline !== undefined ? detail.tagline : (detail.siteTagline !== undefined ? detail.siteTagline : prev.tagline)
+          }));
+        }
+      }
       fetchSiteBranding();
       fetchFrontendSettings();
       fetchAllRecipes();
@@ -563,8 +580,8 @@ export default function DynamicHomePage() {
               <span className="text-lg font-black tracking-tight" style={{ color: 'var(--color-text, #f1f5f9)' }}>
                 {siteBranding.siteName || 'Zecratary'}
               </span>
-              <span className="block text-[9px] font-bold uppercase tracking-widest text-[var(--color-primary)]">
-                Culinary AI
+              <span className="block text-[9px] font-bold uppercase tracking-widest text-[var(--color-primary)] truncate max-w-[200px] sm:max-w-xs">
+                {siteBranding.tagline || t('common.tagline', 'Culinary AI')}
               </span>
             </div>
           </Link>
@@ -1048,7 +1065,7 @@ export default function DynamicHomePage() {
                   </span>
                 </div>
                 <p className="text-xs sm:text-sm leading-relaxed opacity-75 max-w-md">
-                  {activePage?.footer?.aboutText || 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.'}
+                  {activePage?.footer?.aboutText || siteBranding.tagline || t('admin.defaultTagline', 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.')}
                 </p>
 
                 {/* Social Links */}

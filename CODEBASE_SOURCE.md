@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.83",
+  "version": "8.0.84",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.83",
+  "version": "8.0.84",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -63208,6 +63208,10 @@ export default function Sidebar() {
                     <Link href="/admin" className={navClass('/admin')} title="Admin Setting">
                       <ShieldCheck className="h-4 w-4 shrink-0" style={iconStyle} />
                       {!showCollapsed && <span className="truncate whitespace-nowrap">Admin Setting</span>}
+                    </Link>
+                    <Link href="/admin/frontend" className={navClass('/admin/frontend')} title={t('frontendSetting') || 'Frontend Setting'}>
+                      <LayoutTemplate className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">{t('frontendSetting') || 'Frontend Setting'}</span>}
                     </Link>
                     <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} title="Ai Settings">
                       <Cpu className="h-4 w-4 shrink-0" style={iconStyle} />

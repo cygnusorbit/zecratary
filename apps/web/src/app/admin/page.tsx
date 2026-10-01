@@ -151,6 +151,7 @@ export default function AdminSettingsPage() {
 
   // Site Identity State
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
+  const [siteTagline, setSiteTagline] = useState<string>('');
   const [titlebarEmoji, setTitlebarEmoji] = useState<string>(DEFAULT_SITE_ICON);
   const [titlebarImage, setTitlebarImage] = useState<string>('');
   const [faviconEmoji, setFaviconEmoji] = useState<string>(DEFAULT_SITE_ICON);
@@ -270,6 +271,9 @@ export default function AdminSettingsPage() {
 
         if (payload.siteName || payload.site_name) {
           setSiteName(payload.siteName || payload.site_name);
+        }
+        if (payload.siteTagline !== undefined || payload.site_tagline !== undefined || payload.tagline !== undefined) {
+          setSiteTagline(payload.siteTagline ?? payload.site_tagline ?? payload.tagline ?? '');
         }
         if (payload.titlebarEmoji || payload.titlebar_emoji) {
           setTitlebarEmoji(payload.titlebarEmoji || payload.titlebar_emoji);
@@ -444,6 +448,8 @@ export default function AdminSettingsPage() {
     try {
       const updatedBranding: SiteIdentityConfig = {
         siteName: siteName.trim() || DEFAULT_SITE_NAME,
+        siteTagline: siteTagline.trim(),
+        tagline: siteTagline.trim(),
         titlebarEmoji: titlebarEmoji.trim() || DEFAULT_SITE_ICON,
         titlebarImage: titlebarImage || '',
         faviconEmoji: faviconEmoji.trim() || DEFAULT_SITE_ICON,
@@ -498,6 +504,9 @@ export default function AdminSettingsPage() {
       const payloadToSave = {
         siteName: updatedBranding.siteName,
         site_name: updatedBranding.siteName,
+        siteTagline: updatedBranding.siteTagline,
+        site_tagline: updatedBranding.siteTagline,
+        tagline: updatedBranding.tagline,
         titlebarEmoji: updatedBranding.titlebarEmoji,
         titlebar_emoji: updatedBranding.titlebarEmoji,
         titlebarImage: updatedBranding.titlebarImage || '',
@@ -596,6 +605,8 @@ export default function AdminSettingsPage() {
       const defaultSpacing = '0em';
 
       setSiteName(defaultName);
+      const defaultTagline = 'Autonomous culinary intelligence & AI meal planning';
+      setSiteTagline(defaultTagline);
       setTitlebarEmoji(defaultIcon);
       setTitlebarImage('');
       setFaviconEmoji(defaultIcon);
@@ -617,6 +628,9 @@ export default function AdminSettingsPage() {
       const defaultBranding = {
         siteName: defaultName,
         site_name: defaultName,
+        siteTagline: defaultTagline,
+        site_tagline: defaultTagline,
+        tagline: defaultTagline,
         titlebarEmoji: defaultIcon,
         titlebar_emoji: defaultIcon,
         titlebarImage: '',
@@ -922,6 +936,49 @@ export default function AdminSettingsPage() {
                 value={siteName} 
                 onChange={(e) => setSiteName(e.target.value)} 
                 placeholder="e.g. Zecratary" 
+                className="admin-input w-full sm:w-1/2 border rounded-xl px-3.5 py-2 font-bold outline-none transition" 
+                style={{ 
+                  backgroundColor: 'var(--color-inner-dark)', 
+                  borderColor: 'var(--color-border)', 
+                  color: 'var(--color-text)' 
+                }} 
+              />
+            </div>
+          </div>
+
+          {/* APPLICATION TAGLINE */}
+          <div 
+            className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
+            style={{ 
+              backgroundColor: 'var(--color-card)', 
+              borderColor: 'var(--color-border)' 
+            }}
+          >
+            <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+              {t('admin.appTagline', 'Application Tagline & Subtitle')}
+            </h2>
+            <div>
+              <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('admin.siteTagline', 'Tagline / Description')}
+              </label>
+              <input 
+                type="text" 
+                id="cfg_app_branding_tagline"
+                name="cfg_app_branding_tagline"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck="false"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                role="presentation"
+                readOnly
+                onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                value={siteTagline} 
+                onChange={(e) => setSiteTagline(e.target.value)} 
+                placeholder="e.g. Autonomous culinary intelligence & AI meal planning" 
                 className="admin-input w-full sm:w-1/2 border rounded-xl px-3.5 py-2 font-bold outline-none transition" 
                 style={{ 
                   backgroundColor: 'var(--color-inner-dark)', 

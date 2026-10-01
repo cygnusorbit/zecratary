@@ -4,6 +4,8 @@
 import { persistServerAdminSettings, fetchServerAdminSettings } from '@/lib/adminSync';
 
 export interface SiteIdentityConfig {
+  siteTagline?: string;
+  tagline?: string;
   siteName: string;
   titlebarEmoji: string;
   titlebarImage?: string;
@@ -98,3 +100,5 @@ if (typeof window !== 'undefined') {
     }
   }).catch(() => {});
 }
+
+export const DEFAULT_SITE_TAGLINE = 'Autonomous culinary intelligence & AI meal planning';
