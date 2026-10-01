@@ -1523,6 +1523,10 @@ export default function Sidebar() {
                       <ShieldCheck className="h-4 w-4 shrink-0" style={iconStyle} />
                       {!showCollapsed && <span className="truncate whitespace-nowrap">Admin Setting</span>}
                     </Link>
+                    <Link href="/admin/frontend" className={navClass('/admin/frontend')} title={t('frontendSetting') || 'Frontend Setting'}>
+                      <LayoutTemplate className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">{t('frontendSetting') || 'Frontend Setting'}</span>}
+                    </Link>
                     <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} title="Ai Settings">
                       <Cpu className="h-4 w-4 shrink-0" style={iconStyle} />
                       {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}

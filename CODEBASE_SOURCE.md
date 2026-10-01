@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.82",
+  "version": "8.0.83",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.82",
+  "version": "8.0.83",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -23457,7 +23457,6 @@ export default function AdminFrontendSettingsPage() {
       }
     } catch (_) {}
   }, []);
-  const [activeImageUploadElementId, setActiveImageUploadElementId] = useState<{ id: string; target: 'imageUrl' } | null>(null);
 
   // 1. Fetch Subscription Plans
   const fetchLivePlans = useCallback(async () => {
@@ -23547,7 +23546,7 @@ export default function AdminFrontendSettingsPage() {
     fetchSiteBranding();
     fetchLivePlans();
     fetchAllSavedRecipes();
-  }, [fetchPages, fetchLivePlans, fetchAllSavedRecipes]);
+  }, [fetchPages, fetchSiteBranding, fetchLivePlans, fetchAllSavedRecipes]);
 
   const handleSelectPage = (id: string) => {
     setSelectedPageId(id);
@@ -23747,6 +23746,98 @@ export default function AdminFrontendSettingsPage() {
     }
   };
 
+  // Add New Page Handler
+  const handleCreateNewPage = async () => {
+    if (!newPageTitle.trim()) {
+      alert('Please enter a valid page title.');
+      return;
+    }
+    let slug = newPageSlug.trim();
+    if (!slug) {
+      slug = '/' + newPageTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    }
+    if (!slug.startsWith('/')) slug = `/${slug}`;
+
+    const newPageObj: FrontendPage = {
+      id: `page_${Date.now()}`,
+      title: newPageTitle.trim(),
+      slug,
+      description: newPageDesc.trim(),
+      is_default: false,
+      is_published: true,
+      elements: [
+        {
+          id: `elem_title_${Date.now()}`,
+          type: 'title',
+          title: newPageTitle.trim(),
+          subtitle: newPageDesc.trim() || 'Welcome to this custom page.',
+          level: 'h1',
+          alignment: 'center'
+        },
+        {
+          id: `elem_content_${Date.now()}`,
+          type: 'content',
+          title: 'Introduction',
+          content: 'Customize the contents of this new page using the modular element editor.',
+          alignment: 'left'
+        }
+      ],
+      padding: {
+        top: '2.5rem',
+        bottom: '4rem',
+        left: '1.5rem',
+        right: '1.5rem',
+        x: '1.5rem',
+        maxWidth: 'max-w-7xl'
+      },
+      footer: {
+        enabled: true,
+        aboutText: 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.',
+        copyrightText: '© 2026 Zecratary. All rights reserved.',
+        columns: [
+          {
+            id: 'col_platform',
+            title: 'Platform',
+            links: [
+              { id: 'l_1', label: 'AI Chef', url: '/chef' },
+              { id: 'l_2', label: 'Saved Recipes', url: '/saved' }
+            ]
+          }
+        ]
+      }
+    };
+
+    try {
+      setSaving(true);
+      const res = await fetch('/api/admin/frontend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save_page', page: newPageObj })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setShowCreateModal(false);
+        setNewPageTitle('');
+        setNewPageSlug('');
+        setNewPageDesc('');
+        setToastMessage('New page created successfully.');
+        setTimeout(() => setToastMessage(null), 4000);
+        await fetchPages(newPageObj.id);
+        setActivePageTab('elements');
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_frontend_pages_updated'));
+          localStorage.setItem('zecratary_frontend_updated_at', Date.now().toString());
+        }
+      } else {
+        alert(data.error || 'Failed to create page.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error creating page.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Set Default Homepage
   const handleSetDefaultHomepage = async (pageId: string) => {
     try {
@@ -23897,12 +23988,23 @@ export default function AdminFrontendSettingsPage() {
               </span>
             </div>
             <p className="text-xs mt-0.5" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
-              Configure page padding, design dynamic footers, customize elements, and arrange with drag & drop.
+              Configure page properties, padding clearance, dynamic footers, and modular drag & drop blocks.
             </p>
           </div>
         </div>
 
         <div className="flex items-center flex-wrap gap-2.5">
+          {/* ADD NEW PAGE BUTTON */}
+          <button
+            type="button"
+            onClick={() => setShowCreateModal(true)}
+            className="px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 border transition shadow-xs cursor-pointer hover:bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+            style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)' }}
+          >
+            <Plus className="h-4 w-4" />
+            <span>{t('addNewPageBtn') || 'Add New Page'}</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setPreviewMode(!previewMode)}
@@ -23945,7 +24047,7 @@ export default function AdminFrontendSettingsPage() {
         </div>
       )}
 
-      {/* PAGE SELECTOR TABS */}
+      {/* PAGE SELECTOR TABS WITH INLINE ADD PAGE BUTTON */}
       <div 
         className="p-3 rounded-2xl border flex items-center gap-2 overflow-x-auto shadow-sm"
         style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
@@ -23979,6 +24081,16 @@ export default function AdminFrontendSettingsPage() {
             </button>
           );
         })}
+
+        {/* INLINE ADD NEW PAGE BUTTON */}
+        <button
+          type="button"
+          onClick={() => setShowCreateModal(true)}
+          className="px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition shrink-0 cursor-pointer border border-dashed border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          <span>{t('addPage') || 'Add New Page'}</span>
+        </button>
       </div>
 
       {selectedPage && (
@@ -24031,10 +24143,9 @@ export default function AdminFrontendSettingsPage() {
             </div>
           )}
 
-          {/* VIEW MODE: LIVE PREVIEW (FIXED & FULLY UPDATED) */}
+          {/* VIEW MODE: LIVE PREVIEW */}
           {previewMode ? (
             <div className="space-y-4 animate-in fade-in duration-200">
-              {/* LIVE PREVIEW TOOLBAR */}
               <div 
                 className="p-3.5 rounded-2xl border flex flex-wrap items-center justify-between gap-3 shadow-md"
                 style={{
@@ -24052,7 +24163,6 @@ export default function AdminFrontendSettingsPage() {
                   </span>
                 </div>
 
-                {/* Viewport switchers & sandbox options */}
                 <div className="flex items-center gap-2">
                   <div className="border p-0.5 rounded-xl flex items-center gap-1 bg-black/30" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
                     <button
@@ -24131,7 +24241,6 @@ export default function AdminFrontendSettingsPage() {
                     borderColor: 'var(--color-border, #1e293b)'
                   }}
                 >
-                  {/* SIMULATED TOP HEADER */}
                   <div 
                     className="h-14 border-b px-4 flex items-center justify-between transition-colors"
                     style={{
@@ -24161,7 +24270,6 @@ export default function AdminFrontendSettingsPage() {
                     </div>
                   </div>
 
-                  {/* DYNAMIC CONTENT CANVAS WITH EXACT PADDING */}
                   <div 
                     className={`${selectedPage.padding?.maxWidth || 'max-w-7xl'} mx-auto w-full space-y-10 sm:space-y-12 transition-all`}
                     style={{
@@ -24184,15 +24292,12 @@ export default function AdminFrontendSettingsPage() {
                         const elemBorder = elem.borderColor || 'var(--color-border, #1e293b)';
                         const elemAccent = elem.accentColor || 'var(--color-primary, #E05638)';
 
-                        // 1. TITLE
                         if (elem.type === 'title') {
                           const alignCls = elem.alignment === 'center' ? 'text-center' : elem.alignment === 'right' ? 'text-right' : 'text-left';
                           return (
                             <div key={elem.id} className={`space-y-2 py-4 px-4 rounded-2xl ${alignCls}`} style={{ backgroundColor: elemBg, color: elemText }}>
                               {elem.level === 'h1' ? (
                                 <h1 className="text-3xl sm:text-5xl font-black tracking-tight" style={{ color: elemAccent }}>{elem.title}</h1>
-                              ) : elem.level === 'h3' ? (
-                                <h3 className="text-xl font-bold tracking-tight">{elem.title}</h3>
                               ) : (
                                 <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight">{elem.title}</h2>
                               )}
@@ -24201,18 +24306,15 @@ export default function AdminFrontendSettingsPage() {
                           );
                         }
 
-                        // 2. TEXT CONTENT
                         if (elem.type === 'content') {
-                          const alignCls = elem.alignment === 'center' ? 'text-center' : elem.alignment === 'right' ? 'text-right' : 'text-left';
                           return (
-                            <div key={elem.id} className={`p-6 sm:p-7 rounded-3xl border space-y-2.5 shadow-sm ${alignCls}`} style={{ backgroundColor: elem.bgColor || 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: elemText }}>
+                            <div key={elem.id} className="p-6 sm:p-7 rounded-3xl border space-y-2.5 shadow-sm" style={{ backgroundColor: elem.bgColor || 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: elemText }}>
                               {elem.title && <h3 className="text-lg sm:text-xl font-black" style={{ color: elemAccent }}>{elem.title}</h3>}
                               <p className="text-xs sm:text-sm leading-relaxed opacity-90 whitespace-pre-line">{elem.content}</p>
                             </div>
                           );
                         }
 
-                        // 3. MULTI-COLUMN GRID
                         if (elem.type === 'column') {
                           const gridCols = elem.columnsCount === 2 ? 'sm:grid-cols-2' : elem.columnsCount === 4 ? 'sm:grid-cols-2 md:grid-cols-4' : 'sm:grid-cols-3';
                           return (
@@ -24220,7 +24322,7 @@ export default function AdminFrontendSettingsPage() {
                               {elem.title && <h3 className="text-xl sm:text-2xl font-black text-center" style={{ color: elemAccent }}>{elem.title}</h3>}
                               <div className={`grid grid-cols-1 ${gridCols} gap-4`}>
                                 {(elem.columns || []).map((col) => (
-                                  <div key={col.id} className="p-5 rounded-2xl border space-y-2 shadow-xs transition hover:-translate-y-0.5" style={{ backgroundColor: elem.bgColor || 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: elemText }}>
+                                  <div key={col.id} className="p-5 rounded-2xl border space-y-2 shadow-xs" style={{ backgroundColor: elem.bgColor || 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: elemText }}>
                                     <h4 className="text-sm font-bold" style={{ color: elemAccent }}>{col.title}</h4>
                                     <p className="text-xs leading-relaxed opacity-80">{col.content}</p>
                                   </div>
@@ -24230,7 +24332,6 @@ export default function AdminFrontendSettingsPage() {
                           );
                         }
 
-                        // 4. PICTURE
                         if (elem.type === 'picture') {
                           return (
                             <div key={elem.id} className="space-y-2.5 py-2 p-2 rounded-3xl" style={{ backgroundColor: elemBg }}>
@@ -24247,10 +24348,9 @@ export default function AdminFrontendSettingsPage() {
                           );
                         }
 
-                        // 5. CALLOUT BOX / CARD
                         if (elem.type === 'box') {
                           return (
-                            <div key={elem.id} className="p-6 sm:p-8 rounded-3xl border shadow-lg space-y-3 transition" style={{ backgroundColor: elem.bgColor || (elem.boxStyle === 'highlight' ? 'rgba(224, 86, 56, 0.08)' : 'var(--color-inner-dark, #0e1422)'), borderColor: elemBorder, color: elemText }}>
+                            <div key={elem.id} className="p-6 sm:p-8 rounded-3xl border shadow-lg space-y-3" style={{ backgroundColor: elem.bgColor || (elem.boxStyle === 'highlight' ? 'rgba(224, 86, 56, 0.08)' : 'var(--color-inner-dark, #0e1422)'), borderColor: elemBorder, color: elemText }}>
                               <div className="flex items-center justify-between gap-2">
                                 <h3 className="text-lg sm:text-xl font-black tracking-tight" style={{ color: elemAccent }}>{elem.title}</h3>
                                 {elem.badge && (
@@ -24272,7 +24372,6 @@ export default function AdminFrontendSettingsPage() {
                           );
                         }
 
-                        // 6. RECIPE GRID WITH FULL POPUP MODAL (FIXED IN PREVIEW)
                         if (elem.type === 'recipe') {
                           let list = savedRecipesList;
                           if (elem.recipeCategoryFilter && elem.recipeCategoryFilter !== 'all') {
@@ -24291,7 +24390,7 @@ export default function AdminFrontendSettingsPage() {
                           const gridColsCls = density === 2 ? 'grid-cols-1 sm:grid-cols-2' : density === 4 ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-4' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3';
 
                           return (
-                            <div key={elem.id} className="p-6 sm:p-7 rounded-3xl border shadow-lg space-y-6 transition" style={{ backgroundColor: elem.bgColor || 'var(--color-card, #0b0f17)', borderColor: elemBorder, color: elemText }}>
+                            <div key={elem.id} className="p-6 sm:p-7 rounded-3xl border shadow-lg space-y-6" style={{ backgroundColor: elem.bgColor || 'var(--color-card, #0b0f17)', borderColor: elemBorder, color: elemText }}>
                               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: elemBorder }}>
                                 <div>
                                   <div className="flex items-center gap-2">
@@ -24304,15 +24403,7 @@ export default function AdminFrontendSettingsPage() {
                                   <h3 className="text-xl sm:text-2xl font-black tracking-tight mt-1.5" style={{ color: elemAccent }}>
                                     {elem.title || 'Community Recipes Gallery'}
                                   </h3>
-                                  {elem.subtitle && <p className="text-xs opacity-75 mt-0.5 max-w-2xl">{elem.subtitle}</p>}
                                 </div>
-
-                                {elem.buttonText && (
-                                  <div className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md flex items-center gap-1.5 w-fit" style={{ backgroundColor: elemAccent }}>
-                                    <Sparkles className="h-3.5 w-3.5" />
-                                    <span>{elem.buttonText}</span>
-                                  </div>
-                                )}
                               </div>
 
                               <div className={`grid ${gridColsCls} gap-4`}>
@@ -24331,14 +24422,9 @@ export default function AdminFrontendSettingsPage() {
                                     <div>
                                       <div className="relative h-40 w-full overflow-hidden bg-black/20">
                                         <img src={r.imageUrl || r.image || '/uploads/recipes/default.jpg'} alt={r.title || r.name} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
-                                        <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10">
-                                          {r.isCooked && <span className="p-1 rounded-full shadow-md border text-white bg-emerald-500 border-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /></span>}
-                                          {r.isFavorite && <span className="p-1 rounded-full shadow-md border" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: elemAccent, color: elemAccent }}><Heart className="h-3.5 w-3.5 fill-current" /></span>}
-                                        </div>
                                       </div>
                                       <div className="p-3.5 space-y-1">
                                         <h4 className="font-bold text-xs leading-snug line-clamp-2">{r.title || r.name}</h4>
-                                        {r.description && <p className="text-[11px] line-clamp-2 opacity-75">{r.description}</p>}
                                       </div>
                                     </div>
 
@@ -24353,61 +24439,19 @@ export default function AdminFrontendSettingsPage() {
                                   </div>
                                 ))}
                               </div>
-
-                              {/* In-Element Pagination */}
-                              {totalPages > 1 && (
-                                <div className="pt-3 border-t flex flex-wrap items-center justify-between gap-2 text-xs" style={{ borderColor: elemBorder }}>
-                                  <span className="opacity-70 text-[11px]">
-                                    Showing {startIndex + 1} - {endIndex} of {totalCount} recipes
-                                  </span>
-                                  <div className="flex items-center gap-1">
-                                    <button
-                                      type="button"
-                                      disabled={currentPage <= 1}
-                                      onClick={() => setRecipeElementPages((prev) => ({ ...prev, [elem.id]: Math.max(1, currentPage - 1) }))}
-                                      className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer"
-                                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder }}
-                                    >
-                                      <ChevronLeft className="h-3.5 w-3.5" />
-                                    </button>
-                                    {Array.from({ length: totalPages }, (_, i) => i + 1).map((num) => (
-                                      <button
-                                        key={num}
-                                        type="button"
-                                        onClick={() => setRecipeElementPages((prev) => ({ ...prev, [elem.id]: num }))}
-                                        className="min-w-[28px] h-7 rounded-lg text-xs font-bold transition flex items-center justify-center border cursor-pointer"
-                                        style={currentPage === num ? { backgroundColor: elemAccent, borderColor: elemAccent, color: '#ffffff' } : { backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder }}
-                                      >
-                                        {num}
-                                      </button>
-                                    ))}
-                                    <button
-                                      type="button"
-                                      disabled={currentPage >= totalPages}
-                                      onClick={() => setRecipeElementPages((prev) => ({ ...prev, [elem.id]: Math.min(totalPages, currentPage + 1) }))}
-                                      className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer"
-                                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder }}
-                                    >
-                                      <ChevronRight className="h-3.5 w-3.5" />
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
                             </div>
                           );
                         }
 
-                        // 7. SUBSCRIPTION PLANS (FIXED IN PREVIEW)
                         if (elem.type === 'subscription') {
                           const filteredPlans = elem.planSlug && elem.planSlug !== 'all' ? availablePlans.filter((p) => p.slug === elem.planSlug) : availablePlans;
                           const interval = planPreviewInterval;
 
                           return (
-                            <div key={elem.id} className="p-6 sm:p-7 rounded-3xl border shadow-lg space-y-5 transition" style={{ backgroundColor: elem.bgColor || 'var(--color-card, #0b0f17)', borderColor: elemBorder, color: elemText }}>
+                            <div key={elem.id} className="p-6 sm:p-7 rounded-3xl border shadow-lg space-y-5" style={{ backgroundColor: elem.bgColor || 'var(--color-card, #0b0f17)', borderColor: elemBorder, color: elemText }}>
                               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3" style={{ borderColor: elemBorder }}>
                                 <div>
                                   <h3 className="text-xl sm:text-2xl font-black tracking-tight" style={{ color: elemAccent }}>{elem.title || 'Choose Your Culinary Plan'}</h3>
-                                  {elem.subtitle && <p className="text-xs opacity-75 mt-0.5">{elem.subtitle}</p>}
                                 </div>
                                 <div className="rounded-full p-1 border shadow-xs flex items-center bg-black/30" style={{ borderColor: elemBorder }}>
                                   <button type="button" onClick={() => setPlanPreviewInterval('MONTH')} className={`px-3 py-1 rounded-full text-xs font-bold transition cursor-pointer ${interval === 'MONTH' ? 'bg-[var(--color-primary,#E05638)] text-white' : 'opacity-70'}`}>Monthly</button>
@@ -24419,43 +24463,16 @@ export default function AdminFrontendSettingsPage() {
                                 {filteredPlans.map((plan) => {
                                   const isAnnual = interval === 'YEAR';
                                   const price = isAnnual ? plan.annualPrice : plan.monthlyPrice;
-                                  const badge = isAnnual ? (plan.annualBadge || plan.trialBadge) : (plan.monthlyBadge || plan.trialBadge);
 
                                   return (
                                     <div key={plan.id} className="rounded-3xl border-2 p-5 sm:p-6 relative flex flex-col justify-between space-y-4 shadow-md" style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: plan.isFree ? elemBorder : elemAccent }}>
-                                      {badge && <div className="absolute -top-3 right-5 px-3 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider text-white shadow-md" style={{ backgroundColor: plan.isFree ? '#10b981' : elemAccent }}>{badge}</div>}
                                       <div className="space-y-3">
-                                        <div className="flex items-center justify-between">
-                                          <h4 className="text-xl font-black tracking-tight" style={{ color: elemAccent }}>{plan.name}</h4>
-                                          {elem.planShowTokens !== false && (
-                                            <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                                              <Coins className="h-3 w-3" />
-                                              <span>+{(plan.tokenLimit || 500000).toLocaleString()} 🪙</span>
-                                            </span>
-                                          )}
-                                        </div>
-
+                                        <h4 className="text-xl font-black tracking-tight" style={{ color: elemAccent }}>{plan.name}</h4>
                                         <div className="py-2 border-y" style={{ borderColor: elemBorder }}>
                                           <div className="flex items-baseline gap-1">
                                             <span className="text-3xl font-black" style={{ color: elemAccent }}>{plan.isFree ? 'Free' : `$${price.toFixed(2)}`}</span>
                                             {!plan.isFree && <span className="text-xs opacity-60">/{isAnnual ? 'year' : 'month'}</span>}
                                           </div>
-                                        </div>
-
-                                        <div className="space-y-1.5 text-xs">
-                                          {plan.features.slice(0, 3).map((feat, fIdx) => (
-                                            <div key={fIdx} className="flex items-start gap-1.5 opacity-90">
-                                              <Check className="h-3.5 w-3.5 shrink-0 mt-0.5 text-emerald-400" />
-                                              <span>{feat}</span>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </div>
-
-                                      <div className="pt-2">
-                                        <div className="w-full py-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 text-white shadow-md" style={{ backgroundColor: plan.isFree ? '#10b981' : elemAccent }}>
-                                          <span>{elem.planCtaText || (plan.isFree ? 'Manage Plan' : 'Choose Plan')}</span>
-                                          <ChevronRight className="h-3.5 w-3.5" />
                                         </div>
                                       </div>
                                     </div>
@@ -24471,7 +24488,6 @@ export default function AdminFrontendSettingsPage() {
                     )}
                   </div>
 
-                  {/* DYNAMIC FOOTER IN PREVIEW */}
                   {selectedPage.footer?.enabled !== false && (
                     <footer 
                       className="border-t pt-8 pb-5 px-6 sm:px-8 space-y-6 mt-12 transition-colors"
@@ -24481,44 +24497,22 @@ export default function AdminFrontendSettingsPage() {
                         color: selectedPage.footer?.textColor || (previewIsDark ? '#f1f5f9' : '#0f172a')
                       }}
                     >
-                      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                        <div className="md:col-span-2 space-y-2">
-                          <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-xl flex items-center justify-center text-white" style={{ backgroundColor: selectedPage.footer?.accentColor || 'var(--color-primary, #E05638)' }}>
-                              <ChefHat className="h-4 w-4" />
-                            </div>
-                            <span className="font-black text-sm">Zecratary</span>
-                          </div>
-                          <p className="text-xs opacity-75 max-w-sm">{selectedPage.footer?.aboutText}</p>
-                        </div>
-
-                        {(selectedPage.footer?.columns || []).map((col) => (
-                          <div key={col.id} className="space-y-2">
-                            <h4 className="font-bold text-xs uppercase tracking-wider" style={{ color: selectedPage.footer?.accentColor || 'var(--color-primary, #E05638)' }}>{col.title}</h4>
-                            <ul className="space-y-1 text-xs opacity-75">
-                              {col.links.map((l) => (
-                                <li key={l.id}>{l.label}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        ))}
+                      <div className="flex items-center gap-2">
+                        {renderDynamicBrandLogo('w-8 h-8', 'h-4 w-4')}
+                        <span className="font-black text-sm">Zecratary</span>
                       </div>
-
-                      <div className="border-t pt-4 flex flex-wrap items-center justify-between text-[11px] opacity-60" style={{ borderColor: selectedPage.footer?.borderColor || 'var(--color-border, #1e293b)' }}>
-                        <span>{selectedPage.footer?.copyrightText}</span>
-                        <span>Preview Mode Active</span>
-                      </div>
+                      <p className="text-xs opacity-75 max-w-sm">{selectedPage.footer?.aboutText}</p>
                     </footer>
                   )}
                 </div>
               </div>
             </div>
-          ) : activePageTab === 'settings' ? (
+          ) : activePageTab === 'elements' ? (
             /* ───────────────────────────────────────────────────────────── */
-            /* "SETTINGS" TAB: Basic Properties, Spacing & Padding, Footer   */
+            /* "PAGE ELEMENTS & BLOCKS" TAB: BASIC SETTINGS + BLOCKS CANVAS  */
             /* ───────────────────────────────────────────────────────────── */
             <div className="space-y-6 animate-in fade-in duration-200">
-              {/* A. PAGE BASIC PROPERTIES & ROUTING */}
+              {/* PAGE BASIC PROPERTIES & ROUTING (MOVED HERE AS REQUESTED) */}
               <div 
                 className="border rounded-3xl p-6 shadow-xl space-y-4"
                 style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
@@ -24532,6 +24526,30 @@ export default function AdminFrontendSettingsPage() {
                     <p className="text-xs" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
                       Manage the routing slug, display title, and publication status for this view.
                     </p>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    {!selectedPage.is_default && (
+                      <button
+                        type="button"
+                        onClick={() => handleSetDefaultHomepage(selectedPage.id)}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer hover:bg-amber-500/10 text-amber-400 border-amber-500/30"
+                      >
+                        <Home className="h-3.5 w-3.5" />
+                        <span>Set as Default Homepage</span>
+                      </button>
+                    )}
+
+                    {!selectedPage.is_default && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePage(selectedPage.id)}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer text-red-400 border-red-500/30 hover:bg-red-500/10"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span>Delete Page</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -24588,305 +24606,26 @@ export default function AdminFrontendSettingsPage() {
                       </span>
                     </div>
                   </div>
-                </div>
-              </div>
 
-              {/* B. PAGE SPACING & PADDING SETTINGS */}
-              <div 
-                className="border rounded-3xl p-6 shadow-xl space-y-4"
-                style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                  <div>
-                    <h2 className="text-sm font-black uppercase tracking-wide flex items-center gap-2">
-                      <Sliders className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
-                      Page Spacing & Padding Settings
-                    </h2>
-                    <p className="text-xs" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
-                      Configure top, bottom, and horizontal margins and container width for this page.
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-[10px] font-bold uppercase opacity-60">Presets:</span>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedPage({
-                        ...selectedPage,
-                        padding: { top: '1.5rem', bottom: '2.5rem', left: '1rem', right: '1rem', x: '1rem', maxWidth: 'max-w-6xl' }
-                      })}
-                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold border hover:bg-white/10"
-                      style={{ borderColor: 'var(--color-border, #1e293b)' }}
-                    >
-                      Compact
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedPage({
-                        ...selectedPage,
-                        padding: { top: '2.5rem', bottom: '4rem', left: '1.5rem', right: '1.5rem', x: '1.5rem', maxWidth: 'max-w-7xl' }
-                      })}
-                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold border hover:bg-white/10 text-emerald-400 border-emerald-500/30"
-                    >
-                      Balanced (Default)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedPage({
-                        ...selectedPage,
-                        padding: { top: '4rem', bottom: '6rem', left: '2.5rem', right: '2.5rem', x: '2.5rem', maxWidth: 'max-w-7xl' }
-                      })}
-                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold border hover:bg-white/10 text-amber-400 border-amber-500/30"
-                    >
-                      Spacious
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedPage({
-                        ...selectedPage,
-                        padding: { top: '0', bottom: '4rem', left: '0', right: '0', x: '0', maxWidth: 'max-w-full' }
-                      })}
-                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold border hover:bg-white/10"
-                      style={{ borderColor: 'var(--color-border, #1e293b)' }}
-                    >
-                      Full-Width Flush
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 text-xs pt-1">
-                  <div>
-                    <label className="block font-bold mb-1 opacity-70">Top Padding (Clearance)</label>
+                  <div className="md:col-span-3">
+                    <label className="block text-[11px] font-bold mb-1" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
+                      {t('pageMetaDescription') || 'SEO & Meta Description'}
+                    </label>
                     <input 
-                      type="text" 
-                      value={selectedPage.padding?.top || '2.5rem'}
-                      onChange={(e) => handlePaddingChange('top', e.target.value)}
-                      placeholder="e.g. 2.5rem or 40px"
-                      className="w-full px-3 py-2 rounded-xl border font-mono font-bold"
-                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                      type="text"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      value={selectedPage.description || ''}
+                      onChange={(e) => handleBasicPageChange('description', e.target.value)}
+                      placeholder="Summarize this page for search indices and social sharing preview..."
+                      className="w-full px-3.5 py-2 rounded-xl text-xs border font-medium outline-none"
+                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)', color: 'var(--color-text, #f1f5f9)' }}
                     />
-                  </div>
-
-                  <div>
-                    <label className="block font-bold mb-1 opacity-70">Bottom Padding</label>
-                    <input 
-                      type="text" 
-                      value={selectedPage.padding?.bottom || '4rem'}
-                      onChange={(e) => handlePaddingChange('bottom', e.target.value)}
-                      placeholder="e.g. 4rem or 64px"
-                      className="w-full px-3 py-2 rounded-xl border font-mono font-bold"
-                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-bold mb-1 opacity-70">Left Padding</label>
-                    <input 
-                      type="text" 
-                      value={selectedPage.padding?.left || selectedPage.padding?.x || '1.5rem'}
-                      onChange={(e) => {
-                        handlePaddingChange('left', e.target.value);
-                        handlePaddingChange('x', e.target.value);
-                      }}
-                      placeholder="e.g. 1.5rem or 24px"
-                      className="w-full px-3 py-2 rounded-xl border font-mono font-bold"
-                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-bold mb-1 opacity-70">Right Padding</label>
-                    <input 
-                      type="text" 
-                      value={selectedPage.padding?.right || selectedPage.padding?.x || '1.5rem'}
-                      onChange={(e) => handlePaddingChange('right', e.target.value)}
-                      placeholder="e.g. 1.5rem or 24px"
-                      className="w-full px-3 py-2 rounded-xl border font-mono font-bold"
-                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-bold mb-1 opacity-70">Container Max Width</label>
-                    <select 
-                      value={selectedPage.padding?.maxWidth || 'max-w-7xl'}
-                      onChange={(e) => handlePaddingChange('maxWidth', e.target.value as any)}
-                      className="w-full px-3 py-2 rounded-xl border font-bold"
-                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
-                    >
-                      <option value="max-w-5xl">5XL (1024px)</option>
-                      <option value="max-w-6xl">6XL (1152px)</option>
-                      <option value="max-w-7xl">7XL (1280px - Default)</option>
-                      <option value="max-w-full">Full Width (100% Edge-to-Edge)</option>
-                    </select>
                   </div>
                 </div>
               </div>
 
-              {/* C. FOOTER SETTINGS & NAVIGATION COLUMNS */}
-              <div 
-                className="border rounded-3xl p-6 shadow-xl space-y-4"
-                style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                  <div>
-                    <h2 className="text-sm font-black uppercase tracking-wide flex items-center gap-2">
-                      <PanelBottom className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
-                      Footer Settings & Navigation Columns
-                    </h2>
-                    <p className="text-xs" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
-                      Configure the footer banner, multi-column navigation links, and copyright statement.
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => handleFooterChange('enabled', !(selectedPage.footer?.enabled !== false))}
-                      className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
-                        selectedPage.footer?.enabled !== false ? 'bg-emerald-600' : 'bg-slate-700'
-                      }`}
-                    >
-                      <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                        selectedPage.footer?.enabled !== false ? 'translate-x-5' : 'translate-x-0'
-                      }`} />
-                    </button>
-                    <span className="text-xs font-bold">
-                      {selectedPage.footer?.enabled !== false ? 'Footer Enabled' : 'Footer Hidden'}
-                    </span>
-                  </div>
-                </div>
-
-                {selectedPage.footer?.enabled !== false && (
-                  <div className="space-y-5 text-xs pt-1">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block font-bold mb-1 opacity-70">Brand Description / About</label>
-                        <textarea 
-                          rows={2}
-                          value={selectedPage.footer?.aboutText || ''}
-                          onChange={(e) => handleFooterChange('aboutText', e.target.value)}
-                          placeholder="Brief company mission or platform statement..."
-                          className="w-full px-3 py-2 rounded-xl border leading-relaxed"
-                          style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
-                        />
-                      </div>
-                      <div>
-                        <label className="block font-bold mb-1 opacity-70">Copyright Statement</label>
-                        <input 
-                          type="text" 
-                          value={selectedPage.footer?.copyrightText || ''}
-                          onChange={(e) => handleFooterChange('copyrightText', e.target.value)}
-                          placeholder="© 2026 Zecratary. All rights reserved."
-                          className="w-full px-3 py-2 rounded-xl border font-bold"
-                          style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
-                        />
-                      </div>
-                    </div>
-
-                    {/* Footer Navigation Columns */}
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-[11px] uppercase tracking-wider opacity-80">Footer Navigation Columns</span>
-                        <button
-                          type="button"
-                          onClick={addFooterColumn}
-                          className="px-3 py-1 rounded-xl text-xs font-bold border flex items-center gap-1.5 hover:bg-white/10"
-                          style={{ borderColor: 'var(--color-border, #1e293b)' }}
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                          <span>Add Column</span>
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {(selectedPage.footer?.columns || []).map((col, colIdx) => (
-                          <div 
-                            key={col.id} 
-                            className="p-4 rounded-2xl border space-y-3"
-                            style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
-                          >
-                            <div className="flex items-center justify-between gap-2 border-b pb-2" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                              <input 
-                                type="text"
-                                value={col.title}
-                                onChange={(e) => {
-                                  const cols = [...(selectedPage.footer?.columns || [])];
-                                  cols[colIdx].title = e.target.value;
-                                  handleFooterChange('columns', cols);
-                                }}
-                                className="font-bold text-xs px-2 py-1 rounded-lg border w-full max-w-xs"
-                                style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => removeFooterColumn(colIdx)}
-                                className="p-1 rounded text-red-400 hover:bg-red-500/10 cursor-pointer"
-                                title="Remove Column"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-
-                            <div className="space-y-2">
-                              {col.links.map((link, linkIdx) => (
-                                <div key={link.id} className="flex items-center gap-2">
-                                  <input 
-                                    type="text"
-                                    placeholder="Link Label"
-                                    value={link.label}
-                                    onChange={(e) => {
-                                      const cols = [...(selectedPage.footer?.columns || [])];
-                                      cols[colIdx].links[linkIdx].label = e.target.value;
-                                      handleFooterChange('columns', cols);
-                                    }}
-                                    className="px-2 py-1 rounded-lg border text-xs w-1/2"
-                                    style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
-                                  />
-                                  <input 
-                                    type="text"
-                                    placeholder="URL (e.g. /about)"
-                                    value={link.url}
-                                    onChange={(e) => {
-                                      const cols = [...(selectedPage.footer?.columns || [])];
-                                      cols[colIdx].links[linkIdx].url = e.target.value;
-                                      handleFooterChange('columns', cols);
-                                    }}
-                                    className="px-2 py-1 rounded-lg border text-xs font-mono w-1/2"
-                                    style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => removeFooterLink(colIdx, linkIdx)}
-                                    className="p-1 text-slate-400 hover:text-red-400 cursor-pointer"
-                                  >
-                                    <X className="h-3.5 w-3.5" />
-                                  </button>
-                                </div>
-                              ))}
-
-                              <button
-                                type="button"
-                                onClick={() => addFooterLink(colIdx)}
-                                className="text-[10px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 pt-1"
-                              >
-                                <Plus className="h-3 w-3" />
-                                <span>Add Link to this column</span>
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            /* ───────────────────────────────────────────────────────────── */
-            /* "ELEMENTS & BLOCKS" TAB: Palette Toolbar + Canvas Reorder     */
-            /* ───────────────────────────────────────────────────────────── */
-            <div className="space-y-4 animate-in fade-in duration-200">
+              {/* ELEMENT PALETTE TOOLBAR */}
               <div 
                 className="p-4 rounded-3xl border shadow-md flex flex-wrap items-center justify-between gap-3"
                 style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
@@ -25053,181 +24792,392 @@ export default function AdminFrontendSettingsPage() {
                 })}
               </div>
             </div>
+          ) : (
+            /* ───────────────────────────────────────────────────────────── */
+            /* "SETTINGS" TAB: Spacing & Padding, Footer Settings            */
+            /* ───────────────────────────────────────────────────────────── */
+            <div className="space-y-6 animate-in fade-in duration-200">
+              {/* PAGE SPACING & PADDING SETTINGS */}
+              <div 
+                className="border rounded-3xl p-6 shadow-xl space-y-4"
+                style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                  <div>
+                    <h2 className="text-sm font-black uppercase tracking-wide flex items-center gap-2">
+                      <Sliders className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
+                      Page Spacing & Padding Settings
+                    </h2>
+                    <p className="text-xs" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
+                      Configure top, bottom, and horizontal margins and container width for this page.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[10px] font-bold uppercase opacity-60">Presets:</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPage({
+                        ...selectedPage,
+                        padding: { top: '1.5rem', bottom: '2.5rem', left: '1rem', right: '1rem', x: '1rem', maxWidth: 'max-w-6xl' }
+                      })}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold border hover:bg-white/10"
+                      style={{ borderColor: 'var(--color-border, #1e293b)' }}
+                    >
+                      Compact
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPage({
+                        ...selectedPage,
+                        padding: { top: '2.5rem', bottom: '4rem', left: '1.5rem', right: '1.5rem', x: '1.5rem', maxWidth: 'max-w-7xl' }
+                      })}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold border hover:bg-white/10 text-emerald-400 border-emerald-500/30"
+                    >
+                      Balanced (Default)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPage({
+                        ...selectedPage,
+                        padding: { top: '4rem', bottom: '6rem', left: '2.5rem', right: '2.5rem', x: '2.5rem', maxWidth: 'max-w-7xl' }
+                      })}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold border hover:bg-white/10 text-amber-400 border-amber-500/30"
+                    >
+                      Spacious
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedPage({
+                        ...selectedPage,
+                        padding: { top: '0', bottom: '4rem', left: '0', right: '0', x: '0', maxWidth: 'max-w-full' }
+                      })}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold border hover:bg-white/10"
+                      style={{ borderColor: 'var(--color-border, #1e293b)' }}
+                    >
+                      Full-Width Flush
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 text-xs pt-1">
+                  <div>
+                    <label className="block font-bold mb-1 opacity-70">Top Padding (Clearance)</label>
+                    <input 
+                      type="text" 
+                      value={selectedPage.padding?.top || '2.5rem'}
+                      onChange={(e) => handlePaddingChange('top', e.target.value)}
+                      placeholder="e.g. 2.5rem or 40px"
+                      className="w-full px-3 py-2 rounded-xl border font-mono font-bold"
+                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold mb-1 opacity-70">Bottom Padding</label>
+                    <input 
+                      type="text" 
+                      value={selectedPage.padding?.bottom || '4rem'}
+                      onChange={(e) => handlePaddingChange('bottom', e.target.value)}
+                      placeholder="e.g. 4rem or 64px"
+                      className="w-full px-3 py-2 rounded-xl border font-mono font-bold"
+                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold mb-1 opacity-70">Left Padding</label>
+                    <input 
+                      type="text" 
+                      value={selectedPage.padding?.left || selectedPage.padding?.x || '1.5rem'}
+                      onChange={(e) => {
+                        handlePaddingChange('left', e.target.value);
+                        handlePaddingChange('x', e.target.value);
+                      }}
+                      placeholder="e.g. 1.5rem or 24px"
+                      className="w-full px-3 py-2 rounded-xl border font-mono font-bold"
+                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold mb-1 opacity-70">Right Padding</label>
+                    <input 
+                      type="text" 
+                      value={selectedPage.padding?.right || selectedPage.padding?.x || '1.5rem'}
+                      onChange={(e) => handlePaddingChange('right', e.target.value)}
+                      placeholder="e.g. 1.5rem or 24px"
+                      className="w-full px-3 py-2 rounded-xl border font-mono font-bold"
+                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold mb-1 opacity-70">Container Max Width</label>
+                    <select 
+                      value={selectedPage.padding?.maxWidth || 'max-w-7xl'}
+                      onChange={(e) => handlePaddingChange('maxWidth', e.target.value as any)}
+                      className="w-full px-3 py-2 rounded-xl border font-bold"
+                      style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                    >
+                      <option value="max-w-5xl">5XL (1024px)</option>
+                      <option value="max-w-6xl">6XL (1152px)</option>
+                      <option value="max-w-7xl">7XL (1280px - Default)</option>
+                      <option value="max-w-full">Full Width (100% Edge-to-Edge)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* FOOTER SETTINGS & NAVIGATION COLUMNS */}
+              <div 
+                className="border rounded-3xl p-6 shadow-xl space-y-4"
+                style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                  <div>
+                    <h2 className="text-sm font-black uppercase tracking-wide flex items-center gap-2">
+                      <PanelBottom className="h-4 w-4" style={{ color: 'var(--color-primary, #E05638)' }} />
+                      Footer Settings & Navigation Columns
+                    </h2>
+                    <p className="text-xs" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
+                      Configure the footer banner, multi-column navigation links, and copyright statement.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleFooterChange('enabled', !(selectedPage.footer?.enabled !== false))}
+                      className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
+                        selectedPage.footer?.enabled !== false ? 'bg-emerald-600' : 'bg-slate-700'
+                      }`}
+                    >
+                      <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                        selectedPage.footer?.enabled !== false ? 'translate-x-5' : 'translate-x-0'
+                      }`} />
+                    </button>
+                    <span className="text-xs font-bold">
+                      {selectedPage.footer?.enabled !== false ? 'Footer Enabled' : 'Footer Hidden'}
+                    </span>
+                  </div>
+                </div>
+
+                {selectedPage.footer?.enabled !== false && (
+                  <div className="space-y-5 text-xs pt-1">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block font-bold mb-1 opacity-70">Brand Description / About</label>
+                        <textarea 
+                          rows={2}
+                          value={selectedPage.footer?.aboutText || ''}
+                          onChange={(e) => handleFooterChange('aboutText', e.target.value)}
+                          placeholder="Brief company mission or platform statement..."
+                          className="w-full px-3 py-2 rounded-xl border leading-relaxed"
+                          style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-bold mb-1 opacity-70">Copyright Statement</label>
+                        <input 
+                          type="text" 
+                          value={selectedPage.footer?.copyrightText || ''}
+                          onChange={(e) => handleFooterChange('copyrightText', e.target.value)}
+                          placeholder="© 2026 Zecratary. All rights reserved."
+                          className="w-full px-3 py-2 rounded-xl border font-bold"
+                          style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Footer Navigation Columns */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[11px] uppercase tracking-wider opacity-80">Footer Navigation Columns</span>
+                        <button
+                          type="button"
+                          onClick={addFooterColumn}
+                          className="px-3 py-1 rounded-xl text-xs font-bold border flex items-center gap-1.5 hover:bg-white/10"
+                          style={{ borderColor: 'var(--color-border, #1e293b)' }}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          <span>Add Column</span>
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {(selectedPage.footer?.columns || []).map((col, colIdx) => (
+                          <div 
+                            key={col.id} 
+                            className="p-4 rounded-2xl border space-y-3"
+                            style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                          >
+                            <div className="flex items-center justify-between gap-2 border-b pb-2" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                              <input 
+                                type="text"
+                                value={col.title}
+                                onChange={(e) => {
+                                  const cols = [...(selectedPage.footer?.columns || [])];
+                                  cols[colIdx].title = e.target.value;
+                                  handleFooterChange('columns', cols);
+                                }}
+                                className="font-bold text-xs px-2 py-1 rounded-lg border w-full max-w-xs"
+                                style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeFooterColumn(colIdx)}
+                                className="p-1 rounded text-red-400 hover:bg-red-500/10 cursor-pointer"
+                                title="Remove Column"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+
+                            <div className="space-y-2">
+                              {col.links.map((link, linkIdx) => (
+                                <div key={link.id} className="flex items-center gap-2">
+                                  <input 
+                                    type="text"
+                                    placeholder="Link Label"
+                                    value={link.label}
+                                    onChange={(e) => {
+                                      const cols = [...(selectedPage.footer?.columns || [])];
+                                      cols[colIdx].links[linkIdx].label = e.target.value;
+                                      handleFooterChange('columns', cols);
+                                    }}
+                                    className="px-2 py-1 rounded-lg border text-xs w-1/2"
+                                    style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+                                  />
+                                  <input 
+                                    type="text"
+                                    placeholder="URL (e.g. /about)"
+                                    value={link.url}
+                                    onChange={(e) => {
+                                      const cols = [...(selectedPage.footer?.columns || [])];
+                                      cols[colIdx].links[linkIdx].url = e.target.value;
+                                      handleFooterChange('columns', cols);
+                                    }}
+                                    className="px-2 py-1 rounded-lg border text-xs font-mono w-1/2"
+                                    style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => removeFooterLink(colIdx, linkIdx)}
+                                    className="p-1 text-slate-400 hover:text-red-400 cursor-pointer"
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
+                              ))}
+
+                              <button
+                                type="button"
+                                onClick={() => addFooterLink(colIdx)}
+                                className="text-[10px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 pt-1"
+                              >
+                                <Plus className="h-3 w-3" />
+                                <span>Add Link to this column</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
       )}
 
-      {/* FULL RECIPE POPUP MODAL (WORKS IN LIVE PREVIEW) */}
-      {activeRecipeModal && (
-        <div 
-          onClick={() => setActiveRecipeModal(null)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer animate-in fade-in"
-        >
+      {/* CREATE NEW PAGE MODAL */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4">
           <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative cursor-default transition-colors duration-200"
+            className="w-full max-w-md border rounded-3xl p-6 shadow-2xl space-y-4 animate-in fade-in"
             style={{
               backgroundColor: 'var(--color-card, #0b0f17)',
               borderColor: 'var(--color-border, #1e293b)',
               color: 'var(--color-text, #f1f5f9)'
             }}
           >
-            <button
-              type="button"
-              onClick={() => setActiveRecipeModal(null)}
-              className="absolute top-4 right-4 z-30 p-2 rounded-xl border transition cursor-pointer shadow-md hover:opacity-80"
-              style={{
-                backgroundColor: 'var(--color-card, #0b0f17)',
-                borderColor: 'var(--color-border, #1e293b)',
-                color: 'var(--color-text, #f1f5f9)'
-              }}
-            >
-              <X className="h-5 w-5"/>
-            </button>
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+              <div className="flex items-center gap-2">
+                <Globe className="h-5 w-5" style={{ color: 'var(--color-primary, #E05638)' }} />
+                <h3 className="text-base font-black">Create New Frontend Page</h3>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setShowCreateModal(false)}
+                className="text-sm font-bold opacity-60 hover:opacity-100 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
 
-            <div className="overflow-y-auto flex-1 space-y-5 pb-6">
-              <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
-                <img
-                  src={activeRecipeModal.imageUrl || activeRecipeModal.image || '/uploads/recipes/default.jpg'}
-                  alt={activeRecipeModal.title || activeRecipeModal.name}
-                  referrerPolicy="no-referrer"
-                  className="absolute inset-0 w-full h-full object-cover"
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold mb-1">Page Title</label>
+                <input 
+                  type="text"
+                  placeholder="e.g. About Us, Features, Pricing"
+                  value={newPageTitle}
+                  onChange={(e) => {
+                    setNewPageTitle(e.target.value);
+                    if (!newPageSlug) {
+                      setNewPageSlug('/' + e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''));
+                    }
+                  }}
+                  className="w-full px-3 py-2 rounded-xl border font-bold"
+                  style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
-
-                <div className="relative z-10 space-y-3">
-                  <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
-                    {activeRecipeModal.title || activeRecipeModal.name}
-                  </h2>
-
-                  <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-                    <span className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 backdrop-blur-md" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}>
-                      <Clock className="h-3.5 w-3.5 text-emerald-400" />
-                      <span className="font-bold">Cook: {activeRecipeModal.cookTime || `${activeRecipeModal.cookTimeMinutes || 20}m`}</span>
-                    </span>
-                    <span className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 backdrop-blur-md" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}>
-                      <Clock className="h-3.5 w-3.5 text-blue-400" />
-                      <span className="font-bold">Prep: {activeRecipeModal.prepTime || `${activeRecipeModal.prepTimeMinutes || 15}m`}</span>
-                    </span>
-                    <span className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 backdrop-blur-md" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}>
-                      <Utensils className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                      <span className="font-bold">{activeRecipeModal.category || activeRecipeModal.recipeType || 'Main Dish'}</span>
-                    </span>
-                    {activeRecipeModal.calories && (
-                      <span className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 backdrop-blur-md bg-amber-500/15 border-amber-500/30 text-amber-400">
-                        <Flame className="h-3.5 w-3.5" />
-                        <span className="font-bold">{activeRecipeModal.calories}</span>
-                      </span>
-                    )}
-                    <span className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 backdrop-blur-md" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}>
-                      <Users className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                      <span className="font-bold">By {activeRecipeModal.creatorName || 'Community Chef'}</span>
-                    </span>
-                  </div>
-                </div>
               </div>
 
-              {/* Servings Stepper */}
-              <div className="px-6 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-bold flex items-center gap-1.5 text-[var(--color-primary)]">
-                    <Users className="h-4 w-4"/> {t('servingsLabel') || 'Servings'}
-                  </span>
-                  <div className="flex items-center border rounded-lg overflow-hidden shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
-                    <button type="button" onClick={() => setModalServingsMultiplier(Math.max(1, modalServingsMultiplier - 1))} className="px-2.5 py-1 font-bold cursor-pointer hover:bg-white/10">-</button>
-                    <span className="px-3 py-1 text-xs font-bold min-w-[32px] text-center">
-                      {Number(activeRecipeModal.servings || 2) * modalServingsMultiplier}
-                    </span>
-                    <button type="button" onClick={() => setModalServingsMultiplier(modalServingsMultiplier + 1)} className="px-2.5 py-1 font-bold cursor-pointer hover:bg-white/10">+</button>
-                  </div>
-                </div>
-
-                {(activeRecipeModal.rating || 0) > 0 && (
-                  <div className="flex items-center gap-1">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <Star key={star} className="h-4 w-4" style={{ color: (activeRecipeModal.rating || 0) >= star ? 'var(--color-primary, #E05638)' : 'var(--color-border, #1e293b)', fill: (activeRecipeModal.rating || 0) >= star ? 'var(--color-primary, #E05638)' : 'transparent' }} />
-                    ))}
-                  </div>
-                )}
+              <div>
+                <label className="block font-bold mb-1">URL Slug</label>
+                <input 
+                  type="text"
+                  placeholder="/about"
+                  value={newPageSlug}
+                  onChange={(e) => setNewPageSlug(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border font-mono font-bold"
+                  style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                />
               </div>
 
-              {/* Ingredients */}
-              <div className="px-6 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-black">{t('ingredientsHeading') || 'Ingredients'}</h3>
-                  <div className="flex items-center border rounded-lg overflow-hidden text-xs shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
-                    <button type="button" onClick={() => setModalFontSizeScale(Math.max(70, modalFontSizeScale - 10))} className="px-2 py-0.5 font-bold cursor-pointer hover:bg-white/10">-</button>
-                    <span className="px-2 py-0.5 font-bold min-w-[36px] text-center">{modalFontSizeScale}%</span>
-                    <button type="button" onClick={() => setModalFontSizeScale(Math.min(130, modalFontSizeScale + 10))} className="px-2 py-0.5 font-bold cursor-pointer hover:bg-white/10">+</button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs" style={{ fontSize: `${modalFontSizeScale}%` }}>
-                  {Array.isArray(activeRecipeModal.ingredients) && activeRecipeModal.ingredients.map((ing: any, idx: number) => {
-                    const rawAmt = typeof ing === 'string' ? '' : ing.amount || ing.quantity || '';
-                    const scaledAmt = calculateScaledAmount(rawAmt, Number(activeRecipeModal.servings || 2), Number(activeRecipeModal.servings || 2) * modalServingsMultiplier);
-                    const unit = typeof ing === 'string' ? '' : ing.unit || '';
-                    const name = typeof ing === 'string' ? ing : ing.item || ing.name || '';
-                    return (
-                      <div key={idx} className="flex items-start gap-2">
-                        <span className="w-1.5 h-1.5 rounded-full inline-block shrink-0 mt-1.5" style={{ backgroundColor: 'var(--color-primary, #E05638)' }} />
-                        <span>
-                          {scaledAmt && <strong>{scaledAmt} {unit}{' '}</strong>}
-                          <span>{name}</span>
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
+              <div>
+                <label className="block font-bold mb-1">Description (Optional)</label>
+                <textarea 
+                  rows={2}
+                  placeholder="Brief description for SEO and page metadata..."
+                  value={newPageDesc}
+                  onChange={(e) => setNewPageDesc(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border"
+                  style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: 'var(--color-border, #1e293b)' }}
+                />
               </div>
+            </div>
 
-              <div className="border-t mx-6" style={{ borderColor: 'var(--color-border, #1e293b)' }} />
-
-              {/* Instructions */}
-              <div className="px-6 space-y-3">
-                <h3 className="text-base font-black">{t('instructionsHeading') || 'Instructions'}</h3>
-                <div className="space-y-2 text-xs" style={{ fontSize: `${modalFontSizeScale}%` }}>
-                  {Array.isArray(activeRecipeModal.instructions || activeRecipeModal.directions) && 
-                   (activeRecipeModal.instructions || activeRecipeModal.directions).map((step: string, idx: number) => {
-                    const isDone = modalCompletedSteps.includes(idx);
-                    return (
-                      <div
-                        key={idx}
-                        onClick={() => {
-                          if (modalCompletedSteps.includes(idx)) {
-                            setModalCompletedSteps(modalCompletedSteps.filter(i => i !== idx));
-                          } else {
-                            setModalCompletedSteps([...modalCompletedSteps, idx]);
-                          }
-                        }}
-                        className={`flex items-start gap-2.5 p-2.5 rounded-xl border cursor-pointer transition select-none ${isDone ? 'opacity-50' : ''}`}
-                        style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}
-                      >
-                        <div className="w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 mt-0.5" style={isDone ? { backgroundColor: 'var(--color-primary, #E05638)', borderColor: 'var(--color-primary, #E05638)', color: '#ffffff' } : { borderColor: 'var(--color-primary, #E05638)' }}>
-                          {isDone && <Check className="h-3 w-3 stroke-[3]"/>}
-                        </div>
-                        <span className="font-extrabold shrink-0" style={{ color: 'var(--color-primary, #E05638)' }}>{idx + 1}.</span>
-                        <span className={`leading-relaxed flex-1 ${isDone ? 'line-through opacity-50' : ''}`}>{step}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="border-t mx-6" style={{ borderColor: 'var(--color-border, #1e293b)' }} />
-
-              {/* Modal Footer */}
-              <div className="px-6 flex items-center justify-between text-xs pt-1">
-                <span className="text-[11px] opacity-60">Source: {getSafeHostname(activeRecipeModal.sourceUrl)}</span>
-                <button
-                  type="button"
-                  onClick={() => setActiveRecipeModal(null)}
-                  className="px-4 py-1.5 rounded-xl font-bold border hover:bg-white/10"
-                  style={{ borderColor: 'var(--color-border, #1e293b)' }}
-                >
-                  Close
-                </button>
-              </div>
+            <div className="flex items-center justify-end gap-3 pt-3 border-t" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+              <button
+                type="button"
+                onClick={() => setShowCreateModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold border hover:bg-white/5 cursor-pointer"
+                style={{ borderColor: 'var(--color-border, #1e293b)' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateNewPage}
+                disabled={saving || !newPageTitle.trim()}
+                className="px-5 py-2 rounded-xl text-xs font-black text-white shadow-md disabled:opacity-50 cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
+              >
+                Create Page
+              </button>
             </div>
           </div>
         </div>
