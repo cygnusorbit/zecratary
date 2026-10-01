@@ -173,8 +173,8 @@ function formatNotificationTime(timestampStr: string): string {
 export default function Sidebar() {
   const pathname = usePathname();
   const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
-  if (isAuthRoute) return null;
-
+  const isHomePage = pathname === '/' || pathname === '' || pathname === '/index';
+  if (isAuthRoute || isHomePage) return null;
   const { t, locale, setLocale } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
