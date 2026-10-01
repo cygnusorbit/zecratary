@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.75",
+  "version": "8.0.76",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.75",
+  "version": "8.0.76",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -1349,7 +1349,6 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
 
 ## File: `apps/web/src/app/saved/page.tsx`
 ```typescript
-// Generated / Updated by AI Collaborator
 'use client';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -1412,6 +1411,166 @@ const isRecipeInBook = (rec: any, bookId: string): boolean => {
   return rec.bookId === bookId || rec.book_id === bookId;
 };
 
+// Culinary Fraction & Number Scaling Helpers
+const formatScaledNumber = (val: number): string => {
+  if (isNaN(val) || val <= 0) return '';
+  const intPart = Math.floor(val);
+  const fracPart = val - intPart;
+
+  if (Math.abs(val - Math.round(val)) < 0.02) {
+    return String(Math.round(val));
+  }
+
+  const fractions: [number, string][] = [
+    [0.25, '1/4'],
+    [0.333, '1/3'],
+    [0.5, '1/2'],
+    [0.667, '2/3'],
+    [0.75, '3/4']
+  ];
+
+  for (const [fVal, fStr] of fractions) {
+    if (Math.abs(fracPart - fVal) < 0.04) {
+      return intPart > 0 ? `${intPart} ${fStr}` : fStr;
+    }
+  }
+
+  return Number(val.toFixed(2)).toString();
+};
+
+const parseAmountToNumber = (rawAmt: any): number | null => {
+  if (rawAmt === null || rawAmt === undefined) return null;
+  const str = String(rawAmt).trim();
+  if (!str) return null;
+
+  if (str.includes('/')) {
+    const parts = str.split(/\s+/);
+    if (parts.length === 2) {
+      const [num, den] = parts[1].split('/').map(Number);
+      if (!isNaN(num) && !isNaN(den) && den !== 0) {
+        return (Number(parts[0]) || 0) + (num / den);
+      }
+    } else if (parts.length === 1) {
+      const [num, den] = parts[0].split('/').map(Number);
+      if (!isNaN(num) && !isNaN(den) && den !== 0) {
+        return num / den;
+      }
+    }
+  }
+
+  const numMatch = str.match(/^(\d+(?:\.\d+)?)/);
+  if (numMatch) {
+    const parsed = Number(numMatch[1]);
+    if (!isNaN(parsed)) return parsed;
+  }
+
+  const directNum = Number(str);
+  if (!isNaN(directNum)) return directNum;
+
+  return null;
+};
+
+const calculateScaledAmount = (rawAmt: any, baseServings: number, currentServings: number): string => {
+  if (!rawAmt && rawAmt !== 0) return '';
+  const safeBase = Math.max(1, Number(baseServings) || 4);
+  const safeCurrent = Math.max(1, Number(currentServings) || safeBase);
+  const scaleRatio = safeCurrent / safeBase;
+
+  const str = String(rawAmt).trim();
+  if (!str) return '';
+
+  const rangeMatch = str.match(/^((?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?)\s*(-|to)\s*((?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?)$/i);
+  if (rangeMatch) {
+    const num1 = parseAmountToNumber(rangeMatch[1]);
+    const num2 = parseAmountToNumber(rangeMatch[3]);
+    const sep = rangeMatch[2];
+    if (num1 !== null && num2 !== null) {
+      const s1 = formatScaledNumber(num1 * scaleRatio);
+      const s2 = formatScaledNumber(num2 * scaleRatio);
+      return `${s1} ${sep} ${s2}`;
+    }
+  }
+
+  const num = parseAmountToNumber(str);
+  if (num !== null) {
+    return formatScaledNumber(num * scaleRatio);
+  }
+
+  return str;
+};
+
+const parseIngredientString = (rawStr: string, defaultCat: string) => {
+  const trimmed = String(rawStr || '').trim();
+  if (!trimmed) return { amount: '', unit: '', item: '', category: defaultCat };
+
+  const regex = /^((?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?(?:\s*(?:-|to)\s*(?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?)?)\s*([a-zA-Z]+)?\s*(?:of\s+)?(.*)$/i;
+  const match = trimmed.match(regex);
+
+  if (match) {
+    const amount = match[1].trim();
+    const possibleUnit = (match[2] || '').trim().toLowerCase();
+    const rest = (match[3] || '').trim();
+
+    const knownUnits = [
+      'cup', 'cups', 'tbsp', 'tbs', 'tablespoon', 'tablespoons', 'tsp', 'teaspoon', 'teaspoons',
+      'oz', 'ounce', 'ounces', 'lb', 'lbs', 'pound', 'pounds', 'g', 'gram', 'grams', 'kg',
+      'ml', 'l', 'liter', 'liters', 'clove', 'cloves', 'can', 'cans', 'slice', 'slices',
+      'pinch', 'pinches', 'bunch', 'bunches', 'stalk', 'stalks', 'piece', 'pieces', 'dash',
+      'pkg', 'package', 'packages', 'handful', 'handfuls', 'sprig', 'sprigs'
+    ];
+
+    if (knownUnits.includes(possibleUnit)) {
+      return { amount, unit: possibleUnit, item: rest || trimmed, category: defaultCat };
+    } else if (possibleUnit) {
+      return { amount, unit: '', item: `${possibleUnit} ${rest}`.trim(), category: defaultCat };
+    }
+    return { amount, unit: '', item: rest || trimmed, category: defaultCat };
+  }
+
+  return { amount: '', unit: '', item: trimmed, category: defaultCat };
+};
+
+const getNormalizedIngredient = (ing: any, defaultCat: string) => {
+  if (!ing) return { amount: '', unit: '', name: '', category: defaultCat };
+
+  if (typeof ing === 'string') {
+    const parsed = parseIngredientString(ing, defaultCat);
+    return {
+      amount: parsed.amount,
+      unit: parsed.unit,
+      name: parsed.item,
+      category: parsed.category
+    };
+  }
+
+  if (typeof ing === 'object') {
+    const rawItem = String(ing.item || ing.name || '').trim();
+    const rawAmt = String(ing.amount || ing.quantity || '').trim();
+    const rawUnit = String(ing.unit || '').trim();
+
+    if (!rawAmt && rawItem) {
+      const parsed = parseIngredientString(rawItem, ing.category || defaultCat);
+      if (parsed.amount) {
+        return {
+          amount: parsed.amount,
+          unit: rawUnit || parsed.unit,
+          name: parsed.item,
+          category: ing.category || defaultCat
+        };
+      }
+    }
+
+    return {
+      amount: rawAmt,
+      unit: rawUnit,
+      name: rawItem,
+      category: ing.category || defaultCat
+    };
+  }
+
+  return { amount: '', unit: '', name: String(ing), category: defaultCat };
+};
+
 export default function SavedRecipesPage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -1467,8 +1626,8 @@ export default function SavedRecipesPage() {
   const [isReorderingSteps, setIsReorderingSteps] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  // View States
-  const [servingsMultiplier, setServingsMultiplier] = useState(1);
+  // Servings Scaling & View States
+  const [currentServings, setCurrentServings] = useState<number>(4);
   const [fontSizeScale, setFontSizeScale] = useState(80);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
   const [noteText, setNoteText] = useState('');
@@ -1766,7 +1925,6 @@ export default function SavedRecipesPage() {
     };
   }, [loadData, router, t]);
 
-  // Unified persistence function: POST /api/recipes/saved exclusively
   const saveAllRecipes = (updatedUserList: any[]) => {
     if (!currentUser) return;
     const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
@@ -1904,7 +2062,7 @@ export default function SavedRecipesPage() {
       mealType: planMealType,
       time: planTime || '',
       notes: planNotes || '',
-      servings: currentTotalServings || selectedRecipe.servings || 4,
+      servings: currentServings || selectedRecipe.servings || 4,
       prepTimeMinutes: selectedRecipe.prepTimeMinutes || 15,
       cookTimeMinutes: selectedRecipe.cookTimeMinutes || 25,
       recipe: selectedRecipe,
@@ -2081,12 +2239,15 @@ export default function SavedRecipesPage() {
       cookTimeMinutes: selectedRecipe.cookTimeMinutes || 10,
       imageUrl: currentImg,
       ingredients: rawIngredients.length > 0
-        ? rawIngredients.map((ing: any) => ({
-            amount: typeof ing === 'string' ? '' : ing.amount || ing.quantity || '',
-            unit: typeof ing === 'string' ? '' : ing.unit || '',
-            item: typeof ing === 'string' ? ing : ing.item || ing.name || '',
-            category: typeof ing === 'string' ? defaultCat : ing.category || defaultCat
-          }))
+        ? rawIngredients.map((ing: any) => {
+            const norm = getNormalizedIngredient(ing, defaultCat);
+            return {
+              amount: norm.amount,
+              unit: norm.unit,
+              item: norm.name,
+              category: norm.category
+            };
+          })
         : [{ amount: '', unit: '', item: '', category: defaultCat }],
       instructions: selectedRecipe.instructions && selectedRecipe.instructions.length > 0
         ? [...selectedRecipe.instructions]
@@ -2108,10 +2269,12 @@ export default function SavedRecipesPage() {
     const cleanType = getCleanRecipeType(editForm);
     const targetUserId = currentUser?.id || currentUser?.email || 'usr_admin_1';
     const resolvedImg = editForm.imageUrl || editForm.image || editForm.image_url || selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || '';
+    const newServings = Math.max(1, Number(editForm.servings) || 4);
 
     const updatedRec = {
       ...selectedRecipe,
       ...editForm,
+      servings: newServings,
       imageUrl: resolvedImg,
       image: resolvedImg,
       image_url: resolvedImg,
@@ -2127,72 +2290,17 @@ export default function SavedRecipesPage() {
     };
 
     setSelectedRecipe(updatedRec);
+    setCurrentServings(newServings);
     const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
     saveAllRecipes(updatedList);
     setIsEditing(false);
   };
 
-  const calculateScaledAmount = (rawAmt: any, baseServings: number, currentServings: number) => {
-    if (!rawAmt || isNaN(Number(rawAmt))) {
-      if (typeof rawAmt === 'string' && rawAmt.includes('/')) {
-        try {
-          const parts = rawAmt.trim().split(' ');
-          let fractionValue = 0;
-          if (parts.length === 2) {
-            const [num, den] = parts[1].split('/').map(Number);
-            fractionValue = Number(parts[0]) + (num / den);
-          } else {
-            const [num, den] = parts[0].split('/').map(Number);
-            fractionValue = num / den;
-          }
-          const scaled = (fractionValue / (baseServings || 4)) * currentServings;
-          return Number.isInteger(scaled) ? scaled : Number(scaled.toFixed(2));
-        } catch {
-          return rawAmt;
-        }
-      }
-      return rawAmt;
-    }
-
-    const num = Number(rawAmt);
-    const scaled = (num / (baseServings || 4)) * currentServings;
-    return Number.isInteger(scaled) ? scaled : Number(scaled.toFixed(2));
-  };
-
-  const parseIngredientString = (rawStr: string, defaultCat: string) => {
-    const trimmed = String(rawStr || '').trim();
-    if (!trimmed) return { amount: '1', unit: 'unit', item: '', category: defaultCat };
-
-    const regex = /^((?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?)\s*([a-zA-Z]+)?\s+(?:of\s+)?(.*)$/i;
-    const match = trimmed.match(regex);
-
-    if (match) {
-      const amount = match[1].trim();
-      const possibleUnit = (match[2] || '').trim().toLowerCase();
-      const rest = match[3].trim();
-
-      const knownUnits = [
-        'cup', 'cups', 'tbsp', 'tbs', 'tablespoon', 'tablespoons', 'tsp', 'teaspoon', 'teaspoons',
-        'oz', 'ounce', 'ounces', 'lb', 'lbs', 'pound', 'pounds', 'g', 'gram', 'grams', 'kg',
-        'ml', 'l', 'liter', 'liters', 'clove', 'cloves', 'can', 'cans', 'slice', 'slices',
-        'pinch', 'pinches', 'bunch', 'bunches', 'stalk', 'stalks', 'piece', 'pieces', 'dash'
-      ];
-
-      if (knownUnits.includes(possibleUnit)) {
-        return { amount, unit: possibleUnit, item: rest || trimmed, category: defaultCat };
-      } else if (possibleUnit) {
-        return { amount, unit: '', item: `${possibleUnit} ${rest}`.trim(), category: defaultCat };
-      }
-    }
-
-    return { amount: '1', unit: '', item: trimmed, category: defaultCat };
-  };
-
   const handleOpenShoppingModal = () => {
     if (!selectedRecipe) return;
     const defaultCat = categories[0] || 'Produce';
-    const baseServings = selectedRecipe.servings || 4;
-    const totalServings = baseServings * servingsMultiplier;
+    const base = Math.max(1, Number(selectedRecipe.servings) || 4);
+    const totalServings = currentServings || base;
 
     let rawIngredients = selectedRecipe.ingredients;
     if (typeof rawIngredients === 'string') {
@@ -2201,28 +2309,16 @@ export default function SavedRecipesPage() {
     if (!Array.isArray(rawIngredients)) rawIngredients = [];
 
     const items = rawIngredients.map((ing: any, idx: number) => {
-      let parsed = { amount: '', unit: '', item: '', category: defaultCat };
-
-      if (typeof ing === 'string') {
-        parsed = parseIngredientString(ing, defaultCat);
-      } else if (ing && typeof ing === 'object') {
-        parsed = {
-          amount: String(ing.amount || ing.quantity || '').trim(),
-          unit: String(ing.unit || '').trim(),
-          item: String(ing.item || ing.name || '').trim(),
-          category: String(ing.category || defaultCat).trim()
-        };
-      }
-
-      const scaledAmt = calculateScaledAmount(parsed.amount, baseServings, totalServings);
+      const norm = getNormalizedIngredient(ing, defaultCat);
+      const scaledAmt = calculateScaledAmount(norm.amount, base, totalServings);
 
       return {
         id: 'shop_item_' + idx + '_' + Math.random().toString(36).substring(2, 6),
         selected: true,
-        amount: scaledAmt !== '' ? scaledAmt : (parsed.amount || '1'),
-        unit: parsed.unit || '',
-        name: parsed.item || 'Ingredient',
-        category: parsed.category || defaultCat
+        amount: scaledAmt !== '' ? scaledAmt : (norm.amount || '1'),
+        unit: norm.unit || '',
+        name: norm.name || 'Ingredient',
+        category: norm.category || defaultCat
       };
     });
 
@@ -2435,9 +2531,16 @@ export default function SavedRecipesPage() {
   const paginatedRecipes = filtered.slice(startIndex, startIndex + itemsPerPage);
 
   const assignedBook = books.find(b => b.id === (selectedRecipe?.bookId || selectedRecipe?.book_id));
-  const baseServings = selectedRecipe?.servings || 4;
-  const currentTotalServings = baseServings * servingsMultiplier;
+  const baseServings = Math.max(1, Number(selectedRecipe?.servings) || 4);
   const recipeCategoryBadge = selectedRecipe ? getCleanRecipeType(selectedRecipe) : 'Main Dish';
+
+  const scaleFactor = useMemo(() => {
+    return currentServings / baseServings;
+  }, [currentServings, baseServings]);
+
+  const percentChange = useMemo(() => {
+    return Math.round(((currentServings - baseServings) / baseServings) * 100);
+  }, [currentServings, baseServings]);
 
   const formattedCountdown = useMemo(() => {
     if (!activeTimer) return '00:00';
@@ -2949,7 +3052,7 @@ export default function SavedRecipesPage() {
                 key={r.id}
                 onClick={() => {
                   setSelectedRecipe(r);
-                  setServingsMultiplier(1);
+                  setCurrentServings(Math.max(1, Number(r.servings) || 4));
                   setCompletedSteps([]);
                   setNoteText(r.note || '');
                   setIsBookDropdownOpen(false);
@@ -2978,7 +3081,7 @@ export default function SavedRecipesPage() {
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                     />
                     
-                    {/* Card Action Buttons (Direct POST trigger) */}
+                    {/* Card Action Buttons */}
                     <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
@@ -3379,7 +3482,7 @@ export default function SavedRecipesPage() {
 
                   <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
-                  {/* Servings Stepper */}
+                  {/* Servings Stepper with Live Percentage Telemetry */}
                   <div className="px-5 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <span 
@@ -3397,23 +3500,60 @@ export default function SavedRecipesPage() {
                       >
                         <button
                           type="button"
-                          onClick={() => setServingsMultiplier(Math.max(1, servingsMultiplier - 1))}
-                          className="px-2.5 py-1 font-bold cursor-pointer transition"
+                          onClick={() => setCurrentServings((prev) => Math.max(1, prev - 1))}
+                          className="px-2.5 py-1 font-bold cursor-pointer transition select-none hover:opacity-80"
                           style={{ color: 'var(--color-text-secondary)' }}
+                          title="Decrease servings by 1"
                         >
                           -
                         </button>
-                        <span className="px-3 py-1 text-xs font-bold min-w-[32px] text-center" style={{ color: 'var(--color-text)' }}>
-                          {currentTotalServings}
+                        <span className="px-3 py-1 text-xs font-bold min-w-[36px] text-center tabular-nums" style={{ color: 'var(--color-text)' }}>
+                          {currentServings}
                         </span>
                         <button
                           type="button"
-                          onClick={() => setServingsMultiplier(servingsMultiplier + 1)}
-                          className="px-2.5 py-1 font-bold cursor-pointer transition"
+                          onClick={() => setCurrentServings((prev) => prev + 1)}
+                          className="px-2.5 py-1 font-bold cursor-pointer transition select-none hover:opacity-80"
                           style={{ color: 'var(--color-text-secondary)' }}
+                          title="Increase servings by 1"
                         >
                           +
                         </button>
+                      </div>
+
+                      {/* Percentage Badge & Reset */}
+                      <div className="flex items-center gap-1.5">
+                        <span 
+                          className="text-[11px] font-bold px-2 py-0.5 rounded-full border transition-all shadow-xs tabular-nums"
+                          style={percentChange === 0 ? {
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text-secondary)'
+                          } : percentChange > 0 ? {
+                            backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                            borderColor: 'var(--color-emerald)',
+                            color: 'var(--color-emerald)'
+                          } : {
+                            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-primary)'
+                          }}
+                          title={`Scale factor: ${scaleFactor.toFixed(2)}x`}
+                        >
+                          {percentChange === 0 ? '100%' : `${percentChange > 0 ? '+' : ''}${percentChange}%`}
+                        </span>
+
+                        {percentChange !== 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setCurrentServings(baseServings)}
+                            className="text-[10px] font-bold underline cursor-pointer transition hover:opacity-90"
+                            style={{ color: 'var(--color-text-secondary)' }}
+                            title={t('resetServings') || 'Reset to original servings'}
+                          >
+                            {t('reset') || 'Reset'}
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -3564,10 +3704,26 @@ export default function SavedRecipesPage() {
 
                   <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
-                  {/* INGREDIENTS SECTION */}
+                  {/* INGREDIENTS SECTION (SCALED BY PERCENTAGE) */}
                   <div className="px-5 space-y-4">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>{t('ingredientsHeading') || 'Ingredients'}</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>
+                          {t('ingredientsHeading') || 'Ingredients'}
+                        </h3>
+                        {percentChange !== 0 && (
+                          <span 
+                            className="text-[11px] font-bold px-2 py-0.5 rounded-full border shadow-xs"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-primary)',
+                              color: 'var(--color-primary)'
+                            }}
+                          >
+                            {scaleFactor.toFixed(2)}x
+                          </span>
+                        )}
+                      </div>
                       
                       <div 
                         className="flex items-center border rounded-lg overflow-hidden text-xs shadow-xs"
@@ -3603,10 +3759,10 @@ export default function SavedRecipesPage() {
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2.5" style={{ fontSize: `${fontSizeScale}%` }}>
                       {Array.isArray(selectedRecipe.ingredients) && selectedRecipe.ingredients.map((ing: any, idx: number) => {
-                        const rawAmt = typeof ing === 'string' ? '' : ing.amount || ing.quantity || '';
-                        const scaledAmt = calculateScaledAmount(rawAmt, baseServings, currentTotalServings);
-                        const unit = typeof ing === 'string' ? '' : ing.unit || '';
-                        const name = typeof ing === 'string' ? ing : ing.item || ing.name || '';
+                        const defaultCat = categories[0] || 'Produce';
+                        const norm = getNormalizedIngredient(ing, defaultCat);
+                        const scaledAmt = calculateScaledAmount(norm.amount, baseServings, currentServings);
+
                         return (
                           <div key={idx} className="flex items-start gap-2.5 leading-snug">
                             <span 
@@ -3614,12 +3770,16 @@ export default function SavedRecipesPage() {
                               style={{ backgroundColor: 'var(--color-primary)' }}
                             />
                             <span style={{ color: 'var(--color-text)' }}>
-                              {(scaledAmt !== '' || unit) && (
-                                <strong className="font-semibold" style={{ color: 'var(--color-text)' }}>
-                                  {scaledAmt} {unit && unit !== 'Unit' ? unit : ''}{' '}
-                                </strong>
+                              {(scaledAmt || norm.unit) ? (
+                                <>
+                                  <strong className="font-bold tracking-tight" style={{ color: 'var(--color-text)' }}>
+                                    {scaledAmt} {norm.unit && norm.unit.toLowerCase() !== 'unit' ? norm.unit : ''}{' '}
+                                  </strong>
+                                  <span>{norm.name}</span>
+                                </>
+                              ) : (
+                                <span>{norm.name}</span>
                               )}
-                              <span>{name}</span>
                             </span>
                           </div>
                         );
@@ -3933,8 +4093,9 @@ export default function SavedRecipesPage() {
                           </label>
                           <input
                             type="number"
+                            min={1}
                             value={editForm.servings}
-                            onChange={(e) => setEditForm({ ...editForm, servings: parseInt(e.target.value) || 1 })}
+                            onChange={(e) => setEditForm({ ...editForm, servings: Math.max(1, parseInt(e.target.value) || 1) })}
                             className="w-full border rounded-xl p-3 text-xs outline-none"
                             style={{
                               backgroundColor: 'var(--color-inner-dark)',

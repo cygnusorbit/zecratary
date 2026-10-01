@@ -1,7 +1,6 @@
-import { formatSystemTimestamp, getSystemTimezone } from '@/lib/timezone';
-// Generated / Updated by AI Collaborator
 'use client';
 
+// Generated / Updated by AI Collaborator
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -13,6 +12,7 @@ import {
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+import { formatSystemTimestamp, getSystemTimezone } from '@/lib/timezone';
 
 type TabKey = 'tokens' | 'wallet';
 
@@ -52,6 +52,18 @@ interface ExtendedUser extends User {
 const CURRENCY_SYMBOLS: Record<string, string> = {
   USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'AU$', JPY: '¥'
 };
+
+function formatDate(dateStr?: string): string {
+  if (!dateStr) return '-';
+  try {
+    if (typeof formatSystemTimestamp === 'function') {
+      return formatSystemTimestamp(dateStr);
+    }
+    return new Date(dateStr).toLocaleString();
+  } catch (_) {
+    return new Date(dateStr).toLocaleString();
+  }
+}
 
 function TransactionsContent() {
   const router = useRouter();
@@ -838,7 +850,7 @@ function TransactionsContent() {
                             {tx.description || '-'}
                           </td>
                           <td className="p-3.5 font-mono text-[11px] whitespace-nowrap opacity-60">
-                            {tx.created_at ? new Date(tx.created_at).toLocaleString() : '-'}
+                            <span suppressHydrationWarning>{formatDate(tx.created_at)}</span>
                           </td>
                         </tr>
                       );
@@ -1081,7 +1093,7 @@ function TransactionsContent() {
                             {tx.description || '-'}
                           </td>
                           <td className="p-3.5 font-mono text-[11px] whitespace-nowrap opacity-60">
-                            {tx.created_at ? new Date(tx.created_at).toLocaleString() : '-'}
+                            <span suppressHydrationWarning>{formatDate(tx.created_at)}</span>
                           </td>
                         </tr>
                       );
