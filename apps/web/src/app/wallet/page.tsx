@@ -28,7 +28,9 @@ import {
   Shield,
   ExternalLink,
   Info,
-  RotateCw
+  RotateCw,
+  Sparkles,
+  Sliders
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -41,7 +43,12 @@ interface WalletSettings {
   preset_amounts: number[];
   bonus_rules: Array<{ threshold: number; bonus_percent: number }>;
   allowed_gateways: string[];
+  active_gateway?: string;
   allow_site_purchases: boolean;
+  stripe_configured?: boolean;
+  stripe_publishable_key?: string;
+  paypal_configured?: boolean;
+  test_mode?: boolean;
 }
 
 interface WalletTx {
@@ -81,7 +88,7 @@ function WalletContent() {
   const isFetchingWalletRef = useRef<boolean>(false);
   const fetchSeqRef = useRef<number>(0);
 
-  // Settings
+  // Gateway & Wallet Settings (Synchronized from /admin/payment-gateway)
   const [settings, setSettings] = useState<WalletSettings>({
     is_enabled: true,
     currency: 'USD',
@@ -90,13 +97,18 @@ function WalletContent() {
     preset_amounts: [10, 25, 50, 100, 250],
     bonus_rules: [{ threshold: 50, bonus_percent: 5 }, { threshold: 100, bonus_percent: 10 }],
     allowed_gateways: ['stripe', 'paypal', 'manual'],
+    active_gateway: 'stripe',
     allow_site_purchases: true,
+    stripe_configured: false,
+    paypal_configured: false,
+    test_mode: true,
   });
 
   // Top-Up Form States
   const [selectedAmount, setSelectedAmount] = useState<number>(50);
   const [customAmount, setCustomAmount] = useState<string>('');
   const [selectedGateway, setSelectedGateway] = useState<string>('stripe');
+  const [focusedField, setFocusedField] = useState<string | null>(null);
 
   // Ledger States
   const [transactions, setTransactions] = useState<WalletTx[]>([]);
@@ -111,9 +123,10 @@ function WalletContent() {
   const [stats, setStats] = useState({ totalDeposited: 0, totalSpent: 0, totalEvents: 0 });
 
   const activeCurrencySymbol = useMemo(() => {
-    return CURRENCY_SYMBOLS[settings.currency] || '$';
+    return CURRENCY_SYMBOLS[settings.currency?.toUpperCase()] || '$';
   }, [settings.currency]);
 
+  // Non-destructive custom amount input handler
   const handleCustomAmountChange = (raw: string) => {
     const clean = raw.replace(/[^0-9.]/g, '');
     const parts = clean.split('.');
@@ -273,7 +286,7 @@ function WalletContent() {
   const fetchWalletRef = useRef(fetchWalletData);
   fetchWalletRef.current = fetchWalletData;
 
-  // Mount Lifecycle
+  // Mount Lifecycle & Event Listeners
   useEffect(() => {
     hydrateUserRef.current();
 
@@ -288,14 +301,19 @@ function WalletContent() {
     const handleSync = () => {
       fetchWalletRef.current(page, limit, debouncedSearch, typeFilter, true);
     };
+
     window.addEventListener('zecratary_wallet_updated', handleSync);
     window.addEventListener('zecratary_wallet_settings_updated', handleSync);
+    window.addEventListener('zecratary_payment_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_wallet_updated', handleSync);
       window.removeEventListener('zecratary_wallet_settings_updated', handleSync);
+      window.removeEventListener('zecratary_payment_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
-  }, []);
+  }, [limit, debouncedSearch, page, typeFilter]);
 
   // Filter & Pagination effect
   useEffect(() => {
@@ -308,7 +326,7 @@ function WalletContent() {
     }
   }, [page, limit, debouncedSearch, typeFilter]);
 
-  // Handle Stripe Return Verification on Mount
+  // Handle Stripe & PayPal Return Verification on Mount
   useEffect(() => {
     const sessionId = searchParams.get('session_id');
     const status = searchParams.get('status');
@@ -321,7 +339,7 @@ function WalletContent() {
         setSubmitting(true);
         setFeedback({
           type: 'info',
-          msg: t('verifyingStripeSession', 'Confirming Stripe Payment and synchronizing your wallet balance...'),
+          msg: t('verifyingStripeSession', 'Confirming payment session and synchronizing your wallet balance...'),
         });
 
         let active = currentUserRef.current || getCurrentUser();
@@ -348,12 +366,11 @@ function WalletContent() {
           if (data.success) {
             setFeedback({
               type: 'success',
-              msg: data.message || t('topupSuccessMsg', 'Stripe checkout verified! Store credit added to your account.'),
+              msg: data.message || t('topupSuccessMsg', 'Checkout verified! Store credit added to your account.'),
             });
             if (typeof data.wallet_balance === 'number') {
               setBalance(data.wallet_balance);
             }
-            // Directly hydrate transactions from verification response
             if (Array.isArray(data.transactions) && data.transactions.length > 0) {
               setTransactions(data.transactions);
               if (typeof data.totalCount === 'number') setTotalCount(data.totalCount);
@@ -374,15 +391,15 @@ function WalletContent() {
               }
             } catch (_) {}
 
-            // In-place parameter cleanup without Next.js router remount
             if (typeof window !== 'undefined') {
               window.history.replaceState({}, '', '/wallet');
               window.dispatchEvent(new Event('zecratary_wallet_updated'));
+              window.dispatchEvent(new Event('zecratary_payment_updated'));
             }
           } else {
             setFeedback({
               type: 'error',
-              msg: data.error || t('topupVerifyFailed', 'Could not verify Stripe payment session.'),
+              msg: data.error || t('topupVerifyFailed', 'Could not verify payment session.'),
             });
             fetchWalletRef.current(1, limit, '', 'all', true);
             if (typeof window !== 'undefined') {
@@ -407,7 +424,7 @@ function WalletContent() {
     } else if (status === 'cancelled') {
       setFeedback({
         type: 'info',
-        msg: t('topupCancelledMsg', 'Stripe Checkout was cancelled. No charges were made to your account.'),
+        msg: t('topupCancelledMsg', 'Checkout was cancelled. No charges were made to your account.'),
       });
       if (typeof window !== 'undefined') {
         window.history.replaceState({}, '', '/wallet');
@@ -466,9 +483,13 @@ function WalletContent() {
         if (data.checkoutUrl) {
           setFeedback({
             type: 'info',
-            msg: t('redirectingToStripe', 'Redirecting to Stripe secure checkout...'),
+            msg: selectedGateway === 'paypal' ? t('redirectingToPaypal', 'Redirecting to PayPal...') : t('redirectingToStripe', 'Redirecting to secure checkout...'),
           });
-          window.location.href = data.checkoutUrl;
+          try {
+            window.location.assign(data.checkoutUrl);
+          } catch (_) {
+            window.location.href = data.checkoutUrl;
+          }
           return;
         }
 
@@ -488,6 +509,7 @@ function WalletContent() {
         fetchWalletRef.current(1, limit, '', 'all', true);
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('zecratary_wallet_updated'));
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
         }
       } else {
         setFeedback({ type: 'error', msg: data.error || t('topupFailed', 'Top-up transaction failed.') });
@@ -503,7 +525,7 @@ function WalletContent() {
     setReconciling(true);
     setFeedback({
       type: 'info',
-      msg: t('reconcilingLedger', 'Scanning Stripe Payment Gateway and synchronizing unrecorded top-ups...'),
+      msg: t('reconcilingLedger', 'Scanning payment gateway and synchronizing unrecorded top-ups...'),
     });
 
     const active = currentUserRef.current || user || getCurrentUser();
@@ -523,7 +545,7 @@ function WalletContent() {
       if (data.success) {
         setFeedback({
           type: 'success',
-          msg: data.message || t('reconcileSuccessMsg', 'Ledger is fully synchronized with Stripe.'),
+          msg: data.message || t('reconcileSuccessMsg', 'Ledger is fully synchronized with payment gateways.'),
         });
         if (typeof data.wallet_balance === 'number') {
           setBalance(data.wallet_balance);
@@ -536,17 +558,18 @@ function WalletContent() {
         }
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('zecratary_wallet_updated'));
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
         }
       } else {
         setFeedback({
           type: 'error',
-          msg: data.error || t('reconcileFailed', 'Failed to synchronize with Stripe.'),
+          msg: data.error || t('reconcileFailed', 'Failed to synchronize with payment gateway.'),
         });
       }
     } catch (err: any) {
       setFeedback({
         type: 'error',
-        msg: err.message || t('reconcileConnError', 'Connection error while synchronizing with Stripe.'),
+        msg: err.message || t('reconcileConnError', 'Connection error while synchronizing with payment gateway.'),
       });
     } finally {
       setReconciling(false);
@@ -628,6 +651,16 @@ function WalletContent() {
               <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                 {t('activeAndPersistent', 'Active & Persistent')}
               </span>
+              <span 
+                className="px-2 py-0.5 rounded-full text-[10px] border"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                  borderColor: settings.test_mode ? '#f59e0b' : 'var(--color-emerald, #10b981)',
+                  color: settings.test_mode ? '#fbbf24' : 'var(--color-emerald, #10b981)'
+                }}
+              >
+                {settings.test_mode ? t('sandboxTest', 'Sandbox Test') : t('liveProduction', 'Live Production')}
+              </span>
             </div>
             <div className="text-4xl sm:text-5xl font-black tracking-tight flex items-baseline gap-2">
               <span className="font-mono text-[var(--color-primary,#3b82f6)]" suppressHydrationWarning>
@@ -640,7 +673,7 @@ function WalletContent() {
             </p>
           </div>
 
-          {/* Quick Metrics & Settlement */}
+          {/* Quick Metrics */}
           <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 w-full lg:w-auto">
             <div
               className="flex-1 p-4 rounded-2xl border flex items-center gap-3 shadow-inner"
@@ -708,6 +741,7 @@ function WalletContent() {
               href="/admin/payment-gateway"
               className="px-3.5 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shrink-0 bg-black/20 hover:bg-black/40 border-rose-500/40 text-white shadow-xs"
             >
+              <Sliders className="w-3.5 h-3.5" />
               <span>{t('configureGatewayBtn', 'Configure Gateway')}</span>
               <ExternalLink className="w-3.5 h-3.5" />
             </Link>
@@ -715,7 +749,7 @@ function WalletContent() {
         </div>
       )}
 
-      {/* Top-Up Configuration Area */}
+      {/* Top-Up Configuration Area (Form-Free <div> Container) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div
           className="lg:col-span-2 p-6 sm:p-7 rounded-3xl border space-y-6 shadow-md transition-colors duration-200"
@@ -785,13 +819,31 @@ function WalletContent() {
               </span>
               <input
                 type="text"
+                id="cfg_wallet_custom_amount"
+                name="cfg_wallet_custom_amount"
+                autoComplete="new-password"
+                autoCorrect="off"
+                spellCheck={false}
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                role="presentation"
                 inputMode="decimal"
                 placeholder="e.g. 5.00"
                 value={customAmount}
+                readOnly={focusedField !== 'customAmount'}
                 onChange={(e) => handleCustomAmountChange(e.target.value)}
-                onFocus={() => {
-                  if (!customAmount) {
-                    setSelectedAmount(0);
+                onFocus={(e) => {
+                  e.currentTarget.readOnly = false;
+                  setFocusedField('customAmount');
+                  e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)';
+                }}
+                onBlur={(e) => {
+                  setFocusedField(null);
+                  e.currentTarget.style.borderColor = customAmount ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)';
+                  if (!customAmount && selectedAmount === 0) {
+                    setSelectedAmount(settings.preset_amounts?.[0] || 50);
                   }
                 }}
                 onKeyDown={(e) => {
@@ -800,7 +852,7 @@ function WalletContent() {
                     handleExecuteTopup();
                   }
                 }}
-                className="w-full pl-9 pr-4 py-3 rounded-2xl border text-base font-bold font-mono outline-none focus:border-[var(--color-primary,#3b82f6)]"
+                className="w-full pl-9 pr-4 py-3 rounded-2xl border text-base font-bold font-mono outline-none transition"
                 style={{
                   backgroundColor: 'var(--color-inner-dark, #0f172a)',
                   borderColor: customAmount ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
@@ -855,6 +907,30 @@ function WalletContent() {
                 })}
             </div>
           </div>
+
+          {/* Test Card Guidance Helper */}
+          {settings.test_mode && selectedGateway === 'stripe' && (
+            <div 
+              className="p-3.5 rounded-2xl border space-y-1.5 transition-colors shadow-xs animate-in fade-in"
+              style={{
+                backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                borderColor: 'var(--color-border, #334155)'
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs flex items-center gap-1.5 text-amber-400">
+                  <CreditCard className="h-3.5 w-3.5" />
+                  {t('stripeTestCardGuide', 'Stripe Test Card Helper')}
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                  {t('sandboxActiveBadge', 'Sandbox Active')}
+                </span>
+              </div>
+              <p className="text-[11px] leading-relaxed opacity-75">
+                {t('testCardInstructions', 'Use card number')} <code className="px-1.5 py-0.5 rounded font-mono font-bold text-[11px] border bg-[var(--color-card,#1e293b)] border-[var(--color-border,#334155)] text-white">4242 4242 4242 4242</code>, {t('anyFutureExpiry', 'any future MM/YY (e.g. 12/28), and any 3-digit CVC (e.g. 123).')}
+              </p>
+            </div>
+          )}
         </div>
 
         <div
@@ -885,6 +961,10 @@ function WalletContent() {
                 <span>{t('selectedGateway', 'Selected Gateway:')}</span>
                 <span className="uppercase font-semibold font-mono">{selectedGateway}</span>
               </div>
+              <div className="flex justify-between opacity-70 text-xs">
+                <span>{t('currencyLabel', 'Processing Currency:')}</span>
+                <span className="font-semibold font-mono text-[var(--color-primary,#3b82f6)]">{settings.currency}</span>
+              </div>
 
               <div
                 className="border-t pt-3 flex justify-between text-base font-bold"
@@ -902,7 +982,7 @@ function WalletContent() {
             type="button"
             onClick={handleExecuteTopup}
             disabled={submitting || activeAmount <= 0}
-            className="w-full py-4 rounded-2xl font-bold text-sm text-white flex items-center justify-center gap-2 transition-all shadow-lg cursor-pointer disabled:opacity-50"
+            className="w-full py-4 rounded-2xl font-bold text-sm text-white flex items-center justify-center gap-2 transition-all shadow-lg cursor-pointer disabled:opacity-50 hover:brightness-110"
             style={{ backgroundColor: 'var(--color-primary, #3b82f6)' }}
           >
             {submitting ? (
@@ -912,7 +992,13 @@ function WalletContent() {
               </>
             ) : (
               <>
-                <span>{selectedGateway === 'stripe' ? t('checkoutWithStripe', 'Pay with Stripe Checkout') : t('completeTopup', 'Complete Top-Up')}</span>
+                <span>
+                  {selectedGateway === 'stripe'
+                    ? t('checkoutWithStripe', 'Pay with Stripe Checkout')
+                    : selectedGateway === 'paypal'
+                    ? t('checkoutWithPaypal', 'Pay with PayPal')
+                    : t('completeTopup', 'Complete Top-Up')}
+                </span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
@@ -920,7 +1006,7 @@ function WalletContent() {
         </div>
       </div>
 
-      {/* Wallet Transactions Ledger & Stripe Reconcile */}
+      {/* Wallet Transactions Ledger & Reconcile */}
       <div
         className="p-6 sm:p-7 rounded-3xl border space-y-4 shadow-md transition-colors duration-200"
         style={{ backgroundColor: 'var(--color-card, #1e293b)', borderColor: 'var(--color-border, #334155)' }}
@@ -943,18 +1029,18 @@ function WalletContent() {
               disabled={reconciling || txLoading}
               className="text-xs font-bold px-3 py-1.5 rounded-xl border flex items-center gap-1.5 transition cursor-pointer hover:border-emerald-500 text-emerald-400 disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}
-              title={t('reconcileStripeTooltip', 'Check and reconcile any unrecorded Stripe checkout payments')}
+              title={t('reconcileStripeTooltip', 'Check and reconcile any unrecorded checkout payments')}
             >
               <RotateCw className={`w-3.5 h-3.5 ${reconciling ? 'animate-spin' : ''}`} />
-              <span>{reconciling ? t('reconcilingBtn', 'Reconciling...') : t('reconcileStripeBtn', 'Reconcile Stripe')}</span>
+              <span>{reconciling ? t('reconcilingBtn', 'Reconciling...') : t('reconcileBtn', 'Reconcile Payments')}</span>
             </button>
 
             <Link
-              href="/transactions?tab=wallet"
+              href="/admin/payment-gateway"
               className="text-xs font-bold px-3 py-1.5 rounded-xl border flex items-center gap-1.5 transition hover:opacity-80"
               style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}
             >
-              <span>{t('fullLedger', 'Full Ledger')}</span>
+              <span>{t('gatewaySettings', 'Gateway Settings')}</span>
               <ExternalLink className="w-3.5 h-3.5 opacity-60" />
             </Link>
 
@@ -1022,7 +1108,7 @@ function WalletContent() {
           </div>
         </div>
 
-        {/* Responsive Table with Gateway Badge and Transaction Number */}
+        {/* Responsive Table */}
         <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border, #334155)' }}>
           <table className="w-full text-left text-xs border-collapse">
             <thead>

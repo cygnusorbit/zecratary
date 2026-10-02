@@ -2435,9 +2435,9 @@
       "paypal": {
         "enabled": false,
         "clientId": "",
-        "clientSecret": "",
         "webhookId": "",
-        "environment": "sandbox"
+        "environment": "sandbox",
+        "clientSecret": ""
       }
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
@@ -3798,9 +3798,9 @@
       "paypal": {
         "enabled": false,
         "clientId": "",
-        "clientSecret": "",
         "webhookId": "",
-        "environment": "sandbox"
+        "environment": "sandbox",
+        "clientSecret": ""
       }
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
@@ -3909,5 +3909,5 @@
     ],
     "recommendedRecipeUrls": []
   },
-  "updatedAt": "2026-10-02T14:04:18.460Z"
+  "updatedAt": "2026-10-02T15:33:47.846Z"
 }

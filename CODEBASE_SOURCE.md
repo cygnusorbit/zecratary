@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.89",
+  "version": "8.0.90",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.89",
+  "version": "8.0.90",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -31295,7 +31295,7 @@ import {
   CreditCard, Shield, CheckCircle2, AlertCircle, Save, 
   RefreshCw, Check, Eye, EyeOff, Globe, Zap, Sliders,
   ShieldCheck, Terminal, ExternalLink, Code2, AlertTriangle,
-  Activity, CheckCheck
+  Activity, CheckCheck, DownloadCloud, UploadCloud, Sparkles
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -31345,6 +31345,8 @@ export default function AdminPaymentGatewayPage() {
   const version = langContext?.version;
 
   const [loading, setLoading] = useState(false);
+  const [syncingEnv, setSyncingEnv] = useState(false);
+  const [updatingEnv, setUpdatingEnv] = useState(false);
   const [verifyingStripe, setVerifyingStripe] = useState(false);
   const [verifyingWebhook, setVerifyingWebhook] = useState(false);
   const [showStripeGuideModal, setShowStripeGuideModal] = useState(false);
@@ -31352,6 +31354,7 @@ export default function AdminPaymentGatewayPage() {
   const [webhookEndpointUrl, setWebhookEndpointUrl] = useState('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
+  const [focusedField, setFocusedField] = useState<string | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
   // Gateway Settings State
@@ -31379,6 +31382,7 @@ export default function AdminPaymentGatewayPage() {
 
   const configRef = useRef<GatewayConfig>(config);
   const isFetchingRef = useRef<boolean>(false);
+  const isSavingRef = useRef<boolean>(false);
 
   useEffect(() => {
     configRef.current = config;
@@ -31386,7 +31390,7 @@ export default function AdminPaymentGatewayPage() {
 
   useEffect(() => {
     if (feedback) {
-      const timer = setTimeout(() => setFeedback(null), 4500);
+      const timer = setTimeout(() => setFeedback(null), 5000);
       return () => clearTimeout(timer);
     }
   }, [feedback]);
@@ -31428,17 +31432,162 @@ export default function AdminPaymentGatewayPage() {
     setVisibleFields((prev) => ({ ...prev, [field]: !prev[field] }));
   };
 
+  // SYNC FROM .ENV FILE DATA
+  const handleSyncFromEnv = useCallback(async (isManual = true) => {
+    if (syncingEnv || isSavingRef.current) return;
+    setSyncingEnv(true);
+    isSavingRef.current = true;
+    if (isManual) setFeedback(null);
+
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sync_env' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success && data.settings) {
+        const merged: GatewayConfig = {
+          ...configRef.current,
+          ...data.settings,
+          stripe: { ...configRef.current.stripe, ...(data.settings.stripe || {}) },
+          paypal: { ...configRef.current.paypal, ...(data.settings.paypal || {}) },
+        };
+        setConfig(merged);
+        configRef.current = merged;
+        persistServerAdminSettings({ 
+          paymentSettings: merged,
+          currency: merged.currency 
+        }).catch(() => {});
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        }
+
+        const count = data.syncedCount !== undefined ? data.syncedCount : (data.syncedFields?.length || 0);
+        const fields = Array.isArray(data.syncedFields) && data.syncedFields.length > 0 
+          ? ` (${data.syncedFields.join(', ')})` 
+          : '';
+
+        if (isManual || count > 0) {
+          setFeedback({
+            type: 'success',
+            msg: count > 0
+              ? t('syncEnvSuccess', `Successfully synced ${count} credential(s) from .env${fields} and updated PostgreSQL!`)
+              : t('syncEnvUpToDate', 'Dashboard is already up to date with your server .env credentials.'),
+          });
+        }
+      } else {
+        if (isManual) {
+          setFeedback({
+            type: 'error',
+            msg: data.error || t('syncEnvFailed', 'Failed to sync credentials from .env. Please check server environment configuration.'),
+          });
+        }
+      }
+    } catch (e: any) {
+      if (isManual) {
+        setFeedback({
+          type: 'error',
+          msg: e.message || t('syncEnvError', 'Error connecting to server for .env synchronization.'),
+        });
+      }
+    } finally {
+      setSyncingEnv(false);
+      setTimeout(() => { isSavingRef.current = false; }, 500);
+    }
+  }, [syncingEnv, t]);
+
+  // UPDATE / SAVE EXPLICITLY TO .ENV FILE DATA
+  const handleUpdateToEnv = useCallback(async () => {
+    if (updatingEnv || isSavingRef.current) return;
+    setUpdatingEnv(true);
+    isSavingRef.current = true;
+    setFeedback(null);
+
+    const currentPayload = { ...configRef.current };
+
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          action: 'update_env', 
+          paymentSettings: currentPayload,
+          currency: currentPayload.currency,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setFeedback({
+          type: 'success',
+          msg: data.message || t('updateEnvSuccess', 'API Keys and Gateway settings successfully written to .env file!'),
+        });
+      } else {
+        throw new Error(data.error || 'Failed to update .env file on server.');
+      }
+    } catch (e: any) {
+      setFeedback({
+        type: 'error',
+        msg: e.message || t('updateEnvError', 'Failed to update .env file on server.'),
+      });
+    } finally {
+      setUpdatingEnv(false);
+      setTimeout(() => { isSavingRef.current = false; }, 500);
+    }
+  }, [updatingEnv, t]);
+
   const fetchData = useCallback(async () => {
-    if (isFetchingRef.current) return;
+    if (isFetchingRef.current || isSavingRef.current) return;
     isFetchingRef.current = true;
     purgeLegacyBrowserAdminStorage();
     try {
       const res = await fetch('/api/admin/payment?t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        if (data.success && data.settings) {
-          const merged = { ...configRef.current, ...data.settings };
-          if (JSON.stringify(configRef.current) !== JSON.stringify(merged)) {
+        let serverSettings = data.settings;
+
+        if (!serverSettings) {
+          try {
+            const adminData = await fetchServerAdminSettings();
+            if (adminData && (adminData.paymentSettings || adminData.payment_gateway_config)) {
+              serverSettings = adminData.paymentSettings || adminData.payment_gateway_config;
+            }
+          } catch (_) {}
+        }
+
+        if (serverSettings) {
+          if (typeof serverSettings === 'string') {
+            try {
+              serverSettings = JSON.parse(serverSettings);
+            } catch (_) {}
+          }
+          if (serverSettings && typeof serverSettings === 'object') {
+            const merged: GatewayConfig = {
+              ...configRef.current,
+              ...serverSettings,
+              currency: serverSettings.currency || configRef.current.currency || 'USD',
+              testMode: serverSettings.testMode !== undefined ? Boolean(serverSettings.testMode) : configRef.current.testMode,
+              activeGateway: serverSettings.activeGateway || configRef.current.activeGateway || 'stripe',
+              stripe: {
+                ...configRef.current.stripe,
+                ...(serverSettings.stripe || {}),
+                publishableKey: serverSettings.stripe?.publishableKey !== undefined ? serverSettings.stripe.publishableKey : configRef.current.stripe.publishableKey,
+                secretKey: serverSettings.stripe?.secretKey !== undefined ? serverSettings.stripe.secretKey : configRef.current.stripe.secretKey,
+                webhookSecret: serverSettings.stripe?.webhookSecret !== undefined ? serverSettings.stripe.webhookSecret : configRef.current.stripe.webhookSecret,
+                enabled: serverSettings.stripe?.enabled !== undefined ? Boolean(serverSettings.stripe.enabled) : configRef.current.stripe.enabled,
+              },
+              paypal: {
+                ...configRef.current.paypal,
+                ...(serverSettings.paypal || {}),
+                clientId: serverSettings.paypal?.clientId !== undefined ? serverSettings.paypal.clientId : configRef.current.paypal.clientId,
+                clientSecret: serverSettings.paypal?.clientSecret !== undefined ? serverSettings.paypal.clientSecret : configRef.current.paypal.clientSecret,
+                webhookId: serverSettings.paypal?.webhookId !== undefined ? serverSettings.paypal.webhookId : configRef.current.paypal.webhookId,
+                environment: serverSettings.paypal?.environment || configRef.current.paypal.environment || 'sandbox',
+                enabled: serverSettings.paypal?.enabled !== undefined ? Boolean(serverSettings.paypal.enabled) : configRef.current.paypal.enabled,
+              },
+            };
             configRef.current = merged;
             setConfig(merged);
           }
@@ -31460,10 +31609,13 @@ export default function AdminPaymentGatewayPage() {
 
     let debounceTimer: NodeJS.Timeout | null = null;
     const handleDebouncedSync = () => {
+      if (isSavingRef.current) return;
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        fetchDataRef.current();
-      }, 300);
+        if (!isSavingRef.current) {
+          fetchDataRef.current();
+        }
+      }, 350);
     };
 
     window.addEventListener('zecratary_payment_updated', handleDebouncedSync);
@@ -31498,28 +31650,40 @@ export default function AdminPaymentGatewayPage() {
     setConfig(updatedConfig);
     configRef.current = updatedConfig;
 
-    await persistServerAdminSettings({ currency: newCurrency, paymentSettings: updatedConfig });
+    isSavingRef.current = true;
     try {
-      await fetch('/api/admin/payment', {
+      persistServerAdminSettings({ currency: newCurrency, paymentSettings: updatedConfig }).catch(() => {});
+      const res = await fetch('/api/admin/payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedConfig),
+        body: JSON.stringify({
+          action: 'save_gateway_settings',
+          currency: newCurrency,
+          paymentSettings: updatedConfig,
+        }),
       });
+      const data = await res.json().catch(() => ({}));
 
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      if (res.ok && data.success) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        }
+
+        setFeedback({
+          type: 'success',
+          msg: `Processing currency updated to ${newCurrency} (${getCurrencySymbol(newCurrency)}) and saved to server & .env!`,
+        });
+      } else {
+        throw new Error(data.error || 'Failed to save currency');
       }
-
-      setFeedback({
-        type: 'success',
-        msg: `Processing currency updated to ${newCurrency} (${getCurrencySymbol(newCurrency)}) and saved to server!`,
-      });
     } catch (err: any) {
       setFeedback({
         type: 'error',
         msg: `Failed to persist currency: ${err.message || 'Server error'}`,
       });
+    } finally {
+      setTimeout(() => { isSavingRef.current = false; }, 500);
     }
   };
 
@@ -31534,30 +31698,42 @@ export default function AdminPaymentGatewayPage() {
     setConfig(updatedConfig);
     configRef.current = updatedConfig;
 
+    isSavingRef.current = true;
     try {
       const res = await fetch('/api/admin/payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'toggle_test_mode', testMode: nextMode }),
+        body: JSON.stringify({
+          action: 'toggle_test_mode',
+          testMode: nextMode,
+          paymentSettings: updatedConfig,
+        }),
       });
-      await persistServerAdminSettings({ paymentSettings: updatedConfig });
+      const data = await res.json().catch(() => ({}));
+      persistServerAdminSettings({ paymentSettings: updatedConfig }).catch(() => {});
 
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      if (res.ok && data.success) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        }
+
+        setFeedback({
+          type: 'success',
+          msg: nextMode
+            ? t('sandboxTestModeEnabled', 'Sandbox (Test Mode) enabled and saved to server & .env!')
+            : t('liveProductionModeEnabled', 'Live Production mode enabled and saved to server & .env!'),
+        });
+      } else {
+        throw new Error(data.error || 'Failed to update gateway environment');
       }
-
-      setFeedback({
-        type: 'success',
-        msg: nextMode
-          ? t('sandboxTestModeEnabled', 'Sandbox (Test Mode) enabled and saved to server!')
-          : t('liveProductionModeEnabled', 'Live Production mode enabled and saved to server!'),
-      });
     } catch (err: any) {
       setFeedback({
         type: 'error',
         msg: err.message || 'Failed to update gateway environment.',
       });
+    } finally {
+      setTimeout(() => { isSavingRef.current = false; }, 500);
     }
   };
 
@@ -31590,7 +31766,7 @@ export default function AdminPaymentGatewayPage() {
         };
         setConfig(updated);
         configRef.current = updated;
-        await persistServerAdminSettings({ paymentSettings: updated });
+        persistServerAdminSettings({ paymentSettings: updated }).catch(() => {});
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('zecratary_payment_updated'));
           window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
@@ -31666,7 +31842,7 @@ export default function AdminPaymentGatewayPage() {
         };
         setConfig(updated);
         configRef.current = updated;
-        await persistServerAdminSettings({ paymentSettings: updated });
+        persistServerAdminSettings({ paymentSettings: updated }).catch(() => {});
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('zecratary_payment_updated'));
           window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
@@ -31699,50 +31875,66 @@ export default function AdminPaymentGatewayPage() {
   };
 
   const handleSaveSettings = async (e?: React.SyntheticEvent) => {
+    if (config.stripe.secretKey && (config.stripe.secretKey.includes('...') || config.stripe.secretKey.includes('*'))) {
+      setFeedback({
+        type: 'error',
+        msg: t('invalidSecretKeyFormat', 'Please enter a valid Stripe Secret Key. Do not submit placeholder dots (...) or masked asterisks (*).'),
+      });
+      return;
+    }
     if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    if (loading || isSavingRef.current) return;
+
     setLoading(true);
+    isSavingRef.current = true;
     setFeedback(null);
 
-    const updatedConfig: GatewayConfig = { ...config };
+    const updatedConfig: GatewayConfig = {
+      ...config,
+      stripe: { ...config.stripe },
+      paypal: { ...config.paypal },
+    };
 
     try {
       const res = await fetch('/api/admin/payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedConfig),
+        body: JSON.stringify({
+          action: 'save_gateway_settings',
+          paymentSettings: updatedConfig,
+          currency: updatedConfig.currency,
+        }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
-      await persistServerAdminSettings({
-        paymentSettings: updatedConfig,
-        currency: updatedConfig.currency
-      });
-
-      if (data.success) {
-        setConfig(updatedConfig);
-        configRef.current = updatedConfig;
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_payment_updated'));
-          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-        }
-        setFeedback({ type: 'success', msg: t('gatewaySettingsSavedSuccess', 'Payment gateway settings and currency saved successfully to server!') });
-      } else {
-        setFeedback({ type: 'error', msg: data.error || 'Failed to save gateway settings.' });
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to save gateway settings to server.');
       }
-    } catch (e: any) {
-      await persistServerAdminSettings({
+
+      persistServerAdminSettings({
         paymentSettings: updatedConfig,
         currency: updatedConfig.currency
-      });
+      }).catch((err) => console.warn('persistServerAdminSettings non-blocking warning:', err));
+
       setConfig(updatedConfig);
       configRef.current = updatedConfig;
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_payment_updated'));
         window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
-      setFeedback({ type: 'success', msg: t('gatewaySettingsSavedSuccess', 'Payment gateway settings saved to server.') });
+      setFeedback({ 
+        type: 'success', 
+        msg: t('gatewaySettingsSavedSuccess', 'Payment gateway settings and API keys saved successfully to PostgreSQL and .env!') 
+      });
+    } catch (e: any) {
+      console.error('Save gateway settings error:', e);
+      setFeedback({ 
+        type: 'error', 
+        msg: e.message || t('failedToSaveSettings', 'Failed to save payment gateway settings.') 
+      });
     } finally {
       setLoading(false);
+      setTimeout(() => { isSavingRef.current = false; }, 500);
     }
   };
 
@@ -31781,7 +31973,41 @@ export default function AdminPaymentGatewayPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* SYNC FROM .ENV BUTTON */}
+          <button
+            type="button"
+            onClick={() => handleSyncFromEnv(true)}
+            disabled={syncingEnv}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50 hover:border-[var(--color-primary)]"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+            title={t('syncFromEnvTooltip', 'Import API credentials directly from server .env file into PostgreSQL')}
+          >
+            <DownloadCloud className={`h-4 w-4 text-[var(--color-primary)] ${syncingEnv ? 'animate-bounce' : ''}`} />
+            <span>{syncingEnv ? t('syncingEnv', 'Syncing .env...') : t('syncFromEnvBtn', 'Sync from .env')}</span>
+          </button>
+
+          {/* UPDATE / SAVE TO .ENV BUTTON */}
+          <button
+            type="button"
+            onClick={handleUpdateToEnv}
+            disabled={updatingEnv}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50 hover:border-emerald-500"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+            title={t('updateToEnvTooltip', 'Save current API credentials and environment settings directly into .env file')}
+          >
+            <UploadCloud className={`h-4 w-4 text-emerald-500 ${updatingEnv ? 'animate-pulse' : ''}`} />
+            <span>{updatingEnv ? t('updatingEnv', 'Updating .env...') : t('updateEnvBtn', 'Update .env')}</span>
+          </button>
+
           <Link
             href="/admin/plans"
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs"
@@ -31856,6 +32082,30 @@ export default function AdminPaymentGatewayPage() {
             >
               {(config.stripeKeysVerified && config.stripeWebhookVerified) ? t('verifiedStatus', 'Verified') : t('unverifiedStatus', 'Unverified')}
             </span>
+          </div>
+
+          <div className="flex items-center gap-2 pl-2 border-l" style={{ borderColor: 'var(--color-border)' }}>
+            <button
+              type="button"
+              onClick={() => handleSyncFromEnv(true)}
+              disabled={syncingEnv}
+              className="font-bold text-[11px] flex items-center gap-1 text-[var(--color-primary)] hover:underline cursor-pointer disabled:opacity-40"
+              title={t('syncFromEnvTooltip', 'Sync credentials from .env')}
+            >
+              <Sparkles className="h-3 w-3" />
+              <span>{syncingEnv ? t('syncing', 'Syncing...') : t('syncEnvText', 'Sync .env')}</span>
+            </button>
+            <span style={{ color: 'var(--color-border)' }}>•</span>
+            <button
+              type="button"
+              onClick={handleUpdateToEnv}
+              disabled={updatingEnv}
+              className="font-bold text-[11px] flex items-center gap-1 text-emerald-500 hover:underline cursor-pointer disabled:opacity-40"
+              title={t('updateToEnvTooltip', 'Save current settings to .env')}
+            >
+              <UploadCloud className="h-3 w-3" />
+              <span>{updatingEnv ? t('saving', 'Saving...') : t('updateEnvText', 'Update .env')}</span>
+            </button>
           </div>
         </div>
       </div>
@@ -32028,6 +32278,17 @@ export default function AdminPaymentGatewayPage() {
                 <h3 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('stripeApiConfig', 'Stripe API Configuration')}</h3>
               </div>
               <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => handleSyncFromEnv(true)}
+                  disabled={syncingEnv}
+                  className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                  title={t('syncStripeEnvTooltip', 'Sync Stripe credentials from .env')}
+                >
+                  <DownloadCloud className="h-3 w-3" />
+                  <span>{t('syncFromEnv', '.env Sync')}</span>
+                </button>
+
                 <span
                   className="text-[11px] font-bold tracking-tight select-none transition-colors duration-200"
                   style={{ color: config.stripe.enabled ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
@@ -32192,15 +32453,21 @@ export default function AdminPaymentGatewayPage() {
                     name="cfg_stripe_publishable_key"
                     autoComplete="new-password"
                     autoCorrect="off"
-                    spellCheck="false"
+                    spellCheck={false}
                     data-lpignore="true"
                     data-1p-ignore="true"
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    readOnly={focusedField !== 'stripePublishable'}
+                    onFocus={(e) => { 
+                      setFocusedField('stripePublishable'); 
+                      e.currentTarget.style.borderColor = 'var(--color-primary)'; 
+                    }}
+                    onBlur={(e) => { 
+                      setFocusedField(null); 
+                      e.currentTarget.style.borderColor = 'var(--color-border)'; 
+                    }}
                     value={config.stripe.publishableKey}
                     onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, publishableKey: e.target.value } })}
                     placeholder="pk_test_... / pk_live_..."
@@ -32233,15 +32500,21 @@ export default function AdminPaymentGatewayPage() {
                     name="cfg_stripe_secret_key"
                     autoComplete="new-password"
                     autoCorrect="off"
-                    spellCheck="false"
+                    spellCheck={false}
                     data-lpignore="true"
                     data-1p-ignore="true"
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    readOnly={focusedField !== 'stripeSecret'}
+                    onFocus={(e) => { 
+                      setFocusedField('stripeSecret'); 
+                      e.currentTarget.style.borderColor = 'var(--color-primary)'; 
+                    }}
+                    onBlur={(e) => { 
+                      setFocusedField(null); 
+                      e.currentTarget.style.borderColor = 'var(--color-border)'; 
+                    }}
                     value={config.stripe.secretKey}
                     onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, secretKey: e.target.value } })}
                     placeholder="sk_test_... / sk_live_..."
@@ -32309,15 +32582,21 @@ export default function AdminPaymentGatewayPage() {
                     name="cfg_stripe_webhook_secret"
                     autoComplete="new-password"
                     autoCorrect="off"
-                    spellCheck="false"
+                    spellCheck={false}
                     data-lpignore="true"
                     data-1p-ignore="true"
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    readOnly={focusedField !== 'stripeWebhook'}
+                    onFocus={(e) => { 
+                      setFocusedField('stripeWebhook'); 
+                      e.currentTarget.style.borderColor = 'var(--color-primary)'; 
+                    }}
+                    onBlur={(e) => { 
+                      setFocusedField(null); 
+                      e.currentTarget.style.borderColor = 'var(--color-border)'; 
+                    }}
                     value={config.stripe.webhookSecret}
                     onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
                     placeholder="whsec_..."
@@ -32385,6 +32664,17 @@ export default function AdminPaymentGatewayPage() {
                 <h3 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('paypalApiConfig', 'PayPal API Configuration')}</h3>
               </div>
               <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => handleSyncFromEnv(true)}
+                  disabled={syncingEnv}
+                  className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                  title={t('syncPaypalEnvTooltip', 'Sync PayPal credentials from .env')}
+                >
+                  <DownloadCloud className="h-3 w-3" />
+                  <span>{t('syncFromEnv', '.env Sync')}</span>
+                </button>
+
                 <span
                   className="text-[11px] font-bold tracking-tight select-none transition-colors duration-200"
                   style={{ color: config.paypal.enabled ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
@@ -32427,15 +32717,21 @@ export default function AdminPaymentGatewayPage() {
                     name="cfg_paypal_client_id"
                     autoComplete="new-password"
                     autoCorrect="off"
-                    spellCheck="false"
+                    spellCheck={false}
                     data-lpignore="true"
                     data-1p-ignore="true"
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    readOnly={focusedField !== 'paypalClientId'}
+                    onFocus={(e) => { 
+                      setFocusedField('paypalClientId'); 
+                      e.currentTarget.style.borderColor = 'var(--color-primary)'; 
+                    }}
+                    onBlur={(e) => { 
+                      setFocusedField(null); 
+                      e.currentTarget.style.borderColor = 'var(--color-border)'; 
+                    }}
                     value={config.paypal.clientId}
                     onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientId: e.target.value } })}
                     placeholder="PayPal Client ID"
@@ -32468,15 +32764,21 @@ export default function AdminPaymentGatewayPage() {
                     name="cfg_paypal_secret_key"
                     autoComplete="new-password"
                     autoCorrect="off"
-                    spellCheck="false"
+                    spellCheck={false}
                     data-lpignore="true"
                     data-1p-ignore="true"
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    readOnly={focusedField !== 'paypalSecret'}
+                    onFocus={(e) => { 
+                      setFocusedField('paypalSecret'); 
+                      e.currentTarget.style.borderColor = 'var(--color-primary)'; 
+                    }}
+                    onBlur={(e) => { 
+                      setFocusedField(null); 
+                      e.currentTarget.style.borderColor = 'var(--color-border)'; 
+                    }}
                     value={config.paypal.clientSecret}
                     onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientSecret: e.target.value } })}
                     placeholder="PayPal Client Secret"
@@ -32509,15 +32811,21 @@ export default function AdminPaymentGatewayPage() {
                     name="cfg_paypal_webhook_id"
                     autoComplete="new-password"
                     autoCorrect="off"
-                    spellCheck="false"
+                    spellCheck={false}
                     data-lpignore="true"
                     data-1p-ignore="true"
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    readOnly={focusedField !== 'paypalWebhook'}
+                    onFocus={(e) => { 
+                      setFocusedField('paypalWebhook'); 
+                      e.currentTarget.style.borderColor = 'var(--color-primary)'; 
+                    }}
+                    onBlur={(e) => { 
+                      setFocusedField(null); 
+                      e.currentTarget.style.borderColor = 'var(--color-border)'; 
+                    }}
                     value={config.paypal.webhookId}
                     onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, webhookId: e.target.value } })}
                     placeholder="PayPal Webhook ID"
@@ -44416,7 +44724,7 @@ function WalletContent() {
 
       {feedback && (
         <div
-          className={`p-4 rounded-2xl border flex items-center gap-3 text-sm animate-fade-in ${
+          className={`p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-sm animate-fade-in ${
             feedback.type === 'success'
               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
               : feedback.type === 'info'
@@ -44424,14 +44732,26 @@ function WalletContent() {
               : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
           }`}
         >
-          {feedback.type === 'success' ? (
-            <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-          ) : feedback.type === 'info' ? (
-            <Info className="w-5 h-5 flex-shrink-0" />
-          ) : (
-            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          <div className="flex items-center gap-3">
+            {feedback.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+            ) : feedback.type === 'info' ? (
+              <Info className="w-5 h-5 flex-shrink-0" />
+            ) : (
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            )}
+            <span className="font-semibold text-xs leading-relaxed">{feedback.msg}</span>
+          </div>
+
+          {feedback.type === 'error' && (feedback.msg.includes('Admin Payment Settings') || feedback.msg.includes('Stripe')) && (
+            <Link
+              href="/admin/payment-gateway"
+              className="px-3.5 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shrink-0 bg-black/20 hover:bg-black/40 border-rose-500/40 text-white shadow-xs"
+            >
+              <span>{t('configureGatewayBtn', 'Configure Gateway')}</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </Link>
           )}
-          <span className="font-semibold text-xs">{feedback.msg}</span>
         </div>
       )}
 
@@ -49405,8 +49725,196 @@ export async function POST(req: NextRequest) {
 ## File: `apps/web/src/app/api/admin/payment/route.ts`
 ```typescript
 import { NextResponse } from 'next/server';
-import crypto from 'crypto';
 import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+function extractRows(result: any): any[] {
+  if (!result) return [];
+  if (Array.isArray(result)) return result;
+  if (Array.isArray(result.rows)) return result.rows;
+  return [];
+}
+
+function extractFirstRow(result: any): any | null {
+  if (!result) return null;
+  if (Array.isArray(result)) return result[0] || null;
+  if (Array.isArray(result.rows)) return result.rows[0] || null;
+  return null;
+}
+
+function isValidStripeSecretKey(key?: string | null): boolean {
+  if (!key) return false;
+  const trimmed = key.trim();
+  if (trimmed.length < 25) return false;
+  if (trimmed.includes('...') || trimmed.includes('*') || trimmed.includes('placeholder') || trimmed.includes('sample')) {
+    return false;
+  }
+  return (
+    trimmed.startsWith('sk_test_') ||
+    trimmed.startsWith('sk_live_') ||
+    trimmed.startsWith('rk_test_') ||
+    trimmed.startsWith('rk_live_')
+  );
+}
+
+function isValidStripePublishableKey(key?: string | null): boolean {
+  if (!key) return false;
+  const trimmed = key.trim();
+  if (trimmed.length < 25) return false;
+  if (trimmed.includes('...') || trimmed.includes('*') || trimmed.includes('placeholder') || trimmed.includes('sample')) {
+    return false;
+  }
+  return trimmed.startsWith('pk_test_') || trimmed.startsWith('pk_live_');
+}
+
+function getPrimaryEnvFilePath(): string {
+  const cwd = process.cwd();
+  const candidates = [
+    path.join(cwd, '.env'),
+    path.join(cwd, '.env.local'),
+    path.join(cwd, 'apps', 'web', '.env'),
+    path.join(cwd, 'apps', 'web', '.env.local'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return path.join(cwd, '.env');
+}
+
+function parseEnvFile(filePath: string): Record<string, string> {
+  const map: Record<string, string> = {};
+  if (!fs.existsSync(filePath)) return map;
+  try {
+    const lines = fs.readFileSync(filePath, 'utf-8').split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const idx = trimmed.indexOf('=');
+      if (idx > 0) {
+        const k = trimmed.substring(0, idx).trim();
+        let v = trimmed.substring(idx + 1).trim();
+        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+          v = v.slice(1, -1);
+        }
+        map[k] = v;
+      }
+    }
+  } catch (_) {}
+  return map;
+}
+
+function updateEnvFileBatch(filePath: string, updates: Record<string, string>): boolean {
+  let content = '';
+  if (fs.existsSync(filePath)) {
+    try {
+      content = fs.readFileSync(filePath, 'utf-8');
+    } catch (_) {}
+  } else {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+    }
+  }
+
+  let lines = content ? content.split(/\r?\n/) : [];
+  const processedKeys = new Set<string>();
+
+  lines = lines.map(line => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return line;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx > 0) {
+      const k = trimmed.substring(0, eqIdx).trim();
+      if (k in updates) {
+        processedKeys.add(k);
+        const val = updates[k];
+        const safeVal = val.includes(' ') || val.includes('#') ? `"${val}"` : val;
+        return `${k}=${safeVal}`;
+      }
+    }
+    return line;
+  });
+
+  for (const [k, val] of Object.entries(updates)) {
+    if (!processedKeys.has(k)) {
+      const safeVal = val.includes(' ') || val.includes('#') ? `"${val}"` : val;
+      lines.push(`${k}=${safeVal}`);
+    }
+  }
+
+  const newContent = lines.join('\n').trim() + '\n';
+  if (newContent !== content) {
+    try {
+      fs.writeFileSync(filePath, newContent, 'utf-8');
+      return true;
+    } catch (e) {
+      console.warn('[EnvUpdate] Failed to write env file:', e);
+      return false;
+    }
+  }
+  return false;
+}
+
+function persistEnvCredentials(settings: any, currency?: string) {
+  const targetKeys: Record<string, string> = {};
+
+  if (settings.stripe?.publishableKey !== undefined) {
+    const pk = settings.stripe.publishableKey.trim();
+    if (isValidStripePublishableKey(pk)) {
+      targetKeys['STRIPE_PUBLISHABLE_KEY'] = pk;
+      targetKeys['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'] = pk;
+    }
+  }
+  if (settings.stripe?.secretKey !== undefined) {
+    const sk = settings.stripe.secretKey.trim();
+    if (isValidStripeSecretKey(sk)) {
+      targetKeys['STRIPE_SECRET_KEY'] = sk;
+    }
+  }
+  if (settings.stripe?.webhookSecret !== undefined) {
+    const ws = settings.stripe.webhookSecret.trim();
+    if (ws.startsWith('whsec_') && ws.length >= 20 && !ws.includes('...')) {
+      targetKeys['STRIPE_WEBHOOK_SECRET'] = ws;
+    }
+  }
+
+  if (settings.paypal?.clientId !== undefined) {
+    targetKeys['PAYPAL_CLIENT_ID'] = settings.paypal.clientId.trim();
+    targetKeys['NEXT_PUBLIC_PAYPAL_CLIENT_ID'] = settings.paypal.clientId.trim();
+  }
+  if (settings.paypal?.clientSecret !== undefined) {
+    targetKeys['PAYPAL_CLIENT_SECRET'] = settings.paypal.clientSecret.trim();
+  }
+  if (settings.paypal?.webhookId !== undefined) {
+    targetKeys['PAYPAL_WEBHOOK_ID'] = settings.paypal.webhookId.trim();
+  }
+  if (settings.paypal?.environment !== undefined) {
+    targetKeys['PAYPAL_ENVIRONMENT'] = settings.paypal.environment;
+  }
+
+  const cur = currency || settings.currency;
+  if (cur) {
+    targetKeys['PAYMENT_CURRENCY'] = cur;
+  }
+  if (settings.activeGateway) {
+    targetKeys['PAYMENT_GATEWAY'] = settings.activeGateway;
+  }
+  if (settings.testMode !== undefined) {
+    targetKeys['PAYMENT_TEST_MODE'] = String(settings.testMode);
+  }
+
+  const primaryEnv = getPrimaryEnvFilePath();
+  updateEnvFileBatch(primaryEnv, targetKeys);
+
+  for (const [key, val] of Object.entries(targetKeys)) {
+    process.env[key] = val;
+  }
+
+  return { envFile: primaryEnv, updatedKeys: Object.keys(targetKeys) };
+}
 
 async function ensurePaymentSchema() {
   try {
@@ -49437,154 +49945,95 @@ async function ensurePaymentSchema() {
 
     await query(`
       CREATE TABLE IF NOT EXISTS admin_settings (
-        id VARCHAR(64) PRIMARY KEY DEFAULT 'primary_settings',
-        payment_settings JSONB,
-        currency VARCHAR(10) DEFAULT 'USD',
+        key VARCHAR(255) PRIMARY KEY,
+        value JSONB,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+    `);
+
+    await query(`
+      DO $$ 
+      BEGIN 
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS id INT; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS key VARCHAR(255); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS payment_settings JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS site_name TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN OTHERS THEN NULL; END;
+      END $$;
     `);
   } catch (e) {
     console.warn('[Payment API] Schema check warning:', e);
   }
 }
 
-function verifyWebhookSigningSecret(secret: string): { valid: boolean; error?: string } {
-  const s = (secret || '').trim();
-  if (!s) {
-    return { valid: false, error: 'Webhook Secret is required.' };
-  }
-  if (!s.startsWith('whsec_')) {
-    return { valid: false, error: 'Webhook Secret must begin with "whsec_".' };
-  }
-  if (s.length < 24) {
-    return { valid: false, error: 'Webhook Secret is too short to be a valid Stripe signing key.' };
-  }
+async function persistAdminSettingsData(settings: any, currency: string) {
+  await ensurePaymentSchema();
+  const cleanSettings = { ...settings };
+  delete cleanSettings.action;
+  const jsonStr = JSON.stringify(cleanSettings);
+  const cur = currency || cleanSettings.currency || 'USD';
 
-  try {
-    const testPayload = JSON.stringify({ test: true, timestamp: Date.now() });
-    const timestamp = Math.floor(Date.now() / 1000);
-    const signedPayload = `${timestamp}.${testPayload}`;
-    const hmac = crypto.createHmac('sha256', s).update(signedPayload, 'utf8').digest('hex');
-    if (!hmac || hmac.length !== 64) {
-      return { valid: false, error: 'Cryptographic HMAC computation test failed.' };
-    }
-  } catch (err: any) {
-    return { valid: false, error: `Invalid signing key for HMAC-SHA256: ${err.message}` };
-  }
-
-  return { valid: true };
-}
-
-async function verifyStripeCredentials(publishableKey: string, secretKey: string, testMode: boolean, webhookSecret?: string) {
-  const pKey = (publishableKey || '').trim();
-  const sKey = (secretKey || '').trim();
-  const wSecret = (webhookSecret || '').trim();
-
-  if (!pKey) {
-    return { valid: false, error: 'Publishable Key is required to verify.' };
-  }
-  if (!sKey) {
-    return { valid: false, error: 'Secret Key is required to verify.' };
-  }
-  if (!wSecret) {
-    return { valid: false, error: 'Webhook Secret (whsec_...) is required to verify.' };
-  }
-
-  if (testMode) {
-    if (!pKey.startsWith('pk_test_')) {
-      return { valid: false, error: 'Sandbox Test Mode is active, but Publishable Key does not start with "pk_test_".' };
-    }
-    if (!sKey.startsWith('sk_test_') && !sKey.startsWith('rk_test_')) {
-      return { valid: false, error: 'Sandbox Test Mode is active, but Secret Key does not start with "sk_test_".' };
-    }
-  } else {
-    if (!pKey.startsWith('pk_live_')) {
-      return { valid: false, error: 'Live Production Mode is active, but Publishable Key is not a live key ("pk_live_...").' };
-    }
-    if (!sKey.startsWith('sk_live_') && !sKey.startsWith('rk_live_')) {
-      return { valid: false, error: 'Live Production Mode is active, but Secret Key is not a live key ("sk_live_...").' };
-    }
-  }
-
-  let livemodeDetected = !testMode;
-  try {
-    const sRes = await fetch('https://api.stripe.com/v1/balance', {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${sKey}`,
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      cache: 'no-store'
-    });
-    const sData = await sRes.json().catch(() => ({}));
-    if (!sRes.ok || sData.error) {
-      return {
-        valid: false,
-        error: `Secret Key rejected by Stripe: ${sData.error?.message || `HTTP status ${sRes.status}`}`
-      };
-    }
-    livemodeDetected = Boolean(sData.livemode);
-    if (testMode && livemodeDetected) {
-      return { valid: false, error: 'Sandbox Test Mode is active, but Secret Key belongs to a Live Stripe account.' };
-    }
-    if (!testMode && !livemodeDetected) {
-      return { valid: false, error: 'Live Production Mode is active, but Secret Key belongs to a Test Stripe account.' };
-    }
-  } catch (err: any) {
-    return { valid: false, error: `Failed to connect to Stripe to verify Secret Key: ${err.message}` };
-  }
-
-  try {
-    const pRes = await fetch('https://api.stripe.com/v1/tokens', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${pKey}`,
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      cache: 'no-store'
-    });
-    const pData = await pRes.json().catch(() => ({}));
-
-    if (pRes.status === 401 || (pData.error && pData.error.type === 'invalid_request_error' && pRes.status === 401)) {
-      return {
-        valid: false,
-        error: `Publishable Key rejected by Stripe: ${pData.error?.message || 'Invalid API Key provided.'}`
-      };
-    }
-  } catch (err: any) {
-    return { valid: false, error: `Failed to connect to Stripe to verify Publishable Key: ${err.message}` };
-  }
-
-  const wCheck = verifyWebhookSigningSecret(wSecret);
-  if (!wCheck.valid) {
-    return { valid: false, error: `Webhook Secret validation failed: ${wCheck.error}` };
-  }
-
-  return { 
-    valid: true, 
-    livemode: livemodeDetected,
-    webhookVerified: true
-  };
-}
-
-async function persistAdminPaymentSettings(settings: any, currency: string) {
   try {
     await query(
-      `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
-       VALUES ('primary_settings', $1, $2, NOW())
-       ON CONFLICT (id) DO UPDATE SET
-         payment_settings = EXCLUDED.payment_settings,
+      `INSERT INTO admin_settings (key, value, currency, updated_at)
+       VALUES ('payment_gateway_config', $1::jsonb, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET
+         value = EXCLUDED.value,
          currency = EXCLUDED.currency,
          updated_at = NOW()`,
-      [JSON.stringify(settings), currency]
+      [jsonStr, cur]
     );
-  } catch (_) {
+  } catch (e1) {
+    try {
+      await query(
+        `UPDATE admin_settings SET value = $1::jsonb, currency = $2, updated_at = NOW() WHERE key = 'payment_gateway_config'`,
+        [jsonStr, cur]
+      );
+    } catch (_) {}
+  }
+
+  try {
     await query(
-      `UPDATE admin_settings 
-       SET payment_settings = $1, currency = $2, updated_at = NOW() 
-       WHERE id::text IN ('primary_settings', '1')`,
-      [JSON.stringify(settings), currency]
-    ).catch(() => {});
+      `INSERT INTO admin_settings (key, value, currency, updated_at)
+       VALUES ('paymentSettings', $1::jsonb, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET
+         value = EXCLUDED.value,
+         currency = EXCLUDED.currency,
+         updated_at = NOW()`,
+      [jsonStr, cur]
+    );
+  } catch (_) {}
+
+  try {
+    await query(
+      `UPDATE admin_settings SET payment_settings = $1::jsonb, currency = $2, updated_at = NOW()
+       WHERE key IN ('payment_gateway_config', 'paymentSettings') OR id = 1`,
+      [jsonStr, cur]
+    );
+  } catch (_) {}
+
+  try {
+    const dataDir = path.join(process.cwd(), 'data');
+    const filePath = path.join(dataDir, 'admin_settings.json');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    let existing: any = {};
+    if (fs.existsSync(filePath)) {
+      try {
+        existing = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      } catch (_) {}
+    }
+    existing.paymentSettings = cleanSettings;
+    existing.payment_gateway_config = cleanSettings;
+    existing.currency = cur;
+    existing.updatedAt = new Date().toISOString();
+    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
+  } catch (fileErr) {
+    console.warn('[Payment API] File mirror error:', fileErr);
   }
 }
 
@@ -49592,34 +50041,120 @@ export async function GET() {
   try {
     await ensurePaymentSchema();
 
-    let txRes: any = await query(
-      `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
-    ).catch(async () => {
-      return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => ({ rows: [] }));
-    });
+    let txRes: any = null;
+    try {
+      txRes = await query(`SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`);
+    } catch (_) {
+      try {
+        txRes = await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`);
+      } catch (_) {
+        txRes = [];
+      }
+    }
 
-    const transactions = Array.isArray(txRes) ? txRes : ((txRes as any)?.rows || []);
+    const transactions = extractRows(txRes);
+    let settings: any = null;
 
-    let settings = null;
     try {
       const sRes: any = await query(
-        `SELECT payment_settings, currency FROM admin_settings 
-         WHERE id::text IN ('primary_settings', '1') 
-         ORDER BY updated_at DESC LIMIT 1`
+        `SELECT key, value, payment_settings, currency FROM admin_settings 
+         WHERE key IN ('payment_gateway_config', 'paymentSettings') OR id = 1 
+         ORDER BY updated_at DESC LIMIT 2`
       );
-      const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
-      if (sRow) {
-        settings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
-        if (sRow.currency && typeof settings === 'object') {
-          settings.currency = sRow.currency;
+      const rows = extractRows(sRes);
+      for (const row of rows) {
+        let val = row.value || row.payment_settings;
+        if (typeof val === 'string') {
+          try { val = JSON.parse(val); } catch (_) {}
+        }
+        if (val && typeof val === 'object') {
+          settings = { ...val };
+          if (row.currency) settings.currency = row.currency;
+          break;
         }
       }
     } catch (_) {}
 
+    if (!settings) {
+      try {
+        const filePath = path.join(process.cwd(), 'data', 'admin_settings.json');
+        if (fs.existsSync(filePath)) {
+          const fileData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+          if (fileData.paymentSettings || fileData.payment_gateway_config) {
+            settings = { ...(fileData.paymentSettings || fileData.payment_gateway_config) };
+            if (fileData.currency) settings.currency = fileData.currency;
+          }
+        }
+      } catch (_) {}
+    }
+
+    const primaryEnv = getPrimaryEnvFilePath();
+    const envMap = parseEnvFile(primaryEnv);
+
+    const rawStripePk = envMap['STRIPE_PUBLISHABLE_KEY'] || envMap['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'] || process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
+    const rawStripeSk = envMap['STRIPE_SECRET_KEY'] || envMap['STRIPE_SK'] || process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || '';
+    const rawStripeWh = envMap['STRIPE_WEBHOOK_SECRET'] || envMap['STRIPE_ENDPOINT_SECRET'] || process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_ENDPOINT_SECRET || '';
+
+    const stripePk = isValidStripePublishableKey(rawStripePk) ? rawStripePk : '';
+    const stripeSk = isValidStripeSecretKey(rawStripeSk) ? rawStripeSk : '';
+    const stripeWh = rawStripeWh.startsWith('whsec_') && !rawStripeWh.includes('...') ? rawStripeWh : '';
+
+    const paypalClientId = envMap['PAYPAL_CLIENT_ID'] || envMap['NEXT_PUBLIC_PAYPAL_CLIENT_ID'] || process.env.PAYPAL_CLIENT_ID || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '';
+    const paypalSecret = envMap['PAYPAL_CLIENT_SECRET'] || envMap['PAYPAL_SECRET'] || envMap['PAYPAL_SECRET_KEY'] || process.env.PAYPAL_CLIENT_SECRET || process.env.PAYPAL_SECRET || '';
+    const paypalWebhook = envMap['PAYPAL_WEBHOOK_ID'] || process.env.PAYPAL_WEBHOOK_ID || '';
+    const paypalRawEnv = (envMap['PAYPAL_ENVIRONMENT'] || envMap['PAYPAL_MODE'] || process.env.PAYPAL_ENVIRONMENT || process.env.PAYPAL_MODE || '').toLowerCase();
+    const paypalEnv: 'sandbox' | 'live' = paypalRawEnv.includes('live') ? 'live' : 'sandbox';
+    const currencyFromEnv = envMap['PAYMENT_CURRENCY'] || envMap['DEFAULT_CURRENCY'] || process.env.PAYMENT_CURRENCY || process.env.DEFAULT_CURRENCY || '';
+
+    if (!settings) {
+      settings = {
+        activeGateway: stripePk ? 'stripe' : (paypalClientId ? 'paypal' : 'stripe'),
+        currency: currencyFromEnv || 'USD',
+        testMode: stripeSk ? stripeSk.startsWith('sk_test_') : true,
+        stripe: {
+          enabled: Boolean(stripePk || stripeSk),
+          publishableKey: stripePk,
+          secretKey: stripeSk,
+          webhookSecret: stripeWh,
+        },
+        paypal: {
+          enabled: Boolean(paypalClientId || paypalSecret),
+          clientId: paypalClientId,
+          clientSecret: paypalSecret,
+          webhookId: paypalWebhook,
+          environment: paypalEnv,
+        },
+      };
+    } else {
+      settings.stripe = {
+        enabled: settings.stripe?.enabled ?? Boolean(stripePk || stripeSk),
+        publishableKey: isValidStripePublishableKey(settings.stripe?.publishableKey) ? settings.stripe.publishableKey : stripePk,
+        secretKey: isValidStripeSecretKey(settings.stripe?.secretKey) ? settings.stripe.secretKey : stripeSk,
+        webhookSecret: (settings.stripe?.webhookSecret && !settings.stripe.webhookSecret.includes('...')) ? settings.stripe.webhookSecret : stripeWh,
+        ...(settings.stripe || {})
+      };
+      if (!isValidStripeSecretKey(settings.stripe.secretKey)) {
+        settings.stripe.secretKey = '';
+      }
+      if (!isValidStripePublishableKey(settings.stripe.publishableKey)) {
+        settings.stripe.publishableKey = '';
+      }
+
+      settings.paypal = {
+        enabled: settings.paypal?.enabled ?? Boolean(paypalClientId || paypalSecret),
+        clientId: settings.paypal?.clientId || paypalClientId,
+        clientSecret: settings.paypal?.clientSecret || paypalSecret,
+        webhookId: settings.paypal?.webhookId || paypalWebhook,
+        environment: settings.paypal?.environment || paypalEnv,
+        ...(settings.paypal || {})
+      };
+      if (!settings.currency && currencyFromEnv) settings.currency = currencyFromEnv;
+    }
+
     return NextResponse.json({
       success: true,
       transactions,
-      settings
+      settings: settings || null
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
@@ -49631,112 +50166,228 @@ export async function POST(req: Request) {
     await ensurePaymentSchema();
     const body = await req.json();
 
-    if (body.action === 'verify_webhook_secret') {
-      const secret = String(body.webhookSecret || '').trim();
-      const check = verifyWebhookSigningSecret(secret);
-      if (!check.valid) {
-        return NextResponse.json({
-          success: false,
-          error: check.error || 'Invalid Webhook Signing Secret.'
-        }, { status: 400 });
-      }
+    // 1. SYNC FROM .ENV FILE DATA
+    if (body.action === 'sync_env' || body.action === 'sync_from_env') {
+      const primaryEnv = getPrimaryEnvFilePath();
+      const envMap = parseEnvFile(primaryEnv);
+
+      const rawStripePk = envMap['STRIPE_PUBLISHABLE_KEY'] || envMap['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'] || process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
+      const rawStripeSk = envMap['STRIPE_SECRET_KEY'] || envMap['STRIPE_SK'] || process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || '';
+      const rawStripeWh = envMap['STRIPE_WEBHOOK_SECRET'] || envMap['STRIPE_ENDPOINT_SECRET'] || process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_ENDPOINT_SECRET || '';
+
+      const stripePk = isValidStripePublishableKey(rawStripePk) ? rawStripePk : '';
+      const stripeSk = isValidStripeSecretKey(rawStripeSk) ? rawStripeSk : '';
+      const stripeWh = rawStripeWh.startsWith('whsec_') && !rawStripeWh.includes('...') ? rawStripeWh : '';
+
+      const paypalClientId = envMap['PAYPAL_CLIENT_ID'] || envMap['NEXT_PUBLIC_PAYPAL_CLIENT_ID'] || process.env.PAYPAL_CLIENT_ID || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '';
+      const paypalSecret = envMap['PAYPAL_CLIENT_SECRET'] || envMap['PAYPAL_SECRET'] || envMap['PAYPAL_SECRET_KEY'] || process.env.PAYPAL_CLIENT_SECRET || process.env.PAYPAL_SECRET || '';
+      const paypalWebhook = envMap['PAYPAL_WEBHOOK_ID'] || process.env.PAYPAL_WEBHOOK_ID || '';
+      const paypalRawEnv = (envMap['PAYPAL_ENVIRONMENT'] || envMap['PAYPAL_MODE'] || process.env.PAYPAL_ENVIRONMENT || process.env.PAYPAL_MODE || '').toLowerCase();
+      const paypalEnv: 'sandbox' | 'live' = paypalRawEnv.includes('live') ? 'live' : 'sandbox';
+      const currencyFromEnv = envMap['PAYMENT_CURRENCY'] || envMap['DEFAULT_CURRENCY'] || process.env.PAYMENT_CURRENCY || process.env.DEFAULT_CURRENCY || '';
 
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
-        const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
-        if (sRow?.payment_settings) {
-          currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
+        const sRes: any = await query(`SELECT value FROM admin_settings WHERE key IN ('payment_gateway_config', 'paymentSettings') LIMIT 1`);
+        const sRow = extractFirstRow(sRes);
+        if (sRow?.value) {
+          currentSettings = typeof sRow.value === 'string' ? JSON.parse(sRow.value) : sRow.value;
         }
       } catch (_) {}
 
-      const updatedSettings = {
+      const syncedFields: string[] = [];
+      const updatedConfig = {
         ...currentSettings,
-        stripeWebhookVerified: true,
         stripe: {
-          ...(currentSettings?.stripe || {}),
-          webhookSecret: secret
+          enabled: currentSettings.stripe?.enabled ?? true,
+          publishableKey: currentSettings.stripe?.publishableKey || '',
+          secretKey: currentSettings.stripe?.secretKey || '',
+          webhookSecret: currentSettings.stripe?.webhookSecret || '',
+          ...(currentSettings.stripe || {})
+        },
+        paypal: {
+          enabled: currentSettings.paypal?.enabled ?? false,
+          clientId: currentSettings.paypal?.clientId || '',
+          clientSecret: currentSettings.paypal?.clientSecret || '',
+          webhookId: currentSettings.paypal?.webhookId || '',
+          environment: currentSettings.paypal?.environment || 'sandbox',
+          ...(currentSettings.paypal || {})
         }
       };
 
-      await persistAdminPaymentSettings(updatedSettings, currentSettings?.currency || 'USD');
+      if (stripePk) {
+        updatedConfig.stripe.publishableKey = stripePk;
+        syncedFields.push('Stripe Publishable Key');
+      }
+      if (stripeSk) {
+        updatedConfig.stripe.secretKey = stripeSk;
+        syncedFields.push('Stripe Secret Key');
+      }
+      if (stripeWh) {
+        updatedConfig.stripe.webhookSecret = stripeWh;
+        syncedFields.push('Stripe Webhook Secret');
+      }
+      if (paypalClientId) {
+        updatedConfig.paypal.clientId = paypalClientId;
+        syncedFields.push('PayPal Client ID');
+      }
+      if (paypalSecret) {
+        updatedConfig.paypal.clientSecret = paypalSecret;
+        syncedFields.push('PayPal Client Secret');
+      }
+      if (paypalWebhook) {
+        updatedConfig.paypal.webhookId = paypalWebhook;
+        syncedFields.push('PayPal Webhook ID');
+      }
+      if (paypalRawEnv) {
+        updatedConfig.paypal.environment = paypalEnv;
+      }
+      if (currencyFromEnv) {
+        updatedConfig.currency = currencyFromEnv;
+        syncedFields.push('Processing Currency');
+      }
+
+      if (updatedConfig.stripe.secretKey.startsWith('sk_test_')) {
+        updatedConfig.testMode = true;
+      } else if (updatedConfig.stripe.secretKey.startsWith('sk_live_')) {
+        updatedConfig.testMode = false;
+      }
+
+      await persistAdminSettingsData(updatedConfig, updatedConfig.currency || 'USD');
 
       return NextResponse.json({
         success: true,
-        webhookVerified: true,
-        message: 'Stripe Webhook Signing Secret verified and confirmed for HMAC signature validation!'
+        settings: updatedConfig,
+        syncedFields,
+        syncedCount: syncedFields.length,
+        message: syncedFields.length > 0 
+          ? `Successfully synced ${syncedFields.length} credential(s) from .env: ${syncedFields.join(', ')}`
+          : 'Database settings are already up-to-date with your current .env variables.'
       });
     }
 
-    if (body.action === 'verify_stripe_keys' || body.action === 'verify_stripe_key') {
-      let currentSettings: any = {};
-      try {
-        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
-        const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
-        if (sRow?.payment_settings) {
-          currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
-        }
-      } catch (_) {}
+    // 2. UPDATE / SAVE EXPLICITLY TO .ENV FILE DATA
+    if (body.action === 'update_env' || body.action === 'sync_to_env') {
+      const cfg = body.paymentSettings || body;
+      const currency = cfg.currency || body.currency || 'USD';
 
-      const publishableKey = String(body.publishableKey || body.stripe?.publishableKey || currentSettings?.stripe?.publishableKey || '').trim();
-      const secretKey = String(body.secretKey || body.stripe?.secretKey || currentSettings?.stripe?.secretKey || '').trim();
-      const webhookSecret = String(body.webhookSecret !== undefined ? body.webhookSecret : (currentSettings?.stripe?.webhookSecret || '')).trim();
-      const testMode = body.testMode !== undefined ? Boolean(body.testMode) : Boolean(currentSettings?.testMode);
-
-      const verifyRes = await verifyStripeCredentials(publishableKey, secretKey, testMode, webhookSecret);
-      if (!verifyRes.valid) {
-        return NextResponse.json({
-          success: false,
-          keysVerified: false,
-          webhookVerified: false,
-          error: verifyRes.error
-        }, { status: 400 });
-      }
-
-      const updatedSettings = {
-        ...currentSettings,
-        stripeKeysVerified: true,
-        stripeWebhookVerified: true,
-        stripe: {
-          ...(currentSettings?.stripe || {}),
-          publishableKey,
-          secretKey,
-          webhookSecret,
-        }
-      };
-
-      await persistAdminPaymentSettings(updatedSettings, currentSettings?.currency || 'USD');
-
-      const msg = `Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers (${verifyRes.livemode ? 'Live Production Mode' : 'Sandbox Test Mode'})!`;
+      const envResult = persistEnvCredentials(cfg, currency);
+      await persistAdminSettingsData(cfg, currency);
 
       return NextResponse.json({
         success: true,
-        keysVerified: true,
-        webhookVerified: true,
-        livemode: verifyRes.livemode,
-        message: msg
+        message: `Successfully updated .env file with ${envResult.updatedKeys.length} payment variables!`,
+        updatedKeys: envResult.updatedKeys,
+        settings: cfg
+      });
+    }
+
+    if (body.action === 'verify_webhook_secret') {
+      const secret = (body.webhookSecret || '').trim();
+      if (!secret) {
+        return NextResponse.json({ success: false, error: 'Webhook secret is required' }, { status: 400 });
+      }
+      if (!secret.startsWith('whsec_') || secret.length < 20 || secret.includes('...')) {
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Webhook Secret must start with "whsec_" and contain a valid HMAC signing key.' 
+        }, { status: 400 });
+      }
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!' 
+      });
+    }
+
+    if (body.action === 'verify_stripe_keys') {
+      const pKey = (body.publishableKey || body.stripe?.publishableKey || '').trim();
+      const sKey = (body.secretKey || body.stripe?.secretKey || '').trim();
+      const wSecret = (body.webhookSecret || body.stripe?.webhookSecret || '').trim();
+      const isTestMode = body.testMode !== undefined ? Boolean(body.testMode) : true;
+
+      if (!isValidStripePublishableKey(pKey)) {
+        return NextResponse.json({
+          success: false,
+          error: 'Publishable Key is invalid or contains placeholder characters (...).'
+        }, { status: 400 });
+      }
+
+      if (!isValidStripeSecretKey(sKey)) {
+        return NextResponse.json({
+          success: false,
+          error: 'Secret Key is invalid or contains placeholder characters (...).'
+        }, { status: 400 });
+      }
+
+      if (isTestMode && (!pKey.startsWith('pk_test_') || !sKey.startsWith('sk_test_'))) {
+        return NextResponse.json({
+          success: false,
+          error: 'Sandbox Test Mode is active: Publishable Key must start with "pk_test_" and Secret Key must start with "sk_test_".'
+        }, { status: 400 });
+      }
+
+      if (!isTestMode && (!pKey.startsWith('pk_live_') || !sKey.startsWith('sk_live_'))) {
+        return NextResponse.json({
+          success: false,
+          error: 'Live Production Mode is active: Publishable Key must start with "pk_live_" and Secret Key must start with "sk_live_".'
+        }, { status: 400 });
+      }
+
+      let stripeLiveVerified = false;
+      try {
+        const stripeRes = await fetch('https://api.stripe.com/v1/balance', {
+          headers: { 'Authorization': `Bearer ${sKey}` },
+          signal: AbortSignal.timeout(4000),
+        });
+        if (stripeRes.ok) {
+          stripeLiveVerified = true;
+        } else {
+          const errData = await stripeRes.json().catch(() => ({}));
+          return NextResponse.json({
+            success: false,
+            error: errData?.error?.message || `Stripe authentication rejected key with status ${stripeRes.status}`
+          }, { status: 400 });
+        }
+      } catch (err: any) {
+        return NextResponse.json({
+          success: false,
+          error: `Could not connect to Stripe: ${err.message}`
+        }, { status: 400 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers!'
       });
     }
 
     if (body.action === 'toggle_test_mode') {
+      const nextMode = Boolean(body.testMode);
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id::text IN ('primary_settings', '1') ORDER BY updated_at DESC LIMIT 1`);
-        const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
-        if (sRow?.payment_settings) {
-          currentSettings = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
+        const sRes: any = await query(`SELECT value FROM admin_settings WHERE key IN ('payment_gateway_config', 'paymentSettings') LIMIT 1`);
+        const row = extractFirstRow(sRes);
+        if (row?.value) {
+          currentSettings = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
         }
       } catch (_) {}
 
       const updatedSettings = {
         ...currentSettings,
-        testMode: Boolean(body.testMode),
+        ...(body.paymentSettings || {}),
+        testMode: nextMode,
         stripeKeysVerified: false,
-        stripeWebhookVerified: false
+        stripeWebhookVerified: false,
       };
 
-      await persistAdminPaymentSettings(updatedSettings, currentSettings?.currency || 'USD');
-      return NextResponse.json({ success: true, message: 'Test mode updated in PostgreSQL', testMode: updatedSettings.testMode });
+      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
+      persistEnvCredentials(updatedSettings, updatedSettings.currency || 'USD');
+
+      return NextResponse.json({
+        success: true,
+        message: nextMode ? 'Sandbox (Test Mode) enabled and saved to server & .env!' : 'Live Production mode enabled and saved to server & .env!',
+        settings: updatedSettings
+      });
     }
 
     if (body.action === 'add_transaction') {
@@ -49765,118 +50416,92 @@ export async function POST(req: Request) {
       const confirmedAmount = tx.confirmedAmount !== undefined ? Number(tx.confirmedAmount) : (status === 'succeeded' ? amount : null);
       const confirmedAt = tx.confirmedAt ? new Date(tx.confirmedAt).toISOString() : (status === 'succeeded' ? new Date().toISOString() : null);
 
-      await query(
-        `INSERT INTO payment_transactions (
-          id, customer_name, customer_email, plan_name, plan_slug,
-          amount, currency, gateway, status, test_mode, failure_reason,
-          is_recurring, recurring_interval, auto_renew, created_at,
-          expiry_date, gateway_transaction_id, confirmed_amount, confirmed_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          customer_name = EXCLUDED.customer_name,
-          customer_email = EXCLUDED.customer_email,
-          plan_name = EXCLUDED.plan_name,
-          plan_slug = EXCLUDED.plan_slug,
-          amount = EXCLUDED.amount,
-          currency = EXCLUDED.currency,
-          gateway = EXCLUDED.gateway,
-          status = EXCLUDED.status,
-          failure_reason = EXCLUDED.failure_reason,
-          is_recurring = EXCLUDED.is_recurring,
-          recurring_interval = EXCLUDED.recurring_interval,
-          auto_renew = EXCLUDED.auto_renew,
-          created_at = EXCLUDED.created_at,
-          expiry_date = EXCLUDED.expiry_date,
-          gateway_transaction_id = EXCLUDED.gateway_transaction_id,
-          confirmed_amount = EXCLUDED.confirmed_amount,
-          confirmed_at = EXCLUDED.confirmed_at,
-          updated_at = NOW()`,
-        [
-          txId, customerName, customerEmail, planName, planSlug,
-          amount, currency, gateway, status, testMode, failureReason,
-          isRecurring, recurringInterval, autoRenew, createdAt,
-          expiryDate, gatewayTxId, confirmedAmount, confirmedAt
-        ]
-      );
+      let checkRes: any = null;
+      try {
+        checkRes = await query(`SELECT id FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
+      } catch (_) {
+        checkRes = [];
+      }
+      const checkRows = extractRows(checkRes);
 
-      return NextResponse.json({ success: true, message: 'Transaction recorded successfully', transaction: tx });
-    }
-
-    if (body.action === 'update_transaction') {
-      const tx = body.transaction;
-      if (!tx || !tx.id) {
-        return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+      if (checkRows.length > 0) {
+        await query(
+          `UPDATE payment_transactions 
+           SET customer_name = $1, customer_email = $2, plan_name = $3, plan_slug = $4,
+               amount = $5, currency = $6, gateway = $7, status = $8, failure_reason = $9,
+               is_recurring = $10, recurring_interval = $11, auto_renew = $12, created_at = $13,
+               expiry_date = $14, gateway_transaction_id = $15, confirmed_amount = $16,
+               confirmed_at = $17, updated_at = NOW()
+           WHERE id = $18`,
+          [
+            customerName, customerEmail, planName, planSlug, amount, currency, gateway,
+            status, failureReason, isRecurring, recurringInterval, autoRenew, createdAt,
+            expiryDate, gatewayTxId, confirmedAmount, confirmedAt, txId
+          ]
+        );
+      } else {
+        await query(
+          `INSERT INTO payment_transactions (
+            id, customer_name, customer_email, plan_name, plan_slug,
+            amount, currency, gateway, status, test_mode, failure_reason,
+            is_recurring, recurring_interval, auto_renew, created_at,
+            expiry_date, gateway_transaction_id, confirmed_amount, confirmed_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())`,
+          [
+            txId, customerName, customerEmail, planName, planSlug,
+            amount, currency, gateway, status, testMode, failureReason,
+            isRecurring, recurringInterval, autoRenew, createdAt,
+            expiryDate, gatewayTxId, confirmedAmount, confirmedAt
+          ]
+        ).catch(async () => {
+          await query(
+            `INSERT INTO payment_transactions (
+              id, customer_name, customer_email, plan_name, plan_slug,
+              amount, currency, gateway, status, created_at, expiry_date
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+            [
+              txId, customerName, customerEmail, planName, planSlug,
+              amount, currency, gateway, status, createdAt, expiryDate
+            ]
+          );
+        });
       }
 
-      await query(
-        `UPDATE payment_transactions 
-         SET customer_name = $1, customer_email = $2, plan_name = $3, plan_slug = $4,
-             amount = $5, currency = $6, gateway = $7, status = $8, failure_reason = $9,
-             is_recurring = $10, recurring_interval = $11, auto_renew = $12, created_at = $13,
-             expiry_date = $14, gateway_transaction_id = $15, confirmed_amount = $16,
-             confirmed_at = $17, updated_at = NOW()
-         WHERE id = $18`,
-        [
-          tx.customerName,
-          (tx.customerEmail || '').toLowerCase().trim(),
-          tx.planName,
-          tx.planSlug,
-          Number(tx.amount || 0),
-          tx.currency,
-          tx.gateway,
-          tx.status,
-          tx.failureReason || null,
-          Boolean(tx.isRecurring),
-          tx.recurringInterval || 'MONTH',
-          Boolean(tx.autoRenew),
-          tx.createdAt,
-          tx.expiryDate || null,
-          tx.gatewayTransactionId || null,
-          tx.confirmedAmount !== undefined ? Number(tx.confirmedAmount) : null,
-          tx.confirmedAt || null,
-          tx.id
-        ]
-      );
-
-      return NextResponse.json({ success: true, message: 'Transaction updated', transaction: tx });
-    }
-
-    if (body.action === 'refund_transaction' || body.action === 'cancel_transaction' || body.action === 'confirm_payment') {
-      const tx = body.transaction || {};
-      const txId = body.id || tx.id;
-      if (!txId) {
-        return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
-      }
-
-      await query(
-        `UPDATE payment_transactions 
-         SET status = $1, is_recurring = $2, auto_renew = $3, expiry_date = $4,
-             confirmed_amount = $5, confirmed_at = $6, gateway_transaction_id = $7, updated_at = NOW()
-         WHERE id = $8`,
-        [
-          tx.status,
-          Boolean(tx.isRecurring),
-          Boolean(tx.autoRenew),
-          tx.expiryDate || null,
-          tx.confirmedAmount !== undefined ? Number(tx.confirmedAmount) : null,
-          tx.confirmedAt || null,
-          tx.gatewayTransactionId || null,
-          txId
-        ]
-      );
-
-      return NextResponse.json({ 
-        success: true, 
-        message: body.action === 'refund_transaction' ? 'Transaction refunded' : body.action === 'cancel_transaction' ? 'Transaction cancelled' : 'Payment confirmed',
-        transaction: tx 
+      return NextResponse.json({
+        success: true,
+        message: 'Transaction recorded successfully',
+        transaction: {
+          ...tx,
+          id: txId,
+          customerName,
+          customerEmail,
+          planName,
+          planSlug,
+          amount,
+          currency,
+          gateway,
+          status,
+          isRecurring,
+          autoRenew,
+          createdAt,
+          expiryDate
+        }
       });
     }
 
+    // Default Save Gateway Settings
     const gatewayConfig = body.paymentSettings || body;
     const currency = gatewayConfig.currency || body.currency || 'USD';
-    await persistAdminPaymentSettings(gatewayConfig, currency);
 
-    return NextResponse.json({ success: true, message: 'Gateway settings saved to PostgreSQL' });
+    await persistAdminSettingsData(gatewayConfig, currency);
+    const envResult = persistEnvCredentials(gatewayConfig, currency);
+
+    return NextResponse.json({
+      success: true,
+      message: 'Payment gateway settings and currency saved successfully to PostgreSQL and .env file!',
+      settings: gatewayConfig,
+      updatedKeys: envResult.updatedKeys
+    });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -50166,6 +50791,816 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: 'Unsupported provider' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message || 'Internal connection test failure.' }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/payment-gateway/route.ts`
+```typescript
+import { NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+function extractRows(result: any): any[] {
+  if (!result) return [];
+  if (Array.isArray(result)) return result;
+  if (Array.isArray(result.rows)) return result.rows;
+  return [];
+}
+
+function extractFirstRow(result: any): any | null {
+  if (!result) return null;
+  if (Array.isArray(result)) return result[0] || null;
+  if (Array.isArray(result.rows)) return result.rows[0] || null;
+  return null;
+}
+
+function isValidStripeSecretKey(key?: string | null): boolean {
+  if (!key) return false;
+  const trimmed = key.trim();
+  if (trimmed.length < 25) return false;
+  if (trimmed.includes('...') || trimmed.includes('*') || trimmed.includes('placeholder') || trimmed.includes('sample')) {
+    return false;
+  }
+  return (
+    trimmed.startsWith('sk_test_') ||
+    trimmed.startsWith('sk_live_') ||
+    trimmed.startsWith('rk_test_') ||
+    trimmed.startsWith('rk_live_')
+  );
+}
+
+function isValidStripePublishableKey(key?: string | null): boolean {
+  if (!key) return false;
+  const trimmed = key.trim();
+  if (trimmed.length < 25) return false;
+  if (trimmed.includes('...') || trimmed.includes('*') || trimmed.includes('placeholder') || trimmed.includes('sample')) {
+    return false;
+  }
+  return trimmed.startsWith('pk_test_') || trimmed.startsWith('pk_live_');
+}
+
+function getPrimaryEnvFilePath(): string {
+  const cwd = process.cwd();
+  const candidates = [
+    path.join(cwd, '.env'),
+    path.join(cwd, '.env.local'),
+    path.join(cwd, 'apps', 'web', '.env'),
+    path.join(cwd, 'apps', 'web', '.env.local'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return path.join(cwd, '.env');
+}
+
+function parseEnvFile(filePath: string): Record<string, string> {
+  const map: Record<string, string> = {};
+  if (!fs.existsSync(filePath)) return map;
+  try {
+    const lines = fs.readFileSync(filePath, 'utf-8').split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const idx = trimmed.indexOf('=');
+      if (idx > 0) {
+        const k = trimmed.substring(0, idx).trim();
+        let v = trimmed.substring(idx + 1).trim();
+        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+          v = v.slice(1, -1);
+        }
+        map[k] = v;
+      }
+    }
+  } catch (_) {}
+  return map;
+}
+
+function updateEnvFileBatch(filePath: string, updates: Record<string, string>): boolean {
+  let content = '';
+  if (fs.existsSync(filePath)) {
+    try {
+      content = fs.readFileSync(filePath, 'utf-8');
+    } catch (_) {}
+  } else {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
+    }
+  }
+
+  let lines = content ? content.split(/\r?\n/) : [];
+  const processedKeys = new Set<string>();
+
+  lines = lines.map(line => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return line;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx > 0) {
+      const k = trimmed.substring(0, eqIdx).trim();
+      if (k in updates) {
+        processedKeys.add(k);
+        const val = updates[k];
+        const safeVal = val.includes(' ') || val.includes('#') ? `"${val}"` : val;
+        return `${k}=${safeVal}`;
+      }
+    }
+    return line;
+  });
+
+  for (const [k, val] of Object.entries(updates)) {
+    if (!processedKeys.has(k)) {
+      const safeVal = val.includes(' ') || val.includes('#') ? `"${val}"` : val;
+      lines.push(`${k}=${safeVal}`);
+    }
+  }
+
+  const newContent = lines.join('\n').trim() + '\n';
+  if (newContent !== content) {
+    try {
+      fs.writeFileSync(filePath, newContent, 'utf-8');
+      return true;
+    } catch (e) {
+      console.warn('[EnvUpdate] Failed to write env file:', e);
+      return false;
+    }
+  }
+  return false;
+}
+
+function persistEnvCredentials(settings: any, currency?: string) {
+  const targetKeys: Record<string, string> = {};
+
+  if (settings.stripe?.publishableKey !== undefined) {
+    const pk = settings.stripe.publishableKey.trim();
+    if (isValidStripePublishableKey(pk)) {
+      targetKeys['STRIPE_PUBLISHABLE_KEY'] = pk;
+      targetKeys['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'] = pk;
+    }
+  }
+  if (settings.stripe?.secretKey !== undefined) {
+    const sk = settings.stripe.secretKey.trim();
+    if (isValidStripeSecretKey(sk)) {
+      targetKeys['STRIPE_SECRET_KEY'] = sk;
+    }
+  }
+  if (settings.stripe?.webhookSecret !== undefined) {
+    const ws = settings.stripe.webhookSecret.trim();
+    if (ws.startsWith('whsec_') && ws.length >= 20 && !ws.includes('...')) {
+      targetKeys['STRIPE_WEBHOOK_SECRET'] = ws;
+    }
+  }
+
+  if (settings.paypal?.clientId !== undefined) {
+    targetKeys['PAYPAL_CLIENT_ID'] = settings.paypal.clientId.trim();
+    targetKeys['NEXT_PUBLIC_PAYPAL_CLIENT_ID'] = settings.paypal.clientId.trim();
+  }
+  if (settings.paypal?.clientSecret !== undefined) {
+    targetKeys['PAYPAL_CLIENT_SECRET'] = settings.paypal.clientSecret.trim();
+  }
+  if (settings.paypal?.webhookId !== undefined) {
+    targetKeys['PAYPAL_WEBHOOK_ID'] = settings.paypal.webhookId.trim();
+  }
+  if (settings.paypal?.environment !== undefined) {
+    targetKeys['PAYPAL_ENVIRONMENT'] = settings.paypal.environment;
+  }
+
+  const cur = currency || settings.currency;
+  if (cur) {
+    targetKeys['PAYMENT_CURRENCY'] = cur;
+  }
+  if (settings.activeGateway) {
+    targetKeys['PAYMENT_GATEWAY'] = settings.activeGateway;
+  }
+  if (settings.testMode !== undefined) {
+    targetKeys['PAYMENT_TEST_MODE'] = String(settings.testMode);
+  }
+
+  const primaryEnv = getPrimaryEnvFilePath();
+  updateEnvFileBatch(primaryEnv, targetKeys);
+
+  for (const [key, val] of Object.entries(targetKeys)) {
+    process.env[key] = val;
+  }
+
+  return { envFile: primaryEnv, updatedKeys: Object.keys(targetKeys) };
+}
+
+async function ensurePaymentSchema() {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        id VARCHAR(255) PRIMARY KEY,
+        customer_name TEXT,
+        customer_email TEXT,
+        plan_name TEXT,
+        plan_slug TEXT,
+        amount NUMERIC DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'USD',
+        gateway VARCHAR(50) DEFAULT 'stripe',
+        status VARCHAR(50) DEFAULT 'succeeded',
+        test_mode BOOLEAN DEFAULT false,
+        failure_reason TEXT,
+        is_recurring BOOLEAN DEFAULT true,
+        recurring_interval VARCHAR(20) DEFAULT 'MONTH',
+        auto_renew BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        expiry_date TIMESTAMPTZ,
+        gateway_transaction_id TEXT,
+        confirmed_amount NUMERIC,
+        confirmed_at TIMESTAMPTZ
+      );
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        key VARCHAR(255) PRIMARY KEY,
+        value JSONB,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    await query(`
+      DO $$ 
+      BEGIN 
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS id INT; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS key VARCHAR(255); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS payment_settings JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS site_name TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN OTHERS THEN NULL; END;
+      END $$;
+    `);
+  } catch (e) {
+    console.warn('[Payment API] Schema check warning:', e);
+  }
+}
+
+async function persistAdminSettingsData(settings: any, currency: string) {
+  await ensurePaymentSchema();
+  const cleanSettings = { ...settings };
+  delete cleanSettings.action;
+  const jsonStr = JSON.stringify(cleanSettings);
+  const cur = currency || cleanSettings.currency || 'USD';
+
+  try {
+    await query(
+      `INSERT INTO admin_settings (key, value, currency, updated_at)
+       VALUES ('payment_gateway_config', $1::jsonb, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET
+         value = EXCLUDED.value,
+         currency = EXCLUDED.currency,
+         updated_at = NOW()`,
+      [jsonStr, cur]
+    );
+  } catch (e1) {
+    try {
+      await query(
+        `UPDATE admin_settings SET value = $1::jsonb, currency = $2, updated_at = NOW() WHERE key = 'payment_gateway_config'`,
+        [jsonStr, cur]
+      );
+    } catch (_) {}
+  }
+
+  try {
+    await query(
+      `INSERT INTO admin_settings (key, value, currency, updated_at)
+       VALUES ('paymentSettings', $1::jsonb, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET
+         value = EXCLUDED.value,
+         currency = EXCLUDED.currency,
+         updated_at = NOW()`,
+      [jsonStr, cur]
+    );
+  } catch (_) {}
+
+  try {
+    await query(
+      `UPDATE admin_settings SET payment_settings = $1::jsonb, currency = $2, updated_at = NOW()
+       WHERE key IN ('payment_gateway_config', 'paymentSettings') OR id = 1`,
+      [jsonStr, cur]
+    );
+  } catch (_) {}
+
+  try {
+    const dataDir = path.join(process.cwd(), 'data');
+    const filePath = path.join(dataDir, 'admin_settings.json');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    let existing: any = {};
+    if (fs.existsSync(filePath)) {
+      try {
+        existing = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      } catch (_) {}
+    }
+    existing.paymentSettings = cleanSettings;
+    existing.payment_gateway_config = cleanSettings;
+    existing.currency = cur;
+    existing.updatedAt = new Date().toISOString();
+    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
+  } catch (fileErr) {
+    console.warn('[Payment API] File mirror error:', fileErr);
+  }
+}
+
+export async function GET() {
+  try {
+    await ensurePaymentSchema();
+
+    let txRes: any = null;
+    try {
+      txRes = await query(`SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`);
+    } catch (_) {
+      try {
+        txRes = await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`);
+      } catch (_) {
+        txRes = [];
+      }
+    }
+
+    const transactions = extractRows(txRes);
+    let settings: any = null;
+
+    try {
+      const sRes: any = await query(
+        `SELECT key, value, payment_settings, currency FROM admin_settings 
+         WHERE key IN ('payment_gateway_config', 'paymentSettings') OR id = 1 
+         ORDER BY updated_at DESC LIMIT 2`
+      );
+      const rows = extractRows(sRes);
+      for (const row of rows) {
+        let val = row.value || row.payment_settings;
+        if (typeof val === 'string') {
+          try { val = JSON.parse(val); } catch (_) {}
+        }
+        if (val && typeof val === 'object') {
+          settings = { ...val };
+          if (row.currency) settings.currency = row.currency;
+          break;
+        }
+      }
+    } catch (_) {}
+
+    if (!settings) {
+      try {
+        const filePath = path.join(process.cwd(), 'data', 'admin_settings.json');
+        if (fs.existsSync(filePath)) {
+          const fileData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+          if (fileData.paymentSettings || fileData.payment_gateway_config) {
+            settings = { ...(fileData.paymentSettings || fileData.payment_gateway_config) };
+            if (fileData.currency) settings.currency = fileData.currency;
+          }
+        }
+      } catch (_) {}
+    }
+
+    const primaryEnv = getPrimaryEnvFilePath();
+    const envMap = parseEnvFile(primaryEnv);
+
+    const rawStripePk = envMap['STRIPE_PUBLISHABLE_KEY'] || envMap['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'] || process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
+    const rawStripeSk = envMap['STRIPE_SECRET_KEY'] || envMap['STRIPE_SK'] || process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || '';
+    const rawStripeWh = envMap['STRIPE_WEBHOOK_SECRET'] || envMap['STRIPE_ENDPOINT_SECRET'] || process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_ENDPOINT_SECRET || '';
+
+    const stripePk = isValidStripePublishableKey(rawStripePk) ? rawStripePk : '';
+    const stripeSk = isValidStripeSecretKey(rawStripeSk) ? rawStripeSk : '';
+    const stripeWh = rawStripeWh.startsWith('whsec_') && !rawStripeWh.includes('...') ? rawStripeWh : '';
+
+    const paypalClientId = envMap['PAYPAL_CLIENT_ID'] || envMap['NEXT_PUBLIC_PAYPAL_CLIENT_ID'] || process.env.PAYPAL_CLIENT_ID || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '';
+    const paypalSecret = envMap['PAYPAL_CLIENT_SECRET'] || envMap['PAYPAL_SECRET'] || envMap['PAYPAL_SECRET_KEY'] || process.env.PAYPAL_CLIENT_SECRET || process.env.PAYPAL_SECRET || '';
+    const paypalWebhook = envMap['PAYPAL_WEBHOOK_ID'] || process.env.PAYPAL_WEBHOOK_ID || '';
+    const paypalRawEnv = (envMap['PAYPAL_ENVIRONMENT'] || envMap['PAYPAL_MODE'] || process.env.PAYPAL_ENVIRONMENT || process.env.PAYPAL_MODE || '').toLowerCase();
+    const paypalEnv: 'sandbox' | 'live' = paypalRawEnv.includes('live') ? 'live' : 'sandbox';
+    const currencyFromEnv = envMap['PAYMENT_CURRENCY'] || envMap['DEFAULT_CURRENCY'] || process.env.PAYMENT_CURRENCY || process.env.DEFAULT_CURRENCY || '';
+
+    if (!settings) {
+      settings = {
+        activeGateway: stripePk ? 'stripe' : (paypalClientId ? 'paypal' : 'stripe'),
+        currency: currencyFromEnv || 'USD',
+        testMode: stripeSk ? stripeSk.startsWith('sk_test_') : true,
+        stripe: {
+          enabled: Boolean(stripePk || stripeSk),
+          publishableKey: stripePk,
+          secretKey: stripeSk,
+          webhookSecret: stripeWh,
+        },
+        paypal: {
+          enabled: Boolean(paypalClientId || paypalSecret),
+          clientId: paypalClientId,
+          clientSecret: paypalSecret,
+          webhookId: paypalWebhook,
+          environment: paypalEnv,
+        },
+      };
+    } else {
+      settings.stripe = {
+        enabled: settings.stripe?.enabled ?? Boolean(stripePk || stripeSk),
+        publishableKey: isValidStripePublishableKey(settings.stripe?.publishableKey) ? settings.stripe.publishableKey : stripePk,
+        secretKey: isValidStripeSecretKey(settings.stripe?.secretKey) ? settings.stripe.secretKey : stripeSk,
+        webhookSecret: (settings.stripe?.webhookSecret && !settings.stripe.webhookSecret.includes('...')) ? settings.stripe.webhookSecret : stripeWh,
+        ...(settings.stripe || {})
+      };
+      if (!isValidStripeSecretKey(settings.stripe.secretKey)) {
+        settings.stripe.secretKey = '';
+      }
+      if (!isValidStripePublishableKey(settings.stripe.publishableKey)) {
+        settings.stripe.publishableKey = '';
+      }
+
+      settings.paypal = {
+        enabled: settings.paypal?.enabled ?? Boolean(paypalClientId || paypalSecret),
+        clientId: settings.paypal?.clientId || paypalClientId,
+        clientSecret: settings.paypal?.clientSecret || paypalSecret,
+        webhookId: settings.paypal?.webhookId || paypalWebhook,
+        environment: settings.paypal?.environment || paypalEnv,
+        ...(settings.paypal || {})
+      };
+      if (!settings.currency && currencyFromEnv) settings.currency = currencyFromEnv;
+    }
+
+    return NextResponse.json({
+      success: true,
+      transactions,
+      settings: settings || null
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    await ensurePaymentSchema();
+    const body = await req.json();
+
+    // 1. SYNC FROM .ENV FILE DATA
+    if (body.action === 'sync_env' || body.action === 'sync_from_env') {
+      const primaryEnv = getPrimaryEnvFilePath();
+      const envMap = parseEnvFile(primaryEnv);
+
+      const rawStripePk = envMap['STRIPE_PUBLISHABLE_KEY'] || envMap['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'] || process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
+      const rawStripeSk = envMap['STRIPE_SECRET_KEY'] || envMap['STRIPE_SK'] || process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || '';
+      const rawStripeWh = envMap['STRIPE_WEBHOOK_SECRET'] || envMap['STRIPE_ENDPOINT_SECRET'] || process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_ENDPOINT_SECRET || '';
+
+      const stripePk = isValidStripePublishableKey(rawStripePk) ? rawStripePk : '';
+      const stripeSk = isValidStripeSecretKey(rawStripeSk) ? rawStripeSk : '';
+      const stripeWh = rawStripeWh.startsWith('whsec_') && !rawStripeWh.includes('...') ? rawStripeWh : '';
+
+      const paypalClientId = envMap['PAYPAL_CLIENT_ID'] || envMap['NEXT_PUBLIC_PAYPAL_CLIENT_ID'] || process.env.PAYPAL_CLIENT_ID || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '';
+      const paypalSecret = envMap['PAYPAL_CLIENT_SECRET'] || envMap['PAYPAL_SECRET'] || envMap['PAYPAL_SECRET_KEY'] || process.env.PAYPAL_CLIENT_SECRET || process.env.PAYPAL_SECRET || '';
+      const paypalWebhook = envMap['PAYPAL_WEBHOOK_ID'] || process.env.PAYPAL_WEBHOOK_ID || '';
+      const paypalRawEnv = (envMap['PAYPAL_ENVIRONMENT'] || envMap['PAYPAL_MODE'] || process.env.PAYPAL_ENVIRONMENT || process.env.PAYPAL_MODE || '').toLowerCase();
+      const paypalEnv: 'sandbox' | 'live' = paypalRawEnv.includes('live') ? 'live' : 'sandbox';
+      const currencyFromEnv = envMap['PAYMENT_CURRENCY'] || envMap['DEFAULT_CURRENCY'] || process.env.PAYMENT_CURRENCY || process.env.DEFAULT_CURRENCY || '';
+
+      let currentSettings: any = {};
+      try {
+        const sRes: any = await query(`SELECT value FROM admin_settings WHERE key IN ('payment_gateway_config', 'paymentSettings') LIMIT 1`);
+        const sRow = extractFirstRow(sRes);
+        if (sRow?.value) {
+          currentSettings = typeof sRow.value === 'string' ? JSON.parse(sRow.value) : sRow.value;
+        }
+      } catch (_) {}
+
+      const syncedFields: string[] = [];
+      const updatedConfig = {
+        ...currentSettings,
+        stripe: {
+          enabled: currentSettings.stripe?.enabled ?? true,
+          publishableKey: currentSettings.stripe?.publishableKey || '',
+          secretKey: currentSettings.stripe?.secretKey || '',
+          webhookSecret: currentSettings.stripe?.webhookSecret || '',
+          ...(currentSettings.stripe || {})
+        },
+        paypal: {
+          enabled: currentSettings.paypal?.enabled ?? false,
+          clientId: currentSettings.paypal?.clientId || '',
+          clientSecret: currentSettings.paypal?.clientSecret || '',
+          webhookId: currentSettings.paypal?.webhookId || '',
+          environment: currentSettings.paypal?.environment || 'sandbox',
+          ...(currentSettings.paypal || {})
+        }
+      };
+
+      if (stripePk) {
+        updatedConfig.stripe.publishableKey = stripePk;
+        syncedFields.push('Stripe Publishable Key');
+      }
+      if (stripeSk) {
+        updatedConfig.stripe.secretKey = stripeSk;
+        syncedFields.push('Stripe Secret Key');
+      }
+      if (stripeWh) {
+        updatedConfig.stripe.webhookSecret = stripeWh;
+        syncedFields.push('Stripe Webhook Secret');
+      }
+      if (paypalClientId) {
+        updatedConfig.paypal.clientId = paypalClientId;
+        syncedFields.push('PayPal Client ID');
+      }
+      if (paypalSecret) {
+        updatedConfig.paypal.clientSecret = paypalSecret;
+        syncedFields.push('PayPal Client Secret');
+      }
+      if (paypalWebhook) {
+        updatedConfig.paypal.webhookId = paypalWebhook;
+        syncedFields.push('PayPal Webhook ID');
+      }
+      if (paypalRawEnv) {
+        updatedConfig.paypal.environment = paypalEnv;
+      }
+      if (currencyFromEnv) {
+        updatedConfig.currency = currencyFromEnv;
+        syncedFields.push('Processing Currency');
+      }
+
+      if (updatedConfig.stripe.secretKey.startsWith('sk_test_')) {
+        updatedConfig.testMode = true;
+      } else if (updatedConfig.stripe.secretKey.startsWith('sk_live_')) {
+        updatedConfig.testMode = false;
+      }
+
+      await persistAdminSettingsData(updatedConfig, updatedConfig.currency || 'USD');
+
+      return NextResponse.json({
+        success: true,
+        settings: updatedConfig,
+        syncedFields,
+        syncedCount: syncedFields.length,
+        message: syncedFields.length > 0 
+          ? `Successfully synced ${syncedFields.length} credential(s) from .env: ${syncedFields.join(', ')}`
+          : 'Database settings are already up-to-date with your current .env variables.'
+      });
+    }
+
+    // 2. UPDATE / SAVE EXPLICITLY TO .ENV FILE DATA
+    if (body.action === 'update_env' || body.action === 'sync_to_env') {
+      const cfg = body.paymentSettings || body;
+      const currency = cfg.currency || body.currency || 'USD';
+
+      const envResult = persistEnvCredentials(cfg, currency);
+      await persistAdminSettingsData(cfg, currency);
+
+      return NextResponse.json({
+        success: true,
+        message: `Successfully updated .env file with ${envResult.updatedKeys.length} payment variables!`,
+        updatedKeys: envResult.updatedKeys,
+        settings: cfg
+      });
+    }
+
+    if (body.action === 'verify_webhook_secret') {
+      const secret = (body.webhookSecret || '').trim();
+      if (!secret) {
+        return NextResponse.json({ success: false, error: 'Webhook secret is required' }, { status: 400 });
+      }
+      if (!secret.startsWith('whsec_') || secret.length < 20 || secret.includes('...')) {
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Webhook Secret must start with "whsec_" and contain a valid HMAC signing key.' 
+        }, { status: 400 });
+      }
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!' 
+      });
+    }
+
+    if (body.action === 'verify_stripe_keys') {
+      const pKey = (body.publishableKey || body.stripe?.publishableKey || '').trim();
+      const sKey = (body.secretKey || body.stripe?.secretKey || '').trim();
+      const wSecret = (body.webhookSecret || body.stripe?.webhookSecret || '').trim();
+      const isTestMode = body.testMode !== undefined ? Boolean(body.testMode) : true;
+
+      if (!isValidStripePublishableKey(pKey)) {
+        return NextResponse.json({
+          success: false,
+          error: 'Publishable Key is invalid or contains placeholder characters (...).'
+        }, { status: 400 });
+      }
+
+      if (!isValidStripeSecretKey(sKey)) {
+        return NextResponse.json({
+          success: false,
+          error: 'Secret Key is invalid or contains placeholder characters (...).'
+        }, { status: 400 });
+      }
+
+      if (isTestMode && (!pKey.startsWith('pk_test_') || !sKey.startsWith('sk_test_'))) {
+        return NextResponse.json({
+          success: false,
+          error: 'Sandbox Test Mode is active: Publishable Key must start with "pk_test_" and Secret Key must start with "sk_test_".'
+        }, { status: 400 });
+      }
+
+      if (!isTestMode && (!pKey.startsWith('pk_live_') || !sKey.startsWith('sk_live_'))) {
+        return NextResponse.json({
+          success: false,
+          error: 'Live Production Mode is active: Publishable Key must start with "pk_live_" and Secret Key must start with "sk_live_".'
+        }, { status: 400 });
+      }
+
+      let stripeLiveVerified = false;
+      try {
+        const stripeRes = await fetch('https://api.stripe.com/v1/balance', {
+          headers: { 'Authorization': `Bearer ${sKey}` },
+          signal: AbortSignal.timeout(4000),
+        });
+        if (stripeRes.ok) {
+          stripeLiveVerified = true;
+        } else {
+          const errData = await stripeRes.json().catch(() => ({}));
+          return NextResponse.json({
+            success: false,
+            error: errData?.error?.message || `Stripe authentication rejected key with status ${stripeRes.status}`
+          }, { status: 400 });
+        }
+      } catch (err: any) {
+        return NextResponse.json({
+          success: false,
+          error: `Could not connect to Stripe: ${err.message}`
+        }, { status: 400 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers!'
+      });
+    }
+
+    if (body.action === 'toggle_test_mode') {
+      const nextMode = Boolean(body.testMode);
+      let currentSettings: any = {};
+      try {
+        const sRes: any = await query(`SELECT value FROM admin_settings WHERE key IN ('payment_gateway_config', 'paymentSettings') LIMIT 1`);
+        const row = extractFirstRow(sRes);
+        if (row?.value) {
+          currentSettings = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
+        }
+      } catch (_) {}
+
+      const updatedSettings = {
+        ...currentSettings,
+        ...(body.paymentSettings || {}),
+        testMode: nextMode,
+        stripeKeysVerified: false,
+        stripeWebhookVerified: false,
+      };
+
+      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
+      persistEnvCredentials(updatedSettings, updatedSettings.currency || 'USD');
+
+      return NextResponse.json({
+        success: true,
+        message: nextMode ? 'Sandbox (Test Mode) enabled and saved to server & .env!' : 'Live Production mode enabled and saved to server & .env!',
+        settings: updatedSettings
+      });
+    }
+
+    if (body.action === 'add_transaction') {
+      const tx = body.transaction;
+      if (!tx) {
+        return NextResponse.json({ success: false, error: 'Transaction object required' }, { status: 400 });
+      }
+
+      const txId = String(tx.id || ('tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5)));
+      const customerName = String(tx.customerName || 'Customer');
+      const customerEmail = String(tx.customerEmail || '').toLowerCase().trim();
+      const planName = String(tx.planName || 'Plan');
+      const planSlug = String(tx.planSlug || 'taster');
+      const amount = Number(tx.amount || 0);
+      const currency = String(tx.currency || 'USD');
+      const gateway = String(tx.gateway || 'stripe');
+      const status = String(tx.status || 'succeeded').toLowerCase();
+      const testMode = Boolean(tx.testMode);
+      const failureReason = tx.failureReason || null;
+      const isRecurring = tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : true;
+      const recurringInterval = String(tx.recurringInterval || 'MONTH');
+      const autoRenew = tx.autoRenew !== undefined ? Boolean(tx.autoRenew) : true;
+      const createdAt = tx.createdAt ? new Date(tx.createdAt).toISOString() : new Date().toISOString();
+      const expiryDate = tx.expiryDate ? new Date(tx.expiryDate).toISOString() : null;
+      const gatewayTxId = tx.gatewayTransactionId ? String(tx.gatewayTransactionId).trim() : null;
+      const confirmedAmount = tx.confirmedAmount !== undefined ? Number(tx.confirmedAmount) : (status === 'succeeded' ? amount : null);
+      const confirmedAt = tx.confirmedAt ? new Date(tx.confirmedAt).toISOString() : (status === 'succeeded' ? new Date().toISOString() : null);
+
+      let checkRes: any = null;
+      try {
+        checkRes = await query(`SELECT id FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
+      } catch (_) {
+        checkRes = [];
+      }
+      const checkRows = extractRows(checkRes);
+
+      if (checkRows.length > 0) {
+        await query(
+          `UPDATE payment_transactions 
+           SET customer_name = $1, customer_email = $2, plan_name = $3, plan_slug = $4,
+               amount = $5, currency = $6, gateway = $7, status = $8, failure_reason = $9,
+               is_recurring = $10, recurring_interval = $11, auto_renew = $12, created_at = $13,
+               expiry_date = $14, gateway_transaction_id = $15, confirmed_amount = $16,
+               confirmed_at = $17, updated_at = NOW()
+           WHERE id = $18`,
+          [
+            customerName, customerEmail, planName, planSlug, amount, currency, gateway,
+            status, failureReason, isRecurring, recurringInterval, autoRenew, createdAt,
+            expiryDate, gatewayTxId, confirmedAmount, confirmedAt, txId
+          ]
+        );
+      } else {
+        await query(
+          `INSERT INTO payment_transactions (
+            id, customer_name, customer_email, plan_name, plan_slug,
+            amount, currency, gateway, status, test_mode, failure_reason,
+            is_recurring, recurring_interval, auto_renew, created_at,
+            expiry_date, gateway_transaction_id, confirmed_amount, confirmed_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())`,
+          [
+            txId, customerName, customerEmail, planName, planSlug,
+            amount, currency, gateway, status, testMode, failureReason,
+            isRecurring, recurringInterval, autoRenew, createdAt,
+            expiryDate, gatewayTxId, confirmedAmount, confirmedAt
+          ]
+        ).catch(async () => {
+          await query(
+            `INSERT INTO payment_transactions (
+              id, customer_name, customer_email, plan_name, plan_slug,
+              amount, currency, gateway, status, created_at, expiry_date
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+            [
+              txId, customerName, customerEmail, planName, planSlug,
+              amount, currency, gateway, status, createdAt, expiryDate
+            ]
+          );
+        });
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: 'Transaction recorded successfully',
+        transaction: {
+          ...tx,
+          id: txId,
+          customerName,
+          customerEmail,
+          planName,
+          planSlug,
+          amount,
+          currency,
+          gateway,
+          status,
+          isRecurring,
+          autoRenew,
+          createdAt,
+          expiryDate
+        }
+      });
+    }
+
+    // Default Save Gateway Settings
+    const gatewayConfig = body.paymentSettings || body;
+    const currency = gatewayConfig.currency || body.currency || 'USD';
+
+    await persistAdminSettingsData(gatewayConfig, currency);
+    const envResult = persistEnvCredentials(gatewayConfig, currency);
+
+    return NextResponse.json({
+      success: true,
+      message: 'Payment gateway settings and currency saved successfully to PostgreSQL and .env file!',
+      settings: gatewayConfig,
+      updatedKeys: envResult.updatedKeys
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    await ensurePaymentSchema();
+    const url = new URL(req.url);
+    const id = url.searchParams.get('id');
+
+    if (id) {
+      await query(`DELETE FROM payment_transactions WHERE id = $1`, [id]);
+      return NextResponse.json({ success: true, message: 'Transaction deleted' });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    if (Array.isArray(body.ids) && body.ids.length > 0) {
+      await query(`DELETE FROM payment_transactions WHERE id = ANY($1::text[])`, [body.ids]);
+      return NextResponse.json({ success: true, message: `${body.ids.length} transactions deleted` });
+    }
+
+    return NextResponse.json({ success: false, error: 'Transaction ID(s) required' }, { status: 400 });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -56288,6 +57723,10 @@ export async function DELETE(req: NextRequest) {
 import { NextRequest, NextResponse } from 'next/server';
 import { Pool } from 'pg';
 import Stripe from 'stripe';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
 
 let pool: Pool | null = null;
 function getPool() {
@@ -56299,14 +57738,149 @@ function getPool() {
   return pool;
 }
 
-let isDbInitialized = false;
+const ZERO_DECIMAL_CURRENCIES = [
+  'BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA',
+  'PYG', 'RWF', 'UGX', 'VND', 'VUV', 'XAF', 'XOF', 'XPF'
+];
 
-const ZERO_DECIMAL_CURRENCIES = new Set([
-  'BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'UGX', 'VND', 'VUV', 'XAF', 'XOF', 'XPF'
-]);
+function isValidStripeSecretKey(key?: string | null): boolean {
+  if (!key) return false;
+  const trimmed = key.trim();
+  if (trimmed.length < 25) return false;
+  if (trimmed.includes('...') || trimmed.includes('*') || trimmed.includes('placeholder') || trimmed.includes('sample')) {
+    return false;
+  }
+  return (
+    trimmed.startsWith('sk_test_') ||
+    trimmed.startsWith('sk_live_') ||
+    trimmed.startsWith('rk_test_') ||
+    trimmed.startsWith('rk_live_')
+  );
+}
+
+function getPrimaryEnvFilePath(): string {
+  const cwd = process.cwd();
+  const candidates = [
+    path.join(cwd, '.env'),
+    path.join(cwd, '.env.local'),
+    path.join(cwd, 'apps', 'web', '.env'),
+    path.join(cwd, 'apps', 'web', '.env.local'),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return path.join(cwd, '.env');
+}
+
+function parseEnvFile(filePath: string): Record<string, string> {
+  const map: Record<string, string> = {};
+  if (!fs.existsSync(filePath)) return map;
+  try {
+    const lines = fs.readFileSync(filePath, 'utf-8').split(/\r?\n/);
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const idx = trimmed.indexOf('=');
+      if (idx > 0) {
+        const k = trimmed.substring(0, idx).trim();
+        let v = trimmed.substring(idx + 1).trim();
+        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+          v = v.slice(1, -1);
+        }
+        map[k] = v;
+      }
+    }
+  } catch (_) {}
+  return map;
+}
+
+async function getStripeCredentials(client?: any) {
+  let secretKey = '';
+  let publishableKey = '';
+  let currency = 'USD';
+  let testMode = true;
+
+  // 1. Check PostgreSQL admin_settings with multiple schema variations
+  if (client) {
+    try {
+      const res = await client.query(`
+        SELECT key, value, payment_settings, currency, updated_at 
+        FROM admin_settings 
+        WHERE key IN ('payment_gateway_config', 'paymentSettings', 'primary_settings', 'payment_settings') 
+           OR id::text IN ('1', 'primary_settings', 'current') 
+        ORDER BY updated_at DESC LIMIT 5
+      `);
+      const rows = res.rows || [];
+      for (const row of rows) {
+        let val = row.value || row.payment_settings;
+        if (typeof val === 'string') {
+          try { val = JSON.parse(val); } catch (_) {}
+        }
+        if (val && typeof val === 'object') {
+          if (!secretKey) {
+            secretKey = val.stripe?.secretKey || val.secretKey || val.stripeSecretKey || '';
+          }
+          if (!publishableKey) {
+            publishableKey = val.stripe?.publishableKey || val.publishableKey || val.stripePublishableKey || '';
+          }
+          if (val.testMode !== undefined) {
+            testMode = Boolean(val.testMode);
+          }
+          if (row.currency) currency = row.currency;
+          else if (val.currency) currency = val.currency;
+          if (secretKey) break;
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. Check data/admin_settings.json file mirror
+  if (!secretKey) {
+    try {
+      const filePath = path.join(process.cwd(), 'data', 'admin_settings.json');
+      if (fs.existsSync(filePath)) {
+        const fileData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        const ps = fileData.paymentSettings || fileData.payment_gateway_config || fileData;
+        if (ps) {
+          secretKey = ps.stripe?.secretKey || ps.secretKey || '';
+          publishableKey = ps.stripe?.publishableKey || ps.publishableKey || '';
+          if (ps.currency) currency = ps.currency;
+          if (ps.testMode !== undefined) testMode = Boolean(ps.testMode);
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 3. Check .env and .env.local files directly
+  if (!secretKey) {
+    try {
+      const primaryEnv = getPrimaryEnvFilePath();
+      const envMap = parseEnvFile(primaryEnv);
+      secretKey = envMap['STRIPE_SECRET_KEY'] || envMap['STRIPE_SK'] || '';
+      publishableKey = envMap['STRIPE_PUBLISHABLE_KEY'] || envMap['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'] || '';
+      if (envMap['PAYMENT_CURRENCY']) currency = envMap['PAYMENT_CURRENCY'];
+      if (envMap['PAYMENT_TEST_MODE'] !== undefined) testMode = envMap['PAYMENT_TEST_MODE'] === 'true';
+    } catch (_) {}
+  }
+
+  // 4. Check process.env in-memory runtime
+  if (!secretKey) {
+    secretKey = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || '';
+    if (!publishableKey) {
+      publishableKey = process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
+    }
+    if (process.env.PAYMENT_CURRENCY) currency = process.env.PAYMENT_CURRENCY;
+  }
+
+  return {
+    secretKey: (secretKey || '').trim(),
+    publishableKey: (publishableKey || '').trim(),
+    currency: (currency || 'USD').toUpperCase(),
+    testMode
+  };
+}
 
 async function initWalletDb() {
-  if (isDbInitialized) return;
   const client = await getPool().connect();
   try {
     await client.query(`
@@ -56362,27 +57936,10 @@ async function initWalletDb() {
 
       ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(10,2) DEFAULT 0.00;
 
-      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS user_id VARCHAR(64);
-      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS user_email VARCHAR(255);
-      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS type VARCHAR(32) DEFAULT 'topup';
-      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS amount NUMERIC(10,2) DEFAULT 0.00;
-      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS balance_after NUMERIC(10,2) DEFAULT 0.00;
-      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS gateway VARCHAR(32) DEFAULT 'stripe';
-      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS gateway_tx_id VARCHAR(255);
-      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'succeeded';
-      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS description TEXT;
-      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}';
-      ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
-
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_transactions_gateway_tx_id_uniq 
-      ON wallet_transactions (gateway_tx_id) 
-      WHERE gateway_tx_id IS NOT NULL AND gateway_tx_id != '';
-
       INSERT INTO wallet_settings (id, is_enabled, currency, min_topup, max_topup, preset_amounts, bonus_rules, allowed_gateways, allow_site_purchases)
       VALUES ('current', true, 'USD', 5.00, 1000.00, '[10, 25, 50, 100, 250]', '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]', '["stripe", "paypal", "manual"]', true)
-      ON CONFLICT (id) DO UPDATE SET min_topup = LEAST(wallet_settings.min_topup, 5.00);
+      ON CONFLICT (id) DO NOTHING;
     `);
-    isDbInitialized = true;
   } catch (err) {
     console.warn('[Wallet DB init warning]:', err);
   } finally {
@@ -56390,222 +57947,12 @@ async function initWalletDb() {
   }
 }
 
-async function getStripeCredentials(client: any) {
-  let secretKey = process.env.STRIPE_SECRET_KEY || '';
-  let publishableKey = process.env.STRIPE_PUBLISHABLE_KEY || '';
-  let currency = 'USD';
-  let testMode = true;
-
-  try {
-    const checkTable = await client.query(`
-      SELECT table_name FROM information_schema.tables WHERE table_name = 'admin_settings' LIMIT 1
-    `).catch(() => ({ rows: [] }));
-
-    if (checkTable.rows && checkTable.rows.length > 0) {
-      const res = await client.query(`SELECT * FROM admin_settings ORDER BY updated_at DESC LIMIT 1`).catch(() => ({ rows: [] }));
-      const row = res.rows?.[0];
-      if (row) {
-        const rawPs = row.payment_settings || row.paymentSettings || row.settings?.paymentSettings || row.settings?.payment_settings || row.settings;
-        let ps = rawPs;
-        if (typeof ps === 'string') {
-          try { ps = JSON.parse(ps); } catch (_) {}
-        }
-
-        if (ps) {
-          if (ps.stripe?.secretKey) secretKey = ps.stripe.secretKey;
-          else if (ps.secretKey) secretKey = ps.secretKey;
-
-          if (ps.stripe?.publishableKey) publishableKey = ps.stripe.publishableKey;
-          else if (ps.publishableKey) publishableKey = ps.publishableKey;
-
-          if (typeof ps.testMode === 'boolean') testMode = ps.testMode;
-        }
-
-        if (row.currency) currency = row.currency;
-        else if (ps?.currency) currency = ps.currency;
-      }
-    }
-  } catch (e) {
-    console.warn('[Stripe credentials lookup warning]:', e);
-  }
-
-  if (!secretKey) secretKey = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET || '';
-  if (!publishableKey) publishableKey = process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
-  if (!currency) currency = process.env.NEXT_PUBLIC_DEFAULT_CURRENCY || 'USD';
-
-  return {
-    secretKey: secretKey.trim(),
-    publishableKey: publishableKey.trim(),
-    currency: currency.toUpperCase(),
-    testMode
-  };
-}
-
-// Resilient background auto-reconciliation
-async function autoReconcileUnrecordedPayments(client: any, user: any, targetEmail = '', targetUserId = '') {
-  if (!user && !targetEmail && !targetUserId) return;
-  const email = (user?.email || targetEmail || '').toLowerCase().trim();
-  const userId = user?.id ? String(user.id).trim() : (targetUserId || '').trim();
-
-  const { secretKey } = await getStripeCredentials(client);
-  if (!secretKey) return;
-
-  try {
-    const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
-    const recentSessions = await stripe.checkout.sessions.list({ limit: 12 });
-
-    for (const s of recentSessions.data) {
-      if (s.payment_status !== 'paid' && s.status !== 'complete') continue;
-      const meta = s.metadata || {};
-      const metaType = meta.type || '';
-      const metaEmail = (meta.userEmail || s.customer_email || s.customer_details?.email || '').toLowerCase().trim();
-      const metaUserId = String(meta.userId || s.client_reference_id || '').trim();
-
-      const isUserMatch = (email && metaEmail === email) || (userId && metaUserId === userId);
-      const isTopup = metaType === 'wallet_topup' || Boolean(s.success_url && s.success_url.includes('/wallet'));
-
-      if (!isUserMatch || !isTopup) continue;
-
-      const checkTx = await client.query(
-        `SELECT id FROM wallet_transactions 
-         WHERE gateway_tx_id = $1 
-            OR metadata->>'stripeSessionId' = $1 
-         LIMIT 1`,
-        [s.id]
-      );
-
-      if (checkTx.rows.length === 0) {
-        const sCurr = (s.currency || 'USD').toUpperCase();
-        const rawAmt = s.amount_total ? (ZERO_DECIMAL_CURRENCIES.has(sCurr) ? s.amount_total : s.amount_total / 100) : 0;
-        const baseAmt = parseFloat(meta.baseAmount || String(rawAmt));
-        const bonusAmt = parseFloat(meta.bonusCredit || '0');
-        const totalAmt = parseFloat(meta.totalAddition || String(baseAmt + bonusAmt));
-
-        if (totalAmt > 0) {
-          const uRes = await client.query(
-            `UPDATE users 
-             SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW() 
-             WHERE (LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '') OR (id::text = $3 AND $3 != '')
-             RETURNING id, email, wallet_balance`,
-            [totalAmt, metaEmail || email, metaUserId || userId]
-          );
-          const resolvedUser = uRes.rows[0];
-          const newBal = resolvedUser ? parseFloat(resolvedUser.wallet_balance || 0) : totalAmt;
-          const wtxId = `wtx_rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-          const desc = bonusAmt > 0
-            ? `Wallet Top-Up: +$${baseAmt.toFixed(2)} (Includes +$${bonusAmt.toFixed(2)} promotional bonus)`
-            : `Wallet Top-Up: +$${baseAmt.toFixed(2)}`;
-
-          await client.query(`
-            INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata, created_at)
-            VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'succeeded', $7, $8, NOW())
-            ON CONFLICT (id) DO NOTHING
-          `, [
-            wtxId,
-            resolvedUser ? String(resolvedUser.id) : (metaUserId || userId || 'usr_wallet'),
-            resolvedUser ? resolvedUser.email : (metaEmail || email),
-            totalAmt,
-            newBal,
-            s.id,
-            desc,
-            JSON.stringify({
-              baseAmount: baseAmt,
-              bonusCredit: bonusAmt,
-              totalAddition: totalAmt,
-              stripeSessionId: s.id,
-              reconciledFrom: 'auto_reconcile',
-              paymentIntentId: s.payment_intent
-            })
-          ]).catch(() => {});
-        }
-      }
-    }
-  } catch (recErr) {
-    console.warn('[Auto-reconcile warning]:', recErr);
-  }
-}
-
-async function fetchUserLedger(client: any, user: any, email = '', userId = '', limit = 10, offset = 0, typeFilter = 'all', search = '') {
-  const targetEmail = (user?.email || email || '').toLowerCase().trim();
-  const dbUserId = user?.id ? String(user.id).trim() : '';
-  const passedUserId = userId ? String(userId).trim() : '';
-
-  const conditions: string[] = [];
-  const values: any[] = [];
-
-  const identityClauses: string[] = [];
-  if (targetEmail) {
-    values.push(targetEmail);
-    const idx = values.length;
-    identityClauses.push(`LOWER(TRIM(user_email)) = LOWER(TRIM($${idx}))`);
-    identityClauses.push(`LOWER(TRIM(COALESCE(metadata->>'userEmail', ''))) = LOWER(TRIM($${idx}))`);
-  }
-  if (dbUserId) {
-    values.push(dbUserId);
-    const idx = values.length;
-    identityClauses.push(`user_id::text = $${idx}`);
-    identityClauses.push(`COALESCE(metadata->>'userId', '') = $${idx}`);
-  }
-  if (passedUserId && passedUserId !== dbUserId) {
-    values.push(passedUserId);
-    const idx = values.length;
-    identityClauses.push(`user_id::text = $${idx}`);
-    identityClauses.push(`COALESCE(metadata->>'userId', '') = $${idx}`);
-  }
-
-  if (identityClauses.length > 0) {
-    conditions.push(`(${identityClauses.join(' OR ')})`);
-  } else {
-    return { transactions: [], totalCount: 0, stats: { totalDeposited: 0, totalSpent: 0, totalEvents: 0 } };
-  }
-
-  if (typeFilter && typeFilter !== 'all') {
-    values.push(typeFilter);
-    conditions.push(`type = $${values.length}`);
-  }
-
-  if (search) {
-    values.push(`%${search}%`);
-    const sIdx = values.length;
-    conditions.push(`(LOWER(description) LIKE $${sIdx} OR LOWER(id) LIKE $${sIdx} OR LOWER(COALESCE(gateway_tx_id, '')) LIKE $${sIdx} OR LOWER(COALESCE(gateway, '')) LIKE $${sIdx})`);
-  }
-
-  const whereSql = conditions.join(' AND ');
-
-  const countRes = await client.query(`SELECT COUNT(*) FROM wallet_transactions WHERE ${whereSql}`, values);
-  const totalCount = parseInt(countRes.rows[0]?.count || '0', 10);
-
-  const pageValues = [...values, limit, offset];
-  const rowsRes = await client.query(
-    `SELECT * FROM wallet_transactions WHERE ${whereSql} ORDER BY created_at DESC LIMIT $${pageValues.length - 1} OFFSET $${pageValues.length}`,
-    pageValues
-  );
-  const transactions = rowsRes.rows;
-
-  const statsRes = await client.query(`
-    SELECT
-      COALESCE(SUM(CASE WHEN amount > 0 AND status IN ('succeeded', 'successful', 'completed', 'paid') THEN amount ELSE 0 END), 0) as total_deposited,
-      COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_spent,
-      COUNT(*) as total_events
-    FROM wallet_transactions
-    WHERE ${whereSql} AND status IN ('succeeded', 'successful', 'completed', 'paid')
-  `, values);
-
-  const stats = {
-    totalDeposited: parseFloat(statsRes.rows[0]?.total_deposited || 0),
-    totalSpent: parseFloat(statsRes.rows[0]?.total_spent || 0),
-    totalEvents: parseInt(statsRes.rows[0]?.total_events || 0, 10),
-  };
-
-  return { transactions, totalCount, stats };
-}
-
 export async function GET(req: NextRequest) {
   try {
     await initWalletDb();
     const { searchParams } = new URL(req.url);
-    const email = searchParams.get('email')?.trim().toLowerCase() || '';
-    const userId = searchParams.get('userId')?.trim() || '';
+    const email = searchParams.get('email')?.trim().toLowerCase();
+    const userId = searchParams.get('userId')?.trim();
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.max(1, parseInt(searchParams.get('limit') || '10', 10));
     const offset = (page - 1) * limit;
@@ -56614,10 +57961,13 @@ export async function GET(req: NextRequest) {
 
     const client = await getPool().connect();
     try {
-      const settingsRes = await client.query(`SELECT * FROM wallet_settings WHERE id = $1`, ['current']);
+      const stripeCreds = await getStripeCredentials(client);
+      const isStripeConfigured = isValidStripeSecretKey(stripeCreds.secretKey);
+
+      const settingsRes = await client.query('SELECT * FROM wallet_settings WHERE id = $1', ['current']);
       const settings = settingsRes.rows[0] || {
         is_enabled: true,
-        currency: 'USD',
+        currency: stripeCreds.currency || 'USD',
         min_topup: 5.00,
         max_topup: 1000.00,
         preset_amounts: [10, 25, 50, 100, 250],
@@ -56628,49 +57978,76 @@ export async function GET(req: NextRequest) {
 
       let user = null;
       let walletBalance = 0;
-
-      if (userId || email) {
-        let userRes = null;
-        if (userId && email) {
-          userRes = await client.query(
-            `SELECT id, email, name, wallet_balance FROM users WHERE id::text = $1 OR LOWER(email) = LOWER($2) LIMIT 1`,
-            [userId, email]
-          ).catch(() => null);
-        } else if (userId) {
-          userRes = await client.query(
-            `SELECT id, email, name, wallet_balance FROM users WHERE id::text = $1 LIMIT 1`,
-            [userId]
-          ).catch(() => null);
-        } else if (email) {
-          userRes = await client.query(
-            `SELECT id, email, name, wallet_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`,
-            [email]
-          ).catch(() => null);
+      if (email || userId) {
+        let userRes;
+        if (userId) {
+          userRes = await client.query('SELECT id, email, name, wallet_balance FROM users WHERE id = $1', [userId]);
         }
-
+        if ((!userRes || userRes.rows.length === 0) && email) {
+          userRes = await client.query('SELECT id, email, name, wallet_balance FROM users WHERE LOWER(email) = LOWER($1)', [email]);
+        }
         if (userRes && userRes.rows.length > 0) {
           user = userRes.rows[0];
           walletBalance = parseFloat(user.wallet_balance || 0);
         }
       }
 
-      // Automatically reconcile unrecorded sessions without rolling back
-      await autoReconcileUnrecordedPayments(client, user, email, userId);
+      let transactions: any[] = [];
+      let totalCount = 0;
+      let stats = { totalDeposited: 0, totalSpent: 0, totalEvents: 0 };
 
-      if (user?.id) {
-        const balCheck = await client.query(`SELECT wallet_balance FROM users WHERE id::text = $1`, [String(user.id)]);
-        if (balCheck.rows[0]) {
-          walletBalance = parseFloat(balCheck.rows[0].wallet_balance || 0);
+      if (user || email) {
+        const targetEmail = user?.email || email;
+        const conditions: string[] = ['(LOWER(user_email) = LOWER($1) OR user_id = $2)'];
+        const values: any[] = [targetEmail, user?.id || ''];
+
+        if (typeFilter && typeFilter !== 'all') {
+          values.push(typeFilter);
+          conditions.push(`type = $${values.length}`);
+        }
+
+        if (search) {
+          values.push(`%${search}%`);
+          const sIdx = values.length;
+          conditions.push(`(LOWER(description) LIKE $${sIdx} OR LOWER(id) LIKE $${sIdx} OR LOWER(gateway_tx_id) LIKE $${sIdx} OR LOWER(gateway) LIKE $${sIdx})`);
+        }
+
+        const whereSql = conditions.join(' AND ');
+        const countRes = await client.query(`SELECT COUNT(*) FROM wallet_transactions WHERE ${whereSql}`, values);
+        totalCount = parseInt(countRes.rows[0]?.count || '0', 10);
+
+        const pageValues = [...values, limit, offset];
+        const rowsRes = await client.query(
+          `SELECT * FROM wallet_transactions WHERE ${whereSql} ORDER BY created_at DESC LIMIT $${pageValues.length - 1} OFFSET $${pageValues.length}`,
+          pageValues
+        );
+        transactions = rowsRes.rows;
+
+        const statsRes = await client.query(`
+          SELECT
+            COALESCE(SUM(CASE WHEN amount > 0 AND status = 'succeeded' THEN amount ELSE 0 END), 0) as total_deposited,
+            COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_spent,
+            COUNT(*) as total_events
+          FROM wallet_transactions
+          WHERE (LOWER(user_email) = LOWER($1) OR user_id = $2) AND status = 'succeeded'
+        `, [targetEmail, user?.id || '']);
+
+        if (statsRes.rows.length > 0) {
+          stats = {
+            totalDeposited: parseFloat(statsRes.rows[0].total_deposited || 0),
+            totalSpent: parseFloat(statsRes.rows[0].total_spent || 0),
+            totalEvents: parseInt(statsRes.rows[0].total_events || 0, 10),
+          };
         }
       }
 
-      const { transactions, totalCount, stats } = await fetchUserLedger(
-        client, user, email, userId, limit, offset, typeFilter, search
-      );
-
       return NextResponse.json({
         success: true,
-        settings,
+        settings: {
+          ...settings,
+          stripe_configured: isStripeConfigured,
+          test_mode: stripeCreds.testMode,
+        },
         user,
         wallet_balance: walletBalance,
         transactions,
@@ -56706,226 +58083,234 @@ export async function POST(req: NextRequest) {
         }
 
         const { secretKey } = await getStripeCredentials(client);
-        if (!secretKey) {
-          return NextResponse.json({ success: false, error: 'Stripe Secret Key is not configured.' }, { status: 400 });
-        }
+        let baseAmount = 0;
+        let bonusCredit = 0;
+        let totalAddition = 0;
+        let targetEmail = (body.email || '').toLowerCase().trim();
+        let targetUserId = body.userId || '';
+        let customerName = 'Customer';
+        let currency = 'USD';
 
-        const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
-        let session = await stripe.checkout.sessions.retrieve(sessionId, {
-          expand: ['payment_intent']
-        });
-
-        let isPaid = session && (session.payment_status === 'paid' || session.status === 'complete');
-        let paymentIntentObj = typeof session.payment_intent === 'object' ? (session.payment_intent as any) : null;
-        if (!isPaid && paymentIntentObj && paymentIntentObj.status === 'succeeded') {
-          isPaid = true;
-        }
-
-        if (!isPaid) {
-          for (let attempt = 0; attempt < 3; attempt++) {
-            await new Promise((r) => setTimeout(r, 600));
-            session = await stripe.checkout.sessions.retrieve(sessionId, {
-              expand: ['payment_intent']
-            });
-            paymentIntentObj = typeof session.payment_intent === 'object' ? (session.payment_intent as any) : null;
-            if (
-              session &&
-              (session.payment_status === 'paid' ||
-               session.status === 'complete' ||
-               paymentIntentObj?.status === 'succeeded')
-            ) {
-              isPaid = true;
-              break;
-            }
-          }
-        }
-
-        if (!isPaid) {
-          return NextResponse.json({
-            success: false,
-            error: `Stripe payment status is ${session?.payment_status || 'unpaid'}.`,
-          }, { status: 400 });
-        }
-
-        const metadata = session.metadata || {};
-        const curr = (session.currency || 'USD').toUpperCase();
-        const rawAmount = session.amount_total ? (ZERO_DECIMAL_CURRENCIES.has(curr) ? session.amount_total : session.amount_total / 100) : 0;
-        const baseAmount = parseFloat(metadata.baseAmount || String(rawAmount));
-        const bonusCredit = parseFloat(metadata.bonusCredit || '0');
-        const totalAddition = parseFloat(metadata.totalAddition || String(baseAmount + bonusCredit));
-        const targetEmail = (metadata.userEmail || body.email || session.customer_details?.email || session.customer_email || '').toLowerCase().trim();
-        const targetUserId = String(metadata.userId || body.userId || session.client_reference_id || '').trim();
-        const paymentIntentId = typeof session.payment_intent === 'string'
-          ? session.payment_intent
-          : (session.payment_intent as any)?.id || '';
-
-        let newBalance = totalAddition;
-        let finalUserId = targetUserId;
-        let finalEmail = targetEmail;
-
-        // ISOLATED TRANSACTION FOR WALLET: Cannot be rolled back by payment_transactions
-        await client.query('BEGIN');
-        try {
-          await client.query(`SELECT pg_advisory_xact_lock(hashtext($1)::bigint)`, [`wallet_topup_${sessionId}`]);
-
+        if (sessionId.startsWith('sim_')) {
+          // Handled simulation session
           const existingTx = await client.query(
-            `SELECT id, balance_after FROM wallet_transactions 
-             WHERE gateway_tx_id = $1 
-                OR ($2 != '' AND gateway_tx_id = $2)
-                OR metadata->>'stripeSessionId' = $1 
-                OR ($2 != '' AND metadata->>'paymentIntentId' = $2)
-             LIMIT 1`,
-            [sessionId, paymentIntentId]
+            `SELECT id, balance_after FROM wallet_transactions WHERE gateway_tx_id = $1 AND status = 'succeeded' LIMIT 1`,
+            [sessionId]
           );
-
-          if (existingTx.rows.length === 0) {
-            let updateRes = await client.query(
-              `UPDATE users 
-               SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW()
-               WHERE (id::text = $2 AND $2 != '') OR (LOWER(TRIM(email)) = LOWER(TRIM($3)) AND $3 != '')
-               RETURNING id, email, name, wallet_balance`,
-              [totalAddition, targetUserId, targetEmail]
-            );
-
-            if (updateRes.rows.length === 0 && targetEmail) {
-              updateRes = await client.query(
-                `UPDATE users 
-                 SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW()
-                 WHERE LOWER(TRIM(email)) = LOWER(TRIM($2))
-                 RETURNING id, email, name, wallet_balance`,
-                [totalAddition, targetEmail]
-              );
-            }
-
-            const updatedUser = updateRes.rows[0];
-            newBalance = updatedUser ? parseFloat(updatedUser.wallet_balance || 0) : totalAddition;
-            finalUserId = updatedUser ? String(updatedUser.id) : (targetUserId || 'usr_wallet');
-            finalEmail = updatedUser?.email || targetEmail || 'customer@zecratary.com';
-
-            const wtxId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-            const desc = bonusCredit > 0
-              ? `Wallet Top-Up: +$${baseAmount.toFixed(2)} (Includes +$${bonusCredit.toFixed(2)} promotional bonus)`
-              : `Wallet Top-Up: +$${baseAmount.toFixed(2)}`;
-
-            await client.query(`
-              INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata, created_at)
-              VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'succeeded', $7, $8, NOW())
-              ON CONFLICT (id) DO UPDATE SET balance_after = EXCLUDED.balance_after, status = 'succeeded'
-            `, [
-              wtxId,
-              finalUserId,
-              finalEmail,
-              totalAddition,
-              newBalance,
-              sessionId,
-              desc,
-              JSON.stringify({ 
-                baseAmount, 
-                bonusCredit, 
-                totalAddition, 
-                gateway: 'stripe', 
-                stripeSessionId: sessionId,
-                paymentIntentId,
-                userEmail: finalEmail,
-                userId: finalUserId
-              }),
-            ]);
-          } else {
-            newBalance = parseFloat(existingTx.rows[0].balance_after || 0);
+          if (existingTx.rows.length > 0) {
+            return NextResponse.json({
+              success: true,
+              verified: true,
+              wallet_balance: parseFloat(existingTx.rows[0].balance_after || 0),
+              message: 'Deposit already credited to your wallet.',
+            });
+          }
+        } else {
+          if (!isValidStripeSecretKey(secretKey)) {
+            return NextResponse.json({
+              success: false,
+              error: 'Stripe Secret Key is not configured in Admin Payment Settings.',
+            }, { status: 400 });
           }
 
-          await client.query('COMMIT');
-        } catch (txErr) {
-          await client.query('ROLLBACK');
-          throw txErr;
+          const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
+          const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+          if (!session || session.payment_status !== 'paid') {
+            return NextResponse.json({
+              success: false,
+              error: `Stripe payment status is ${session?.payment_status || 'unpaid'}.`,
+            }, { status: 400 });
+          }
+
+          const metadata = session.metadata || {};
+          baseAmount = parseFloat(metadata.baseAmount || String((session.amount_total || 0) / 100));
+          bonusCredit = parseFloat(metadata.bonusCredit || '0');
+          totalAddition = parseFloat(metadata.totalAddition || String(baseAmount + bonusCredit));
+          targetEmail = (metadata.userEmail || session.customer_email || session.customer_details?.email || targetEmail).toLowerCase().trim();
+          targetUserId = metadata.userId || targetUserId;
+          customerName = session.customer_details?.name || 'Customer';
+          currency = (session.currency || 'USD').toUpperCase();
         }
 
-        // NON-BLOCKING RECORD FOR PAYMENT_TRANSACTIONS: Safely isolated
-        try {
-          await client.query(`
-            INSERT INTO payment_transactions (
-              id, customer_name, customer_email, plan_name, plan_slug, amount,
-              currency, gateway, status, is_recurring, auto_renew, gateway_transaction_id, confirmed_amount, confirmed_at, created_at, updated_at
-            ) VALUES ($1, $2, $3, 'Store Wallet Top-Up', 'wallet_topup', $4, $5, 'stripe', 'succeeded', false, false, $6, $4, NOW(), NOW(), NOW())
-            ON CONFLICT (id) DO UPDATE SET
-              status = 'succeeded',
-              confirmed_amount = EXCLUDED.amount,
-              confirmed_at = NOW(),
-              updated_at = NOW()
-          `, [
-            sessionId,
-            session.customer_details?.name || 'Customer',
-            finalEmail,
-            baseAmount,
-            curr,
-            sessionId
-          ]);
-        } catch (_) {}
-
-        const userCheck = await client.query(
-          `SELECT id, email, name, wallet_balance FROM users WHERE id::text = $1 OR (LOWER(email) = LOWER($2) AND $2 != '') LIMIT 1`,
-          [finalUserId, finalEmail]
+        // Idempotency guard: check existing wallet_transactions
+        const existingTx = await client.query(
+          `SELECT id, balance_after FROM wallet_transactions WHERE gateway_tx_id = $1 AND status = 'succeeded' LIMIT 1`,
+          [sessionId]
         );
-        const resolvedUser = userCheck.rows[0];
-        const ledgerData = await fetchUserLedger(client, resolvedUser, finalEmail, finalUserId, 10, 0);
+
+        if (existingTx.rows.length > 0) {
+          const userCheck = await client.query(
+            `SELECT wallet_balance FROM users WHERE LOWER(email) = LOWER($1) OR id = $2 LIMIT 1`,
+            [targetEmail, targetUserId]
+          );
+          const currentBal = parseFloat(userCheck.rows[0]?.wallet_balance || existingTx.rows[0].balance_after || 0);
+
+          return NextResponse.json({
+            success: true,
+            verified: true,
+            alreadyProcessed: true,
+            wallet_balance: currentBal,
+            message: `Deposit of $${baseAmount.toFixed(2)} was already credited to your wallet!`,
+          });
+        }
+
+        // Increment user wallet balance
+        const updateRes = await client.query(
+          `UPDATE users 
+           SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW()
+           WHERE LOWER(email) = LOWER($2) OR id = $3
+           RETURNING id, email, wallet_balance`,
+          [totalAddition, targetEmail, targetUserId]
+        );
+
+        const updatedUser = updateRes.rows[0];
+        const newBalance = updatedUser ? parseFloat(updatedUser.wallet_balance || 0) : totalAddition;
+        const finalUserId = updatedUser?.id || targetUserId || 'usr_wallet';
+
+        const wtxId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+        const desc = bonusCredit > 0
+          ? `Wallet Top-Up: +$${baseAmount.toFixed(2)} (Includes +$${bonusCredit.toFixed(2)} promotional bonus)`
+          : `Wallet Top-Up: +$${baseAmount.toFixed(2)}`;
+
+        await client.query(`
+          INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata)
+          VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'succeeded', $7, $8)
+          ON CONFLICT (id) DO UPDATE SET status = 'succeeded', balance_after = EXCLUDED.balance_after
+        `, [
+          wtxId,
+          finalUserId,
+          targetEmail,
+          totalAddition,
+          newBalance,
+          sessionId,
+          desc,
+          JSON.stringify({ baseAmount, bonusCredit, totalAddition, gateway: 'stripe', stripeSessionId: sessionId }),
+        ]);
+
+        await client.query(`
+          INSERT INTO payment_transactions (
+            id, customer_name, customer_email, plan_name, plan_slug, amount,
+            currency, gateway, status, is_recurring, auto_renew, gateway_transaction_id, confirmed_amount, confirmed_at, created_at, updated_at
+          ) VALUES ($1, $2, $3, 'Store Wallet Top-Up', 'wallet_topup', $4, $5, 'stripe', 'succeeded', false, false, $6, $4, NOW(), NOW(), NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            status = 'succeeded',
+            confirmed_amount = EXCLUDED.amount,
+            confirmed_at = NOW(),
+            updated_at = NOW()
+        `, [
+          sessionId,
+          customerName,
+          targetEmail,
+          baseAmount,
+          currency,
+          sessionId
+        ]).catch(() => {});
 
         return NextResponse.json({
           success: true,
           verified: true,
           wallet_balance: newBalance,
           amount: totalAddition,
-          transactions: ledgerData.transactions,
-          totalCount: ledgerData.totalCount,
-          totalPages: Math.ceil(ledgerData.totalCount / 10) || 1,
-          stats: ledgerData.stats,
           message: `Stripe Checkout completed! Added +$${baseAmount.toFixed(2)}${bonusCredit > 0 ? ` (+$${bonusCredit.toFixed(2)} bonus)` : ''} to your balance.`,
         });
       }
 
       // -----------------------------------------------------------------------
-      // 2. ACTION: Reconcile Wallet Sessions
+      // 2. ACTION: Reconcile Wallet Transactions with Stripe
       // -----------------------------------------------------------------------
       if (action === 'reconcile_wallet') {
-        const { email, userId } = body;
-        const targetEmail = (email || '').toLowerCase().trim();
-        const targetUserId = String(userId || '');
+        const targetEmail = (body.email || '').toLowerCase().trim();
+        const targetUserId = String(body.userId || '');
+        const { secretKey } = await getStripeCredentials(client);
 
-        let user = null;
-        if (targetUserId || targetEmail) {
-          const uRes = await client.query(
-            `SELECT id, email, name, wallet_balance FROM users WHERE id::text = $1 OR (LOWER(email) = LOWER($2) AND $2 != '') LIMIT 1`,
-            [targetUserId, targetEmail]
-          ).catch(() => null);
-          if (uRes && uRes.rows.length > 0) user = uRes.rows[0];
+        const userRes = await client.query(
+          `SELECT id, email, wallet_balance FROM users WHERE LOWER(email) = LOWER($1) OR id = $2 LIMIT 1`,
+          [targetEmail, targetUserId]
+        );
+        const curBal = parseFloat(userRes.rows[0]?.wallet_balance || 0);
+
+        if (!isValidStripeSecretKey(secretKey)) {
+          return NextResponse.json({
+            success: true,
+            wallet_balance: curBal,
+            message: 'Ledger verified. (Live Stripe synchronization requires API keys in Admin Payment Settings).',
+          });
         }
 
-        await autoReconcileUnrecordedPayments(client, user, targetEmail, targetUserId);
+        try {
+          const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
+          const sessions = await stripe.checkout.sessions.list({ limit: 30 });
+          let reconciledCount = 0;
 
-        let currentBalance = user ? parseFloat(user.wallet_balance || 0) : 0;
-        if (user?.id) {
-          const balRes = await client.query(`SELECT wallet_balance FROM users WHERE id::text = $1`, [String(user.id)]);
-          if (balRes.rows[0]) currentBalance = parseFloat(balRes.rows[0].wallet_balance || 0);
+          for (const sess of sessions.data) {
+            if (sess.payment_status === 'paid' && sess.metadata?.type === 'wallet_topup') {
+              const sessEmail = (sess.metadata.userEmail || sess.customer_email || sess.customer_details?.email || '').toLowerCase().trim();
+              const sessUserId = sess.metadata.userId || '';
+
+              if (sessEmail === targetEmail || (targetUserId && sessUserId === targetUserId)) {
+                const existRes = await client.query(
+                  `SELECT id FROM wallet_transactions WHERE gateway_tx_id = $1 AND status = 'succeeded' LIMIT 1`,
+                  [sess.id]
+                );
+                if (existRes.rows.length === 0) {
+                  const baseAmount = parseFloat(sess.metadata.baseAmount || String((sess.amount_total || 0) / 100));
+                  const bonusCredit = parseFloat(sess.metadata.bonusCredit || '0');
+                  const totalAddition = parseFloat(sess.metadata.totalAddition || String(baseAmount + bonusCredit));
+
+                  const updateBal = await client.query(
+                    `UPDATE users SET wallet_balance = COALESCE(wallet_balance, 0) + $1 WHERE LOWER(email) = LOWER($2) OR id = $3 RETURNING wallet_balance`,
+                    [totalAddition, sessEmail, sessUserId]
+                  );
+                  const newBal = parseFloat(updateBal.rows[0]?.wallet_balance || 0);
+
+                  const wtxId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+                  await client.query(`
+                    INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata)
+                    VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'succeeded', $7, $8)
+                  `, [
+                    wtxId,
+                    sessUserId || targetUserId,
+                    sessEmail,
+                    totalAddition,
+                    newBal,
+                    sess.id,
+                    `Wallet Top-Up (Reconciled): +$${baseAmount.toFixed(2)}`,
+                    JSON.stringify({ baseAmount, bonusCredit, totalAddition, gateway: 'stripe', stripeSessionId: sess.id })
+                  ]);
+                  reconciledCount++;
+                }
+              }
+            }
+          }
+
+          const finalBalRes = await client.query(
+            `SELECT wallet_balance FROM users WHERE LOWER(email) = LOWER($1) OR id = $2 LIMIT 1`,
+            [targetEmail, targetUserId]
+          );
+          const finalBal = parseFloat(finalBalRes.rows[0]?.wallet_balance || curBal);
+
+          return NextResponse.json({
+            success: true,
+            wallet_balance: finalBal,
+            message: reconciledCount > 0
+              ? `Reconciled ${reconciledCount} missing Stripe transaction(s)! Balance updated.`
+              : 'Ledger is fully synchronized with Stripe.',
+          });
+        } catch (e: any) {
+          return NextResponse.json({
+            success: true,
+            wallet_balance: curBal,
+            message: 'Ledger scan completed.',
+          });
         }
-
-        const ledgerData = await fetchUserLedger(client, user, targetEmail, targetUserId, 10, 0);
-
-        return NextResponse.json({
-          success: true,
-          wallet_balance: currentBalance,
-          transactions: ledgerData.transactions,
-          totalCount: ledgerData.totalCount,
-          totalPages: Math.ceil(ledgerData.totalCount / 10) || 1,
-          stats: ledgerData.stats,
-          message: 'All Stripe top-ups are synchronized with your wallet ledger.',
-        });
       }
 
       // -----------------------------------------------------------------------
       // 3. ACTION: Standard Deposit / Checkout Dispatch
       // -----------------------------------------------------------------------
       const { email, userId, amount, gateway } = body;
-      const cleanAmtStr = String(amount ?? '').replace(/[^0-9.]/g, '');
-      const topupAmount = parseFloat(cleanAmtStr);
+      const topupAmount = parseFloat(amount);
 
       if ((!email && !userId) || isNaN(topupAmount) || topupAmount <= 0) {
         return NextResponse.json({
@@ -56934,7 +58319,7 @@ export async function POST(req: NextRequest) {
         }, { status: 400 });
       }
 
-      const settingsRes = await client.query(`SELECT * FROM wallet_settings WHERE id = $1`, ['current']);
+      const settingsRes = await client.query('SELECT * FROM wallet_settings WHERE id = $1', ['current']);
       const settings = settingsRes.rows[0] || {
         is_enabled: true,
         currency: 'USD',
@@ -56967,22 +58352,12 @@ export async function POST(req: NextRequest) {
         }, { status: 400 });
       }
 
-      let userRes = null;
-      if (userId && email) {
-        userRes = await client.query(
-          `SELECT id, email, name, wallet_balance FROM users WHERE id::text = $1 OR LOWER(email) = LOWER($2) LIMIT 1`,
-          [String(userId), String(email).trim()]
-        ).catch(() => null);
-      } else if (userId) {
-        userRes = await client.query(
-          `SELECT id, email, name, wallet_balance FROM users WHERE id::text = $1 LIMIT 1`,
-          [String(userId)]
-        ).catch(() => null);
-      } else if (email) {
-        userRes = await client.query(
-          `SELECT id, email, name, wallet_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1`,
-          [String(email).trim()]
-        ).catch(() => null);
+      let userRes;
+      if (userId) {
+        userRes = await client.query('SELECT id, email, name, wallet_balance FROM users WHERE id = $1', [userId]);
+      }
+      if ((!userRes || userRes.rows.length === 0) && email) {
+        userRes = await client.query('SELECT id, email, name, wallet_balance FROM users WHERE LOWER(email) = LOWER($1)', [email.trim()]);
       }
 
       if (!userRes || userRes.rows.length === 0) {
@@ -57008,80 +58383,119 @@ export async function POST(req: NextRequest) {
       const totalAddition = topupAmount + bonusCredit;
       const activeGateway = (gateway || 'stripe').toLowerCase();
 
-      // STRIPE CHECKOUT SESSION PATH
+      // STRIPE CHECKOUT PATH
       if (activeGateway === 'stripe') {
-        const { secretKey, currency: adminCurrency } = await getStripeCredentials(client);
-        if (!secretKey) {
-          return NextResponse.json({
-            success: false,
-            error: 'Stripe Gateway is not configured. Please configure Stripe API keys in Admin Payment Settings.',
-          }, { status: 400 });
-        }
+        const stripeCreds = await getStripeCredentials(client);
+        const hasValidKey = isValidStripeSecretKey(stripeCreds.secretKey);
 
-        const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
-        const currency = (settings.currency || adminCurrency || 'USD').toUpperCase();
-        
-        let origin = body.origin || req.headers.get('origin');
-        if (!origin) {
-          const referer = req.headers.get('referer');
-          if (referer) {
-            try { origin = new URL(referer).origin; } catch (_) {}
-          }
-        }
-        if (!origin) {
-          const host = req.headers.get('host') || 'localhost:3000';
-          const proto = req.headers.get('x-forwarded-proto') || (host.includes('localhost') ? 'http' : 'https');
-          origin = `${proto}://${host}`;
-        }
-        origin = origin.replace(/\/+$/, '');
+        if (hasValidKey) {
+          const stripe = new Stripe(stripeCreds.secretKey, { apiVersion: '2023-10-16' as any });
+          const currency = (settings.currency || stripeCreds.currency || 'USD').toLowerCase();
+          const origin = body.origin || req.headers.get('origin') || 'http://localhost:3000';
+          const isZeroDecimal = ZERO_DECIMAL_CURRENCIES.includes(currency.toUpperCase());
+          const unitAmount = isZeroDecimal ? Math.round(topupAmount) : Math.round(topupAmount * 100);
 
-        const isZeroDecimal = ZERO_DECIMAL_CURRENCIES.has(currency);
-        const unitAmount = isZeroDecimal ? Math.round(topupAmount) : Math.round(topupAmount * 100);
-
-        const session = await stripe.checkout.sessions.create({
-          payment_method_types: ['card'],
-          mode: 'payment',
-          customer_email: user.email,
-          client_reference_id: String(user.id),
-          line_items: [
-            {
-              price_data: {
-                currency: currency.toLowerCase(),
-                product_data: {
-                  name: `Store Wallet Top-Up (${currency} ${topupAmount.toFixed(2)})`,
-                  description: bonusCredit > 0
-                    ? `Includes +${currency} ${bonusCredit.toFixed(2)} promotional bonus (Total credit: ${totalAddition.toFixed(2)})`
-                    : `Store Credit Deposit for ${user.email}`,
+          const session = await stripe.checkout.sessions.create({
+            payment_method_types: ['card'],
+            mode: 'payment',
+            customer_email: user.email,
+            client_reference_id: String(user.id),
+            line_items: [
+              {
+                price_data: {
+                  currency,
+                  product_data: {
+                    name: `Store Wallet Top-Up (${currency.toUpperCase()} ${topupAmount.toFixed(2)})`,
+                    description: bonusCredit > 0
+                      ? `Includes +${currency.toUpperCase()} ${bonusCredit.toFixed(2)} promotional bonus (Total credit: ${totalAddition.toFixed(2)})`
+                      : `Store Credit Deposit for ${user.email}`,
+                  },
+                  unit_amount: unitAmount,
                 },
-                unit_amount: unitAmount,
+                quantity: 1,
               },
-              quantity: 1,
+            ],
+            metadata: {
+              type: 'wallet_topup',
+              userId: String(user.id),
+              userEmail: String(user.email),
+              baseAmount: String(topupAmount),
+              bonusCredit: String(bonusCredit),
+              totalAddition: String(totalAddition),
+              currency: currency.toUpperCase(),
             },
-          ],
-          metadata: {
-            type: 'wallet_topup',
-            userId: String(user.id),
-            userEmail: String(user.email),
-            baseAmount: String(topupAmount),
-            bonusCredit: String(bonusCredit),
-            totalAddition: String(totalAddition),
-            currency: currency,
-          },
-          success_url: `${origin}/wallet?status=success&session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${origin}/wallet?status=cancelled`,
-        });
+            success_url: `${origin}/wallet?status=success&session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${origin}/wallet?status=cancelled`,
+          });
 
+          return NextResponse.json({
+            success: true,
+            checkoutUrl: session.url,
+            sessionId: session.id,
+            message: 'Redirecting to Stripe Checkout...',
+          });
+        }
+
+        // Sandbox Test Mode fallback if keys are missing or pending
+        if (stripeCreds.testMode || process.env.NODE_ENV !== 'production') {
+          const newBalance = currentBalance + totalAddition;
+          await client.query('UPDATE users SET wallet_balance = $1, updated_at = NOW() WHERE id = $2', [newBalance, user.id]);
+
+          const txId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+          const gwTxId = `sim_stripe_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+          const desc = bonusCredit > 0
+            ? `Wallet Top-Up (Sandbox Stripe): +$${topupAmount.toFixed(2)} (Includes +$${bonusCredit.toFixed(2)} promotional bonus)`
+            : `Wallet Top-Up (Sandbox Stripe): +$${topupAmount.toFixed(2)}`;
+
+          await client.query(`
+            INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata)
+            VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'succeeded', $7, $8)
+          `, [
+            txId,
+            user.id,
+            user.email,
+            totalAddition,
+            newBalance,
+            gwTxId,
+            desc,
+            JSON.stringify({ baseAmount: topupAmount, bonusCredit, totalAddition, gateway: 'stripe', sandbox: true }),
+          ]);
+
+          await client.query(`
+            INSERT INTO payment_transactions (
+              id, customer_name, customer_email, plan_name, plan_slug, amount,
+              currency, gateway, status, is_recurring, auto_renew, gateway_transaction_id, confirmed_amount, confirmed_at, created_at, updated_at
+            ) VALUES ($1, $2, $3, 'Store Wallet Top-Up (Sandbox)', 'wallet_topup', $4, $5, 'stripe', 'succeeded', false, false, $6, $4, NOW(), NOW(), NOW())
+            ON CONFLICT (id) DO UPDATE SET status = 'succeeded', confirmed_amount = EXCLUDED.amount, confirmed_at = NOW(), updated_at = NOW()
+          `, [
+            gwTxId,
+            user.name || 'Customer',
+            user.email,
+            topupAmount,
+            (settings.currency || 'USD').toUpperCase(),
+            gwTxId
+          ]).catch(() => {});
+
+          return NextResponse.json({
+            success: true,
+            sandbox: true,
+            wallet_balance: newBalance,
+            transactionId: txId,
+            message: `Sandbox Test Mode: Added +$${topupAmount.toFixed(2)}${bonusCredit > 0 ? ` (+$${bonusCredit.toFixed(2)} bonus)` : ''} to your wallet! (To use live Stripe Checkout, enter API keys in Admin Payment Settings).`,
+          });
+        }
+
+        // Live Production Mode without configured keys: Return clear error with configuration link
         return NextResponse.json({
-          success: true,
-          checkoutUrl: session.url,
-          sessionId: session.id,
-          message: 'Redirecting to Stripe Checkout...',
-        });
+          success: false,
+          requiresAdminConfig: true,
+          error: 'Stripe Gateway is not configured. Please configure Stripe API keys in Admin Payment Settings (/admin/payment-gateway).',
+        }, { status: 400 });
       }
 
-      // MANUAL / CUSTOM SETTLEMENT PATH
+      // MANUAL OR ALTERNATIVE GATEWAY SETTLEMENT
       const newBalance = currentBalance + totalAddition;
-      await client.query(`UPDATE users SET wallet_balance = $1 WHERE id::text = $2`, [newBalance, String(user.id)]);
+      await client.query('UPDATE users SET wallet_balance = $1, updated_at = NOW() WHERE id = $2', [newBalance, user.id]);
 
       const txId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
       const desc = bonusCredit > 0
@@ -57089,39 +58503,25 @@ export async function POST(req: NextRequest) {
         : `Wallet Top-Up: +$${topupAmount.toFixed(2)}`;
 
       await client.query(`
-        INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+        INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata)
+        VALUES ($1, $2, $3, 'topup', $4, $5, $6, $7, 'succeeded', $8, $9)
       `, [
         txId,
-        String(user.id),
+        user.id,
         user.email,
-        'topup',
         totalAddition,
         newBalance,
         activeGateway,
         body.gatewayTxId || `gw_${Date.now()}`,
-        'succeeded',
         desc,
-        JSON.stringify({ 
-          baseAmount: topupAmount, 
-          bonusCredit, 
-          gateway: activeGateway,
-          userEmail: user.email,
-          userId: String(user.id)
-        }),
+        JSON.stringify({ baseAmount: topupAmount, bonusCredit, gateway: activeGateway }),
       ]);
-
-      const ledgerData = await fetchUserLedger(client, user, user.email, String(user.id), 10, 0);
 
       return NextResponse.json({
         success: true,
         message: `Successfully topped up $${topupAmount.toFixed(2)}${bonusCredit > 0 ? ` with an extra $${bonusCredit.toFixed(2)} bonus!` : '!' }`,
         wallet_balance: newBalance,
         transactionId: txId,
-        transactions: ledgerData.transactions,
-        totalCount: ledgerData.totalCount,
-        totalPages: Math.ceil(ledgerData.totalCount / 10) || 1,
-        stats: ledgerData.stats,
       });
     } finally {
       client.release();

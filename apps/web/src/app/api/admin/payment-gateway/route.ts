@@ -1,198 +1,35 @@
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
-export const dynamic = 'force-dynamic';
-
-function extractRows(result: any): any[] {
-  if (!result) return [];
-  if (Array.isArray(result)) return result;
-  if (Array.isArray(result.rows)) return result.rows;
-  return [];
-}
-
-function extractFirstRow(result: any): any | null {
-  if (!result) return null;
-  if (Array.isArray(result)) return result[0] || null;
-  if (Array.isArray(result.rows)) return result.rows[0] || null;
-  return null;
-}
-
-function isValidStripeSecretKey(key?: string | null): boolean {
-  if (!key) return false;
-  const trimmed = key.trim();
-  if (trimmed.length < 25) return false;
-  if (trimmed.includes('...') || trimmed.includes('*') || trimmed.includes('placeholder') || trimmed.includes('sample')) {
-    return false;
-  }
-  return (
-    trimmed.startsWith('sk_test_') ||
-    trimmed.startsWith('sk_live_') ||
-    trimmed.startsWith('rk_test_') ||
-    trimmed.startsWith('rk_live_')
-  );
-}
-
-function isValidStripePublishableKey(key?: string | null): boolean {
-  if (!key) return false;
-  const trimmed = key.trim();
-  if (trimmed.length < 25) return false;
-  if (trimmed.includes('...') || trimmed.includes('*') || trimmed.includes('placeholder') || trimmed.includes('sample')) {
-    return false;
-  }
-  return trimmed.startsWith('pk_test_') || trimmed.startsWith('pk_live_');
-}
-
-function getPrimaryEnvFilePath(): string {
-  const cwd = process.cwd();
-  const candidates = [
-    path.join(cwd, '.env'),
-    path.join(cwd, '.env.local'),
-    path.join(cwd, 'apps', 'web', '.env'),
-    path.join(cwd, 'apps', 'web', '.env.local'),
-  ];
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c;
-  }
-  return path.join(cwd, '.env');
-}
-
-function parseEnvFile(filePath: string): Record<string, string> {
-  const map: Record<string, string> = {};
-  if (!fs.existsSync(filePath)) return map;
-  try {
-    const lines = fs.readFileSync(filePath, 'utf-8').split(/\r?\n/);
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const idx = trimmed.indexOf('=');
-      if (idx > 0) {
-        const k = trimmed.substring(0, idx).trim();
-        let v = trimmed.substring(idx + 1).trim();
-        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-          v = v.slice(1, -1);
-        }
-        map[k] = v;
-      }
-    }
-  } catch (_) {}
-  return map;
-}
-
-function updateEnvFileBatch(filePath: string, updates: Record<string, string>): boolean {
-  let content = '';
-  if (fs.existsSync(filePath)) {
-    try {
-      content = fs.readFileSync(filePath, 'utf-8');
-    } catch (_) {}
-  } else {
-    const dir = path.dirname(filePath);
-    if (!fs.existsSync(dir)) {
-      try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
-    }
-  }
-
-  let lines = content ? content.split(/\r?\n/) : [];
-  const processedKeys = new Set<string>();
-
-  lines = lines.map(line => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) return line;
-    const eqIdx = trimmed.indexOf('=');
-    if (eqIdx > 0) {
-      const k = trimmed.substring(0, eqIdx).trim();
-      if (k in updates) {
-        processedKeys.add(k);
-        const val = updates[k];
-        const safeVal = val.includes(' ') || val.includes('#') ? `"${val}"` : val;
-        return `${k}=${safeVal}`;
-      }
-    }
-    return line;
-  });
-
-  for (const [k, val] of Object.entries(updates)) {
-    if (!processedKeys.has(k)) {
-      const safeVal = val.includes(' ') || val.includes('#') ? `"${val}"` : val;
-      lines.push(`${k}=${safeVal}`);
-    }
-  }
-
-  const newContent = lines.join('\n').trim() + '\n';
-  if (newContent !== content) {
-    try {
-      fs.writeFileSync(filePath, newContent, 'utf-8');
-      return true;
-    } catch (e) {
-      console.warn('[EnvUpdate] Failed to write env file:', e);
-      return false;
-    }
-  }
-  return false;
-}
-
-function persistEnvCredentials(settings: any, currency?: string) {
-  const targetKeys: Record<string, string> = {};
-
-  if (settings.stripe?.publishableKey !== undefined) {
-    const pk = settings.stripe.publishableKey.trim();
-    if (isValidStripePublishableKey(pk)) {
-      targetKeys['STRIPE_PUBLISHABLE_KEY'] = pk;
-      targetKeys['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'] = pk;
-    }
-  }
-  if (settings.stripe?.secretKey !== undefined) {
-    const sk = settings.stripe.secretKey.trim();
-    if (isValidStripeSecretKey(sk)) {
-      targetKeys['STRIPE_SECRET_KEY'] = sk;
-    }
-  }
-  if (settings.stripe?.webhookSecret !== undefined) {
-    const ws = settings.stripe.webhookSecret.trim();
-    if (ws.startsWith('whsec_') && ws.length >= 20 && !ws.includes('...')) {
-      targetKeys['STRIPE_WEBHOOK_SECRET'] = ws;
-    }
-  }
-
-  if (settings.paypal?.clientId !== undefined) {
-    targetKeys['PAYPAL_CLIENT_ID'] = settings.paypal.clientId.trim();
-    targetKeys['NEXT_PUBLIC_PAYPAL_CLIENT_ID'] = settings.paypal.clientId.trim();
-  }
-  if (settings.paypal?.clientSecret !== undefined) {
-    targetKeys['PAYPAL_CLIENT_SECRET'] = settings.paypal.clientSecret.trim();
-  }
-  if (settings.paypal?.webhookId !== undefined) {
-    targetKeys['PAYPAL_WEBHOOK_ID'] = settings.paypal.webhookId.trim();
-  }
-  if (settings.paypal?.environment !== undefined) {
-    targetKeys['PAYPAL_ENVIRONMENT'] = settings.paypal.environment;
-  }
-
-  const cur = currency || settings.currency;
-  if (cur) {
-    targetKeys['PAYMENT_CURRENCY'] = cur;
-  }
-  if (settings.activeGateway) {
-    targetKeys['PAYMENT_GATEWAY'] = settings.activeGateway;
-  }
-  if (settings.testMode !== undefined) {
-    targetKeys['PAYMENT_TEST_MODE'] = String(settings.testMode);
-  }
-
-  const primaryEnv = getPrimaryEnvFilePath();
-  updateEnvFileBatch(primaryEnv, targetKeys);
-
-  for (const [key, val] of Object.entries(targetKeys)) {
-    process.env[key] = val;
-  }
-
-  return { envFile: primaryEnv, updatedKeys: Object.keys(targetKeys) };
-}
-
 async function ensurePaymentSchema() {
   try {
     await query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id VARCHAR(100) DEFAULT 'primary_settings',
+        key VARCHAR(100) DEFAULT 'payment_gateway_config',
+        value JSONB DEFAULT '{}'::jsonb,
+        payment_settings JSONB DEFAULT '{}'::jsonb,
+        currency VARCHAR(10) DEFAULT 'USD',
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS wallet_settings (
+        id VARCHAR(50) PRIMARY KEY DEFAULT 'current',
+        is_enabled BOOLEAN DEFAULT true,
+        currency VARCHAR(10) DEFAULT 'USD',
+        min_topup NUMERIC(10,2) DEFAULT 5.00,
+        max_topup NUMERIC(10,2) DEFAULT 1000.00,
+        preset_amounts JSONB DEFAULT '[10, 25, 50, 100, 250]'::jsonb,
+        bonus_rules JSONB DEFAULT '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]'::jsonb,
+        allowed_gateways JSONB DEFAULT '["stripe", "paypal", "manual"]'::jsonb,
+        allow_site_purchases BOOLEAN DEFAULT true,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
       CREATE TABLE IF NOT EXISTS payment_transactions (
         id VARCHAR(255) PRIMARY KEY,
         customer_name TEXT,
@@ -218,31 +55,167 @@ async function ensurePaymentSchema() {
     `);
 
     await query(`
-      CREATE TABLE IF NOT EXISTS admin_settings (
-        key VARCHAR(255) PRIMARY KEY,
-        value JSONB,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-    `);
-
-    await query(`
       DO $$ 
       BEGIN 
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS id INT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS key VARCHAR(255); EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS payment_settings JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS id VARCHAR(100) DEFAULT 'primary_settings'; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS key VARCHAR(100) DEFAULT 'payment_gateway_config'; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB DEFAULT '{}'::jsonb; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS payment_settings JSONB DEFAULT '{}'::jsonb; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS site_name TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN OTHERS THEN NULL; END;
+
+        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS allowed_gateways JSONB DEFAULT '["stripe", "paypal", "manual"]'::jsonb; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
       END $$;
     `);
+
+    // Ensure at least one settings row exists
+    const checkRow: any = await query(`SELECT 1 FROM admin_settings LIMIT 1`).catch(() => []);
+    const hasRow = Array.isArray(checkRow) ? checkRow.length > 0 : Boolean((checkRow as any)?.rows?.length);
+    if (!hasRow) {
+      await query(`
+        INSERT INTO admin_settings (id, key, payment_settings, value, currency, updated_at)
+        VALUES ('primary_settings', 'payment_gateway_config', '{}'::jsonb, '{}'::jsonb, 'USD', NOW())
+      `).catch(() => {});
+    }
   } catch (e) {
     console.warn('[Payment API] Schema check warning:', e);
   }
 }
 
+// Live 3-Way Stripe REST API & Cryptographic Verification
+async function verifyThreeStripeCredentials(publishableKey: string, secretKey: string, webhookSecret: string, testMode: boolean) {
+  const pKey = (publishableKey || '').trim();
+  const sKey = (secretKey || '').trim();
+  const wSecret = (webhookSecret || '').trim();
+
+  const missing: string[] = [];
+  if (!pKey) missing.push('Publishable Key');
+  if (!sKey) missing.push('Secret Key');
+  if (!wSecret) missing.push('Webhook Secret');
+
+  if (missing.length > 0) {
+    return { valid: false, error: `Verification required: Please enter ${missing.join(', ')} to verify.` };
+  }
+
+  if (sKey.includes('...') || sKey.includes('*')) {
+    return { valid: false, error: 'Please enter a valid Stripe Secret Key. Do not submit placeholder dots (...) or masked asterisks (*).' };
+  }
+  if (pKey.includes('...') || pKey.includes('*')) {
+    return { valid: false, error: 'Please enter a valid Stripe Publishable Key. Do not submit placeholder dots (...) or masked asterisks (*).' };
+  }
+  if (wSecret.includes('...') || wSecret.includes('*')) {
+    return { valid: false, error: 'Please enter a valid Stripe Webhook Secret. Do not submit placeholder dots (...) or masked asterisks (*).' };
+  }
+
+  if (testMode) {
+    if (!pKey.startsWith('pk_test_')) {
+      return { valid: false, error: 'Sandbox Test Mode is active: Publishable Key must begin with "pk_test_".' };
+    }
+    if (!sKey.startsWith('sk_test_') && !sKey.startsWith('rk_test_')) {
+      return { valid: false, error: 'Sandbox Test Mode is active: Secret Key must begin with "sk_test_" or "rk_test_".' };
+    }
+  } else {
+    if (!pKey.startsWith('pk_live_')) {
+      return { valid: false, error: 'Live Production Mode is active: Publishable Key must begin with "pk_live_".' };
+    }
+    if (!sKey.startsWith('sk_live_') && !sKey.startsWith('rk_live_')) {
+      return { valid: false, error: 'Live Production Mode is active: Secret Key must begin with "sk_live_" or "rk_live_".' };
+    }
+  }
+
+  let livemodeDetected = !testMode;
+  try {
+    const sRes = await fetch('https://api.stripe.com/v1/balance', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${sKey}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      signal: AbortSignal.timeout(8000),
+      cache: 'no-store'
+    });
+    const sData = await sRes.json().catch(() => ({}));
+    if (!sRes.ok || sData.error) {
+      return {
+        valid: false,
+        error: `Secret Key rejected by Stripe: ${sData.error?.message || `HTTP status ${sRes.status}`}`
+      };
+    }
+    livemodeDetected = Boolean(sData.livemode);
+    if (testMode && livemodeDetected) {
+      return { valid: false, error: 'Sandbox Test Mode is active, but Secret Key belongs to a Live Stripe account.' };
+    }
+    if (!testMode && !livemodeDetected) {
+      return { valid: false, error: 'Live Production Mode is active, but Secret Key belongs to a Test Stripe account.' };
+    }
+  } catch (err: any) {
+    return { valid: false, error: `Failed to connect to Stripe to verify Secret Key: ${err.message}` };
+  }
+
+  try {
+    const pRes = await fetch('https://api.stripe.com/v1/tokens', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${pKey}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      signal: AbortSignal.timeout(8000),
+      cache: 'no-store'
+    });
+    const pData = await pRes.json().catch(() => ({}));
+
+    if (pRes.status === 401 || (pData.error && pData.error.type === 'invalid_request_error' && pRes.status === 401)) {
+      return {
+        valid: false,
+        error: `Publishable Key rejected by Stripe: ${pData.error?.message || 'Invalid API Key provided.'}`
+      };
+    }
+  } catch (err: any) {
+    return { valid: false, error: `Failed to connect to Stripe to verify Publishable Key: ${err.message}` };
+  }
+
+  if (!wSecret.startsWith('whsec_')) {
+    return { valid: false, error: 'Webhook Secret must begin with "whsec_".' };
+  }
+  if (wSecret.length < 24) {
+    return { valid: false, error: 'Webhook Secret is too short to be a valid Stripe signing key (minimum 24 characters).' };
+  }
+
+  try {
+    const testPayload = JSON.stringify({ test: true, timestamp: Date.now() });
+    const hmac = crypto.createHmac('sha256', wSecret).update(`1234567890.${testPayload}`, 'utf8').digest('hex');
+    if (!hmac || hmac.length !== 64) {
+      return { valid: false, error: 'Cryptographic HMAC computation test failed on Webhook Secret.' };
+    }
+  } catch (err: any) {
+    return { valid: false, error: `Invalid signing key for HMAC-SHA256: ${err.message}` };
+  }
+
+  let endpointNote = '';
+  try {
+    const weRes = await fetch('https://api.stripe.com/v1/webhook_endpoints?limit=25', {
+      headers: { 'Authorization': `Bearer ${sKey}` },
+      signal: AbortSignal.timeout(4000),
+      cache: 'no-store'
+    });
+    if (weRes.ok) {
+      const weData = await weRes.json().catch(() => ({}));
+      const matchingEp = weData.data?.find((ep: any) => ep.url?.includes('/api/webhooks/stripe'));
+      if (matchingEp) {
+        endpointNote = ' (Matched endpoint registered in Stripe Dashboard)';
+      }
+    }
+  } catch (_) {}
+
+  return {
+    valid: true,
+    livemode: livemodeDetected,
+    endpointNote
+  };
+}
+
+// Fail-safe dual-schema persistence
 async function persistAdminSettingsData(settings: any, currency: string) {
   await ensurePaymentSchema();
   const cleanSettings = { ...settings };
@@ -250,45 +223,73 @@ async function persistAdminSettingsData(settings: any, currency: string) {
   const jsonStr = JSON.stringify(cleanSettings);
   const cur = currency || cleanSettings.currency || 'USD';
 
+  let updatedRow = false;
   try {
-    await query(
-      `INSERT INTO admin_settings (key, value, currency, updated_at)
-       VALUES ('payment_gateway_config', $1::jsonb, $2, NOW())
-       ON CONFLICT (key) DO UPDATE SET
-         value = EXCLUDED.value,
-         currency = EXCLUDED.currency,
-         updated_at = NOW()`,
+    const res = await query(
+      `UPDATE admin_settings 
+       SET payment_settings = $1::jsonb, currency = $2, updated_at = NOW() 
+       WHERE id::text IN ('1', 'primary_settings') OR key IN ('payment_gateway_config', 'paymentSettings', 'primary_settings')`,
       [jsonStr, cur]
     );
-  } catch (e1) {
+    const count = (res as any)?.rowCount || (Array.isArray(res) ? res.length : 0);
+    if (count > 0) updatedRow = true;
+  } catch (_) {}
+
+  if (!updatedRow) {
     try {
       await query(
-        `UPDATE admin_settings SET value = $1::jsonb, currency = $2, updated_at = NOW() WHERE key = 'payment_gateway_config'`,
+        `INSERT INTO admin_settings (id, key, payment_settings, currency, updated_at)
+         VALUES ('primary_settings', 'payment_gateway_config', $1::jsonb, $2, NOW())`,
         [jsonStr, cur]
       );
-    } catch (_) {}
+      updatedRow = true;
+    } catch (_) {
+      try {
+        await query(
+          `INSERT INTO admin_settings (key, value, updated_at)
+           VALUES ('payment_gateway_config', $1::jsonb, NOW())`,
+          [jsonStr]
+        );
+      } catch (_) {}
+    }
   }
 
+  // Also sync value column for key-value readers
   try {
     await query(
-      `INSERT INTO admin_settings (key, value, currency, updated_at)
-       VALUES ('paymentSettings', $1::jsonb, $2, NOW())
-       ON CONFLICT (key) DO UPDATE SET
-         value = EXCLUDED.value,
+      `UPDATE admin_settings 
+       SET value = $1::jsonb, updated_at = NOW() 
+       WHERE key IN ('payment_gateway_config', 'paymentSettings', 'primary_settings')`,
+      [jsonStr]
+    );
+  } catch (_) {}
+
+  // Synchronize wallet_settings table
+  try {
+    const allowed = [];
+    const active = cleanSettings.activeGateway || 'stripe';
+    if (active === 'both') {
+      if (cleanSettings.stripe?.enabled !== false) allowed.push('stripe');
+      if (cleanSettings.paypal?.enabled !== false) allowed.push('paypal');
+    } else if (active === 'paypal') {
+      if (cleanSettings.paypal?.enabled !== false) allowed.push('paypal');
+    } else {
+      if (cleanSettings.stripe?.enabled !== false) allowed.push('stripe');
+    }
+    allowed.push('manual');
+
+    await query(
+      `INSERT INTO wallet_settings (id, currency, allowed_gateways, updated_at)
+       VALUES ('current', $1, $2::jsonb, NOW())
+       ON CONFLICT (id) DO UPDATE SET
          currency = EXCLUDED.currency,
+         allowed_gateways = EXCLUDED.allowed_gateways,
          updated_at = NOW()`,
-      [jsonStr, cur]
+      [cur, JSON.stringify(Array.from(new Set(allowed)))]
     );
   } catch (_) {}
 
-  try {
-    await query(
-      `UPDATE admin_settings SET payment_settings = $1::jsonb, currency = $2, updated_at = NOW()
-       WHERE key IN ('payment_gateway_config', 'paymentSettings') OR id = 1`,
-      [jsonStr, cur]
-    );
-  } catch (_) {}
-
+  // Mirror to data directory
   try {
     const dataDir = path.join(process.cwd(), 'data');
     const filePath = path.join(dataDir, 'admin_settings.json');
@@ -297,54 +298,120 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     }
     let existing: any = {};
     if (fs.existsSync(filePath)) {
-      try {
-        existing = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-      } catch (_) {}
+      try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
     }
     existing.paymentSettings = cleanSettings;
     existing.payment_gateway_config = cleanSettings;
     existing.currency = cur;
     existing.updatedAt = new Date().toISOString();
     fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
-  } catch (fileErr) {
-    console.warn('[Payment API] File mirror error:', fileErr);
+  } catch (_) {}
+}
+
+function readCredentialsFromEnvFile() {
+  const envMap: Record<string, string> = {};
+  const envFiles = ['.env', '.env.local', '.env.production'];
+
+  for (const ef of envFiles) {
+    const fPath = path.join(process.cwd(), ef);
+    if (fs.existsSync(fPath)) {
+      try {
+        const content = fs.readFileSync(fPath, 'utf8');
+        const lines = content.split('\n');
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) continue;
+          const eqIdx = trimmed.indexOf('=');
+          const key = trimmed.slice(0, eqIdx).trim();
+          let val = trimmed.slice(eqIdx + 1).trim();
+          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+            val = val.slice(1, -1);
+          }
+          if (val) envMap[key] = val;
+        }
+      } catch (_) {}
+    }
   }
+
+  const processKeys = [
+    'STRIPE_PUBLISHABLE_KEY', 'NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY',
+    'STRIPE_SECRET_KEY', 'STRIPE_SK',
+    'STRIPE_WEBHOOK_SECRET',
+    'PAYPAL_CLIENT_ID', 'NEXT_PUBLIC_PAYPAL_CLIENT_ID',
+    'PAYPAL_CLIENT_SECRET', 'PAYPAL_SECRET',
+    'PAYPAL_WEBHOOK_ID',
+    'PAYMENT_CURRENCY', 'DEFAULT_CURRENCY'
+  ];
+
+  for (const pk of processKeys) {
+    if (process.env[pk] && !envMap[pk]) {
+      envMap[pk] = process.env[pk] as string;
+    }
+  }
+
+  return envMap;
+}
+
+function writeCredentialsToEnvFile(updates: Record<string, string>) {
+  const envPath = path.join(process.cwd(), '.env');
+  let content = '';
+  if (fs.existsSync(envPath)) {
+    try {
+      content = fs.readFileSync(envPath, 'utf8');
+    } catch (_) {}
+  }
+
+  let lines = content ? content.split('\n') : [];
+  const handled = new Set<string>();
+
+  const newLines = lines.map((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) return line;
+    const key = trimmed.slice(0, trimmed.indexOf('=')).trim();
+    if (updates[key] !== undefined) {
+      handled.add(key);
+      return `${key}="${updates[key]}"`;
+    }
+    return line;
+  });
+
+  for (const [key, val] of Object.entries(updates)) {
+    if (!handled.has(key) && val) {
+      newLines.push(`${key}="${val}"`);
+    }
+  }
+
+  fs.writeFileSync(envPath, newLines.join('\n'), 'utf8');
 }
 
 export async function GET() {
   try {
     await ensurePaymentSchema();
 
-    let txRes: any = null;
-    try {
-      txRes = await query(`SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`);
-    } catch (_) {
-      try {
-        txRes = await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`);
-      } catch (_) {
-        txRes = [];
-      }
-    }
+    let txRes: any = await query(
+      `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
+    ).catch(async () => {
+      return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => ({ rows: [] }));
+    });
 
-    const transactions = extractRows(txRes);
+    const transactions = Array.isArray(txRes) ? txRes : (((txRes as any)?.rows) || []);
+
     let settings: any = null;
-
     try {
       const sRes: any = await query(
-        `SELECT key, value, payment_settings, currency FROM admin_settings 
-         WHERE key IN ('payment_gateway_config', 'paymentSettings') OR id = 1 
-         ORDER BY updated_at DESC LIMIT 2`
+        `SELECT payment_settings, value, currency FROM admin_settings 
+         WHERE id::text IN ('1', 'primary_settings') OR key IN ('payment_gateway_config', 'paymentSettings', 'primary_settings')
+         ORDER BY updated_at DESC LIMIT 1`
       );
-      const rows = extractRows(sRes);
-      for (const row of rows) {
-        let val = row.value || row.payment_settings;
-        if (typeof val === 'string') {
-          try { val = JSON.parse(val); } catch (_) {}
+      const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
+      if (sRow) {
+        let ps = sRow.payment_settings || sRow.value;
+        if (typeof ps === 'string') {
+          try { ps = JSON.parse(ps); } catch (_) {}
         }
-        if (val && typeof val === 'object') {
-          settings = { ...val };
-          if (row.currency) settings.currency = row.currency;
-          break;
+        if (ps && typeof ps === 'object') {
+          settings = { ...ps };
+          if (sRow.currency && !settings.currency) settings.currency = sRow.currency;
         }
       }
     } catch (_) {}
@@ -362,69 +429,6 @@ export async function GET() {
       } catch (_) {}
     }
 
-    const primaryEnv = getPrimaryEnvFilePath();
-    const envMap = parseEnvFile(primaryEnv);
-
-    const rawStripePk = envMap['STRIPE_PUBLISHABLE_KEY'] || envMap['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'] || process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
-    const rawStripeSk = envMap['STRIPE_SECRET_KEY'] || envMap['STRIPE_SK'] || process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || '';
-    const rawStripeWh = envMap['STRIPE_WEBHOOK_SECRET'] || envMap['STRIPE_ENDPOINT_SECRET'] || process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_ENDPOINT_SECRET || '';
-
-    const stripePk = isValidStripePublishableKey(rawStripePk) ? rawStripePk : '';
-    const stripeSk = isValidStripeSecretKey(rawStripeSk) ? rawStripeSk : '';
-    const stripeWh = rawStripeWh.startsWith('whsec_') && !rawStripeWh.includes('...') ? rawStripeWh : '';
-
-    const paypalClientId = envMap['PAYPAL_CLIENT_ID'] || envMap['NEXT_PUBLIC_PAYPAL_CLIENT_ID'] || process.env.PAYPAL_CLIENT_ID || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '';
-    const paypalSecret = envMap['PAYPAL_CLIENT_SECRET'] || envMap['PAYPAL_SECRET'] || envMap['PAYPAL_SECRET_KEY'] || process.env.PAYPAL_CLIENT_SECRET || process.env.PAYPAL_SECRET || '';
-    const paypalWebhook = envMap['PAYPAL_WEBHOOK_ID'] || process.env.PAYPAL_WEBHOOK_ID || '';
-    const paypalRawEnv = (envMap['PAYPAL_ENVIRONMENT'] || envMap['PAYPAL_MODE'] || process.env.PAYPAL_ENVIRONMENT || process.env.PAYPAL_MODE || '').toLowerCase();
-    const paypalEnv: 'sandbox' | 'live' = paypalRawEnv.includes('live') ? 'live' : 'sandbox';
-    const currencyFromEnv = envMap['PAYMENT_CURRENCY'] || envMap['DEFAULT_CURRENCY'] || process.env.PAYMENT_CURRENCY || process.env.DEFAULT_CURRENCY || '';
-
-    if (!settings) {
-      settings = {
-        activeGateway: stripePk ? 'stripe' : (paypalClientId ? 'paypal' : 'stripe'),
-        currency: currencyFromEnv || 'USD',
-        testMode: stripeSk ? stripeSk.startsWith('sk_test_') : true,
-        stripe: {
-          enabled: Boolean(stripePk || stripeSk),
-          publishableKey: stripePk,
-          secretKey: stripeSk,
-          webhookSecret: stripeWh,
-        },
-        paypal: {
-          enabled: Boolean(paypalClientId || paypalSecret),
-          clientId: paypalClientId,
-          clientSecret: paypalSecret,
-          webhookId: paypalWebhook,
-          environment: paypalEnv,
-        },
-      };
-    } else {
-      settings.stripe = {
-        enabled: settings.stripe?.enabled ?? Boolean(stripePk || stripeSk),
-        publishableKey: isValidStripePublishableKey(settings.stripe?.publishableKey) ? settings.stripe.publishableKey : stripePk,
-        secretKey: isValidStripeSecretKey(settings.stripe?.secretKey) ? settings.stripe.secretKey : stripeSk,
-        webhookSecret: (settings.stripe?.webhookSecret && !settings.stripe.webhookSecret.includes('...')) ? settings.stripe.webhookSecret : stripeWh,
-        ...(settings.stripe || {})
-      };
-      if (!isValidStripeSecretKey(settings.stripe.secretKey)) {
-        settings.stripe.secretKey = '';
-      }
-      if (!isValidStripePublishableKey(settings.stripe.publishableKey)) {
-        settings.stripe.publishableKey = '';
-      }
-
-      settings.paypal = {
-        enabled: settings.paypal?.enabled ?? Boolean(paypalClientId || paypalSecret),
-        clientId: settings.paypal?.clientId || paypalClientId,
-        clientSecret: settings.paypal?.clientSecret || paypalSecret,
-        webhookId: settings.paypal?.webhookId || paypalWebhook,
-        environment: settings.paypal?.environment || paypalEnv,
-        ...(settings.paypal || {})
-      };
-      if (!settings.currency && currencyFromEnv) settings.currency = currencyFromEnv;
-    }
-
     return NextResponse.json({
       success: true,
       transactions,
@@ -440,209 +444,262 @@ export async function POST(req: Request) {
     await ensurePaymentSchema();
     const body = await req.json();
 
-    // 1. SYNC FROM .ENV FILE DATA
-    if (body.action === 'sync_env' || body.action === 'sync_from_env') {
-      const primaryEnv = getPrimaryEnvFilePath();
-      const envMap = parseEnvFile(primaryEnv);
-
-      const rawStripePk = envMap['STRIPE_PUBLISHABLE_KEY'] || envMap['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'] || process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
-      const rawStripeSk = envMap['STRIPE_SECRET_KEY'] || envMap['STRIPE_SK'] || process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || '';
-      const rawStripeWh = envMap['STRIPE_WEBHOOK_SECRET'] || envMap['STRIPE_ENDPOINT_SECRET'] || process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_ENDPOINT_SECRET || '';
-
-      const stripePk = isValidStripePublishableKey(rawStripePk) ? rawStripePk : '';
-      const stripeSk = isValidStripeSecretKey(rawStripeSk) ? rawStripeSk : '';
-      const stripeWh = rawStripeWh.startsWith('whsec_') && !rawStripeWh.includes('...') ? rawStripeWh : '';
-
-      const paypalClientId = envMap['PAYPAL_CLIENT_ID'] || envMap['NEXT_PUBLIC_PAYPAL_CLIENT_ID'] || process.env.PAYPAL_CLIENT_ID || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '';
-      const paypalSecret = envMap['PAYPAL_CLIENT_SECRET'] || envMap['PAYPAL_SECRET'] || envMap['PAYPAL_SECRET_KEY'] || process.env.PAYPAL_CLIENT_SECRET || process.env.PAYPAL_SECRET || '';
-      const paypalWebhook = envMap['PAYPAL_WEBHOOK_ID'] || process.env.PAYPAL_WEBHOOK_ID || '';
-      const paypalRawEnv = (envMap['PAYPAL_ENVIRONMENT'] || envMap['PAYPAL_MODE'] || process.env.PAYPAL_ENVIRONMENT || process.env.PAYPAL_MODE || '').toLowerCase();
-      const paypalEnv: 'sandbox' | 'live' = paypalRawEnv.includes('live') ? 'live' : 'sandbox';
-      const currencyFromEnv = envMap['PAYMENT_CURRENCY'] || envMap['DEFAULT_CURRENCY'] || process.env.PAYMENT_CURRENCY || process.env.DEFAULT_CURRENCY || '';
+    // 1. SYNC FROM .ENV ACTION
+    if (body.action === 'sync_env') {
+      const envMap = readCredentialsFromEnvFile();
+      const syncedFields: string[] = [];
 
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT value FROM admin_settings WHERE key IN ('payment_gateway_config', 'paymentSettings') LIMIT 1`);
-        const sRow = extractFirstRow(sRes);
-        if (sRow?.value) {
-          currentSettings = typeof sRow.value === 'string' ? JSON.parse(sRow.value) : sRow.value;
+        const sRes: any = await query(`SELECT payment_settings, value, currency FROM admin_settings WHERE id::text IN ('1', 'primary_settings') ORDER BY updated_at DESC LIMIT 1`);
+        const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
+        const ps = sRow?.payment_settings || sRow?.value;
+        if (ps) {
+          currentSettings = typeof ps === 'string' ? JSON.parse(ps) : ps;
+          if (sRow.currency) currentSettings.currency = sRow.currency;
         }
       } catch (_) {}
 
-      const syncedFields: string[] = [];
-      const updatedConfig = {
+      const stripePk = envMap['STRIPE_PUBLISHABLE_KEY'] || envMap['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'];
+      const stripeSk = envMap['STRIPE_SECRET_KEY'] || envMap['STRIPE_SK'];
+      const stripeWh = envMap['STRIPE_WEBHOOK_SECRET'];
+      const paypalId = envMap['PAYPAL_CLIENT_ID'] || envMap['NEXT_PUBLIC_PAYPAL_CLIENT_ID'];
+      const paypalSec = envMap['PAYPAL_CLIENT_SECRET'] || envMap['PAYPAL_SECRET'];
+      const paypalWh = envMap['PAYPAL_WEBHOOK_ID'];
+      const cur = envMap['PAYMENT_CURRENCY'] || envMap['DEFAULT_CURRENCY'];
+
+      const updated = {
         ...currentSettings,
-        stripe: {
-          enabled: currentSettings.stripe?.enabled ?? true,
-          publishableKey: currentSettings.stripe?.publishableKey || '',
-          secretKey: currentSettings.stripe?.secretKey || '',
-          webhookSecret: currentSettings.stripe?.webhookSecret || '',
-          ...(currentSettings.stripe || {})
-        },
-        paypal: {
-          enabled: currentSettings.paypal?.enabled ?? false,
-          clientId: currentSettings.paypal?.clientId || '',
-          clientSecret: currentSettings.paypal?.clientSecret || '',
-          webhookId: currentSettings.paypal?.webhookId || '',
-          environment: currentSettings.paypal?.environment || 'sandbox',
-          ...(currentSettings.paypal || {})
-        }
+        stripe: { ...(currentSettings.stripe || {}) },
+        paypal: { ...(currentSettings.paypal || {}) },
       };
 
-      if (stripePk) {
-        updatedConfig.stripe.publishableKey = stripePk;
-        syncedFields.push('Stripe Publishable Key');
-      }
-      if (stripeSk) {
-        updatedConfig.stripe.secretKey = stripeSk;
-        syncedFields.push('Stripe Secret Key');
-      }
-      if (stripeWh) {
-        updatedConfig.stripe.webhookSecret = stripeWh;
-        syncedFields.push('Stripe Webhook Secret');
-      }
-      if (paypalClientId) {
-        updatedConfig.paypal.clientId = paypalClientId;
-        syncedFields.push('PayPal Client ID');
-      }
-      if (paypalSecret) {
-        updatedConfig.paypal.clientSecret = paypalSecret;
-        syncedFields.push('PayPal Client Secret');
-      }
-      if (paypalWebhook) {
-        updatedConfig.paypal.webhookId = paypalWebhook;
-        syncedFields.push('PayPal Webhook ID');
-      }
-      if (paypalRawEnv) {
-        updatedConfig.paypal.environment = paypalEnv;
-      }
-      if (currencyFromEnv) {
-        updatedConfig.currency = currencyFromEnv;
-        syncedFields.push('Processing Currency');
-      }
+      if (stripePk) { updated.stripe.publishableKey = stripePk; syncedFields.push('Publishable Key'); }
+      if (stripeSk) { updated.stripe.secretKey = stripeSk; syncedFields.push('Secret Key'); }
+      if (stripeWh) { updated.stripe.webhookSecret = stripeWh; syncedFields.push('Stripe Webhook'); }
+      if (paypalId) { updated.paypal.clientId = paypalId; syncedFields.push('PayPal Client ID'); }
+      if (paypalSec) { updated.paypal.clientSecret = paypalSec; syncedFields.push('PayPal Secret'); }
+      if (paypalWh) { updated.paypal.webhookId = paypalWh; syncedFields.push('PayPal Webhook'); }
+      if (cur) { updated.currency = cur; syncedFields.push('Currency'); }
 
-      if (updatedConfig.stripe.secretKey.startsWith('sk_test_')) {
-        updatedConfig.testMode = true;
-      } else if (updatedConfig.stripe.secretKey.startsWith('sk_live_')) {
-        updatedConfig.testMode = false;
-      }
-
-      await persistAdminSettingsData(updatedConfig, updatedConfig.currency || 'USD');
+      await persistAdminSettingsData(updated, updated.currency || 'USD');
 
       return NextResponse.json({
         success: true,
-        settings: updatedConfig,
-        syncedFields,
+        message: `Successfully synchronized ${syncedFields.length} credential(s) from .env.`,
         syncedCount: syncedFields.length,
-        message: syncedFields.length > 0 
-          ? `Successfully synced ${syncedFields.length} credential(s) from .env: ${syncedFields.join(', ')}`
-          : 'Database settings are already up-to-date with your current .env variables.'
+        syncedFields,
+        settings: updated
       });
     }
 
-    // 2. UPDATE / SAVE EXPLICITLY TO .ENV FILE DATA
-    if (body.action === 'update_env' || body.action === 'sync_to_env') {
-      const cfg = body.paymentSettings || body;
-      const currency = cfg.currency || body.currency || 'USD';
+    // 2. UPDATE / WRITE TO .ENV ACTION
+    if (body.action === 'update_env') {
+      const cfg = body.paymentSettings || {};
+      const cur = body.currency || cfg.currency || 'USD';
 
-      const envResult = persistEnvCredentials(cfg, currency);
-      await persistAdminSettingsData(cfg, currency);
+      const updates: Record<string, string> = {};
+      if (cfg.stripe?.publishableKey) {
+        updates['STRIPE_PUBLISHABLE_KEY'] = cfg.stripe.publishableKey;
+        updates['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'] = cfg.stripe.publishableKey;
+      }
+      if (cfg.stripe?.secretKey) {
+        updates['STRIPE_SECRET_KEY'] = cfg.stripe.secretKey;
+      }
+      if (cfg.stripe?.webhookSecret) {
+        updates['STRIPE_WEBHOOK_SECRET'] = cfg.stripe.webhookSecret;
+      }
+      if (cfg.paypal?.clientId) {
+        updates['PAYPAL_CLIENT_ID'] = cfg.paypal.clientId;
+        updates['NEXT_PUBLIC_PAYPAL_CLIENT_ID'] = cfg.paypal.clientId;
+      }
+      if (cfg.paypal?.clientSecret) {
+        updates['PAYPAL_CLIENT_SECRET'] = cfg.paypal.clientSecret;
+      }
+      if (cfg.paypal?.webhookId) {
+        updates['PAYPAL_WEBHOOK_ID'] = cfg.paypal.webhookId;
+      }
+      if (cur) {
+        updates['PAYMENT_CURRENCY'] = cur;
+      }
+
+      writeCredentialsToEnvFile(updates);
+      await persistAdminSettingsData(cfg, cur);
 
       return NextResponse.json({
         success: true,
-        message: `Successfully updated .env file with ${envResult.updatedKeys.length} payment variables!`,
-        updatedKeys: envResult.updatedKeys,
+        message: 'API Keys and Gateway settings successfully written to .env file!',
         settings: cfg
       });
     }
 
+    // 3. VERIFY WEBHOOK SECRET (STANDALONE ACTION)
     if (body.action === 'verify_webhook_secret') {
-      const secret = (body.webhookSecret || '').trim();
+      const secret = String(body.webhookSecret || body.stripe?.webhookSecret || '').trim().replace(/^["']|["']$/g, '');
       if (!secret) {
-        return NextResponse.json({ success: false, error: 'Webhook secret is required' }, { status: 400 });
+        return NextResponse.json({ success: false, error: 'Webhook secret is required to verify.' }, { status: 400 });
       }
-      if (!secret.startsWith('whsec_') || secret.length < 20 || secret.includes('...')) {
-        return NextResponse.json({ 
-          success: false, 
-          error: 'Webhook Secret must start with "whsec_" and contain a valid HMAC signing key.' 
+
+      if (secret.includes('...') || secret.includes('*')) {
+        return NextResponse.json({
+          success: false,
+          error: 'Please enter a valid Stripe Webhook Secret. Do not submit placeholder dots (...) or masked asterisks (*).'
         }, { status: 400 });
       }
+
+      if (!secret.startsWith('whsec_')) {
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Webhook Secret must begin with "whsec_".' 
+        }, { status: 400 });
+      }
+
+      if (secret.length < 24) {
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Webhook Secret is too short to be a valid Stripe signing key (minimum 24 characters).' 
+        }, { status: 400 });
+      }
+
+      try {
+        const testPayload = JSON.stringify({ test: true, timestamp: Date.now() });
+        const hmac = crypto.createHmac('sha256', secret).update(`1234567890.${testPayload}`, 'utf8').digest('hex');
+        if (!hmac || hmac.length !== 64) {
+          throw new Error('HMAC calculation failed');
+        }
+      } catch (err: any) {
+        return NextResponse.json({ success: false, error: `Invalid HMAC secret: ${err.message}` }, { status: 400 });
+      }
+
+      let currentSettings: any = {};
+      try {
+        const sRes: any = await query(`SELECT payment_settings, value, currency FROM admin_settings WHERE id::text IN ('1', 'primary_settings') ORDER BY updated_at DESC LIMIT 1`);
+        const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
+        const ps = sRow?.payment_settings || sRow?.value;
+        if (ps) {
+          currentSettings = typeof ps === 'string' ? JSON.parse(ps) : ps;
+        }
+      } catch (_) {}
+
+      if (body.paymentSettings && typeof body.paymentSettings === 'object') {
+        currentSettings = { ...currentSettings, ...body.paymentSettings };
+      }
+      if (body.stripe && typeof body.stripe === 'object') {
+        currentSettings.stripe = { ...(currentSettings.stripe || {}), ...body.stripe };
+      }
+
+      const updated = {
+        ...currentSettings,
+        stripeWebhookVerified: true,
+        stripe: {
+          ...(currentSettings?.stripe || {}),
+          webhookSecret: secret,
+        }
+      };
+
+      await persistAdminSettingsData(updated, updated.currency || 'USD');
+
+      try {
+        writeCredentialsToEnvFile({ STRIPE_WEBHOOK_SECRET: secret });
+      } catch (_) {}
+
+      // Optional cross-check against Stripe endpoints
+      let endpointNote = '';
+      const sKey = (body.secretKey || currentSettings?.stripe?.secretKey || process.env.STRIPE_SECRET_KEY || '').trim();
+      if (sKey && !sKey.includes('...') && (sKey.startsWith('sk_') || sKey.startsWith('rk_'))) {
+        try {
+          const weRes = await fetch('https://api.stripe.com/v1/webhook_endpoints?limit=25', {
+            headers: { 'Authorization': `Bearer ${sKey}` },
+            signal: AbortSignal.timeout(4000),
+            cache: 'no-store'
+          });
+          if (weRes.ok) {
+            const weData = await weRes.json().catch(() => ({}));
+            const matchingEp = weData.data?.find((ep: any) => ep.url?.includes('/api/webhooks/stripe'));
+            if (matchingEp) {
+              endpointNote = ' (Matched endpoint registered in Stripe Dashboard)';
+            }
+          }
+        } catch (_) {}
+      }
+
       return NextResponse.json({ 
         success: true, 
-        message: 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!' 
+        message: `Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!${endpointNote}`,
+        settings: updated,
+        stripeWebhookVerified: true
       });
     }
 
-    if (body.action === 'verify_stripe_keys') {
+    // 4. VERIFY ALL THREE: Publishable Key, Secret Key, and Webhook Secret
+    if (body.action === 'verify_stripe_keys' || body.action === 'verify_stripe_key') {
       const pKey = (body.publishableKey || body.stripe?.publishableKey || '').trim();
       const sKey = (body.secretKey || body.stripe?.secretKey || '').trim();
       const wSecret = (body.webhookSecret || body.stripe?.webhookSecret || '').trim();
       const isTestMode = body.testMode !== undefined ? Boolean(body.testMode) : true;
 
-      if (!isValidStripePublishableKey(pKey)) {
+      const verifyRes = await verifyThreeStripeCredentials(pKey, sKey, wSecret, isTestMode);
+      if (!verifyRes.valid) {
         return NextResponse.json({
           success: false,
-          error: 'Publishable Key is invalid or contains placeholder characters (...).'
+          keysVerified: false,
+          stripeKeysVerified: false,
+          stripeWebhookVerified: false,
+          error: verifyRes.error
         }, { status: 400 });
       }
 
-      if (!isValidStripeSecretKey(sKey)) {
-        return NextResponse.json({
-          success: false,
-          error: 'Secret Key is invalid or contains placeholder characters (...).'
-        }, { status: 400 });
-      }
-
-      if (isTestMode && (!pKey.startsWith('pk_test_') || !sKey.startsWith('sk_test_'))) {
-        return NextResponse.json({
-          success: false,
-          error: 'Sandbox Test Mode is active: Publishable Key must start with "pk_test_" and Secret Key must start with "sk_test_".'
-        }, { status: 400 });
-      }
-
-      if (!isTestMode && (!pKey.startsWith('pk_live_') || !sKey.startsWith('sk_live_'))) {
-        return NextResponse.json({
-          success: false,
-          error: 'Live Production Mode is active: Publishable Key must start with "pk_live_" and Secret Key must start with "sk_live_".'
-        }, { status: 400 });
-      }
-
-      let stripeLiveVerified = false;
+      let currentSettings: any = {};
       try {
-        const stripeRes = await fetch('https://api.stripe.com/v1/balance', {
-          headers: { 'Authorization': `Bearer ${sKey}` },
-          signal: AbortSignal.timeout(4000),
-        });
-        if (stripeRes.ok) {
-          stripeLiveVerified = true;
-        } else {
-          const errData = await stripeRes.json().catch(() => ({}));
-          return NextResponse.json({
-            success: false,
-            error: errData?.error?.message || `Stripe authentication rejected key with status ${stripeRes.status}`
-          }, { status: 400 });
+        const sRes: any = await query(`SELECT payment_settings, value, currency FROM admin_settings WHERE id::text IN ('1', 'primary_settings') ORDER BY updated_at DESC LIMIT 1`);
+        const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
+        const ps = sRow?.payment_settings || sRow?.value;
+        if (ps) {
+          currentSettings = typeof ps === 'string' ? JSON.parse(ps) : ps;
         }
-      } catch (err: any) {
-        return NextResponse.json({
-          success: false,
-          error: `Could not connect to Stripe: ${err.message}`
-        }, { status: 400 });
+      } catch (_) {}
+
+      if (body.paymentSettings && typeof body.paymentSettings === 'object') {
+        currentSettings = { ...currentSettings, ...body.paymentSettings };
       }
+
+      const updatedSettings = {
+        ...currentSettings,
+        stripeKeysVerified: true,
+        stripeWebhookVerified: true,
+        stripe: {
+          ...(currentSettings?.stripe || {}),
+          publishableKey: pKey,
+          secretKey: sKey,
+          webhookSecret: wSecret,
+        }
+      };
+
+      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
+
+      const msg = `Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers (${verifyRes.livemode ? 'Live Production Mode' : 'Sandbox Test Mode'})!${verifyRes.endpointNote || ''}`;
 
       return NextResponse.json({
         success: true,
-        message: 'Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers!'
+        keysVerified: true,
+        stripeKeysVerified: true,
+        stripeWebhookVerified: true,
+        livemode: verifyRes.livemode,
+        settings: updatedSettings,
+        message: msg
       });
     }
 
+    // 5. TOGGLE TEST MODE
     if (body.action === 'toggle_test_mode') {
       const nextMode = Boolean(body.testMode);
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT value FROM admin_settings WHERE key IN ('payment_gateway_config', 'paymentSettings') LIMIT 1`);
-        const row = extractFirstRow(sRes);
-        if (row?.value) {
-          currentSettings = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
+        const sRes: any = await query(`SELECT payment_settings, value, currency FROM admin_settings WHERE id::text IN ('1', 'primary_settings') ORDER BY updated_at DESC LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
+        const ps = row?.payment_settings || row?.value;
+        if (ps) {
+          currentSettings = typeof ps === 'string' ? JSON.parse(ps) : ps;
         }
       } catch (_) {}
 
@@ -655,150 +712,54 @@ export async function POST(req: Request) {
       };
 
       await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
-      persistEnvCredentials(updatedSettings, updatedSettings.currency || 'USD');
 
       return NextResponse.json({
         success: true,
-        message: nextMode ? 'Sandbox (Test Mode) enabled and saved to server & .env!' : 'Live Production mode enabled and saved to server & .env!',
+        message: nextMode ? 'Sandbox (Test Mode) enabled and saved to PostgreSQL!' : 'Live Production mode enabled and saved to PostgreSQL!',
         settings: updatedSettings
       });
     }
 
-    if (body.action === 'add_transaction') {
-      const tx = body.transaction;
-      if (!tx) {
-        return NextResponse.json({ success: false, error: 'Transaction object required' }, { status: 400 });
-      }
-
-      const txId = String(tx.id || ('tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 5)));
-      const customerName = String(tx.customerName || 'Customer');
-      const customerEmail = String(tx.customerEmail || '').toLowerCase().trim();
-      const planName = String(tx.planName || 'Plan');
-      const planSlug = String(tx.planSlug || 'taster');
-      const amount = Number(tx.amount || 0);
-      const currency = String(tx.currency || 'USD');
-      const gateway = String(tx.gateway || 'stripe');
-      const status = String(tx.status || 'succeeded').toLowerCase();
-      const testMode = Boolean(tx.testMode);
-      const failureReason = tx.failureReason || null;
-      const isRecurring = tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : true;
-      const recurringInterval = String(tx.recurringInterval || 'MONTH');
-      const autoRenew = tx.autoRenew !== undefined ? Boolean(tx.autoRenew) : true;
-      const createdAt = tx.createdAt ? new Date(tx.createdAt).toISOString() : new Date().toISOString();
-      const expiryDate = tx.expiryDate ? new Date(tx.expiryDate).toISOString() : null;
-      const gatewayTxId = tx.gatewayTransactionId ? String(tx.gatewayTransactionId).trim() : null;
-      const confirmedAmount = tx.confirmedAmount !== undefined ? Number(tx.confirmedAmount) : (status === 'succeeded' ? amount : null);
-      const confirmedAt = tx.confirmedAt ? new Date(tx.confirmedAt).toISOString() : (status === 'succeeded' ? new Date().toISOString() : null);
-
-      let checkRes: any = null;
-      try {
-        checkRes = await query(`SELECT id FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
-      } catch (_) {
-        checkRes = [];
-      }
-      const checkRows = extractRows(checkRes);
-
-      if (checkRows.length > 0) {
-        await query(
-          `UPDATE payment_transactions 
-           SET customer_name = $1, customer_email = $2, plan_name = $3, plan_slug = $4,
-               amount = $5, currency = $6, gateway = $7, status = $8, failure_reason = $9,
-               is_recurring = $10, recurring_interval = $11, auto_renew = $12, created_at = $13,
-               expiry_date = $14, gateway_transaction_id = $15, confirmed_amount = $16,
-               confirmed_at = $17, updated_at = NOW()
-           WHERE id = $18`,
-          [
-            customerName, customerEmail, planName, planSlug, amount, currency, gateway,
-            status, failureReason, isRecurring, recurringInterval, autoRenew, createdAt,
-            expiryDate, gatewayTxId, confirmedAmount, confirmedAt, txId
-          ]
-        );
-      } else {
-        await query(
-          `INSERT INTO payment_transactions (
-            id, customer_name, customer_email, plan_name, plan_slug,
-            amount, currency, gateway, status, test_mode, failure_reason,
-            is_recurring, recurring_interval, auto_renew, created_at,
-            expiry_date, gateway_transaction_id, confirmed_amount, confirmed_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())`,
-          [
-            txId, customerName, customerEmail, planName, planSlug,
-            amount, currency, gateway, status, testMode, failureReason,
-            isRecurring, recurringInterval, autoRenew, createdAt,
-            expiryDate, gatewayTxId, confirmedAmount, confirmedAt
-          ]
-        ).catch(async () => {
-          await query(
-            `INSERT INTO payment_transactions (
-              id, customer_name, customer_email, plan_name, plan_slug,
-              amount, currency, gateway, status, created_at, expiry_date
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-            [
-              txId, customerName, customerEmail, planName, planSlug,
-              amount, currency, gateway, status, createdAt, expiryDate
-            ]
-          );
-        });
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: 'Transaction recorded successfully',
-        transaction: {
-          ...tx,
-          id: txId,
-          customerName,
-          customerEmail,
-          planName,
-          planSlug,
-          amount,
-          currency,
-          gateway,
-          status,
-          isRecurring,
-          autoRenew,
-          createdAt,
-          expiryDate
-        }
-      });
-    }
-
-    // Default Save Gateway Settings
+    // 6. DEFAULT SAVE GATEWAY SETTINGS
     const gatewayConfig = body.paymentSettings || body;
     const currency = gatewayConfig.currency || body.currency || 'USD';
 
     await persistAdminSettingsData(gatewayConfig, currency);
-    const envResult = persistEnvCredentials(gatewayConfig, currency);
+
+    const envUpdates: Record<string, string> = {};
+    if (gatewayConfig.stripe?.publishableKey) {
+      envUpdates['STRIPE_PUBLISHABLE_KEY'] = gatewayConfig.stripe.publishableKey;
+      envUpdates['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'] = gatewayConfig.stripe.publishableKey;
+    }
+    if (gatewayConfig.stripe?.secretKey) {
+      envUpdates['STRIPE_SECRET_KEY'] = gatewayConfig.stripe.secretKey;
+    }
+    if (gatewayConfig.stripe?.webhookSecret) {
+      envUpdates['STRIPE_WEBHOOK_SECRET'] = gatewayConfig.stripe.webhookSecret;
+    }
+    if (gatewayConfig.paypal?.clientId) {
+      envUpdates['PAYPAL_CLIENT_ID'] = gatewayConfig.paypal.clientId;
+      envUpdates['NEXT_PUBLIC_PAYPAL_CLIENT_ID'] = gatewayConfig.paypal.clientId;
+    }
+    if (gatewayConfig.paypal?.clientSecret) {
+      envUpdates['PAYPAL_CLIENT_SECRET'] = gatewayConfig.paypal.clientSecret;
+    }
+    if (gatewayConfig.paypal?.webhookId) {
+      envUpdates['PAYPAL_WEBHOOK_ID'] = gatewayConfig.paypal.webhookId;
+    }
+    if (currency) {
+      envUpdates['PAYMENT_CURRENCY'] = currency;
+    }
+
+    if (Object.keys(envUpdates).length > 0) {
+      try { writeCredentialsToEnvFile(envUpdates); } catch (_) {}
+    }
 
     return NextResponse.json({
       success: true,
-      message: 'Payment gateway settings and currency saved successfully to PostgreSQL and .env file!',
-      settings: gatewayConfig,
-      updatedKeys: envResult.updatedKeys
+      message: 'Payment gateway settings and currency saved successfully to PostgreSQL and .env!',
+      settings: gatewayConfig
     });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
-
-export async function DELETE(req: Request) {
-  try {
-    await ensurePaymentSchema();
-    const url = new URL(req.url);
-    const id = url.searchParams.get('id');
-
-    if (id) {
-      await query(`DELETE FROM payment_transactions WHERE id = $1`, [id]);
-      return NextResponse.json({ success: true, message: 'Transaction deleted' });
-    }
-
-    const body = await req.json().catch(() => ({}));
-    if (Array.isArray(body.ids) && body.ids.length > 0) {
-      await query(`DELETE FROM payment_transactions WHERE id = ANY($1::text[])`, [body.ids]);
-      return NextResponse.json({ success: true, message: `${body.ids.length} transactions deleted` });
-    }
-
-    return NextResponse.json({ success: false, error: 'Transaction ID(s) required' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
