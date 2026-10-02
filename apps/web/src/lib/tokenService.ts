@@ -37,6 +37,7 @@ export interface PurchasePackageParams {
   userId?: string | null;
   userEmail?: string | null;
   paymentMethod?: string;
+  [key: string]: any;
 }
 
 export interface PurchasePackageResult {
@@ -664,9 +665,6 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
       return { success: true, deletedCount: 0, affectedUsers: [] };
     }
 
-    // Group net reversals by user:
-    // If a transaction amount was -2 (deduction), deleting it adds +2 back.
-    // If a transaction amount was +500 (grant/purchase), deleting it removes 500.
     const userAdjustments: Record<string, { userId: string; userEmail: string; netChange: number }> = {};
     for (const tx of txRows) {
       const uKey = tx.user_id || tx.user_email;
@@ -716,7 +714,6 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
       }
     }
 
-    // Delete the transactions from PostgreSQL
     await query(`
       DELETE FROM token_transactions 
       WHERE id IN (${placeholders})
@@ -736,4 +733,136 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
       affectedUsers: []
     };
   }
+}
+
+/**
+ * Grants monthly or plan-associated token rewards to a user upon subscription or cycle renewal.
+ * Stored and updated in PostgreSQL users table (token_balance) and token_transactions.
+ */
+export async function grantMonthlyPlanTokenReward(
+  userEmailOrId?: string | { id?: string; email?: string; userId?: string; userEmail?: string } | null,
+  tokens?: number | string | { tokenLimit?: number; tokens?: number; planSlug?: string; planName?: string; customTokens?: number } | any,
+  options?: { planSlug?: string; planName?: string; [key: string]: any } | any
+): Promise<{ success: boolean; tokensGranted: number; newBalance: number; plan?: string; error?: string }> {
+  await initTokenTables();
+
+  let cleanIdent = '';
+  let emailIdent = '';
+
+  if (typeof userEmailOrId === 'string') {
+    cleanIdent = userEmailOrId.trim();
+    if (cleanIdent.includes('@')) {
+      emailIdent = cleanIdent.toLowerCase();
+    }
+  } else if (userEmailOrId && typeof userEmailOrId === 'object') {
+    cleanIdent = (userEmailOrId.id || userEmailOrId.userId || userEmailOrId.email || '').trim();
+    if (userEmailOrId.email || userEmailOrId.userEmail) {
+      emailIdent = (userEmailOrId.email || userEmailOrId.userEmail || '').trim().toLowerCase();
+    }
+  }
+
+  if (!cleanIdent && !emailIdent) {
+    return { success: false, tokensGranted: 0, newBalance: 0, error: 'User identifier required' };
+  }
+
+  let rewardTokens = 0;
+  let resolvedOptions = options || {};
+
+  if (typeof tokens === 'number') {
+    rewardTokens = tokens;
+  } else if (typeof tokens === 'string') {
+    const parsed = parseInt(tokens, 10);
+    if (!isNaN(parsed)) rewardTokens = parsed;
+  } else if (tokens && typeof tokens === 'object') {
+    rewardTokens = Number(tokens.tokenLimit ?? tokens.tokens ?? tokens.customTokens ?? 0);
+    resolvedOptions = { ...tokens, ...resolvedOptions };
+  }
+
+  let userRow: any = null;
+  try {
+    const userRows = await query(`
+      SELECT id, email, token_balance, subscription_plan 
+      FROM users 
+      WHERE (id::text = $1 AND $1 != '') 
+         OR (LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '')
+         OR (LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+      LIMIT 1
+    `, [cleanIdent, emailIdent]);
+    if (userRows && userRows.length > 0) {
+      userRow = userRows[0];
+    }
+  } catch (_) {}
+
+  const planSlug = resolvedOptions?.planSlug || userRow?.subscription_plan || 'free';
+  const planName = resolvedOptions?.planName || planSlug;
+
+  if (rewardTokens <= 0) {
+    if (resolvedOptions?.customTokens && Number(resolvedOptions.customTokens) > 0) {
+      rewardTokens = Number(resolvedOptions.customTokens);
+    } else {
+      try {
+        const pRows = await query(`
+          SELECT * FROM subscription_plans 
+          WHERE LOWER(slug) = LOWER($1) OR LOWER(id) = LOWER($1)
+          LIMIT 1
+        `, [planSlug]);
+        if (pRows && pRows.length > 0) {
+          rewardTokens = Number(pRows[0].token_limit ?? pRows[0].monthly_tokens ?? 500);
+        }
+      } catch (_) {}
+      
+      if (rewardTokens <= 0) {
+        const settings = await getTokenSettings();
+        const alloc = settings.planAllocations || {};
+        rewardTokens = Number(alloc[planSlug] ?? (planSlug.includes('pro') ? 500 : 50));
+      }
+    }
+  }
+
+  if (rewardTokens <= 0) {
+    rewardTokens = 500;
+  }
+
+  try {
+    const targetId = userRow?.id || cleanIdent;
+    const targetEmail = userRow?.email || emailIdent;
+
+    const updateRes = await query(`
+      UPDATE users 
+      SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
+      WHERE id::text = $2::text OR LOWER(TRIM(email)) = LOWER(TRIM($3))
+      RETURNING id, email, token_balance
+    `, [rewardTokens, targetId, targetEmail]);
+
+    const updatedUser = updateRes?.[0];
+    const newBalance = updatedUser ? Number(updatedUser.token_balance) : ((userRow?.token_balance || 0) + rewardTokens);
+
+    const desc = resolvedOptions?.reason || `Monthly Plan Token Reward: ${planName} (+${rewardTokens.toLocaleString()} tokens)`;
+    const txId = 'tx_grant_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 7);
+
+    try {
+      await query(`
+        INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
+        VALUES ($1, $2, $3, $4, $5, 'plan_monthly_grant', $6, NOW())
+      `, [txId, updatedUser?.id || targetId, updatedUser?.email || targetEmail, rewardTokens, newBalance, desc]);
+    } catch (_) {}
+
+    return {
+      success: true,
+      tokensGranted: rewardTokens,
+      newBalance,
+      plan: planSlug
+    };
+  } catch (err: any) {
+    console.error('[grantMonthlyPlanTokenReward Error]:', err);
+    return { success: false, tokensGranted: 0, newBalance: userRow?.token_balance || 0, error: err.message };
+  }
+}
+
+export async function syncUserMonthlyTokens(userEmailOrId: string): Promise<any> {
+  return grantMonthlyPlanTokenReward(userEmailOrId);
+}
+
+export async function grantUserTokens(userEmailOrId: string, tokens: number, reason?: string): Promise<any> {
+  return grantMonthlyPlanTokenReward(userEmailOrId, tokens, { reason });
 }

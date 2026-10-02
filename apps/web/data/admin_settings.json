@@ -2424,8 +2424,8 @@
       "currency": "USD",
       "testMode": true,
       "stripeConnected": false,
-      "stripeKeysVerified": true,
-      "stripeWebhookVerified": true,
+      "stripeKeysVerified": false,
+      "stripeWebhookVerified": false,
       "stripe": {
         "enabled": true,
         "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG",
@@ -2435,9 +2435,9 @@
       "paypal": {
         "enabled": false,
         "clientId": "",
+        "clientSecret": "",
         "webhookId": "",
-        "environment": "sandbox",
-        "clientSecret": ""
+        "environment": "sandbox"
       }
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
@@ -3787,8 +3787,8 @@
       "currency": "USD",
       "testMode": true,
       "stripeConnected": false,
-      "stripeKeysVerified": true,
-      "stripeWebhookVerified": true,
+      "stripeKeysVerified": false,
+      "stripeWebhookVerified": false,
       "stripe": {
         "enabled": true,
         "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG",
@@ -3798,9 +3798,9 @@
       "paypal": {
         "enabled": false,
         "clientId": "",
+        "clientSecret": "",
         "webhookId": "",
-        "environment": "sandbox",
-        "clientSecret": ""
+        "environment": "sandbox"
       }
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
@@ -3909,5 +3909,5 @@
     ],
     "recommendedRecipeUrls": []
   },
-  "updatedAt": "2026-10-02T15:33:47.846Z"
+  "updatedAt": "2026-10-02T16:17:58.258Z"
 }
