@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.86",
+  "version": "8.0.89",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.86",
+  "version": "8.0.89",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -17441,6 +17441,40 @@ export default function AdminDatabasePage() {
     }
   };
 
+  
+  const [cloning, setCloning] = useState<boolean>(false);
+
+  const handleCloneToSupabase = async () => {
+    const targetUrl = supabaseDbUrl.trim() || data?.savedTargets?.supabasePooler || '';
+    if (!targetUrl) {
+      setFeedback({ type: 'error', message: 'Enter your Supabase pooled connection string before cloning.' });
+      return;
+    }
+    setCloning(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/admin/database', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clone_local_to_supabase', supabaseUrl: targetUrl }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setFeedback({
+          type: 'success',
+          message: `✨ ${json.message} All plans, users, settings, and recipes replicated to Supabase!`
+        });
+        await fetchDatabaseInfo();
+      } else {
+        setFeedback({ type: 'error', message: json.error || 'Cloning failed.' });
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err.message });
+    } finally {
+      setCloning(false);
+    }
+  };
+
   const handleSaveAndConnectSupabase = async () => {
     setSaving(true);
     setFeedback(null);
@@ -18411,6 +18445,33 @@ export default function AdminDatabasePage() {
                 </button>
               </div>
             </div>
+
+            {/* Clone Localhost to Supabase Card */}
+            <div
+              className="p-5 rounded-2xl border bg-indigo-500/5 border-indigo-500/20 space-y-3"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-sm flex items-center gap-2 text-indigo-400">
+                    <Sparkles className="w-4 h-4" />
+                    <span>Clone Localhost Database into Supabase</span>
+                  </h3>
+                  <p className="text-xs opacity-70 mt-0.5">
+                    Copy all current local records (plans, users, settings, recipes, pages) directly to your Supabase PostgreSQL cluster with full relational parity.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCloneToSupabase}
+                  disabled={cloning}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm transition active:scale-95 flex items-center gap-2 cursor-pointer flex-shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${cloning ? 'animate-spin' : ''}`} />
+                  <span>{cloning ? 'Cloning Records...' : 'Clone Localhost to Supabase'}</span>
+                </button>
+              </div>
+            </div>
+
           </div>
         )}
 
@@ -47412,6 +47473,103 @@ export async function POST(req: NextRequest) {
     const { action } = body;
 
     // Action 1: Switch & Activate Database
+    
+    // Action: Clone Localhost Database to Supabase
+    if (action === 'clone_local_to_supabase') {
+      const env = readEnvFiles();
+      const localDbUrl = env.DATABASE_URL_LOCAL_PG || 
+        (env.DATABASE_URL && env.DATABASE_URL.includes('localhost') ? env.DATABASE_URL : 'postgresql://postgres:postgres@localhost:5432/zecratary?schema=public');
+
+      const targetSupaUrl = (body.supabaseUrl || env.SUPABASE_DATABASE_URL || '').trim();
+      if (!targetSupaUrl || (!targetSupaUrl.includes('supabase.co') && !targetSupaUrl.includes('pooler.supabase.com'))) {
+        return NextResponse.json({
+          success: false,
+          error: 'Valid Supabase pooled connection string (port 6543) is required.'
+        }, { status: 400 });
+      }
+
+      // @ts-ignore
+      const { Pool } = await import('pg');
+      const localPool = new Pool({
+        connectionString: localDbUrl,
+        ssl: localDbUrl.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined,
+        connectionTimeoutMillis: 5000,
+      });
+
+      const supaPool = new Pool({
+        connectionString: targetSupaUrl,
+        ssl: { rejectUnauthorized: false },
+        connectionTimeoutMillis: 10000,
+      });
+
+      try {
+        await localPool.query('SELECT 1;');
+        await supaPool.query('SELECT 1;');
+        await ensureCoreTables(targetSupaUrl, 'postgres');
+
+        const tablesToClone = [
+          'subscription_plans',
+          'users',
+          'admin_settings',
+          'payment_transactions',
+          'saved_recipes',
+          'page_contents',
+          'frontend_pages'
+        ];
+
+        let totalCloned = 0;
+        const details: Record<string, number> = {};
+
+        for (const tbl of tablesToClone) {
+          try {
+            const lRes = await localPool.query(`SELECT * FROM ${tbl};`);
+            for (const row of lRes.rows) {
+              const keys = Object.keys(row);
+              const values = Object.values(row).map((v) => {
+                if (v !== null && typeof v === 'object' && !(v instanceof Date)) {
+                  return JSON.stringify(v);
+                }
+                return v;
+              });
+
+              const cols = keys.join(', ');
+              const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+              const conflictCol = keys.includes('id') ? 'id' : keys.includes('page_slug') ? 'page_slug' : keys[0];
+
+              const updateCols = keys
+                .filter((k) => k !== conflictCol)
+                .map((k) => `${k} = EXCLUDED.${k}`)
+                .join(', ');
+
+              const upsertSql = updateCols
+                ? `INSERT INTO ${tbl} (${cols}) VALUES (${placeholders}) ON CONFLICT (${conflictCol}) DO UPDATE SET ${updateCols};`
+                : `INSERT INTO ${tbl} (${cols}) VALUES (${placeholders}) ON CONFLICT (${conflictCol}) DO NOTHING;`;
+
+              await supaPool.query(upsertSql, values);
+              totalCloned++;
+            }
+            details[tbl] = lRes.rows.length;
+          } catch (_) {}
+        }
+
+        await localPool.end();
+        await supaPool.end();
+
+        return NextResponse.json({
+          success: true,
+          message: `Successfully cloned ${totalCloned} records from Localhost to Supabase!`,
+          details
+        });
+      } catch (err: any) {
+        await localPool.end().catch(() => {});
+        await supaPool.end().catch(() => {});
+        return NextResponse.json({
+          success: false,
+          error: `Cloning failed: ${err.message}`
+        }, { status: 400 });
+      }
+    }
+
     if (action === 'switch_database') {
       const { targetType, customUrl } = body;
       const env = readEnvFiles();
