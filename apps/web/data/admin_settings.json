@@ -2,38 +2,38 @@
   "aiProvider": "gemini",
   "aiModel": "gemini-3.6-flash",
   "themeColors": {
-    "primary": "#f59e0b",
-    "primaryColor": "#f59e0b",
-    "primaryHover": "#d97706",
-    "accentEmerald": "#10b981",
-    "accentColor": "#10b981",
-    "accent": "#10b981",
-    "sidebarIconColor": "#fbbf24",
-    "sidebarIcon": "#fbbf24",
-    "backgroundColor": "#120d04",
-    "backgroundDark": "#120d04",
-    "cardBackground": "#1c1507",
-    "cardBorder": "#36270a",
-    "textSecondary": "#fcd34d"
+    "accent": "#ec4899",
+    "primary": "#8b5cf6",
+    "cardBorder": "#2a1650",
+    "accentColor": "#ec4899",
+    "sidebarIcon": "#c084fc",
+    "primaryColor": "#8b5cf6",
+    "primaryHover": "#7c3aed",
+    "accentEmerald": "#ec4899",
+    "textSecondary": "#d8b4fe",
+    "backgroundDark": "#0f081c",
+    "cardBackground": "#180d2e",
+    "backgroundColor": "#0f081c",
+    "sidebarIconColor": "#c084fc"
   },
   "theme_colors": {
-    "primary": "#f59e0b",
-    "primaryColor": "#f59e0b",
-    "primaryHover": "#d97706",
-    "accentEmerald": "#10b981",
-    "accentColor": "#10b981",
-    "accent": "#10b981",
-    "sidebarIconColor": "#fbbf24",
-    "sidebarIcon": "#fbbf24",
-    "backgroundColor": "#120d04",
-    "backgroundDark": "#120d04",
-    "cardBackground": "#1c1507",
-    "cardBorder": "#36270a",
-    "textSecondary": "#fcd34d"
+    "accent": "#ec4899",
+    "primary": "#8b5cf6",
+    "cardBorder": "#2a1650",
+    "accentColor": "#ec4899",
+    "sidebarIcon": "#c084fc",
+    "primaryColor": "#8b5cf6",
+    "primaryHover": "#7c3aed",
+    "accentEmerald": "#ec4899",
+    "textSecondary": "#d8b4fe",
+    "backgroundDark": "#0f081c",
+    "cardBackground": "#180d2e",
+    "backgroundColor": "#0f081c",
+    "sidebarIconColor": "#c084fc"
   },
   "chefAiSettings": {
     "model": "gemini-3.6-flash",
-    "apiKey": "AQ.Ab8RN6JBqR1t4oS0LpYKrRt-9MLJS5l9pTJOdYdBZY4-n4lSVQ",
+    "apiKey": "AQ.Ab8RN6Im8kfqkq_BdZOaXRZoB8QYFDTN4qKFdttKMA5u2jvVSg",
     "provider": "gemini",
     "sections": [
       {
@@ -59,7 +59,7 @@
       }
     ],
     "maxTokens": 4096,
-    "updatedAt": "2026-09-30T14:15:04.833Z",
+    "updatedAt": "2026-10-02T13:30:45.834Z",
     "voiceSpeed": 1,
     "maxPlanDays": 7,
     "temperature": 0.7,
@@ -284,6 +284,18 @@
         "name": "Gemini 3.1 Flash TTS Preview",
         "label": "Gemini 3.1 Flash TTS Preview (gemini-3.1-flash-tts-preview)",
         "description": "Gemini 3.1 Flash TTS Preview"
+      },
+      {
+        "id": "gemini-3.8-flash-tts",
+        "name": "Gemini 3.8 Flash TTS",
+        "label": "Gemini 3.8 Flash TTS (gemini-3.8-flash-tts)",
+        "description": "Gemini 3.8 Flash TTS"
+      },
+      {
+        "id": "gemini-3.8-flash-lite-tts",
+        "name": "Gemini 3.8 Flash Lite TTS",
+        "label": "Gemini 3.8 Flash Lite TTS (gemini-3.8-flash-lite-tts)",
+        "description": "Gemini 3.8 Flash Lite TTS"
       },
       {
         "id": "gemini-robotics-er-2-preview",
@@ -1182,8 +1194,8 @@
     "site_name": "Zecratary",
     "updatedAt": "2026-09-18T08:24:02.536Z",
     "aiProvider": "gemini",
-    "fontFamily": "Roboto",
-    "font_family": "Roboto",
+    "fontFamily": "Poppins",
+    "font_family": "Poppins",
     "recipeTypes": [
       "Breakfast",
       "Lunch",
@@ -1216,37 +1228,37 @@
       "requireEmailVerification": true
     },
     "themeColors": {
-      "primary": "#f59e0b",
-      "primaryColor": "#f59e0b",
-      "primaryHover": "#d97706",
-      "accentEmerald": "#10b981",
-      "accentColor": "#10b981",
-      "accent": "#10b981",
-      "sidebarIconColor": "#fbbf24",
-      "sidebarIcon": "#fbbf24",
-      "backgroundColor": "#120d04",
-      "backgroundDark": "#120d04",
-      "cardBackground": "#1c1507",
-      "cardBorder": "#36270a",
-      "textSecondary": "#fcd34d"
+      "accent": "#ec4899",
+      "primary": "#8b5cf6",
+      "cardBorder": "#2a1650",
+      "accentColor": "#ec4899",
+      "sidebarIcon": "#c084fc",
+      "primaryColor": "#8b5cf6",
+      "primaryHover": "#7c3aed",
+      "accentEmerald": "#ec4899",
+      "textSecondary": "#d8b4fe",
+      "backgroundDark": "#0f081c",
+      "cardBackground": "#180d2e",
+      "backgroundColor": "#0f081c",
+      "sidebarIconColor": "#c084fc"
     },
     "faviconEmoji": "🍳",
     "faviconImage": "",
     "site_tagline": "Your Ai Chef",
     "theme_colors": {
-      "primary": "#f59e0b",
-      "primaryColor": "#f59e0b",
-      "primaryHover": "#d97706",
-      "accentEmerald": "#10b981",
-      "accentColor": "#10b981",
-      "accent": "#10b981",
-      "sidebarIconColor": "#fbbf24",
-      "sidebarIcon": "#fbbf24",
-      "backgroundColor": "#120d04",
-      "backgroundDark": "#120d04",
-      "cardBackground": "#1c1507",
-      "cardBorder": "#36270a",
-      "textSecondary": "#fcd34d"
+      "accent": "#ec4899",
+      "primary": "#8b5cf6",
+      "cardBorder": "#2a1650",
+      "accentColor": "#ec4899",
+      "sidebarIcon": "#c084fc",
+      "primaryColor": "#8b5cf6",
+      "primaryHover": "#7c3aed",
+      "accentEmerald": "#ec4899",
+      "textSecondary": "#d8b4fe",
+      "backgroundDark": "#0f081c",
+      "cardBackground": "#180d2e",
+      "backgroundColor": "#0f081c",
+      "sidebarIconColor": "#c084fc"
     },
     "favicon_emoji": "🍳",
     "favicon_image": "",
@@ -1254,7 +1266,7 @@
     "titlebarImage": "",
     "chefAiSettings": {
       "model": "gemini-3.6-flash",
-      "apiKey": "AQ.Ab8RN6JBqR1t4oS0LpYKrRt-9MLJS5l9pTJOdYdBZY4-n4lSVQ",
+      "apiKey": "AQ.Ab8RN6Im8kfqkq_BdZOaXRZoB8QYFDTN4qKFdttKMA5u2jvVSg",
       "provider": "gemini",
       "sections": [
         {
@@ -1280,7 +1292,7 @@
         }
       ],
       "maxTokens": 4096,
-      "updatedAt": "2026-09-30T14:15:04.833Z",
+      "updatedAt": "2026-10-02T13:30:45.834Z",
       "voiceSpeed": 1,
       "maxPlanDays": 7,
       "temperature": 0.7,
@@ -1505,6 +1517,18 @@
           "name": "Gemini 3.1 Flash TTS Preview",
           "label": "Gemini 3.1 Flash TTS Preview (gemini-3.1-flash-tts-preview)",
           "description": "Gemini 3.1 Flash TTS Preview"
+        },
+        {
+          "id": "gemini-3.8-flash-tts",
+          "name": "Gemini 3.8 Flash TTS",
+          "label": "Gemini 3.8 Flash TTS (gemini-3.8-flash-tts)",
+          "description": "Gemini 3.8 Flash TTS"
+        },
+        {
+          "id": "gemini-3.8-flash-lite-tts",
+          "name": "Gemini 3.8 Flash Lite TTS",
+          "label": "Gemini 3.8 Flash Lite TTS (gemini-3.8-flash-lite-tts)",
+          "description": "Gemini 3.8 Flash Lite TTS"
         },
         {
           "id": "gemini-robotics-er-2-preview",
@@ -2396,25 +2420,25 @@
     "titlebar_image": "",
     "maintenanceMode": false,
     "paymentSettings": {
+      "activeGateway": "stripe",
+      "currency": "USD",
+      "testMode": true,
+      "stripeConnected": false,
+      "stripeKeysVerified": false,
+      "stripeWebhookVerified": false,
+      "stripe": {
+        "enabled": true,
+        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG",
+        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
+        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019"
+      },
       "paypal": {
         "enabled": false,
         "clientId": "",
+        "clientSecret": "",
         "webhookId": "",
-        "environment": "sandbox",
-        "clientSecret": ""
-      },
-      "stripe": {
-        "enabled": true,
-        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
-        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
-        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
-      },
-      "currency": "USD",
-      "testMode": true,
-      "activeGateway": "stripe",
-      "stripeConnected": false,
-      "stripeKeysVerified": true,
-      "stripeWebhookVerified": true
+        "environment": "sandbox"
+      }
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -2533,8 +2557,8 @@
     "site_name": "Zecratary",
     "updatedAt": "2026-09-18T08:24:02.536Z",
     "aiProvider": "gemini",
-    "fontFamily": "Roboto",
-    "font_family": "Roboto",
+    "fontFamily": "Poppins",
+    "font_family": "Poppins",
     "recipeTypes": [
       "Breakfast",
       "Lunch",
@@ -2567,37 +2591,37 @@
       "requireEmailVerification": true
     },
     "themeColors": {
-      "primary": "#f59e0b",
-      "primaryColor": "#f59e0b",
-      "primaryHover": "#d97706",
-      "accentEmerald": "#10b981",
-      "accentColor": "#10b981",
-      "accent": "#10b981",
-      "sidebarIconColor": "#fbbf24",
-      "sidebarIcon": "#fbbf24",
-      "backgroundColor": "#120d04",
-      "backgroundDark": "#120d04",
-      "cardBackground": "#1c1507",
-      "cardBorder": "#36270a",
-      "textSecondary": "#fcd34d"
+      "accent": "#ec4899",
+      "primary": "#8b5cf6",
+      "cardBorder": "#2a1650",
+      "accentColor": "#ec4899",
+      "sidebarIcon": "#c084fc",
+      "primaryColor": "#8b5cf6",
+      "primaryHover": "#7c3aed",
+      "accentEmerald": "#ec4899",
+      "textSecondary": "#d8b4fe",
+      "backgroundDark": "#0f081c",
+      "cardBackground": "#180d2e",
+      "backgroundColor": "#0f081c",
+      "sidebarIconColor": "#c084fc"
     },
     "faviconEmoji": "🍳",
     "faviconImage": "",
     "site_tagline": "Your Ai Chef",
     "theme_colors": {
-      "primary": "#f59e0b",
-      "primaryColor": "#f59e0b",
-      "primaryHover": "#d97706",
-      "accentEmerald": "#10b981",
-      "accentColor": "#10b981",
-      "accent": "#10b981",
-      "sidebarIconColor": "#fbbf24",
-      "sidebarIcon": "#fbbf24",
-      "backgroundColor": "#120d04",
-      "backgroundDark": "#120d04",
-      "cardBackground": "#1c1507",
-      "cardBorder": "#36270a",
-      "textSecondary": "#fcd34d"
+      "accent": "#ec4899",
+      "primary": "#8b5cf6",
+      "cardBorder": "#2a1650",
+      "accentColor": "#ec4899",
+      "sidebarIcon": "#c084fc",
+      "primaryColor": "#8b5cf6",
+      "primaryHover": "#7c3aed",
+      "accentEmerald": "#ec4899",
+      "textSecondary": "#d8b4fe",
+      "backgroundDark": "#0f081c",
+      "cardBackground": "#180d2e",
+      "backgroundColor": "#0f081c",
+      "sidebarIconColor": "#c084fc"
     },
     "favicon_emoji": "🍳",
     "favicon_image": "",
@@ -2605,7 +2629,7 @@
     "titlebarImage": "",
     "chefAiSettings": {
       "model": "gemini-3.6-flash",
-      "apiKey": "AQ.Ab8RN6JBqR1t4oS0LpYKrRt-9MLJS5l9pTJOdYdBZY4-n4lSVQ",
+      "apiKey": "AQ.Ab8RN6Im8kfqkq_BdZOaXRZoB8QYFDTN4qKFdttKMA5u2jvVSg",
       "provider": "gemini",
       "sections": [
         {
@@ -2631,7 +2655,7 @@
         }
       ],
       "maxTokens": 4096,
-      "updatedAt": "2026-09-30T14:15:04.833Z",
+      "updatedAt": "2026-10-02T13:30:45.834Z",
       "voiceSpeed": 1,
       "maxPlanDays": 7,
       "temperature": 0.7,
@@ -2856,6 +2880,18 @@
           "name": "Gemini 3.1 Flash TTS Preview",
           "label": "Gemini 3.1 Flash TTS Preview (gemini-3.1-flash-tts-preview)",
           "description": "Gemini 3.1 Flash TTS Preview"
+        },
+        {
+          "id": "gemini-3.8-flash-tts",
+          "name": "Gemini 3.8 Flash TTS",
+          "label": "Gemini 3.8 Flash TTS (gemini-3.8-flash-tts)",
+          "description": "Gemini 3.8 Flash TTS"
+        },
+        {
+          "id": "gemini-3.8-flash-lite-tts",
+          "name": "Gemini 3.8 Flash Lite TTS",
+          "label": "Gemini 3.8 Flash Lite TTS (gemini-3.8-flash-lite-tts)",
+          "description": "Gemini 3.8 Flash Lite TTS"
         },
         {
           "id": "gemini-robotics-er-2-preview",
@@ -3747,25 +3783,25 @@
     "titlebar_image": "",
     "maintenanceMode": false,
     "paymentSettings": {
+      "activeGateway": "stripe",
+      "currency": "USD",
+      "testMode": true,
+      "stripeConnected": false,
+      "stripeKeysVerified": false,
+      "stripeWebhookVerified": false,
+      "stripe": {
+        "enabled": true,
+        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG",
+        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
+        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019"
+      },
       "paypal": {
         "enabled": false,
         "clientId": "",
+        "clientSecret": "",
         "webhookId": "",
-        "environment": "sandbox",
-        "clientSecret": ""
-      },
-      "stripe": {
-        "enabled": true,
-        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
-        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
-        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
-      },
-      "currency": "USD",
-      "testMode": true,
-      "activeGateway": "stripe",
-      "stripeConnected": false,
-      "stripeKeysVerified": true,
-      "stripeWebhookVerified": true
+        "environment": "sandbox"
+      }
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -3873,5 +3909,5 @@
     ],
     "recommendedRecipeUrls": []
   },
-  "updatedAt": "2026-10-01T16:37:33.809Z"
+  "updatedAt": "2026-10-02T13:35:45.724Z"
 }
