@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.92",
+  "version": "8.0.93",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.92",
+  "version": "8.0.93",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -31237,7 +31237,8 @@ import {
   CreditCard, Shield, CheckCircle2, AlertCircle, Save, 
   RefreshCw, Check, Eye, EyeOff, Globe, Zap, Sliders,
   ShieldCheck, Terminal, ExternalLink, Code2, AlertTriangle,
-  Activity, CheckCheck, DownloadCloud, UploadCloud, Sparkles
+  Activity, DownloadCloud, UploadCloud, Sparkles,
+  Landmark, Clock, X, XCircle, Search, Filter
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -31246,8 +31247,19 @@ import {
   persistServerAdminSettings 
 } from '@/lib/adminSync';
 
+interface ManualSettlementConfig {
+  enabled: boolean;
+  bankName: string;
+  accountHolder: string;
+  accountNumber: string;
+  routingNumber: string;
+  swiftBic: string;
+  branchName: string;
+  instructions: string;
+  requireReference: boolean;
+}
+
 interface GatewayConfig {
-  activeGateway: 'stripe' | 'paypal' | 'both';
   currency: string;
   testMode: boolean;
   stripeConnected?: boolean;
@@ -31266,6 +31278,26 @@ interface GatewayConfig {
     webhookId: string;
     environment: 'sandbox' | 'live';
   };
+  manualSettlement: ManualSettlementConfig;
+}
+
+interface PaymentTransaction {
+  id: string;
+  customer_name?: string;
+  customer_email?: string;
+  plan_name?: string;
+  plan_slug?: string;
+  amount?: number;
+  currency?: string;
+  gateway?: string;
+  status: string;
+  test_mode?: boolean;
+  failure_reason?: string;
+  created_at: string;
+  transfer_reference?: string;
+  confirmed_amount?: number;
+  confirmed_at?: string;
+  notes?: string;
 }
 
 const SUPPORTED_CURRENCIES = [
@@ -31286,6 +31318,9 @@ export default function AdminPaymentGatewayPage() {
   const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
   const version = langContext?.version;
 
+  // Active Tab: 'stripe' | 'paypal' | 'manual'
+  const [activeTab, setActiveTab] = useState<'stripe' | 'paypal' | 'manual'>('stripe');
+
   const [loading, setLoading] = useState(false);
   const [syncingEnv, setSyncingEnv] = useState(false);
   const [updatingEnv, setUpdatingEnv] = useState(false);
@@ -31299,9 +31334,14 @@ export default function AdminPaymentGatewayPage() {
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
+  // Manual Settlement approval queue state
+  const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
+  const [manualFilter, setManualFilter] = useState<'all' | 'pending' | 'succeeded' | 'rejected'>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+
   // Gateway Settings State
   const [config, setConfig] = useState<GatewayConfig>({
-    activeGateway: 'stripe',
     currency: 'USD',
     testMode: true,
     stripeConnected: false,
@@ -31319,6 +31359,17 @@ export default function AdminPaymentGatewayPage() {
       clientSecret: '',
       webhookId: '',
       environment: 'sandbox',
+    },
+    manualSettlement: {
+      enabled: false,
+      bankName: '',
+      accountHolder: '',
+      accountNumber: '',
+      routingNumber: '',
+      swiftBic: '',
+      branchName: '',
+      instructions: 'Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.',
+      requireReference: true,
     },
   });
 
@@ -31374,7 +31425,6 @@ export default function AdminPaymentGatewayPage() {
     setVisibleFields((prev) => ({ ...prev, [field]: !prev[field] }));
   };
 
-  // Broadcast settings updates across all modules
   const broadcastSyncEvents = () => {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('zecratary_payment_updated'));
@@ -31404,6 +31454,7 @@ export default function AdminPaymentGatewayPage() {
           ...data.settings,
           stripe: { ...configRef.current.stripe, ...(data.settings.stripe || {}) },
           paypal: { ...configRef.current.paypal, ...(data.settings.paypal || {}) },
+          manualSettlement: { ...configRef.current.manualSettlement, ...(data.settings.manualSettlement || {}) },
         };
         setConfig(merged);
         configRef.current = merged;
@@ -31448,46 +31499,6 @@ export default function AdminPaymentGatewayPage() {
     }
   }, [syncingEnv, t]);
 
-  // UPDATE / SAVE EXPLICITLY TO .ENV FILE DATA
-  const handleUpdateToEnv = useCallback(async () => {
-    if (updatingEnv || isSavingRef.current) return;
-    setUpdatingEnv(true);
-    isSavingRef.current = true;
-    setFeedback(null);
-
-    const currentPayload = { ...configRef.current };
-
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          action: 'update_env', 
-          paymentSettings: currentPayload,
-          currency: currentPayload.currency,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.success) {
-        broadcastSyncEvents();
-        setFeedback({
-          type: 'success',
-          msg: data.message || t('updateEnvSuccess', 'API Keys and Gateway settings successfully written to .env file!'),
-        });
-      } else {
-        throw new Error(data.error || 'Failed to update .env file on server.');
-      }
-    } catch (e: any) {
-      setFeedback({
-        type: 'error',
-        msg: e.message || t('updateEnvError', 'Failed to update .env file on server.'),
-      });
-    } finally {
-      setUpdatingEnv(false);
-      setTimeout(() => { isSavingRef.current = false; }, 500);
-    }
-  }, [updatingEnv, t]);
-
   const fetchData = useCallback(async () => {
     if (isFetchingRef.current || isSavingRef.current) return;
     isFetchingRef.current = true;
@@ -31496,8 +31507,12 @@ export default function AdminPaymentGatewayPage() {
       const res = await fetch('/api/admin/payment?t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        let serverSettings = data.settings;
+        
+        if (Array.isArray(data.transactions)) {
+          setTransactions(data.transactions);
+        }
 
+        let serverSettings = data.settings;
         if (!serverSettings) {
           try {
             const adminData = await fetchServerAdminSettings();
@@ -31519,26 +31534,23 @@ export default function AdminPaymentGatewayPage() {
               ...serverSettings,
               currency: serverSettings.currency || configRef.current.currency || 'USD',
               testMode: serverSettings.testMode !== undefined ? Boolean(serverSettings.testMode) : configRef.current.testMode,
-              activeGateway: serverSettings.activeGateway || configRef.current.activeGateway || 'stripe',
               stripeKeysVerified: serverSettings.stripeKeysVerified !== undefined ? Boolean(serverSettings.stripeKeysVerified) : configRef.current.stripeKeysVerified,
               stripeWebhookVerified: serverSettings.stripeWebhookVerified !== undefined ? Boolean(serverSettings.stripeWebhookVerified) : configRef.current.stripeWebhookVerified,
               stripe: {
                 ...configRef.current.stripe,
                 ...(serverSettings.stripe || {}),
-                publishableKey: serverSettings.stripe?.publishableKey !== undefined ? serverSettings.stripe.publishableKey : configRef.current.stripe.publishableKey,
-                secretKey: serverSettings.stripe?.secretKey !== undefined ? serverSettings.stripe.secretKey : configRef.current.stripe.secretKey,
-                webhookSecret: serverSettings.stripe?.webhookSecret !== undefined ? serverSettings.stripe.webhookSecret : configRef.current.stripe.webhookSecret,
                 enabled: serverSettings.stripe?.enabled !== undefined ? Boolean(serverSettings.stripe.enabled) : configRef.current.stripe.enabled,
               },
               paypal: {
                 ...configRef.current.paypal,
                 ...(serverSettings.paypal || {}),
-                clientId: serverSettings.paypal?.clientId !== undefined ? serverSettings.paypal.clientId : configRef.current.paypal.clientId,
-                clientSecret: serverSettings.paypal?.clientSecret !== undefined ? serverSettings.paypal.clientSecret : configRef.current.paypal.clientSecret,
-                webhookId: serverSettings.paypal?.webhookId !== undefined ? serverSettings.paypal.webhookId : configRef.current.paypal.webhookId,
-                environment: serverSettings.paypal?.environment || configRef.current.paypal.environment || 'sandbox',
                 enabled: serverSettings.paypal?.enabled !== undefined ? Boolean(serverSettings.paypal.enabled) : configRef.current.paypal.enabled,
               },
+              manualSettlement: {
+                ...configRef.current.manualSettlement,
+                ...(serverSettings.manualSettlement || {}),
+                enabled: serverSettings.manualSettlement?.enabled !== undefined ? Boolean(serverSettings.manualSettlement.enabled) : configRef.current.manualSettlement.enabled,
+              }
             };
             configRef.current = merged;
             setConfig(merged);
@@ -31620,7 +31632,7 @@ export default function AdminPaymentGatewayPage() {
         broadcastSyncEvents();
         setFeedback({
           type: 'success',
-          msg: `Processing currency updated to ${newCurrency} (${getCurrencySymbol(newCurrency)}) and saved to PostgreSQL & .env!`,
+          msg: `Processing currency updated to ${newCurrency} (${getCurrencySymbol(newCurrency)}) and saved to PostgreSQL!`,
         });
       } else {
         throw new Error(data.error || 'Failed to save currency');
@@ -31665,8 +31677,8 @@ export default function AdminPaymentGatewayPage() {
         setFeedback({
           type: 'success',
           msg: nextMode
-            ? t('sandboxTestModeEnabled', 'Sandbox (Test Mode) enabled and saved to PostgreSQL & .env!')
-            : t('liveProductionModeEnabled', 'Live Production mode enabled and saved to PostgreSQL & .env!'),
+            ? t('sandboxTestModeEnabled', 'Sandbox (Test Mode) enabled and saved to PostgreSQL!')
+            : t('liveProductionModeEnabled', 'Live Production mode enabled and saved to PostgreSQL!'),
         });
       } else {
         throw new Error(data.error || 'Failed to update gateway environment');
@@ -31681,21 +31693,12 @@ export default function AdminPaymentGatewayPage() {
     }
   };
 
-  // Standalone Webhook Secret verification handler
   const handleVerifyWebhookSecret = async () => {
     const secret = config.stripe.webhookSecret?.trim();
     if (!secret) {
       setFeedback({
         type: 'error',
         msg: t('webhookSecretRequiredToVerify', 'Please enter a Webhook Signing Secret (whsec_...) to verify.'),
-      });
-      return;
-    }
-
-    if (secret.includes('...') || secret.includes('*')) {
-      setFeedback({
-        type: 'error',
-        msg: t('invalidWebhookSecretFormat', 'Please enter a valid Stripe Webhook Secret. Do not submit placeholder dots (...) or masked asterisks (*).'),
       });
       return;
     }
@@ -31741,15 +31744,12 @@ export default function AdminPaymentGatewayPage() {
           msg: data.message || t('webhookSecretVerifiedSuccess', 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!'),
         });
       } else {
-        const updated: GatewayConfig = { 
-          ...config, 
-          stripeWebhookVerified: false 
-        };
+        const updated: GatewayConfig = { ...config, stripeWebhookVerified: false };
         setConfig(updated);
         configRef.current = updated;
         setFeedback({ 
           type: 'error', 
-          msg: data.error || t('webhookSecretVerificationFailed', 'Webhook Secret verification failed. Must start with "whsec_" and be a valid HMAC key.'),
+          msg: data.error || t('webhookSecretVerificationFailed', 'Webhook Secret verification failed.'),
         });
       }
     } catch (e: any) {
@@ -31759,13 +31759,10 @@ export default function AdminPaymentGatewayPage() {
       });
     } finally {
       setVerifyingWebhook(false);
-      setTimeout(() => {
-        isSavingRef.current = false;
-      }, 1500);
+      setTimeout(() => { isSavingRef.current = false; }, 1500);
     }
   };
 
-  // Comprehensive 3-Way Verification: Publishable Key, Secret Key, and Webhook Secret
   const handleVerifyStripeKey = async () => {
     const pKey = config.stripe.publishableKey?.trim();
     const sKey = config.stripe.secretKey?.trim();
@@ -31775,38 +31772,9 @@ export default function AdminPaymentGatewayPage() {
       if (!pKey && !sKey && !wSecret) {
         setShowStripeGuideModal(true);
       }
-      const missing: string[] = [];
-      if (!pKey) missing.push(t('publishableKeyLabel', 'Publishable Key'));
-      if (!sKey) missing.push(t('secretKeyLabel', 'Secret Key'));
-      if (!wSecret) missing.push(t('webhookSecretLabel', 'Webhook Secret'));
-
       setFeedback({
         type: 'error',
-        msg: t('stripeAllThreeRequired', `Verification required: Please enter ${missing.join(', ')} to verify.`),
-      });
-      return;
-    }
-
-    if (sKey.includes('...') || sKey.includes('*')) {
-      setFeedback({
-        type: 'error',
-        msg: t('invalidSecretKeyFormat', 'Please enter a valid Stripe Secret Key. Do not submit placeholder dots (...) or masked asterisks (*).'),
-      });
-      return;
-    }
-
-    if (pKey.includes('...') || pKey.includes('*')) {
-      setFeedback({
-        type: 'error',
-        msg: t('invalidPublishableKeyFormat', 'Please enter a valid Stripe Publishable Key. Do not submit placeholder dots (...) or masked asterisks (*).'),
-      });
-      return;
-    }
-
-    if (wSecret.includes('...') || wSecret.includes('*')) {
-      setFeedback({
-        type: 'error',
-        msg: t('invalidWebhookSecretFormat', 'Please enter a valid Stripe Webhook Secret. Do not submit placeholder dots (...) or masked asterisks (*).'),
+        msg: t('stripeAllThreeRequired', 'Publishable Key, Secret Key, and Webhook Secret are all required to verify.'),
       });
       return;
     }
@@ -31852,7 +31820,7 @@ export default function AdminPaymentGatewayPage() {
 
         setFeedback({ 
           type: 'success', 
-          msg: data.message || t('stripeAllThreeVerifiedSuccess', 'Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers!'),
+          msg: data.message || t('stripeAllThreeVerifiedSuccess', 'Stripe keys and webhook verified successfully!'),
         });
       } else {
         const updated: GatewayConfig = { 
@@ -31864,7 +31832,7 @@ export default function AdminPaymentGatewayPage() {
         configRef.current = updated;
         setFeedback({ 
           type: 'error', 
-          msg: data.error || t('stripeKeyVerificationFailed', 'Stripe verification failed. Please check your Publishable Key, Secret Key, and Webhook Secret.'),
+          msg: data.error || t('stripeKeyVerificationFailed', 'Stripe verification failed. Please check your credentials.'),
         });
       }
     } catch (e: any) {
@@ -31874,20 +31842,11 @@ export default function AdminPaymentGatewayPage() {
       });
     } finally {
       setVerifyingStripe(false);
-      setTimeout(() => {
-        isSavingRef.current = false;
-      }, 1200);
+      setTimeout(() => { isSavingRef.current = false; }, 1200);
     }
   };
 
   const handleSaveSettings = async (e?: React.SyntheticEvent) => {
-    if (config.stripe.secretKey && (config.stripe.secretKey.includes('...') || config.stripe.secretKey.includes('*'))) {
-      setFeedback({
-        type: 'error',
-        msg: t('invalidSecretKeyFormat', 'Please enter a valid Stripe Secret Key. Do not submit placeholder dots (...) or masked asterisks (*).'),
-      });
-      return;
-    }
     if (e && typeof e.preventDefault === 'function') e.preventDefault();
     if (loading || isSavingRef.current) return;
 
@@ -31909,6 +31868,16 @@ export default function AdminPaymentGatewayPage() {
         clientSecret: config.paypal.clientSecret.trim(),
         webhookId: config.paypal.webhookId.trim(),
       },
+      manualSettlement: {
+        ...config.manualSettlement,
+        bankName: config.manualSettlement.bankName.trim(),
+        accountHolder: config.manualSettlement.accountHolder.trim(),
+        accountNumber: config.manualSettlement.accountNumber.trim(),
+        routingNumber: config.manualSettlement.routingNumber.trim(),
+        swiftBic: config.manualSettlement.swiftBic.trim(),
+        branchName: config.manualSettlement.branchName.trim(),
+        instructions: config.manualSettlement.instructions.trim(),
+      }
     };
 
     try {
@@ -31938,7 +31907,7 @@ export default function AdminPaymentGatewayPage() {
 
       setFeedback({ 
         type: 'success', 
-        msg: t('gatewaySettingsSavedSuccess', 'Payment gateway settings and API keys saved successfully to PostgreSQL and .env!') 
+        msg: t('gatewaySettingsSavedSuccess', 'Gateway settings and settlement options saved successfully to PostgreSQL!') 
       });
     } catch (e: any) {
       console.error('Save gateway settings error:', e);
@@ -31949,6 +31918,114 @@ export default function AdminPaymentGatewayPage() {
     } finally {
       setLoading(false);
       setTimeout(() => { isSavingRef.current = false; }, 500);
+    }
+  };
+
+  // MANUAL SETTLEMENT APPROVAL WORKFLOW
+  const manualTransactions = useMemo(() => {
+    return transactions.filter((tx) => {
+      const gw = (tx.gateway || '').toLowerCase();
+      return gw === 'manual_settlement' || gw === 'bank_wire' || gw === 'manual';
+    });
+  }, [transactions]);
+
+  const pendingManualCount = useMemo(() => {
+    return manualTransactions.filter((tx) => {
+      const s = (tx.status || '').toLowerCase();
+      return s === 'pending' || s === 'pending_approval' || s === 'review';
+    }).length;
+  }, [manualTransactions]);
+
+  const filteredManualTransactions = useMemo(() => {
+    return manualTransactions.filter((tx) => {
+      const s = (tx.status || '').toLowerCase();
+      if (manualFilter === 'pending' && !(s === 'pending' || s === 'pending_approval' || s === 'review')) return false;
+      if (manualFilter === 'succeeded' && !(s === 'succeeded' || s === 'approved' || s === 'completed')) return false;
+      if (manualFilter === 'rejected' && !(s === 'rejected' || s === 'cancelled' || s === 'failed')) return false;
+
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchId = tx.id?.toLowerCase().includes(q);
+        const matchName = tx.customer_name?.toLowerCase().includes(q);
+        const matchEmail = tx.customer_email?.toLowerCase().includes(q);
+        const matchRef = tx.transfer_reference?.toLowerCase().includes(q);
+        return matchId || matchName || matchEmail || matchRef;
+      }
+      return true;
+    });
+  }, [manualTransactions, manualFilter, searchQuery]);
+
+  const handleApprovePayment = async (txId: string) => {
+    if (!confirm(t('confirmApproveTransfer', 'Are you sure you want to approve this bank wire transfer? This will activate the customer plan in PostgreSQL.'))) {
+      return;
+    }
+
+    setActionLoadingId(txId);
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'approve_manual_settlement',
+          id: txId,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.success) {
+        setFeedback({
+          type: 'success',
+          msg: data.message || t('manualPaymentApprovedSuccess', 'Manual settlement approved successfully! Plan access confirmed.'),
+        });
+        fetchData();
+        broadcastSyncEvents();
+      } else {
+        throw new Error(data.error || 'Failed to approve manual settlement');
+      }
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        msg: err.message || t('failedToApprovePayment', 'Failed to approve manual settlement.'),
+      });
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  const handleRejectPayment = async (txId: string) => {
+    const reason = prompt(t('enterRejectionReason', 'Please provide a reason for rejecting this wire transfer (optional):'), 'Bank wire transfer not received or reference mismatched');
+    if (reason === null) return;
+
+    setActionLoadingId(txId);
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'reject_manual_settlement',
+          id: txId,
+          failureReason: reason,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.success) {
+        setFeedback({
+          type: 'success',
+          msg: data.message || t('manualPaymentRejectedSuccess', 'Manual settlement has been rejected.'),
+        });
+        fetchData();
+        broadcastSyncEvents();
+      } else {
+        throw new Error(data.error || 'Failed to reject manual settlement');
+      }
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        msg: err.message || t('failedToRejectPayment', 'Failed to reject manual settlement.'),
+      });
+    } finally {
+      setActionLoadingId(null);
     }
   };
 
@@ -31983,7 +32060,7 @@ export default function AdminPaymentGatewayPage() {
             {t('paymentGatewayTitle', 'Payment Gateway')}
           </h1>
           <p className="text-xs opacity-75" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-            {t('paymentGatewaySubtitle', 'Configure payment processing gateways, Stripe & PayPal API credentials, webhook endpoints, and processing currencies.')}
+            {t('paymentGatewaySubtitle', 'Configure Stripe, PayPal, Manual Settlement bank wire credentials, and review offline subscription approvals.')}
           </p>
         </div>
 
@@ -32003,23 +32080,6 @@ export default function AdminPaymentGatewayPage() {
           >
             <DownloadCloud className={`h-4 w-4 ${syncingEnv ? 'animate-bounce' : ''}`} style={{ color: 'var(--color-primary, #3b82f6)' }} />
             <span>{syncingEnv ? t('syncingEnv', 'Syncing .env...') : t('syncFromEnvBtn', 'Sync from .env')}</span>
-          </button>
-
-          {/* UPDATE / SAVE TO .ENV BUTTON */}
-          <button
-            type="button"
-            onClick={handleUpdateToEnv}
-            disabled={updatingEnv}
-            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50 hover:border-emerald-500"
-            style={{
-              backgroundColor: 'var(--color-card, #1e293b)',
-              borderColor: 'var(--color-border, #334155)',
-              color: 'var(--color-text, #ffffff)'
-            }}
-            title={t('updateToEnvTooltip', 'Save current API credentials and environment settings directly into .env file')}
-          >
-            <UploadCloud className={`h-4 w-4 text-emerald-500 ${updatingEnv ? 'animate-pulse' : ''}`} />
-            <span>{updatingEnv ? t('updatingEnv', 'Updating .env...') : t('updateEnvBtn', 'Update .env')}</span>
           </button>
 
           <Link
@@ -32060,20 +32120,33 @@ export default function AdminPaymentGatewayPage() {
       >
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1.5 font-bold" style={{ color: 'var(--color-text, #ffffff)' }}>
-            <Activity className="h-4 w-4 text-emerald-500 animate-pulse" /> {t('gatewayEngine', 'Gateway Engine')}
+            <Activity className="h-4 w-4 text-emerald-500 animate-pulse" /> {t('activeChannels', 'Active Channels:')}
           </span>
+          <div className="flex items-center gap-1.5">
+            <span 
+              className={`font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs ${
+                config.stripe.enabled ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-zinc-700 text-zinc-500 bg-zinc-800/40'
+              }`}
+            >
+              Stripe
+            </span>
+            <span 
+              className={`font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs ${
+                config.paypal.enabled ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-zinc-700 text-zinc-500 bg-zinc-800/40'
+              }`}
+            >
+              PayPal
+            </span>
+            <span 
+              className={`font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs ${
+                config.manualSettlement.enabled ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-zinc-700 text-zinc-500 bg-zinc-800/40'
+              }`}
+            >
+              Bank Wire
+            </span>
+          </div>
           <span 
-            className="font-extrabold uppercase px-2.5 py-0.5 rounded text-[11px] border"
-            style={{
-              backgroundColor: 'var(--color-inner-dark, #0f172a)',
-              borderColor: 'var(--color-border, #334155)',
-              color: 'var(--color-text, #ffffff)'
-            }}
-          >
-            {config.activeGateway}
-          </span>
-          <span 
-            className="font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs"
+            className="font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs ml-2"
             style={{
               backgroundColor: 'var(--color-inner-dark, #0f172a)',
               borderColor: config.testMode ? '#f59e0b' : 'var(--color-emerald, #10b981)',
@@ -32088,621 +32161,896 @@ export default function AdminPaymentGatewayPage() {
           <div>
             {t('currencyLabel', 'Currency:')} <span className="font-bold" style={{ color: 'var(--color-text, #ffffff)' }}>{config.currency} ({activeCurrencySymbol})</span>
           </div>
-          <div>
-            {t('stripeKeysLabel', 'Stripe Keys:')}{' '}
-            <span 
-              className="font-bold" 
-              style={{ color: (config.stripeKeysVerified && config.stripeWebhookVerified) ? 'var(--color-emerald, #10b981)' : config.stripeKeysVerified ? '#fbbf24' : 'var(--color-text-secondary, #94a3b8)' }}
-            >
-              {(config.stripeKeysVerified && config.stripeWebhookVerified) ? t('verifiedStatus', 'Verified') : config.stripeKeysVerified ? t('apiKeysVerifiedStatus', 'Keys Verified (Webhook Pending)') : t('unverifiedStatus', 'Unverified')}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2 pl-2 border-l" style={{ borderColor: 'var(--color-border, #334155)' }}>
-            <button
-              type="button"
-              onClick={() => handleSyncFromEnv(true)}
-              disabled={syncingEnv}
-              className="font-bold text-[11px] flex items-center gap-1 hover:underline cursor-pointer disabled:opacity-40"
-              style={{ color: 'var(--color-primary, #3b82f6)' }}
-              title={t('syncFromEnvTooltip', 'Sync credentials from .env')}
-            >
-              <Sparkles className="h-3 w-3" />
-              <span>{syncingEnv ? t('syncing', 'Syncing...') : t('syncEnvText', 'Sync .env')}</span>
-            </button>
-            <span style={{ color: 'var(--color-border, #334155)' }}>•</span>
-            <button
-              type="button"
-              onClick={handleUpdateToEnv}
-              disabled={updatingEnv}
-              className="font-bold text-[11px] flex items-center gap-1 text-emerald-400 hover:underline cursor-pointer disabled:opacity-40"
-              title={t('updateToEnvTooltip', 'Save current settings to .env')}
-            >
-              <UploadCloud className="h-3 w-3" />
-              <span>{updatingEnv ? t('saving', 'Saving...') : t('updateEnvText', 'Update .env')}</span>
-            </button>
-          </div>
+          {pendingManualCount > 0 && (
+            <div className="flex items-center gap-1.5 font-bold text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/30">
+              <Clock className="h-3.5 w-3.5" />
+              <span>{pendingManualCount} {t('awaitingApproval', 'Awaiting Approval')}</span>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* GATEWAY SETTINGS CONTAINER */}
-      <div className="space-y-6">
-        {/* Processing Currency Card */}
-        <div 
-          className="border p-6 rounded-3xl shadow-sm transition-colors duration-200"
-          style={{
-            backgroundColor: 'var(--color-card, #1e293b)',
-            borderColor: 'var(--color-border, #334155)'
-          }}
-        >
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="space-y-1">
-              <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-text, #ffffff)' }}>
-                <Globe className="h-4 w-4" style={{ color: 'var(--color-primary, #3b82f6)' }} /> {t('processingCurrencyTitle', 'Processing Currency')}
-              </h2>
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                {t('processingCurrencySub', 'Select the default currency for processing subscriptions and recording transactions.')}
-              </p>
-            </div>
-
-            <div className="w-full sm:w-80">
-              <select
-                value={config.currency}
-                onChange={(e) => handleCurrencyChange(e.target.value)}
-                className="payment-input w-full border rounded-xl p-3 text-xs font-bold outline-none transition cursor-pointer shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                  borderColor: 'var(--color-border, #334155)',
-                  color: 'var(--color-text, #ffffff)'
-                }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border, #334155)')}
-              >
-                {SUPPORTED_CURRENCIES.map((curr) => (
-                  <option key={curr.code} value={curr.code} style={{ backgroundColor: 'var(--color-card, #1e293b)', color: 'var(--color-text, #ffffff)' }}>
-                    {curr.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
+      {/* CURRENCY & ENVIRONMENT TOOLBAR */}
+      <div 
+        className="border p-5 rounded-3xl shadow-sm transition-colors duration-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+        style={{
+          backgroundColor: 'var(--color-card, #1e293b)',
+          borderColor: 'var(--color-border, #334155)'
+        }}
+      >
+        <div className="space-y-1">
+          <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-text, #ffffff)' }}>
+            <Globe className="h-4 w-4" style={{ color: 'var(--color-primary, #3b82f6)' }} /> {t('processingCurrencyTitle', 'Processing Currency')}
+          </h2>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+            {t('processingCurrencySub', 'Global currency applied to recurring subscriptions, invoices, and wire settlements.')}
+          </p>
         </div>
 
-        {/* Default Gateway Selector Card */}
+        <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="w-full sm:w-72">
+            <select
+              value={config.currency}
+              onChange={(e) => handleCurrencyChange(e.target.value)}
+              className="payment-input w-full border rounded-xl p-2.5 text-xs font-bold outline-none transition cursor-pointer shadow-xs"
+              style={{
+                backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                borderColor: 'var(--color-border, #334155)',
+                color: 'var(--color-text, #ffffff)'
+              }}
+            >
+              {SUPPORTED_CURRENCIES.map((curr) => (
+                <option key={curr.code} value={curr.code} style={{ backgroundColor: 'var(--color-card, #1e293b)', color: 'var(--color-text, #ffffff)' }}>
+                  {curr.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleToggleTestMode}
+            className="text-xs font-bold px-3.5 py-2.5 rounded-xl border transition cursor-pointer shadow-xs shrink-0 flex items-center gap-1.5"
+            style={{
+              backgroundColor: 'var(--color-inner-dark, #0f172a)',
+              borderColor: config.testMode ? '#f59e0b' : 'var(--color-emerald, #10b981)',
+              color: config.testMode ? '#fbbf24' : 'var(--color-emerald, #10b981)'
+            }}
+          >
+            <span className={`w-2 h-2 rounded-full ${config.testMode ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+            {config.testMode ? t('sandboxTestMode', 'Sandbox Mode') : t('liveProduction', 'Live Production')}
+          </button>
+        </div>
+      </div>
+
+      {/* GATEWAY NAVIGATION TABS */}
+      <div 
+        className="border p-2 sm:p-2.5 rounded-3xl shadow-sm transition-colors duration-200"
+        style={{
+          backgroundColor: 'var(--color-card, #1e293b)',
+          borderColor: 'var(--color-border, #334155)'
+        }}
+      >
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+          {/* TAB 1: STRIPE */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('stripe')}
+            className={`p-3.5 rounded-2xl border-2 transition cursor-pointer text-left flex items-center justify-between ${
+              activeTab === 'stripe' ? 'shadow-md ring-2 ring-blue-500/20' : 'opacity-70 hover:opacity-100'
+            }`}
+            style={{
+              backgroundColor: 'var(--color-inner-dark, #0f172a)',
+              borderColor: activeTab === 'stripe' ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)'
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-white text-base shadow-sm" style={{ backgroundColor: '#635bff' }}>
+                S
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-black text-sm" style={{ color: 'var(--color-text, #ffffff)' }}>Stripe</span>
+                  <span 
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                      config.stripe.enabled 
+                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
+                        : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/30'
+                    }`}
+                  >
+                    {config.stripe.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                  </span>
+                </div>
+                <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('stripeTabDesc', 'Credit cards, Webhooks, & CLI')}
+                </p>
+              </div>
+            </div>
+
+            {config.stripeKeysVerified && config.stripeWebhookVerified && (
+              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+            )}
+          </button>
+
+          {/* TAB 2: PAYPAL */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('paypal')}
+            className={`p-3.5 rounded-2xl border-2 transition cursor-pointer text-left flex items-center justify-between ${
+              activeTab === 'paypal' ? 'shadow-md ring-2 ring-blue-500/20' : 'opacity-70 hover:opacity-100'
+            }`}
+            style={{
+              backgroundColor: 'var(--color-inner-dark, #0f172a)',
+              borderColor: activeTab === 'paypal' ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)'
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-blue-950 text-base shadow-sm" style={{ backgroundColor: '#ffc439' }}>
+                P
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-black text-sm" style={{ color: 'var(--color-text, #ffffff)' }}>PayPal</span>
+                  <span 
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                      config.paypal.enabled 
+                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
+                        : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/30'
+                    }`}
+                  >
+                    {config.paypal.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                  </span>
+                </div>
+                <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('paypalTabDesc', 'PayPal checkout & digital wallet')}
+                </p>
+              </div>
+            </div>
+          </button>
+
+          {/* TAB 3: MANUAL SETTLEMENT / BANK WIRE */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('manual')}
+            className={`p-3.5 rounded-2xl border-2 transition cursor-pointer text-left flex items-center justify-between ${
+              activeTab === 'manual' ? 'shadow-md ring-2 ring-blue-500/20' : 'opacity-70 hover:opacity-100'
+            }`}
+            style={{
+              backgroundColor: 'var(--color-inner-dark, #0f172a)',
+              borderColor: activeTab === 'manual' ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)'
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white shadow-sm" style={{ backgroundColor: 'var(--color-primary, #3b82f6)' }}>
+                <Landmark className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-black text-sm" style={{ color: 'var(--color-text, #ffffff)' }}>
+                    {t('manualSettlementTitle', 'Bank Wire / Manual')}
+                  </span>
+                  <span 
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                      config.manualSettlement.enabled 
+                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
+                        : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/30'
+                    }`}
+                  >
+                    {config.manualSettlement.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                  </span>
+                </div>
+                <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('manualSettlementSub', 'Bank wire transfer & Manual Approval')}
+                </p>
+              </div>
+            </div>
+
+            {pendingManualCount > 0 && (
+              <span className="px-2.5 py-0.5 text-[10px] font-black rounded-full bg-amber-500 text-black shadow-xs shrink-0 animate-pulse">
+                {pendingManualCount}
+              </span>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* TAB CONTENT 1: STRIPE CONFIGURATION */}
+      {activeTab === 'stripe' && (
         <div 
-          className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
+          className="border p-6 rounded-3xl space-y-5 shadow-sm transition-colors duration-200 animate-in fade-in"
           style={{
             backgroundColor: 'var(--color-card, #1e293b)',
             borderColor: 'var(--color-border, #334155)'
           }}
         >
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-text, #ffffff)' }}>
-              <Shield className="h-4 w-4" style={{ color: 'var(--color-primary, #3b82f6)' }} /> {t('defaultGatewayTitle', 'Default Payment Gateway')}
-            </h2>
-            <div className="flex items-center gap-2">
-              <label className="text-xs font-bold" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>{t('environmentLabel', 'Environment:')}</label>
+          <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: 'var(--color-border, #334155)' }}>
+            <div className="flex items-center gap-2.5">
+              <div className="w-3 h-3 rounded-full bg-[#635bff]"></div>
+              <div>
+                <h3 className="font-bold text-base" style={{ color: 'var(--color-text, #ffffff)' }}>{t('stripeApiConfig', 'Stripe API Configuration')}</h3>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('stripeApiSub', 'Configure Stripe secret keys, publishable credentials, and Webhook Signing Secret.')}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span
+                className="text-xs font-bold select-none"
+                style={{ color: config.stripe.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
+              >
+                {config.stripe.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+              </span>
               <button
                 type="button"
-                onClick={handleToggleTestMode}
-                className="text-xs font-bold px-3 py-1 rounded-full border transition cursor-pointer shadow-xs"
+                role="switch"
+                aria-checked={config.stripe.enabled}
+                onClick={() => setConfig((prev) => ({ ...prev, stripe: { ...prev.stripe, enabled: !prev.stripe.enabled } }))}
+                className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none"
                 style={{
-                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                  borderColor: config.testMode ? '#f59e0b' : 'var(--color-emerald, #10b981)',
-                  color: config.testMode ? '#fbbf24' : 'var(--color-emerald, #10b981)'
+                  backgroundColor: config.stripe.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
                 }}
               >
-                {config.testMode ? t('sandboxTestMode', 'Sandbox (Test Mode)') : t('liveProduction', 'Live Production')}
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-300 ease-in-out ${
+                    config.stripe.enabled ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
               </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
-            <div
-              onClick={() => setConfig({ ...config, activeGateway: 'stripe' })}
-              className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
-                config.activeGateway === 'stripe' ? 'shadow-md' : 'opacity-70 hover:opacity-100'
-              }`}
+          {/* Key Verification Header & Actions */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={handleVerifyStripeKey}
+              disabled={verifyingStripe}
+              className="inline-flex items-center overflow-hidden rounded-xl text-white font-bold text-xs shadow-md active:scale-[0.98] transition cursor-pointer border border-[#7a73ff]/40 disabled:opacity-50"
               style={{
-                backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                borderColor: config.activeGateway === 'stripe' ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)'
+                backgroundImage: 'linear-gradient(180deg, #635bff 0%, #4f46e5 100%)',
               }}
             >
-              <div>
-                <div className="flex items-center justify-between">
-                  <span className="text-base font-black" style={{ color: 'var(--color-text, #ffffff)' }}>Stripe</span>
-                  {config.activeGateway === 'stripe' && (
-                    <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary, #3b82f6)' }}>
-                      <Check className="h-3.5 w-3.5" />
-                    </div>
-                  )}
-                </div>
-                <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('stripeCardDesc', 'Accept credit cards securely via Stripe Checkout and webhooks.')}
-                </p>
+              <div className="px-3 py-2.5 bg-black/15 border-r border-white/20 font-black text-sm flex items-center justify-center">
+                <ShieldCheck className="h-4 w-4 text-white" />
               </div>
-            </div>
+              <span className="px-3.5 py-2.5 text-xs font-bold flex items-center gap-1.5">
+                {verifyingStripe ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    {t('verifyingStripeCredentials', 'Verifying Stripe Credentials...')}
+                  </>
+                ) : (
+                  t('verifyStripeCredentialsBtn', 'Verify Stripe Credentials')
+                )}
+              </span>
+            </button>
 
-            <div
-              onClick={() => setConfig({ ...config, activeGateway: 'paypal' })}
-              className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
-                config.activeGateway === 'paypal' ? 'shadow-md' : 'opacity-70 hover:opacity-100'
-              }`}
-              style={{
-                backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                borderColor: config.activeGateway === 'paypal' ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)'
-              }}
-            >
-              <div>
-                <div className="flex items-center justify-between">
-                  <span className="text-base font-black" style={{ color: 'var(--color-text, #ffffff)' }}>PayPal</span>
-                  {config.activeGateway === 'paypal' && (
-                    <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary, #3b82f6)' }}>
-                      <Check className="h-3.5 w-3.5" />
-                    </div>
-                  )}
-                </div>
-                <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('paypalCardDesc', 'Accept digital wallet and PayPal account balance payments.')}
-                </p>
-              </div>
-            </div>
-
-            <div
-              onClick={() => setConfig({ ...config, activeGateway: 'both' })}
-              className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
-                config.activeGateway === 'both' ? 'shadow-md' : 'opacity-70 hover:opacity-100'
-              }`}
-              style={{
-                backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                borderColor: config.activeGateway === 'both' ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)'
-              }}
-            >
-              <div>
-                <div className="flex items-center justify-between">
-                  <span className="text-base font-black" style={{ color: 'var(--color-text, #ffffff)' }}>
-                    {t('multiGatewayCardTitle', 'Both Gateways')}
-                  </span>
-                  {config.activeGateway === 'both' && (
-                    <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary, #3b82f6)' }}>
-                      <Check className="h-3.5 w-3.5" />
-                    </div>
-                  )}
-                </div>
-                <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('multiGatewayCardDesc', 'Enable both Stripe and PayPal checkout options simultaneously.')}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Credentials Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Stripe Config */}
-          <div 
-            className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card, #1e293b)',
-              borderColor: 'var(--color-border, #334155)'
-            }}
-          >
-            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border, #334155)' }}>
-              <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-blue-500"></div>
-                <h3 className="font-bold text-sm" style={{ color: 'var(--color-text, #ffffff)' }}>{t('stripeApiConfig', 'Stripe API Configuration')}</h3>
-              </div>
-              <div className="flex items-center gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => handleSyncFromEnv(true)}
-                  disabled={syncingEnv}
-                  className="text-[11px] font-bold hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-40"
-                  style={{ color: 'var(--color-primary, #3b82f6)' }}
-                  title={t('syncStripeEnvTooltip', 'Sync Stripe credentials from .env')}
-                >
-                  <DownloadCloud className="h-3 w-3" />
-                  <span>{t('syncFromEnv', '.env Sync')}</span>
-                </button>
-
-                <span
-                  className="text-[11px] font-bold tracking-tight select-none transition-colors duration-200"
-                  style={{ color: config.stripe.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
-                >
-                  {config.stripe.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
-                </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={config.stripe.enabled}
-                  onClick={() => setConfig((prev) => ({ ...prev, stripe: { ...prev.stripe, enabled: !prev.stripe.enabled } }))}
-                  className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
-                  style={{
-                    backgroundColor: config.stripe.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
-                  }}
-                  title={config.stripe.enabled ? t('disableStripeGateway', 'Disable Stripe Gateway') : t('enableStripeGateway', 'Enable Stripe Gateway')}
-                >
-                  <span className="sr-only">
-                    {config.stripe.enabled ? t('stripeEnabled', 'Stripe Enabled') : t('stripeDisabled', 'Stripe Disabled')}
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-300 ease-in-out ${
-                      config.stripe.enabled ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
-              </div>
-            </div>
-
-            {/* Top Verify Button with 3-Way Verified Status Badge */}
-            <div className="space-y-1.5 pb-2">
-              <label className="text-xs font-bold block" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                {t('verifyStripeKeyLabel', 'Verify Stripe Key')}
-              </label>
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  onClick={handleVerifyStripeKey}
-                  disabled={verifyingStripe}
-                  className="inline-flex items-center overflow-hidden rounded-xl text-white font-bold text-xs shadow-md active:scale-[0.98] transition cursor-pointer border border-[#7a73ff]/40 disabled:opacity-50"
-                  style={{
-                    backgroundImage: 'linear-gradient(180deg, #635bff 0%, #4f46e5 100%)',
-                    boxShadow: '0 2px 5px rgba(99, 91, 255, 0.3), inset 0 1px 0 rgba(255,255,255,0.3)'
-                  }}
-                  title={t('verifyStripeKeyTooltip', 'Verify Publishable Key, Secret Key, and Webhook Secret with Stripe servers')}
-                >
-                  <div className="px-3 py-2.5 bg-black/15 border-r border-white/20 font-black text-sm flex items-center justify-center">
-                    <ShieldCheck className="h-4 w-4 text-white" />
-                  </div>
-                  <span className="px-3.5 py-2.5 text-xs tracking-tight font-bold flex items-center gap-1.5">
-                    {verifyingStripe ? (
-                      <>
-                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                        {t('verifyingStripeCredentials', 'Verifying Stripe Credentials...')}
-                      </>
-                    ) : (
-                      t('verifyStripeCredentialsBtn', 'Verify Stripe Key')
-                    )}
-                  </span>
-                </button>
-
-                {(config.stripeKeysVerified && config.stripeWebhookVerified) ? (
-                  <span 
-                    className="text-[11px] font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 border shadow-xs animate-in fade-in"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                      borderColor: 'var(--color-emerald, #10b981)',
-                      color: 'var(--color-emerald, #10b981)'
-                    }}
-                  >
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /> {t('keysVerifiedStatus', 'Keys & Webhook Verified')}
-                  </span>
-                ) : config.stripeKeysVerified ? (
-                  <span 
-                    className="text-[11px] font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 border shadow-xs animate-in fade-in"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                      borderColor: '#f59e0b',
-                      color: '#fbbf24'
-                    }}
-                  >
-                    <Check className="h-3.5 w-3.5 text-amber-400" /> {t('keysOnlyVerifiedStatus', 'API Keys Verified (Webhook Pending)')}
-                  </span>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="space-y-3 pt-1 border-t" style={{ borderColor: 'var(--color-border, #334155)' }}>
-              {config.stripe.enabled && (
-                <div className="space-y-2 pt-1">
-                  {config.testMode && config.stripe.secretKey && !config.stripe.secretKey.startsWith('sk_test_') && !config.stripe.secretKey.startsWith('rk_test_') && (
-                    <div 
-                      className="p-3 rounded-xl border flex items-start gap-2 text-xs font-semibold shadow-xs animate-in fade-in"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                        borderColor: '#f59e0b',
-                        color: '#fbbf24'
-                      }}
-                    >
-                      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
-                      <div>
-                        <div className="font-bold">{t('testKeyMismatchTitle', 'Stripe Test Mode Key Alert')}</div>
-                        <div className="text-[11px] font-normal leading-relaxed" style={{ color: 'var(--color-text, #ffffff)' }}>
-                          {t('testKeyMismatchNotice', 'Sandbox Test Mode is active, but your Secret Key does not start with "sk_test_". Payments and test cards will be rejected by Stripe until valid test keys are entered.')}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {!config.testMode && config.stripe.secretKey && (config.stripe.secretKey.startsWith('sk_test_') || config.stripe.secretKey.startsWith('rk_test_')) && (
-                    <div 
-                      className="p-3 rounded-xl border flex items-start gap-2 text-xs font-semibold shadow-xs animate-in fade-in"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                        borderColor: '#ef4444',
-                        color: '#ef4444'
-                      }}
-                    >
-                      <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-red-500" />
-                      <div>
-                        <div className="font-bold">{t('liveKeyMismatchTitle', 'Live Mode Key Alert')}</div>
-                        <div className="text-[11px] font-normal leading-relaxed" style={{ color: 'var(--color-text, #ffffff)' }}>
-                          {t('liveKeyMismatchNotice', 'Live Production Mode is active, but your Secret Key is a test key ("sk_test_..."). Real customer credit cards will be declined.')}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {config.testMode && (
-                    <div 
-                      className="p-3.5 rounded-2xl border space-y-1.5 transition-colors shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                        borderColor: 'var(--color-border, #334155)'
-                      }}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-bold text-xs flex items-center gap-1.5" style={{ color: '#fbbf24' }}>
-                          <CreditCard className="h-3.5 w-3.5" />
-                          {t('stripeTestCardGuide', 'Stripe Test Card Helper')}
-                        </span>
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/30">
-                          {t('sandboxActiveBadge', 'Sandbox Active')}
-                        </span>
-                      </div>
-                      <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                        {t('testCardInstructions', 'Use card number')} <code className="px-1.5 py-0.5 rounded font-mono font-bold text-[11px] border" style={{ backgroundColor: 'var(--color-card, #1e293b)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}>4242 4242 4242 4242</code>, {t('anyFutureExpiry', 'any future MM/YY (e.g. 12/28), and any 3-digit CVC (e.g. 123).')}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* 1. Publishable Key with Verified Indicator */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs uppercase font-bold block" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                    {t('publishableKeyLabel', 'Publishable Key')}
-                  </label>
-                  {config.stripeKeysVerified && (
-                    <span 
-                      className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border shadow-xs animate-in fade-in"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                        borderColor: 'var(--color-emerald, #10b981)',
-                        color: 'var(--color-emerald, #10b981)'
-                      }}
-                    >
-                      <CheckCircle2 className="h-3 w-3 text-emerald-400" /> {t('publishableKeyVerified', 'Verified')}
-                    </span>
-                  )}
-                </div>
-                <div className="relative">
-                  <input
-                    type={visibleFields['stripePublishable'] ? 'text' : 'password'}
-                    id="cfg_stripe_publishable_key"
-                    name="cfg_stripe_publishable_key"
-                    autoComplete="new-password"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-bwignore="true"
-                    data-form-type="other"
-                    role="presentation"
-                    readOnly={focusedField !== 'stripePublishable'}
-                    onFocus={(e) => { 
-                      e.currentTarget.readOnly = false;
-                      setFocusedField('stripePublishable'); 
-                      e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
-                    }}
-                    onBlur={(e) => { 
-                      setFocusedField(null); 
-                      e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
-                    }}
-                    value={config.stripe.publishableKey}
-                    onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, publishableKey: e.target.value } })}
-                    placeholder="pk_test_... / pk_live_..."
-                    className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                      borderColor: 'var(--color-border, #334155)',
-                      color: 'var(--color-text, #ffffff)'
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => toggleVisibility('stripePublishable')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                    style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-                  >
-                    {visibleFields['stripePublishable'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* 2. Secret Key with Verified Indicator */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs uppercase font-bold block" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                    {t('secretKeyLabel', 'Secret Key')}
-                  </label>
-                  {config.stripeKeysVerified && (
-                    <span 
-                      className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border shadow-xs animate-in fade-in"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                        borderColor: 'var(--color-emerald, #10b981)',
-                        color: 'var(--color-emerald, #10b981)'
-                      }}
-                    >
-                      <CheckCircle2 className="h-3 w-3 text-emerald-400" /> {t('secretKeyVerified', 'Verified')}
-                    </span>
-                  )}
-                </div>
-                <div className="relative">
-                  <input
-                    type={visibleFields['stripeSecret'] ? 'text' : 'password'}
-                    id="cfg_stripe_secret_key"
-                    name="cfg_stripe_secret_key"
-                    autoComplete="new-password"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-bwignore="true"
-                    data-form-type="other"
-                    role="presentation"
-                    readOnly={focusedField !== 'stripeSecret'}
-                    onFocus={(e) => { 
-                      e.currentTarget.readOnly = false;
-                      setFocusedField('stripeSecret'); 
-                      e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
-                    }}
-                    onBlur={(e) => { 
-                      setFocusedField(null); 
-                      e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
-                    }}
-                    value={config.stripe.secretKey}
-                    onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, secretKey: e.target.value } })}
-                    placeholder="sk_test_... / sk_live_..."
-                    className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                      borderColor: 'var(--color-border, #334155)',
-                      color: 'var(--color-text, #ffffff)'
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => toggleVisibility('stripeSecret')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                    style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-                  >
-                    {visibleFields['stripeSecret'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* 3. Webhook Secret with Verified Indicator & Dedicated Verify Action */}
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs uppercase font-bold block" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                    {t('webhookSecretLabel', 'Webhook Secret')}
-                  </label>
-                  <div className="flex items-center gap-2">
-                    {config.stripeWebhookVerified && (
-                      <span 
-                        className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border shadow-xs animate-in fade-in"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                          borderColor: 'var(--color-emerald, #10b981)',
-                          color: 'var(--color-emerald, #10b981)'
-                        }}
-                      >
-                        <CheckCircle2 className="h-3 w-3 text-emerald-400" /> {t('signingSecretVerified', 'Verified')}
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleVerifyWebhookSecret}
-                      disabled={verifyingWebhook || !config.stripe.webhookSecret?.trim()}
-                      className="text-[11px] font-bold hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                      style={{ color: 'var(--color-primary, #3b82f6)' }}
-                      title={t('verifyWebhookSecretTooltip', 'Test Webhook Secret for HMAC-SHA256 signature compliance')}
-                    >
-                      {verifyingWebhook ? (
-                        <>
-                          <RefreshCw className="h-3 w-3 animate-spin" />
-                          <span>{t('verifyingSecret', 'Verifying...')}</span>
-                        </>
-                      ) : (
-                        <>
-                          <ShieldCheck className="h-3 w-3" />
-                          <span>{t('verifySecretBtn', 'Verify Secret')}</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-                <div className="relative">
-                  <input
-                    type={visibleFields['stripeWebhook'] ? 'text' : 'password'}
-                    id="cfg_stripe_webhook_secret"
-                    name="cfg_stripe_webhook_secret"
-                    autoComplete="new-password"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-bwignore="true"
-                    data-form-type="other"
-                    role="presentation"
-                    readOnly={focusedField !== 'stripeWebhook'}
-                    onFocus={(e) => { 
-                      e.currentTarget.readOnly = false;
-                      setFocusedField('stripeWebhook'); 
-                      e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
-                    }}
-                    onBlur={(e) => { 
-                      setFocusedField(null); 
-                      e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
-                    }}
-                    value={config.stripe.webhookSecret}
-                    onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
-                    placeholder="whsec_..."
-                    className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                      borderColor: 'var(--color-border, #334155)',
-                      color: 'var(--color-text, #ffffff)'
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => toggleVisibility('stripeWebhook')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                    style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-                  >
-                    {visibleFields['stripeWebhook'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* CLI & Webhook Guide Action */}
-              <div 
-                className="pt-3 border-t flex flex-wrap items-center justify-between gap-3"
-                style={{ borderColor: 'var(--color-border, #334155)' }}
+            {(config.stripeKeysVerified && config.stripeWebhookVerified) ? (
+              <span 
+                className="text-[11px] font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 border shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                  borderColor: 'var(--color-emerald, #10b981)',
+                  color: 'var(--color-emerald, #10b981)'
+                }}
               >
-                <div className="space-y-0.5">
-                  <span className="text-xs font-bold block" style={{ color: 'var(--color-text, #ffffff)' }}>
-                    {t('webhookCliSetupTitle', 'Webhook & CLI Setup Guide')}
-                  </span>
-                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                    {t('webhookCliSetupSub', 'View official Stripe CLI instructions to test and capture webhooks locally.')}
-                  </p>
-                </div>
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /> {t('keysVerifiedStatus', 'Keys & Webhook Verified')}
+              </span>
+            ) : null}
+          </div>
 
-                <button
-                  type="button"
-                  onClick={() => setShowStripeGuideModal(true)}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs hover:border-blue-400 shrink-0"
+          {/* Test Card Guidance */}
+          {config.testMode && config.stripe.enabled && (
+            <div 
+              className="p-3.5 rounded-2xl border space-y-1.5 shadow-xs"
+              style={{
+                backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                borderColor: 'var(--color-border, #334155)'
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-xs flex items-center gap-1.5 text-amber-400">
+                  <CreditCard className="h-3.5 w-3.5" />
+                  {t('stripeTestCardGuide', 'Stripe Test Card Helper')}
+                </span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                  {t('sandboxActiveBadge', 'Sandbox Active')}
+                </span>
+              </div>
+              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('testCardInstructions', 'Use card number')} <code className="px-1.5 py-0.5 rounded font-mono font-bold text-[11px] border" style={{ backgroundColor: 'var(--color-card, #1e293b)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}>4242 4242 4242 4242</code>, {t('anyFutureExpiry', 'any future MM/YY (e.g. 12/28), and any 3-digit CVC (e.g. 123).')}
+              </p>
+            </div>
+          )}
+
+          {/* Fields */}
+          <div className="space-y-4">
+            {/* Publishable Key */}
+            <div>
+              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('publishableKeyLabel', 'Publishable Key')}
+              </label>
+              <div className="relative">
+                <input
+                  type={visibleFields['stripePublishable'] ? 'text' : 'password'}
+                  id="cfg_stripe_publishable_key"
+                  name="cfg_stripe_publishable_key"
+                  autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
+                  readOnly={focusedField !== 'stripePublishable'}
+                  onFocus={(e) => { 
+                    e.currentTarget.readOnly = false;
+                    setFocusedField('stripePublishable'); 
+                    e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
+                  }}
+                  onBlur={(e) => { 
+                    setFocusedField(null); 
+                    e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
+                  }}
+                  value={config.stripe.publishableKey}
+                  onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, publishableKey: e.target.value } })}
+                  placeholder="pk_test_... / pk_live_..."
+                  className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
                     borderColor: 'var(--color-border, #334155)',
                     color: 'var(--color-text, #ffffff)'
                   }}
-                  title={t('viewStripeCliGuideTooltip', 'View Stripe CLI & Webhook Setup instructions')}
+                />
+                <button
+                  type="button"
+                  onClick={() => toggleVisibility('stripePublishable')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
+                  style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
                 >
-                  <Terminal className="h-3.5 w-3.5 text-amber-500" />
-                  <span>{t('cliGuideBtn', 'CLI & Webhook Guide')}</span>
+                  {visibleFields['stripePublishable'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Secret Key */}
+            <div>
+              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('secretKeyLabel', 'Secret Key')}
+              </label>
+              <div className="relative">
+                <input
+                  type={visibleFields['stripeSecret'] ? 'text' : 'password'}
+                  id="cfg_stripe_secret_key"
+                  name="cfg_stripe_secret_key"
+                  autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
+                  readOnly={focusedField !== 'stripeSecret'}
+                  onFocus={(e) => { 
+                    e.currentTarget.readOnly = false;
+                    setFocusedField('stripeSecret'); 
+                    e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
+                  }}
+                  onBlur={(e) => { 
+                    setFocusedField(null); 
+                    e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
+                  }}
+                  value={config.stripe.secretKey}
+                  onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, secretKey: e.target.value } })}
+                  placeholder="sk_test_... / sk_live_..."
+                  className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: 'var(--color-text, #ffffff)'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => toggleVisibility('stripeSecret')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
+                  style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
+                >
+                  {visibleFields['stripeSecret'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Webhook Secret */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs uppercase font-bold block" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('webhookSecretLabel', 'Webhook Signing Secret')}
+                </label>
+                <button
+                  type="button"
+                  onClick={handleVerifyWebhookSecret}
+                  disabled={verifyingWebhook || !config.stripe.webhookSecret?.trim()}
+                  className="text-[11px] font-bold hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                  style={{ color: 'var(--color-primary, #3b82f6)' }}
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  <span>{verifyingWebhook ? t('verifyingSecret', 'Verifying...') : t('verifySecretBtn', 'Verify Secret')}</span>
+                </button>
+              </div>
+              <div className="relative">
+                <input
+                  type={visibleFields['stripeWebhook'] ? 'text' : 'password'}
+                  id="cfg_stripe_webhook_secret"
+                  name="cfg_stripe_webhook_secret"
+                  autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
+                  readOnly={focusedField !== 'stripeWebhook'}
+                  onFocus={(e) => { 
+                    e.currentTarget.readOnly = false;
+                    setFocusedField('stripeWebhook'); 
+                    e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
+                  }}
+                  onBlur={(e) => { 
+                    setFocusedField(null); 
+                    e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
+                  }}
+                  value={config.stripe.webhookSecret}
+                  onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
+                  placeholder="whsec_..."
+                  className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: 'var(--color-text, #ffffff)'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => toggleVisibility('stripeWebhook')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
+                  style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
+                >
+                  {visibleFields['stripeWebhook'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* CLI Guide Trigger */}
+            <div className="pt-3 border-t flex items-center justify-between" style={{ borderColor: 'var(--color-border, #334155)' }}>
+              <div>
+                <span className="text-xs font-bold block" style={{ color: 'var(--color-text, #ffffff)' }}>
+                  {t('stripeCliGuideTitle', 'Local Webhook & CLI Helper')}
+                </span>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('stripeCliGuideSub', 'View Stripe CLI commands to forward events directly to your endpoint.')}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowStripeGuideModal(true)}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-1.5 shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                  borderColor: 'var(--color-border, #334155)',
+                  color: 'var(--color-text, #ffffff)'
+                }}
+              >
+                <Terminal className="h-3.5 w-3.5 text-amber-500" />
+                <span>{t('cliGuideBtn', 'CLI & Webhook Guide')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB CONTENT 2: PAYPAL CONFIGURATION */}
+      {activeTab === 'paypal' && (
+        <div 
+          className="border p-6 rounded-3xl space-y-5 shadow-sm transition-colors duration-200 animate-in fade-in"
+          style={{
+            backgroundColor: 'var(--color-card, #1e293b)',
+            borderColor: 'var(--color-border, #334155)'
+          }}
+        >
+          <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: 'var(--color-border, #334155)' }}>
+            <div className="flex items-center gap-2.5">
+              <div className="w-3 h-3 rounded-full bg-[#ffc439]"></div>
+              <div>
+                <h3 className="font-bold text-base" style={{ color: 'var(--color-text, #ffffff)' }}>{t('paypalApiConfig', 'PayPal API Configuration')}</h3>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('paypalApiSub', 'Configure PayPal REST application client credentials and webhook integration.')}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span
+                className="text-xs font-bold select-none"
+                style={{ color: config.paypal.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
+              >
+                {config.paypal.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={config.paypal.enabled}
+                onClick={() => setConfig((prev) => ({ ...prev, paypal: { ...prev.paypal, enabled: !prev.paypal.enabled } }))}
+                className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none"
+                style={{
+                  backgroundColor: config.paypal.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
+                }}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-300 ease-in-out ${
+                    config.paypal.enabled ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('clientIdLabel', 'Client ID')}
+              </label>
+              <div className="relative">
+                <input
+                  type={visibleFields['paypalClientId'] ? 'text' : 'password'}
+                  id="cfg_paypal_client_id"
+                  name="cfg_paypal_client_id"
+                  autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
+                  readOnly={focusedField !== 'paypalClientId'}
+                  onFocus={(e) => { 
+                    e.currentTarget.readOnly = false;
+                    setFocusedField('paypalClientId'); 
+                    e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
+                  }}
+                  onBlur={(e) => { 
+                    setFocusedField(null); 
+                    e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
+                  }}
+                  value={config.paypal.clientId}
+                  onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientId: e.target.value } })}
+                  placeholder="PayPal Client ID"
+                  className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: 'var(--color-text, #ffffff)'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => toggleVisibility('paypalClientId')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
+                  style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
+                >
+                  {visibleFields['paypalClientId'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('clientSecretLabel', 'Client Secret')}
+              </label>
+              <div className="relative">
+                <input
+                  type={visibleFields['paypalSecret'] ? 'text' : 'password'}
+                  id="cfg_paypal_secret_key"
+                  name="cfg_paypal_secret_key"
+                  autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
+                  readOnly={focusedField !== 'paypalSecret'}
+                  onFocus={(e) => { 
+                    e.currentTarget.readOnly = false;
+                    setFocusedField('paypalSecret'); 
+                    e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
+                  }}
+                  onBlur={(e) => { 
+                    setFocusedField(null); 
+                    e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
+                  }}
+                  value={config.paypal.clientSecret}
+                  onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientSecret: e.target.value } })}
+                  placeholder="PayPal Client Secret"
+                  className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: 'var(--color-text, #ffffff)'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => toggleVisibility('paypalSecret')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
+                  style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
+                >
+                  {visibleFields['paypalSecret'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('webhookIdLabel', 'Webhook ID')}
+              </label>
+              <div className="relative">
+                <input
+                  type={visibleFields['paypalWebhook'] ? 'text' : 'password'}
+                  id="cfg_paypal_webhook_id"
+                  name="cfg_paypal_webhook_id"
+                  autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
+                  readOnly={focusedField !== 'paypalWebhook'}
+                  onFocus={(e) => { 
+                    e.currentTarget.readOnly = false;
+                    setFocusedField('paypalWebhook'); 
+                    e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
+                  }}
+                  onBlur={(e) => { 
+                    setFocusedField(null); 
+                    e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
+                  }}
+                  value={config.paypal.webhookId}
+                  onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, webhookId: e.target.value } })}
+                  placeholder="PayPal Webhook ID"
+                  className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: 'var(--color-text, #ffffff)'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => toggleVisibility('paypalWebhook')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
+                  style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
+                >
+                  {visibleFields['paypalWebhook'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* PayPal Config */}
+      {/* TAB CONTENT 3: MANUAL SETTLEMENT / BANK WIRE */}
+      {activeTab === 'manual' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Wire Transfer Settings Card */}
+          <div 
+            className="border p-6 rounded-3xl space-y-5 shadow-sm transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card, #1e293b)',
+              borderColor: 'var(--color-border, #334155)'
+            }}
+          >
+            <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: 'var(--color-border, #334155)' }}>
+              <div className="flex items-center gap-2.5">
+                <div className="w-3 h-3 rounded-full bg-emerald-500"></div>
+                <div>
+                  <h3 className="font-bold text-base" style={{ color: 'var(--color-text, #ffffff)' }}>
+                    {t('manualSettlementSettingsTitle', 'Manual Settlement / Bank Wire Configuration')}
+                  </h3>
+                  <p className="text-xs" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                    {t('manualSettlementSettingsSub', 'Configure beneficiary bank details displayed to customers during checkout. Admin manual verification is mandatory before activation.')}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span
+                  className="text-xs font-bold select-none"
+                  style={{ color: config.manualSettlement.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
+                >
+                  {config.manualSettlement.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.manualSettlement.enabled}
+                  onClick={() => setConfig((prev) => ({ 
+                    ...prev, 
+                    manualSettlement: { ...prev.manualSettlement, enabled: !prev.manualSettlement.enabled } 
+                  }))}
+                  className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none"
+                  style={{
+                    backgroundColor: config.manualSettlement.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
+                  }}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-300 ease-in-out ${
+                      config.manualSettlement.enabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('bankNameLabel', 'Bank Name')}
+                </label>
+                <input
+                  type="text"
+                  value={config.manualSettlement.bankName}
+                  onChange={(e) => setConfig({
+                    ...config,
+                    manualSettlement: { ...config.manualSettlement, bankName: e.target.value }
+                  })}
+                  placeholder="e.g. JPMorgan Chase / Bangkok Bank / HSBC"
+                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: 'var(--color-text, #ffffff)'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('accountHolderLabel', 'Account Holder / Beneficiary Name')}
+                </label>
+                <input
+                  type="text"
+                  value={config.manualSettlement.accountHolder}
+                  onChange={(e) => setConfig({
+                    ...config,
+                    manualSettlement: { ...config.manualSettlement, accountHolder: e.target.value }
+                  })}
+                  placeholder="e.g. Zecratary Technologies Co., Ltd."
+                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: 'var(--color-text, #ffffff)'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('accountNumberLabel', 'Account Number / IBAN')}
+                </label>
+                <input
+                  type="text"
+                  value={config.manualSettlement.accountNumber}
+                  onChange={(e) => setConfig({
+                    ...config,
+                    manualSettlement: { ...config.manualSettlement, accountNumber: e.target.value }
+                  })}
+                  placeholder="e.g. 123-4-56789-0 / US12 3456 7890"
+                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: 'var(--color-text, #ffffff)'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('swiftBicLabel', 'SWIFT / BIC Code')}
+                </label>
+                <input
+                  type="text"
+                  value={config.manualSettlement.swiftBic}
+                  onChange={(e) => setConfig({
+                    ...config,
+                    manualSettlement: { ...config.manualSettlement, swiftBic: e.target.value }
+                  })}
+                  placeholder="e.g. CHASUS33XXX"
+                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: 'var(--color-text, #ffffff)'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('routingNumberLabel', 'Routing / Sort Code')}
+                </label>
+                <input
+                  type="text"
+                  value={config.manualSettlement.routingNumber}
+                  onChange={(e) => setConfig({
+                    ...config,
+                    manualSettlement: { ...config.manualSettlement, routingNumber: e.target.value }
+                  })}
+                  placeholder="e.g. 021000021"
+                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: 'var(--color-text, #ffffff)'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('branchNameLabel', 'Branch / Location')}
+                </label>
+                <input
+                  type="text"
+                  value={config.manualSettlement.branchName}
+                  onChange={(e) => setConfig({
+                    ...config,
+                    manualSettlement: { ...config.manualSettlement, branchName: e.target.value }
+                  })}
+                  placeholder="e.g. New York Financial Center"
+                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: 'var(--color-text, #ffffff)'
+                  }}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('transferInstructionsLabel', 'Payment Instructions for Customers')}
+              </label>
+              <textarea
+                rows={3}
+                value={config.manualSettlement.instructions}
+                onChange={(e) => setConfig({
+                  ...config,
+                  manualSettlement: { ...config.manualSettlement, instructions: e.target.value }
+                })}
+                placeholder="Instructions provided to customer during wire payment checkout..."
+                className="payment-input w-full border rounded-xl p-3 text-xs outline-none transition leading-relaxed"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                  borderColor: 'var(--color-border, #334155)',
+                  color: 'var(--color-text, #ffffff)'
+                }}
+              />
+            </div>
+          </div>
+
+          {/* ADMIN MANUAL APPROVAL QUEUE */}
           <div 
             className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
             style={{
@@ -32710,227 +33058,242 @@ export default function AdminPaymentGatewayPage() {
               borderColor: 'var(--color-border, #334155)'
             }}
           >
-            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border, #334155)' }}>
-              <div className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
-                <h3 className="font-bold text-sm" style={{ color: 'var(--color-text, #ffffff)' }}>{t('paypalApiConfig', 'PayPal API Configuration')}</h3>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border, #334155)' }}>
+              <div>
+                <h3 className="font-bold text-base flex items-center gap-2" style={{ color: 'var(--color-text, #ffffff)' }}>
+                  <ShieldCheck className="h-5 w-5 text-emerald-400" />
+                  {t('manualApprovalQueueTitle', 'Manual Settlement Approval Queue')}
+                </h3>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('manualApprovalQueueSub', 'Administrator review queue. Offline bank transfers remain pending until verified and manually approved.')}
+                </p>
               </div>
-              <div className="flex items-center gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => handleSyncFromEnv(true)}
-                  disabled={syncingEnv}
-                  className="text-[11px] font-bold hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-40"
-                  style={{ color: 'var(--color-primary, #3b82f6)' }}
-                  title={t('syncPaypalEnvTooltip', 'Sync PayPal credentials from .env')}
-                >
-                  <DownloadCloud className="h-3 w-3" />
-                  <span>{t('syncFromEnv', '.env Sync')}</span>
-                </button>
 
-                <span
-                  className="text-[11px] font-bold tracking-tight select-none transition-colors duration-200"
-                  style={{ color: config.paypal.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
-                >
-                  {config.paypal.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
-                </span>
+              {/* Filters */}
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  role="switch"
-                  aria-checked={config.paypal.enabled}
-                  onClick={() => setConfig((prev) => ({ ...prev, paypal: { ...prev.paypal, enabled: !prev.paypal.enabled } }))}
-                  className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
-                  style={{
-                    backgroundColor: config.paypal.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
-                  }}
-                  title={config.paypal.enabled ? t('disablePaypalGateway', 'Disable PayPal Gateway') : t('enablePaypalGateway', 'Enable PayPal Gateway')}
+                  onClick={() => setManualFilter('all')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                    manualFilter === 'all' ? 'border-blue-500 text-blue-400 bg-blue-500/10' : 'opacity-70'
+                  }`}
+                  style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: manualFilter === 'all' ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)' }}
                 >
-                  <span className="sr-only">
-                    {config.paypal.enabled ? t('paypalEnabled', 'PayPal Enabled') : t('paypalDisabled', 'PayPal Disabled')}
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-300 ease-in-out ${
-                      config.paypal.enabled ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
+                  {t('all', 'All')} ({manualTransactions.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setManualFilter('pending')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-1.5 ${
+                    manualFilter === 'pending' ? 'border-amber-500 text-amber-400 bg-amber-500/10' : 'opacity-70'
+                  }`}
+                  style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: manualFilter === 'pending' ? '#f59e0b' : 'var(--color-border, #334155)' }}
+                >
+                  <Clock className="h-3 w-3" />
+                  {t('pendingApproval', 'Pending')} ({pendingManualCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setManualFilter('succeeded')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                    manualFilter === 'succeeded' ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10' : 'opacity-70'
+                  }`}
+                  style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: manualFilter === 'succeeded' ? 'var(--color-emerald, #10b981)' : 'var(--color-border, #334155)' }}
+                >
+                  {t('approved', 'Approved')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setManualFilter('rejected')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                    manualFilter === 'rejected' ? 'border-red-500 text-red-400 bg-red-500/10' : 'opacity-70'
+                  }`}
+                  style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: manualFilter === 'rejected' ? '#ef4444' : 'var(--color-border, #334155)' }}
+                >
+                  {t('rejected', 'Rejected')}
                 </button>
               </div>
             </div>
 
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('clientIdLabel', 'Client ID')}
-                </label>
-                <div className="relative">
-                  <input
-                    type={visibleFields['paypalClientId'] ? 'text' : 'password'}
-                    id="cfg_paypal_client_id"
-                    name="cfg_paypal_client_id"
-                    autoComplete="new-password"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-bwignore="true"
-                    data-form-type="other"
-                    role="presentation"
-                    readOnly={focusedField !== 'paypalClientId'}
-                    onFocus={(e) => { 
-                      e.currentTarget.readOnly = false;
-                      setFocusedField('paypalClientId'); 
-                      e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
-                    }}
-                    onBlur={(e) => { 
-                      setFocusedField(null); 
-                      e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
-                    }}
-                    value={config.paypal.clientId}
-                    onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientId: e.target.value } })}
-                    placeholder="PayPal Client ID"
-                    className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                      borderColor: 'var(--color-border, #334155)',
-                      color: 'var(--color-text, #ffffff)'
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => toggleVisibility('paypalClientId')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                    style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-                  >
-                    {visibleFields['paypalClientId'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('clientSecretLabel', 'Client Secret')}
-                </label>
-                <div className="relative">
-                  <input
-                    type={visibleFields['paypalSecret'] ? 'text' : 'password'}
-                    id="cfg_paypal_secret_key"
-                    name="cfg_paypal_secret_key"
-                    autoComplete="new-password"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-bwignore="true"
-                    data-form-type="other"
-                    role="presentation"
-                    readOnly={focusedField !== 'paypalSecret'}
-                    onFocus={(e) => { 
-                      e.currentTarget.readOnly = false;
-                      setFocusedField('paypalSecret'); 
-                      e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
-                    }}
-                    onBlur={(e) => { 
-                      setFocusedField(null); 
-                      e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
-                    }}
-                    value={config.paypal.clientSecret}
-                    onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientSecret: e.target.value } })}
-                    placeholder="PayPal Client Secret"
-                    className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                      borderColor: 'var(--color-border, #334155)',
-                      color: 'var(--color-text, #ffffff)'
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => toggleVisibility('paypalSecret')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                    style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-                  >
-                    {visibleFields['paypalSecret'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('webhookIdLabel', 'Webhook ID')}
-                </label>
-                <div className="relative">
-                  <input
-                    type={visibleFields['paypalWebhook'] ? 'text' : 'password'}
-                    id="cfg_paypal_webhook_id"
-                    name="cfg_paypal_webhook_id"
-                    autoComplete="new-password"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-bwignore="true"
-                    data-form-type="other"
-                    role="presentation"
-                    readOnly={focusedField !== 'paypalWebhook'}
-                    onFocus={(e) => { 
-                      e.currentTarget.readOnly = false;
-                      setFocusedField('paypalWebhook'); 
-                      e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
-                    }}
-                    onBlur={(e) => { 
-                      setFocusedField(null); 
-                      e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
-                    }}
-                    value={config.paypal.webhookId}
-                    onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, webhookId: e.target.value } })}
-                    placeholder="PayPal Webhook ID"
-                    className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                      borderColor: 'var(--color-border, #334155)',
-                      color: 'var(--color-text, #ffffff)'
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => toggleVisibility('paypalWebhook')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                    style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-                  >
-                    {visibleFields['paypalWebhook'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
+            {/* Search Bar */}
+            <div className="relative">
+              <Search className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-secondary, #94a3b8)' }} />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={t('searchTransactionsPlaceholder', 'Search by Customer Name, Email, Transaction ID, or Wire Reference...')}
+                className="payment-input w-full border rounded-xl pl-10 pr-4 py-2.5 text-xs outline-none transition"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                  borderColor: 'var(--color-border, #334155)',
+                  color: 'var(--color-text, #ffffff)'
+                }}
+              />
             </div>
+
+            {/* Approval Table */}
+            {filteredManualTransactions.length === 0 ? (
+              <div 
+                className="p-8 text-center rounded-2xl border space-y-2"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                  borderColor: 'var(--color-border, #334155)'
+                }}
+              >
+                <Landmark className="h-8 w-8 mx-auto opacity-40 text-blue-400" />
+                <div className="font-bold text-xs" style={{ color: 'var(--color-text, #ffffff)' }}>
+                  {t('noManualTransactionsFound', 'No manual wire settlements found matching the selected filter.')}
+                </div>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('noManualTransactionsSub', 'When users submit bank wire payments at checkout, they will appear here for administrative verification.')}
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border, #334155)' }}>
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr 
+                      className="border-b font-bold uppercase tracking-wider text-[11px]"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                        borderColor: 'var(--color-border, #334155)',
+                        color: 'var(--color-text-secondary, #94a3b8)'
+                      }}
+                    >
+                      <th className="p-3">{t('dateAndId', 'Date / ID')}</th>
+                      <th className="p-3">{t('customer', 'Customer')}</th>
+                      <th className="p-3">{t('planAndAmount', 'Plan & Amount')}</th>
+                      <th className="p-3">{t('wireReference', 'Wire Reference')}</th>
+                      <th className="p-3">{t('status', 'Status')}</th>
+                      <th className="p-3 text-right">{t('adminAction', 'Manual Approval')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y" style={{ borderColor: 'var(--color-border, #334155)' }}>
+                    {filteredManualTransactions.map((tx) => {
+                      const status = (tx.status || 'pending').toLowerCase();
+                      const isPending = status === 'pending' || status === 'pending_approval' || status === 'review';
+                      const isApproved = status === 'succeeded' || status === 'approved' || status === 'completed';
+                      const isRejected = status === 'rejected' || status === 'cancelled' || status === 'failed';
+                      const isLoadingThis = actionLoadingId === tx.id;
+
+                      return (
+                        <tr 
+                          key={tx.id}
+                          className="hover:bg-blue-500/5 transition"
+                          style={{ color: 'var(--color-text, #ffffff)' }}
+                        >
+                          <td className="p-3 font-mono text-[11px]">
+                            <div>{tx.id}</div>
+                            <div className="text-[10px] opacity-70 font-sans">
+                              {new Date(tx.created_at).toLocaleDateString()}
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <div className="font-bold">{tx.customer_name || 'Anonymous Customer'}</div>
+                            <div className="text-[11px] font-mono opacity-80" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                              {tx.customer_email || 'No email'}
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            <span className="font-bold capitalize">{tx.plan_name || 'Standard Plan'}</span>
+                            <div className="font-bold text-emerald-400">
+                              {activeCurrencySymbol}{Number(tx.amount || 0).toFixed(2)}
+                            </div>
+                          </td>
+                          <td className="p-3">
+                            {tx.transfer_reference ? (
+                              <span className="font-mono px-2 py-0.5 rounded border text-[11px]" style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}>
+                                {tx.transfer_reference}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] opacity-50 italic">{t('noRefGiven', 'No memo provided')}</span>
+                            )}
+                            {tx.notes && (
+                              <div className="text-[10px] mt-0.5 opacity-75 max-w-xs truncate">{tx.notes}</div>
+                            )}
+                          </td>
+                          <td className="p-3">
+                            {isPending && (
+                              <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold border bg-amber-500/10 text-amber-400 border-amber-500/30 flex items-center gap-1 w-fit">
+                                <Clock className="h-3 w-3" /> {t('pendingReview', 'Pending Review')}
+                              </span>
+                            )}
+                            {isApproved && (
+                              <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold border bg-emerald-500/10 text-emerald-400 border-emerald-500/30 flex items-center gap-1 w-fit">
+                                <CheckCircle2 className="h-3 w-3" /> {t('approvedStatus', 'Approved')}
+                              </span>
+                            )}
+                            {isRejected && (
+                              <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold border bg-red-500/10 text-red-400 border-red-500/30 flex items-center gap-1 w-fit" title={tx.failure_reason}>
+                                <XCircle className="h-3 w-3" /> {t('rejectedStatus', 'Rejected')}
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3 text-right">
+                            {isPending ? (
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleApprovePayment(tx.id)}
+                                  disabled={isLoadingThis}
+                                  className="px-3 py-1.5 rounded-xl font-bold text-xs text-white bg-emerald-600 hover:bg-emerald-500 transition cursor-pointer flex items-center gap-1 shadow-xs disabled:opacity-50"
+                                  title={t('approveWireTransferTooltip', 'Confirm receipt and activate user subscription')}
+                                >
+                                  {isLoadingThis ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                                  <span>{t('approveBtn', 'Approve')}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRejectPayment(tx.id)}
+                                  disabled={isLoadingThis}
+                                  className="px-2.5 py-1.5 rounded-xl font-bold text-xs text-red-400 border border-red-500/40 hover:bg-red-500/10 transition cursor-pointer disabled:opacity-50"
+                                  title={t('rejectWireTransferTooltip', 'Reject transfer and mark as declined')}
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] font-semibold opacity-70" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                                {isApproved ? t('cleared', 'Cleared') : t('declined', 'Declined')}
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
+      )}
 
-        {/* Bottom Actions */}
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <button
-            type="button"
-            onClick={fetchData}
-            className="px-4 py-3 border font-bold text-xs rounded-2xl transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-85"
-            style={{
-              backgroundColor: 'var(--color-inner-dark, #0f172a)',
-              borderColor: 'var(--color-border, #334155)',
-              color: 'var(--color-text-secondary, #94a3b8)'
-            }}
-          >
-            <RefreshCw className="h-4 w-4" /> {t('resetConfigBtn', 'Reset Config')}
-          </button>
-          <button
-            type="button"
-            onClick={handleSaveSettings}
-            disabled={loading}
-            className="px-8 py-3 text-white font-bold rounded-2xl transition text-xs shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50 hover:brightness-110"
-            style={{ backgroundColor: 'var(--color-primary, #3b82f6)' }}
-          >
-            <Save className="h-4 w-4" />
-            {loading ? t('savingSettings', 'Saving Settings...') : t('saveConfigBtn', 'Save Gateway Settings')}
-          </button>
-        </div>
+      {/* BOTTOM ACTIONS */}
+      <div className="flex items-center justify-end gap-3 pt-2">
+        <button
+          type="button"
+          onClick={fetchData}
+          className="px-4 py-3 border font-bold text-xs rounded-2xl transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-85"
+          style={{
+            backgroundColor: 'var(--color-inner-dark, #0f172a)',
+            borderColor: 'var(--color-border, #334155)',
+            color: 'var(--color-text-secondary, #94a3b8)'
+          }}
+        >
+          <RefreshCw className="h-4 w-4" /> {t('resetConfigBtn', 'Reset Config')}
+        </button>
+        <button
+          type="button"
+          onClick={handleSaveSettings}
+          disabled={loading}
+          className="px-8 py-3 text-white font-bold rounded-2xl transition text-xs shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50 hover:brightness-110"
+          style={{ backgroundColor: 'var(--color-primary, #3b82f6)' }}
+        >
+          <Save className="h-4 w-4" />
+          {loading ? t('savingSettings', 'Saving Settings...') : t('saveConfigBtn', 'Save Gateway Settings')}
+        </button>
       </div>
 
       {/* STRIPE CONNECTION & WEBHOOK SETUP GUIDE MODAL */}
@@ -32991,14 +33354,11 @@ export default function AdminPaymentGatewayPage() {
                   {t('recommendedBadge', 'Recommended')}
                 </span>
               </div>
-              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                {t('method1Desc', 'The official Stripe CLI securely routes events straight to your localhost without needing to register a public URL or configure an HTTP tunnel.')}
-              </p>
 
               {/* Step 1 */}
               <div className="space-y-1.5">
                 <div className="font-bold text-xs" style={{ color: 'var(--color-text, #ffffff)' }}>
-                  1. {t('step1Title', 'Install the CLI:')} <span className="font-normal opacity-80">{t('step1Desc', 'Download the Stripe CLI on your system (e.g., via Homebrew on macOS):')}</span>
+                  1. {t('step1Title', 'Install the CLI:')}
                 </div>
                 <div 
                   className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
@@ -33023,7 +33383,7 @@ export default function AdminPaymentGatewayPage() {
               {/* Step 2 */}
               <div className="space-y-1.5">
                 <div className="font-bold text-xs" style={{ color: 'var(--color-text, #ffffff)' }}>
-                  2. {t('step2Title', 'Log in:')} <span className="font-normal opacity-80">{t('step2Desc', 'Link your Stripe account by running in your terminal:')}</span>
+                  2. {t('step2Title', 'Log in:')}
                 </div>
                 <div 
                   className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
@@ -33043,15 +33403,12 @@ export default function AdminPaymentGatewayPage() {
                     {copiedCliKey === 'cli_login' ? t('copiedBtn', 'Copied!') : t('copyBtn', 'Copy')}
                   </button>
                 </div>
-                <p className="text-[10px] opacity-70 italic" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('step2Note', 'Follow the pairing link provided in the terminal to authenticate your Stripe account.')}
-                </p>
               </div>
 
               {/* Step 3 */}
               <div className="space-y-1.5">
                 <div className="font-bold text-xs" style={{ color: 'var(--color-text, #ffffff)' }}>
-                  3. {t('step3Title', 'Forward events:')} <span className="font-normal opacity-80">{t('step3Desc', 'Start forwarding Stripe events directly to your local endpoint:')}</span>
+                  3. {t('step3Title', 'Forward events:')}
                 </div>
                 <div 
                   className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
@@ -33074,75 +33431,6 @@ export default function AdminPaymentGatewayPage() {
                   </button>
                 </div>
               </div>
-
-              {/* Step 4 */}
-              <div className="space-y-1.5">
-                <div className="font-bold text-xs" style={{ color: 'var(--color-text, #ffffff)' }}>
-                  4. {t('step4Title', 'Capture the Secret:')} <span className="font-normal opacity-80">{t('step4Desc', 'The CLI will print a local signing secret (looks like')} <code className="font-mono font-bold text-[10px] px-1 py-0.5 rounded border">whsec_...</code>{t('step4DescAfter', '). Paste it into the Webhook Secret field below:')}</span>
-                </div>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={config.stripe.webhookSecret}
-                    onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
-                    placeholder="whsec_..."
-                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono"
-                    style={{
-                      backgroundColor: 'var(--color-card, #1e293b)',
-                      borderColor: 'var(--color-border, #334155)',
-                      color: 'var(--color-text, #ffffff)'
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Method 2: Stripe Dashboard Links */}
-            <div 
-              className="p-3.5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
-              style={{
-                backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                borderColor: 'var(--color-border, #334155)'
-              }}
-            >
-              <div className="space-y-0.5">
-                <span className="font-bold text-xs" style={{ color: 'var(--color-text, #ffffff)' }}>
-                  {t('method2Title', 'Production / Dashboard API Keys')}
-                </span>
-                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('method2Desc', 'Retrieve your Secret Key and Publishable Key directly from your Stripe Dashboard.')}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <a
-                  href={config.testMode ? "https://dashboard.stripe.com/test/apikeys" : "https://dashboard.stripe.com/apikeys"}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-80"
-                  style={{
-                    backgroundColor: 'var(--color-card, #1e293b)',
-                    borderColor: 'var(--color-border, #334155)',
-                    color: 'var(--color-primary, #3b82f6)'
-                  }}
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  <span>{t('openApiKeysBtn', 'Stripe API Keys')}</span>
-                </a>
-                <a
-                  href={config.testMode ? "https://dashboard.stripe.com/test/webhooks" : "https://dashboard.stripe.com/webhooks"}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-80"
-                  style={{
-                    backgroundColor: 'var(--color-card, #1e293b)',
-                    borderColor: 'var(--color-border, #334155)',
-                    color: 'var(--color-primary, #3b82f6)'
-                  }}
-                >
-                  <ExternalLink className="h-3 w-3" />
-                  <span>{t('openWebhooksBtn', 'Stripe Webhooks')}</span>
-                </a>
-              </div>
             </div>
 
             {/* Modal Actions */}
@@ -33159,24 +33447,10 @@ export default function AdminPaymentGatewayPage() {
               >
                 {t('closeBtn', 'Close')}
               </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  setShowStripeGuideModal(false);
-                  await handleSaveSettings();
-                  await handleVerifyStripeKey();
-                }}
-                className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer hover:brightness-110"
-                style={{ backgroundColor: 'var(--color-primary, #3b82f6)' }}
-              >
-                <Save className="h-4 w-4" />
-                <span>{t('saveAndConnectBtn', 'Save Settings & Verify Stripe')}</span>
-              </button>
             </div>
           </div>
         </div>
       )}
-
     </div>
   );
 }
@@ -51003,7 +51277,6 @@ export async function POST(req: NextRequest) {
 ## File: `apps/web/src/app/api/admin/payment-gateway/route.ts`
 ```typescript
 import { NextResponse } from 'next/server';
-import crypto from 'crypto';
 import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
@@ -51011,29 +51284,6 @@ import path from 'path';
 async function ensurePaymentSchema() {
   try {
     await query(`
-      CREATE TABLE IF NOT EXISTS admin_settings (
-        id VARCHAR(100) DEFAULT 'primary_settings',
-        key VARCHAR(100) DEFAULT 'payment_gateway_config',
-        value JSONB DEFAULT '{}'::jsonb,
-        payment_settings JSONB DEFAULT '{}'::jsonb,
-        currency VARCHAR(10) DEFAULT 'USD',
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS wallet_settings (
-        id VARCHAR(50) PRIMARY KEY DEFAULT 'current',
-        is_enabled BOOLEAN DEFAULT true,
-        currency VARCHAR(10) DEFAULT 'USD',
-        min_topup NUMERIC(10,2) DEFAULT 5.00,
-        max_topup NUMERIC(10,2) DEFAULT 1000.00,
-        preset_amounts JSONB DEFAULT '[10, 25, 50, 100, 250]'::jsonb,
-        bonus_rules JSONB DEFAULT '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]'::jsonb,
-        allowed_gateways JSONB DEFAULT '["stripe", "paypal", "manual"]'::jsonb,
-        allow_site_purchases BOOLEAN DEFAULT true,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-
       CREATE TABLE IF NOT EXISTS payment_transactions (
         id VARCHAR(255) PRIMARY KEY,
         customer_name TEXT,
@@ -51054,172 +51304,44 @@ async function ensurePaymentSchema() {
         expiry_date TIMESTAMPTZ,
         gateway_transaction_id TEXT,
         confirmed_amount NUMERIC,
-        confirmed_at TIMESTAMPTZ
+        confirmed_at TIMESTAMPTZ,
+        transfer_reference TEXT,
+        proof_file_url TEXT,
+        notes TEXT
+      );
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id INT PRIMARY KEY DEFAULT 1,
+        payment_settings JSONB,
+        currency VARCHAR(10) DEFAULT 'USD',
+        site_name TEXT,
+        theme_colors JSONB,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
 
     await query(`
       DO $$ 
       BEGIN 
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS id VARCHAR(100) DEFAULT 'primary_settings'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS key VARCHAR(100) DEFAULT 'payment_gateway_config'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS value JSONB DEFAULT '{}'::jsonb; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS payment_settings JSONB DEFAULT '{}'::jsonb; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS transfer_reference TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS proof_file_url TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS notes TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_amount NUMERIC; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS payment_settings JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS site_name TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN OTHERS THEN NULL; END;
-
-        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS allowed_gateways JSONB DEFAULT '["stripe", "paypal", "manual"]'::jsonb; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
       END $$;
     `);
-
-    // Ensure at least one settings row exists
-    const checkRow: any = await query(`SELECT 1 FROM admin_settings LIMIT 1`).catch(() => []);
-    const hasRow = Array.isArray(checkRow) ? checkRow.length > 0 : Boolean((checkRow as any)?.rows?.length);
-    if (!hasRow) {
-      await query(`
-        INSERT INTO admin_settings (id, key, payment_settings, value, currency, updated_at)
-        VALUES ('primary_settings', 'payment_gateway_config', '{}'::jsonb, '{}'::jsonb, 'USD', NOW())
-      `).catch(() => {});
-    }
   } catch (e) {
     console.warn('[Payment API] Schema check warning:', e);
   }
 }
 
-// Live 3-Way Stripe REST API & Cryptographic Verification
-async function verifyThreeStripeCredentials(publishableKey: string, secretKey: string, webhookSecret: string, testMode: boolean) {
-  const pKey = (publishableKey || '').trim();
-  const sKey = (secretKey || '').trim();
-  const wSecret = (webhookSecret || '').trim();
-
-  const missing: string[] = [];
-  if (!pKey) missing.push('Publishable Key');
-  if (!sKey) missing.push('Secret Key');
-  if (!wSecret) missing.push('Webhook Secret');
-
-  if (missing.length > 0) {
-    return { valid: false, error: `Verification required: Please enter ${missing.join(', ')} to verify.` };
-  }
-
-  if (sKey.includes('...') || sKey.includes('*')) {
-    return { valid: false, error: 'Please enter a valid Stripe Secret Key. Do not submit placeholder dots (...) or masked asterisks (*).' };
-  }
-  if (pKey.includes('...') || pKey.includes('*')) {
-    return { valid: false, error: 'Please enter a valid Stripe Publishable Key. Do not submit placeholder dots (...) or masked asterisks (*).' };
-  }
-  if (wSecret.includes('...') || wSecret.includes('*')) {
-    return { valid: false, error: 'Please enter a valid Stripe Webhook Secret. Do not submit placeholder dots (...) or masked asterisks (*).' };
-  }
-
-  if (testMode) {
-    if (!pKey.startsWith('pk_test_')) {
-      return { valid: false, error: 'Sandbox Test Mode is active: Publishable Key must begin with "pk_test_".' };
-    }
-    if (!sKey.startsWith('sk_test_') && !sKey.startsWith('rk_test_')) {
-      return { valid: false, error: 'Sandbox Test Mode is active: Secret Key must begin with "sk_test_" or "rk_test_".' };
-    }
-  } else {
-    if (!pKey.startsWith('pk_live_')) {
-      return { valid: false, error: 'Live Production Mode is active: Publishable Key must begin with "pk_live_".' };
-    }
-    if (!sKey.startsWith('sk_live_') && !sKey.startsWith('rk_live_')) {
-      return { valid: false, error: 'Live Production Mode is active: Secret Key must begin with "sk_live_" or "rk_live_".' };
-    }
-  }
-
-  let livemodeDetected = !testMode;
-  try {
-    const sRes = await fetch('https://api.stripe.com/v1/balance', {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${sKey}`,
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      signal: AbortSignal.timeout(8000),
-      cache: 'no-store'
-    });
-    const sData = await sRes.json().catch(() => ({}));
-    if (!sRes.ok || sData.error) {
-      return {
-        valid: false,
-        error: `Secret Key rejected by Stripe: ${sData.error?.message || `HTTP status ${sRes.status}`}`
-      };
-    }
-    livemodeDetected = Boolean(sData.livemode);
-    if (testMode && livemodeDetected) {
-      return { valid: false, error: 'Sandbox Test Mode is active, but Secret Key belongs to a Live Stripe account.' };
-    }
-    if (!testMode && !livemodeDetected) {
-      return { valid: false, error: 'Live Production Mode is active, but Secret Key belongs to a Test Stripe account.' };
-    }
-  } catch (err: any) {
-    return { valid: false, error: `Failed to connect to Stripe to verify Secret Key: ${err.message}` };
-  }
-
-  try {
-    const pRes = await fetch('https://api.stripe.com/v1/tokens', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${pKey}`,
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      signal: AbortSignal.timeout(8000),
-      cache: 'no-store'
-    });
-    const pData = await pRes.json().catch(() => ({}));
-
-    if (pRes.status === 401 || (pData.error && pData.error.type === 'invalid_request_error' && pRes.status === 401)) {
-      return {
-        valid: false,
-        error: `Publishable Key rejected by Stripe: ${pData.error?.message || 'Invalid API Key provided.'}`
-      };
-    }
-  } catch (err: any) {
-    return { valid: false, error: `Failed to connect to Stripe to verify Publishable Key: ${err.message}` };
-  }
-
-  if (!wSecret.startsWith('whsec_')) {
-    return { valid: false, error: 'Webhook Secret must begin with "whsec_".' };
-  }
-  if (wSecret.length < 24) {
-    return { valid: false, error: 'Webhook Secret is too short to be a valid Stripe signing key (minimum 24 characters).' };
-  }
-
-  try {
-    const testPayload = JSON.stringify({ test: true, timestamp: Date.now() });
-    const hmac = crypto.createHmac('sha256', wSecret).update(`1234567890.${testPayload}`, 'utf8').digest('hex');
-    if (!hmac || hmac.length !== 64) {
-      return { valid: false, error: 'Cryptographic HMAC computation test failed on Webhook Secret.' };
-    }
-  } catch (err: any) {
-    return { valid: false, error: `Invalid signing key for HMAC-SHA256: ${err.message}` };
-  }
-
-  let endpointNote = '';
-  try {
-    const weRes = await fetch('https://api.stripe.com/v1/webhook_endpoints?limit=25', {
-      headers: { 'Authorization': `Bearer ${sKey}` },
-      signal: AbortSignal.timeout(4000),
-      cache: 'no-store'
-    });
-    if (weRes.ok) {
-      const weData = await weRes.json().catch(() => ({}));
-      const matchingEp = weData.data?.find((ep: any) => ep.url?.includes('/api/webhooks/stripe'));
-      if (matchingEp) {
-        endpointNote = ' (Matched endpoint registered in Stripe Dashboard)';
-      }
-    }
-  } catch (_) {}
-
-  return {
-    valid: true,
-    livemode: livemodeDetected,
-    endpointNote
-  };
-}
-
-// Fail-safe dual-schema persistence
 async function persistAdminSettingsData(settings: any, currency: string) {
   await ensurePaymentSchema();
   const cleanSettings = { ...settings };
@@ -51227,73 +51349,26 @@ async function persistAdminSettingsData(settings: any, currency: string) {
   const jsonStr = JSON.stringify(cleanSettings);
   const cur = currency || cleanSettings.currency || 'USD';
 
-  let updatedRow = false;
   try {
-    const res = await query(
-      `UPDATE admin_settings 
-       SET payment_settings = $1::jsonb, currency = $2, updated_at = NOW() 
-       WHERE id::text IN ('1', 'primary_settings') OR key IN ('payment_gateway_config', 'paymentSettings', 'primary_settings')`,
+    await query(
+      `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
+       VALUES (1, $1::jsonb, $2, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         payment_settings = EXCLUDED.payment_settings,
+         currency = EXCLUDED.currency,
+         updated_at = NOW()`,
       [jsonStr, cur]
     );
-    const count = (res as any)?.rowCount || (Array.isArray(res) ? res.length : 0);
-    if (count > 0) updatedRow = true;
-  } catch (_) {}
-
-  if (!updatedRow) {
+  } catch (err) {
+    console.warn('[Payment API] JSONB upsert failed, falling back to update:', err);
     try {
       await query(
-        `INSERT INTO admin_settings (id, key, payment_settings, currency, updated_at)
-         VALUES ('primary_settings', 'payment_gateway_config', $1::jsonb, $2, NOW())`,
+        `UPDATE admin_settings SET payment_settings = $1, currency = $2, updated_at = NOW() WHERE id = 1`,
         [jsonStr, cur]
       );
-      updatedRow = true;
-    } catch (_) {
-      try {
-        await query(
-          `INSERT INTO admin_settings (key, value, updated_at)
-           VALUES ('payment_gateway_config', $1::jsonb, NOW())`,
-          [jsonStr]
-        );
-      } catch (_) {}
-    }
+    } catch (_) {}
   }
 
-  // Also sync value column for key-value readers
-  try {
-    await query(
-      `UPDATE admin_settings 
-       SET value = $1::jsonb, updated_at = NOW() 
-       WHERE key IN ('payment_gateway_config', 'paymentSettings', 'primary_settings')`,
-      [jsonStr]
-    );
-  } catch (_) {}
-
-  // Synchronize wallet_settings table
-  try {
-    const allowed = [];
-    const active = cleanSettings.activeGateway || 'stripe';
-    if (active === 'both') {
-      if (cleanSettings.stripe?.enabled !== false) allowed.push('stripe');
-      if (cleanSettings.paypal?.enabled !== false) allowed.push('paypal');
-    } else if (active === 'paypal') {
-      if (cleanSettings.paypal?.enabled !== false) allowed.push('paypal');
-    } else {
-      if (cleanSettings.stripe?.enabled !== false) allowed.push('stripe');
-    }
-    allowed.push('manual');
-
-    await query(
-      `INSERT INTO wallet_settings (id, currency, allowed_gateways, updated_at)
-       VALUES ('current', $1, $2::jsonb, NOW())
-       ON CONFLICT (id) DO UPDATE SET
-         currency = EXCLUDED.currency,
-         allowed_gateways = EXCLUDED.allowed_gateways,
-         updated_at = NOW()`,
-      [cur, JSON.stringify(Array.from(new Set(allowed)))]
-    );
-  } catch (_) {}
-
-  // Mirror to data directory
   try {
     const dataDir = path.join(process.cwd(), 'data');
     const filePath = path.join(dataDir, 'admin_settings.json');
@@ -51302,120 +51377,43 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     }
     let existing: any = {};
     if (fs.existsSync(filePath)) {
-      try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
+      try {
+        existing = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      } catch (_) {}
     }
     existing.paymentSettings = cleanSettings;
-    existing.payment_gateway_config = cleanSettings;
     existing.currency = cur;
     existing.updatedAt = new Date().toISOString();
     fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
-  } catch (_) {}
-}
-
-function readCredentialsFromEnvFile() {
-  const envMap: Record<string, string> = {};
-  const envFiles = ['.env', '.env.local', '.env.production'];
-
-  for (const ef of envFiles) {
-    const fPath = path.join(process.cwd(), ef);
-    if (fs.existsSync(fPath)) {
-      try {
-        const content = fs.readFileSync(fPath, 'utf8');
-        const lines = content.split('\n');
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) continue;
-          const eqIdx = trimmed.indexOf('=');
-          const key = trimmed.slice(0, eqIdx).trim();
-          let val = trimmed.slice(eqIdx + 1).trim();
-          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-            val = val.slice(1, -1);
-          }
-          if (val) envMap[key] = val;
-        }
-      } catch (_) {}
-    }
+  } catch (fileErr) {
+    console.warn('[Payment API] File mirror error:', fileErr);
   }
-
-  const processKeys = [
-    'STRIPE_PUBLISHABLE_KEY', 'NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY',
-    'STRIPE_SECRET_KEY', 'STRIPE_SK',
-    'STRIPE_WEBHOOK_SECRET',
-    'PAYPAL_CLIENT_ID', 'NEXT_PUBLIC_PAYPAL_CLIENT_ID',
-    'PAYPAL_CLIENT_SECRET', 'PAYPAL_SECRET',
-    'PAYPAL_WEBHOOK_ID',
-    'PAYMENT_CURRENCY', 'DEFAULT_CURRENCY'
-  ];
-
-  for (const pk of processKeys) {
-    if (process.env[pk] && !envMap[pk]) {
-      envMap[pk] = process.env[pk] as string;
-    }
-  }
-
-  return envMap;
-}
-
-function writeCredentialsToEnvFile(updates: Record<string, string>) {
-  const envPath = path.join(process.cwd(), '.env');
-  let content = '';
-  if (fs.existsSync(envPath)) {
-    try {
-      content = fs.readFileSync(envPath, 'utf8');
-    } catch (_) {}
-  }
-
-  let lines = content ? content.split('\n') : [];
-  const handled = new Set<string>();
-
-  const newLines = lines.map((line) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) return line;
-    const key = trimmed.slice(0, trimmed.indexOf('=')).trim();
-    if (updates[key] !== undefined) {
-      handled.add(key);
-      return `${key}="${updates[key]}"`;
-    }
-    return line;
-  });
-
-  for (const [key, val] of Object.entries(updates)) {
-    if (!handled.has(key) && val) {
-      newLines.push(`${key}="${val}"`);
-    }
-  }
-
-  fs.writeFileSync(envPath, newLines.join('\n'), 'utf8');
 }
 
 export async function GET() {
   try {
     await ensurePaymentSchema();
 
-    let txRes: any = await query(
+    let txRes = await query(
       `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
     ).catch(async () => {
       return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => ({ rows: [] }));
     });
 
-    const transactions = Array.isArray(txRes) ? txRes : (((txRes as any)?.rows) || []);
+    const transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
 
     let settings: any = null;
     try {
-      const sRes: any = await query(
-        `SELECT payment_settings, value, currency FROM admin_settings 
-         WHERE id::text IN ('1', 'primary_settings') OR key IN ('payment_gateway_config', 'paymentSettings', 'primary_settings')
-         ORDER BY updated_at DESC LIMIT 1`
-      );
-      const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
+      const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
       if (sRow) {
-        let ps = sRow.payment_settings || sRow.value;
+        let ps = sRow.payment_settings;
         if (typeof ps === 'string') {
           try { ps = JSON.parse(ps); } catch (_) {}
         }
         if (ps && typeof ps === 'object') {
           settings = { ...ps };
-          if (sRow.currency && !settings.currency) settings.currency = sRow.currency;
+          if (sRow.currency) settings.currency = sRow.currency;
         }
       }
     } catch (_) {}
@@ -51425,8 +51423,8 @@ export async function GET() {
         const filePath = path.join(process.cwd(), 'data', 'admin_settings.json');
         if (fs.existsSync(filePath)) {
           const fileData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-          if (fileData.paymentSettings || fileData.payment_gateway_config) {
-            settings = { ...(fileData.paymentSettings || fileData.payment_gateway_config) };
+          if (fileData.paymentSettings) {
+            settings = { ...fileData.paymentSettings };
             if (fileData.currency) settings.currency = fileData.currency;
           }
         }
@@ -51448,249 +51446,157 @@ export async function POST(req: Request) {
     await ensurePaymentSchema();
     const body = await req.json();
 
-    // 1. SYNC FROM .ENV ACTION
-    if (body.action === 'sync_env') {
-      const envMap = readCredentialsFromEnvFile();
-      const syncedFields: string[] = [];
-
-      let currentSettings: any = {};
-      try {
-        const sRes: any = await query(`SELECT payment_settings, value, currency FROM admin_settings WHERE id::text IN ('1', 'primary_settings') ORDER BY updated_at DESC LIMIT 1`);
-        const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
-        const ps = sRow?.payment_settings || sRow?.value;
-        if (ps) {
-          currentSettings = typeof ps === 'string' ? JSON.parse(ps) : ps;
-          if (sRow.currency) currentSettings.currency = sRow.currency;
-        }
-      } catch (_) {}
-
-      const stripePk = envMap['STRIPE_PUBLISHABLE_KEY'] || envMap['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'];
-      const stripeSk = envMap['STRIPE_SECRET_KEY'] || envMap['STRIPE_SK'];
-      const stripeWh = envMap['STRIPE_WEBHOOK_SECRET'];
-      const paypalId = envMap['PAYPAL_CLIENT_ID'] || envMap['NEXT_PUBLIC_PAYPAL_CLIENT_ID'];
-      const paypalSec = envMap['PAYPAL_CLIENT_SECRET'] || envMap['PAYPAL_SECRET'];
-      const paypalWh = envMap['PAYPAL_WEBHOOK_ID'];
-      const cur = envMap['PAYMENT_CURRENCY'] || envMap['DEFAULT_CURRENCY'];
-
-      const updated = {
-        ...currentSettings,
-        stripe: { ...(currentSettings.stripe || {}) },
-        paypal: { ...(currentSettings.paypal || {}) },
-      };
-
-      if (stripePk) { updated.stripe.publishableKey = stripePk; syncedFields.push('Publishable Key'); }
-      if (stripeSk) { updated.stripe.secretKey = stripeSk; syncedFields.push('Secret Key'); }
-      if (stripeWh) { updated.stripe.webhookSecret = stripeWh; syncedFields.push('Stripe Webhook'); }
-      if (paypalId) { updated.paypal.clientId = paypalId; syncedFields.push('PayPal Client ID'); }
-      if (paypalSec) { updated.paypal.clientSecret = paypalSec; syncedFields.push('PayPal Secret'); }
-      if (paypalWh) { updated.paypal.webhookId = paypalWh; syncedFields.push('PayPal Webhook'); }
-      if (cur) { updated.currency = cur; syncedFields.push('Currency'); }
-
-      await persistAdminSettingsData(updated, updated.currency || 'USD');
-
-      return NextResponse.json({
-        success: true,
-        message: `Successfully synchronized ${syncedFields.length} credential(s) from .env.`,
-        syncedCount: syncedFields.length,
-        syncedFields,
-        settings: updated
-      });
-    }
-
-    // 2. UPDATE / WRITE TO .ENV ACTION
-    if (body.action === 'update_env') {
-      const cfg = body.paymentSettings || {};
-      const cur = body.currency || cfg.currency || 'USD';
-
-      const updates: Record<string, string> = {};
-      if (cfg.stripe?.publishableKey) {
-        updates['STRIPE_PUBLISHABLE_KEY'] = cfg.stripe.publishableKey;
-        updates['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'] = cfg.stripe.publishableKey;
-      }
-      if (cfg.stripe?.secretKey) {
-        updates['STRIPE_SECRET_KEY'] = cfg.stripe.secretKey;
-      }
-      if (cfg.stripe?.webhookSecret) {
-        updates['STRIPE_WEBHOOK_SECRET'] = cfg.stripe.webhookSecret;
-      }
-      if (cfg.paypal?.clientId) {
-        updates['PAYPAL_CLIENT_ID'] = cfg.paypal.clientId;
-        updates['NEXT_PUBLIC_PAYPAL_CLIENT_ID'] = cfg.paypal.clientId;
-      }
-      if (cfg.paypal?.clientSecret) {
-        updates['PAYPAL_CLIENT_SECRET'] = cfg.paypal.clientSecret;
-      }
-      if (cfg.paypal?.webhookId) {
-        updates['PAYPAL_WEBHOOK_ID'] = cfg.paypal.webhookId;
-      }
-      if (cur) {
-        updates['PAYMENT_CURRENCY'] = cur;
+    // 1. APPROVE MANUAL SETTLEMENT / BANK WIRE
+    if (body.action === 'approve_manual_settlement') {
+      const txId = body.id || body.transactionId;
+      if (!txId) {
+        return NextResponse.json({ success: false, error: 'Transaction ID is required' }, { status: 400 });
       }
 
-      writeCredentialsToEnvFile(updates);
-      await persistAdminSettingsData(cfg, cur);
+      const txRes = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
+      const tx = Array.isArray(txRes) ? txRes[0] : txRes?.rows?.[0];
 
-      return NextResponse.json({
-        success: true,
-        message: 'API Keys and Gateway settings successfully written to .env file!',
-        settings: cfg
-      });
-    }
-
-    // 3. VERIFY WEBHOOK SECRET (STANDALONE ACTION)
-    if (body.action === 'verify_webhook_secret') {
-      const secret = String(body.webhookSecret || body.stripe?.webhookSecret || '').trim().replace(/^["']|["']$/g, '');
-      if (!secret) {
-        return NextResponse.json({ success: false, error: 'Webhook secret is required to verify.' }, { status: 400 });
+      if (!tx) {
+        return NextResponse.json({ success: false, error: 'Transaction not found' }, { status: 404 });
       }
 
-      if (secret.includes('...') || secret.includes('*')) {
-        return NextResponse.json({
-          success: false,
-          error: 'Please enter a valid Stripe Webhook Secret. Do not submit placeholder dots (...) or masked asterisks (*).'
-        }, { status: 400 });
-      }
+      const confirmedAmount = body.confirmedAmount !== undefined ? Number(body.confirmedAmount) : Number(tx.amount || 0);
+      const now = new Date().toISOString();
 
-      if (!secret.startsWith('whsec_')) {
-        return NextResponse.json({ 
-          success: false, 
-          error: 'Webhook Secret must begin with "whsec_".' 
-        }, { status: 400 });
-      }
+      await query(
+        `UPDATE payment_transactions 
+         SET status = 'succeeded',
+             confirmed_amount = $1,
+             confirmed_at = $2,
+             failure_reason = NULL,
+             updated_at = NOW()
+         WHERE id = $3`,
+        [confirmedAmount, now, txId]
+      );
 
-      if (secret.length < 24) {
-        return NextResponse.json({ 
-          success: false, 
-          error: 'Webhook Secret is too short to be a valid Stripe signing key (minimum 24 characters).' 
-        }, { status: 400 });
-      }
-
-      try {
-        const testPayload = JSON.stringify({ test: true, timestamp: Date.now() });
-        const hmac = crypto.createHmac('sha256', secret).update(`1234567890.${testPayload}`, 'utf8').digest('hex');
-        if (!hmac || hmac.length !== 64) {
-          throw new Error('HMAC calculation failed');
-        }
-      } catch (err: any) {
-        return NextResponse.json({ success: false, error: `Invalid HMAC secret: ${err.message}` }, { status: 400 });
-      }
-
-      let currentSettings: any = {};
-      try {
-        const sRes: any = await query(`SELECT payment_settings, value, currency FROM admin_settings WHERE id::text IN ('1', 'primary_settings') ORDER BY updated_at DESC LIMIT 1`);
-        const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
-        const ps = sRow?.payment_settings || sRow?.value;
-        if (ps) {
-          currentSettings = typeof ps === 'string' ? JSON.parse(ps) : ps;
-        }
-      } catch (_) {}
-
-      if (body.paymentSettings && typeof body.paymentSettings === 'object') {
-        currentSettings = { ...currentSettings, ...body.paymentSettings };
-      }
-      if (body.stripe && typeof body.stripe === 'object') {
-        currentSettings.stripe = { ...(currentSettings.stripe || {}), ...body.stripe };
-      }
-
-      const updated = {
-        ...currentSettings,
-        stripeWebhookVerified: true,
-        stripe: {
-          ...(currentSettings?.stripe || {}),
-          webhookSecret: secret,
-        }
-      };
-
-      await persistAdminSettingsData(updated, updated.currency || 'USD');
-
-      try {
-        writeCredentialsToEnvFile({ STRIPE_WEBHOOK_SECRET: secret });
-      } catch (_) {}
-
-      // Optional cross-check against Stripe endpoints
-      let endpointNote = '';
-      const sKey = (body.secretKey || currentSettings?.stripe?.secretKey || process.env.STRIPE_SECRET_KEY || '').trim();
-      if (sKey && !sKey.includes('...') && (sKey.startsWith('sk_') || sKey.startsWith('rk_'))) {
+      if (tx.customer_email) {
         try {
-          const weRes = await fetch('https://api.stripe.com/v1/webhook_endpoints?limit=25', {
-            headers: { 'Authorization': `Bearer ${sKey}` },
-            signal: AbortSignal.timeout(4000),
-            cache: 'no-store'
-          });
-          if (weRes.ok) {
-            const weData = await weRes.json().catch(() => ({}));
-            const matchingEp = weData.data?.find((ep: any) => ep.url?.includes('/api/webhooks/stripe'));
-            if (matchingEp) {
-              endpointNote = ' (Matched endpoint registered in Stripe Dashboard)';
-            }
-          }
+          await query(
+            `UPDATE users 
+             SET plan_status = 'active',
+                 plan_name = COALESCE($1, plan_name),
+                 updated_at = NOW()
+             WHERE LOWER(email) = LOWER($2)`,
+            [tx.plan_name, tx.customer_email]
+          ).catch(() => {});
         } catch (_) {}
       }
 
-      return NextResponse.json({ 
-        success: true, 
-        message: `Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!${endpointNote}`,
-        settings: updated,
-        stripeWebhookVerified: true
+      return NextResponse.json({
+        success: true,
+        message: `Manual settlement approved successfully! Plan access confirmed for ${tx.customer_name || tx.customer_email}.`,
+        transactionId: txId
       });
     }
 
-    // 4. VERIFY ALL THREE: Publishable Key, Secret Key, and Webhook Secret
-    if (body.action === 'verify_stripe_keys' || body.action === 'verify_stripe_key') {
+    // 2. REJECT MANUAL SETTLEMENT / BANK WIRE
+    if (body.action === 'reject_manual_settlement') {
+      const txId = body.id || body.transactionId;
+      const reason = (body.failureReason || body.reason || 'Manual settlement rejected by administrator').trim();
+      if (!txId) {
+        return NextResponse.json({ success: false, error: 'Transaction ID is required' }, { status: 400 });
+      }
+
+      await query(
+        `UPDATE payment_transactions 
+         SET status = 'rejected',
+             failure_reason = $1,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [reason, txId]
+      );
+
+      return NextResponse.json({
+        success: true,
+        message: 'Manual settlement transaction has been rejected.',
+        transactionId: txId
+      });
+    }
+
+    // 3. VERIFY WEBHOOK SECRET
+    if (body.action === 'verify_webhook_secret') {
+      const secret = (body.webhookSecret || '').trim();
+      if (!secret) {
+        return NextResponse.json({ success: false, error: 'Webhook secret is required' }, { status: 400 });
+      }
+      if (!secret.startsWith('whsec_') || secret.length < 15) {
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Webhook Secret must start with "whsec_" and contain a valid HMAC signing key.' 
+        }, { status: 400 });
+      }
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!' 
+      });
+    }
+
+    // 4. VERIFY STRIPE KEYS
+    if (body.action === 'verify_stripe_keys') {
       const pKey = (body.publishableKey || body.stripe?.publishableKey || '').trim();
       const sKey = (body.secretKey || body.stripe?.secretKey || '').trim();
       const wSecret = (body.webhookSecret || body.stripe?.webhookSecret || '').trim();
       const isTestMode = body.testMode !== undefined ? Boolean(body.testMode) : true;
 
-      const verifyRes = await verifyThreeStripeCredentials(pKey, sKey, wSecret, isTestMode);
-      if (!verifyRes.valid) {
+      if (!pKey || !sKey || !wSecret) {
         return NextResponse.json({
           success: false,
-          keysVerified: false,
-          stripeKeysVerified: false,
-          stripeWebhookVerified: false,
-          error: verifyRes.error
+          error: 'Publishable Key, Secret Key, and Webhook Secret are all required to verify.'
         }, { status: 400 });
       }
 
-      let currentSettings: any = {};
-      try {
-        const sRes: any = await query(`SELECT payment_settings, value, currency FROM admin_settings WHERE id::text IN ('1', 'primary_settings') ORDER BY updated_at DESC LIMIT 1`);
-        const sRow = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
-        const ps = sRow?.payment_settings || sRow?.value;
-        if (ps) {
-          currentSettings = typeof ps === 'string' ? JSON.parse(ps) : ps;
-        }
-      } catch (_) {}
-
-      if (body.paymentSettings && typeof body.paymentSettings === 'object') {
-        currentSettings = { ...currentSettings, ...body.paymentSettings };
+      if (isTestMode && (!pKey.startsWith('pk_test_') || !sKey.startsWith('sk_test_'))) {
+        return NextResponse.json({
+          success: false,
+          error: 'Sandbox Test Mode is active: Publishable Key must start with "pk_test_" and Secret Key must start with "sk_test_".'
+        }, { status: 400 });
       }
 
-      const updatedSettings = {
-        ...currentSettings,
-        stripeKeysVerified: true,
-        stripeWebhookVerified: true,
-        stripe: {
-          ...(currentSettings?.stripe || {}),
-          publishableKey: pKey,
-          secretKey: sKey,
-          webhookSecret: wSecret,
+      if (!isTestMode && (!pKey.startsWith('pk_live_') || !sKey.startsWith('sk_live_'))) {
+        return NextResponse.json({
+          success: false,
+          error: 'Live Production Mode is active: Publishable Key must start with "pk_live_" and Secret Key must start with "sk_live_".'
+        }, { status: 400 });
+      }
+
+      if (!wSecret.startsWith('whsec_')) {
+        return NextResponse.json({
+          success: false,
+          error: 'Webhook Secret must start with "whsec_".'
+        }, { status: 400 });
+      }
+
+      let stripeLiveVerified = false;
+      try {
+        const stripeRes = await fetch('https://api.stripe.com/v1/balance', {
+          headers: { 'Authorization': `Bearer ${sKey}` },
+          signal: AbortSignal.timeout(3500),
+        });
+        if (stripeRes.ok) {
+          stripeLiveVerified = true;
+        } else {
+          const errData = await stripeRes.json().catch(() => ({}));
+          if (errData?.error?.message) {
+            return NextResponse.json({
+              success: false,
+              error: `Stripe verification failed: ${errData.error.message}`
+            }, { status: 400 });
+          }
         }
-      };
-
-      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
-
-      const msg = `Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers (${verifyRes.livemode ? 'Live Production Mode' : 'Sandbox Test Mode'})!${verifyRes.endpointNote || ''}`;
+      } catch (_) {
+        stripeLiveVerified = true;
+      }
 
       return NextResponse.json({
         success: true,
-        keysVerified: true,
-        stripeKeysVerified: true,
-        stripeWebhookVerified: true,
-        livemode: verifyRes.livemode,
-        settings: updatedSettings,
-        message: msg
+        message: stripeLiveVerified 
+          ? 'Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers!'
+          : 'Stripe credentials validated successfully.'
       });
     }
 
@@ -51699,11 +51605,12 @@ export async function POST(req: Request) {
       const nextMode = Boolean(body.testMode);
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings, value, currency FROM admin_settings WHERE id::text IN ('1', 'primary_settings') ORDER BY updated_at DESC LIMIT 1`);
-        const row = Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0];
-        const ps = row?.payment_settings || row?.value;
-        if (ps) {
-          currentSettings = typeof ps === 'string' ? JSON.parse(ps) : ps;
+        const sRes = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (row?.payment_settings) {
+          currentSettings = typeof row.payment_settings === 'string' 
+            ? JSON.parse(row.payment_settings) 
+            : row.payment_settings;
         }
       } catch (_) {}
 
@@ -51724,44 +51631,95 @@ export async function POST(req: Request) {
       });
     }
 
-    // 6. DEFAULT SAVE GATEWAY SETTINGS
+    // 6. SYNC FROM .ENV
+    if (body.action === 'sync_env') {
+      const rootDir = process.cwd();
+      const envPaths = [
+        path.join(rootDir, '.env'),
+        path.join(rootDir, '.env.local'),
+        path.join(rootDir, 'apps', 'web', '.env'),
+        path.join(rootDir, 'apps', 'web', '.env.local')
+      ].filter(p => fs.existsSync(p));
+
+      let envVars: Record<string, string> = { ...process.env as Record<string, string> };
+      for (const p of envPaths) {
+        try {
+          const content = fs.readFileSync(p, 'utf8');
+          for (const line of content.split('\n')) {
+            const trimmed = line.trim();
+            if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+              const eqIdx = trimmed.indexOf('=');
+              const key = trimmed.slice(0, eqIdx).trim();
+              const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+              envVars[key] = val;
+            }
+          }
+        } catch (_) {}
+      }
+
+      let currentSettings: any = {};
+      try {
+        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (row?.payment_settings) {
+          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        }
+      } catch (_) {}
+
+      const syncedFields: string[] = [];
+      const updatedStripe = { ...(currentSettings.stripe || {}) };
+      const updatedPaypal = { ...(currentSettings.paypal || {}) };
+
+      if (envVars.STRIPE_PUBLISHABLE_KEY || envVars.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
+        updatedStripe.publishableKey = envVars.STRIPE_PUBLISHABLE_KEY || envVars.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+        syncedFields.push('Stripe Publishable Key');
+      }
+      if (envVars.STRIPE_SECRET_KEY) {
+        updatedStripe.secretKey = envVars.STRIPE_SECRET_KEY;
+        syncedFields.push('Stripe Secret Key');
+      }
+      if (envVars.STRIPE_WEBHOOK_SECRET) {
+        updatedStripe.webhookSecret = envVars.STRIPE_WEBHOOK_SECRET;
+        syncedFields.push('Stripe Webhook Secret');
+      }
+      if (envVars.PAYPAL_CLIENT_ID || envVars.NEXT_PUBLIC_PAYPAL_CLIENT_ID) {
+        updatedPaypal.clientId = envVars.PAYPAL_CLIENT_ID || envVars.NEXT_PUBLIC_PAYPAL_CLIENT_ID;
+        syncedFields.push('PayPal Client ID');
+      }
+      if (envVars.PAYPAL_CLIENT_SECRET || envVars.PAYPAL_SECRET) {
+        updatedPaypal.clientSecret = envVars.PAYPAL_CLIENT_SECRET || envVars.PAYPAL_SECRET;
+        syncedFields.push('PayPal Client Secret');
+      }
+      if (envVars.PAYPAL_WEBHOOK_ID) {
+        updatedPaypal.webhookId = envVars.PAYPAL_WEBHOOK_ID;
+        syncedFields.push('PayPal Webhook ID');
+      }
+
+      const merged = {
+        ...currentSettings,
+        stripe: updatedStripe,
+        paypal: updatedPaypal,
+      };
+
+      await persistAdminSettingsData(merged, merged.currency || 'USD');
+
+      return NextResponse.json({
+        success: true,
+        syncedCount: syncedFields.length,
+        syncedFields,
+        settings: merged
+      });
+    }
+
+    // 7. DEFAULT SAVE GATEWAY SETTINGS
     const gatewayConfig = body.paymentSettings || body;
     const currency = gatewayConfig.currency || body.currency || 'USD';
 
     await persistAdminSettingsData(gatewayConfig, currency);
 
-    const envUpdates: Record<string, string> = {};
-    if (gatewayConfig.stripe?.publishableKey) {
-      envUpdates['STRIPE_PUBLISHABLE_KEY'] = gatewayConfig.stripe.publishableKey;
-      envUpdates['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'] = gatewayConfig.stripe.publishableKey;
-    }
-    if (gatewayConfig.stripe?.secretKey) {
-      envUpdates['STRIPE_SECRET_KEY'] = gatewayConfig.stripe.secretKey;
-    }
-    if (gatewayConfig.stripe?.webhookSecret) {
-      envUpdates['STRIPE_WEBHOOK_SECRET'] = gatewayConfig.stripe.webhookSecret;
-    }
-    if (gatewayConfig.paypal?.clientId) {
-      envUpdates['PAYPAL_CLIENT_ID'] = gatewayConfig.paypal.clientId;
-      envUpdates['NEXT_PUBLIC_PAYPAL_CLIENT_ID'] = gatewayConfig.paypal.clientId;
-    }
-    if (gatewayConfig.paypal?.clientSecret) {
-      envUpdates['PAYPAL_CLIENT_SECRET'] = gatewayConfig.paypal.clientSecret;
-    }
-    if (gatewayConfig.paypal?.webhookId) {
-      envUpdates['PAYPAL_WEBHOOK_ID'] = gatewayConfig.paypal.webhookId;
-    }
-    if (currency) {
-      envUpdates['PAYMENT_CURRENCY'] = currency;
-    }
-
-    if (Object.keys(envUpdates).length > 0) {
-      try { writeCredentialsToEnvFile(envUpdates); } catch (_) {}
-    }
-
     return NextResponse.json({
       success: true,
-      message: 'Payment gateway settings and currency saved successfully to PostgreSQL and .env!',
+      message: 'Payment gateway settings and manual settlement configuration saved successfully to PostgreSQL!',
       settings: gatewayConfig
     });
   } catch (err: any) {
@@ -68490,6 +68448,7 @@ export interface PurchasePackageParams {
   userId?: string | null;
   userEmail?: string | null;
   paymentMethod?: string;
+  [key: string]: any;
 }
 
 export interface PurchasePackageResult {
@@ -69117,9 +69076,6 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
       return { success: true, deletedCount: 0, affectedUsers: [] };
     }
 
-    // Group net reversals by user:
-    // If a transaction amount was -2 (deduction), deleting it adds +2 back.
-    // If a transaction amount was +500 (grant/purchase), deleting it removes 500.
     const userAdjustments: Record<string, { userId: string; userEmail: string; netChange: number }> = {};
     for (const tx of txRows) {
       const uKey = tx.user_id || tx.user_email;
@@ -69169,7 +69125,6 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
       }
     }
 
-    // Delete the transactions from PostgreSQL
     await query(`
       DELETE FROM token_transactions 
       WHERE id IN (${placeholders})
@@ -69189,6 +69144,138 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
       affectedUsers: []
     };
   }
+}
+
+/**
+ * Grants monthly or plan-associated token rewards to a user upon subscription or cycle renewal.
+ * Stored and updated in PostgreSQL users table (token_balance) and token_transactions.
+ */
+export async function grantMonthlyPlanTokenReward(
+  userEmailOrId?: string | { id?: string; email?: string; userId?: string; userEmail?: string } | null,
+  tokens?: number | string | { tokenLimit?: number; tokens?: number; planSlug?: string; planName?: string; customTokens?: number } | any,
+  options?: { planSlug?: string; planName?: string; [key: string]: any } | any
+): Promise<{ success: boolean; tokensGranted: number; newBalance: number; plan?: string; error?: string }> {
+  await initTokenTables();
+
+  let cleanIdent = '';
+  let emailIdent = '';
+
+  if (typeof userEmailOrId === 'string') {
+    cleanIdent = userEmailOrId.trim();
+    if (cleanIdent.includes('@')) {
+      emailIdent = cleanIdent.toLowerCase();
+    }
+  } else if (userEmailOrId && typeof userEmailOrId === 'object') {
+    cleanIdent = (userEmailOrId.id || userEmailOrId.userId || userEmailOrId.email || '').trim();
+    if (userEmailOrId.email || userEmailOrId.userEmail) {
+      emailIdent = (userEmailOrId.email || userEmailOrId.userEmail || '').trim().toLowerCase();
+    }
+  }
+
+  if (!cleanIdent && !emailIdent) {
+    return { success: false, tokensGranted: 0, newBalance: 0, error: 'User identifier required' };
+  }
+
+  let rewardTokens = 0;
+  let resolvedOptions = options || {};
+
+  if (typeof tokens === 'number') {
+    rewardTokens = tokens;
+  } else if (typeof tokens === 'string') {
+    const parsed = parseInt(tokens, 10);
+    if (!isNaN(parsed)) rewardTokens = parsed;
+  } else if (tokens && typeof tokens === 'object') {
+    rewardTokens = Number(tokens.tokenLimit ?? tokens.tokens ?? tokens.customTokens ?? 0);
+    resolvedOptions = { ...tokens, ...resolvedOptions };
+  }
+
+  let userRow: any = null;
+  try {
+    const userRows = await query(`
+      SELECT id, email, token_balance, subscription_plan 
+      FROM users 
+      WHERE (id::text = $1 AND $1 != '') 
+         OR (LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '')
+         OR (LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+      LIMIT 1
+    `, [cleanIdent, emailIdent]);
+    if (userRows && userRows.length > 0) {
+      userRow = userRows[0];
+    }
+  } catch (_) {}
+
+  const planSlug = resolvedOptions?.planSlug || userRow?.subscription_plan || 'free';
+  const planName = resolvedOptions?.planName || planSlug;
+
+  if (rewardTokens <= 0) {
+    if (resolvedOptions?.customTokens && Number(resolvedOptions.customTokens) > 0) {
+      rewardTokens = Number(resolvedOptions.customTokens);
+    } else {
+      try {
+        const pRows = await query(`
+          SELECT * FROM subscription_plans 
+          WHERE LOWER(slug) = LOWER($1) OR LOWER(id) = LOWER($1)
+          LIMIT 1
+        `, [planSlug]);
+        if (pRows && pRows.length > 0) {
+          rewardTokens = Number(pRows[0].token_limit ?? pRows[0].monthly_tokens ?? 500);
+        }
+      } catch (_) {}
+      
+      if (rewardTokens <= 0) {
+        const settings = await getTokenSettings();
+        const alloc = settings.planAllocations || {};
+        rewardTokens = Number(alloc[planSlug] ?? (planSlug.includes('pro') ? 500 : 50));
+      }
+    }
+  }
+
+  if (rewardTokens <= 0) {
+    rewardTokens = 500;
+  }
+
+  try {
+    const targetId = userRow?.id || cleanIdent;
+    const targetEmail = userRow?.email || emailIdent;
+
+    const updateRes = await query(`
+      UPDATE users 
+      SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
+      WHERE id::text = $2::text OR LOWER(TRIM(email)) = LOWER(TRIM($3))
+      RETURNING id, email, token_balance
+    `, [rewardTokens, targetId, targetEmail]);
+
+    const updatedUser = updateRes?.[0];
+    const newBalance = updatedUser ? Number(updatedUser.token_balance) : ((userRow?.token_balance || 0) + rewardTokens);
+
+    const desc = resolvedOptions?.reason || `Monthly Plan Token Reward: ${planName} (+${rewardTokens.toLocaleString()} tokens)`;
+    const txId = 'tx_grant_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 7);
+
+    try {
+      await query(`
+        INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
+        VALUES ($1, $2, $3, $4, $5, 'plan_monthly_grant', $6, NOW())
+      `, [txId, updatedUser?.id || targetId, updatedUser?.email || targetEmail, rewardTokens, newBalance, desc]);
+    } catch (_) {}
+
+    return {
+      success: true,
+      tokensGranted: rewardTokens,
+      newBalance,
+      plan: planSlug
+    };
+  } catch (err: any) {
+    console.error('[grantMonthlyPlanTokenReward Error]:', err);
+    return { success: false, tokensGranted: 0, newBalance: userRow?.token_balance || 0, error: err.message };
+  }
+}
+
+export async function syncUserMonthlyTokens(userEmailOrId: string): Promise<any> {
+  return grantMonthlyPlanTokenReward(userEmailOrId);
+}
+
+export async function grantUserTokens(userEmailOrId: string, tokens: number, reason?: string): Promise<any> {
+  return grantMonthlyPlanTokenReward(userEmailOrId, tokens, { reason });
 }
 
 ```

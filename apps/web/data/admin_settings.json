@@ -2420,7 +2420,6 @@
     "titlebar_image": "",
     "maintenanceMode": false,
     "paymentSettings": {
-      "activeGateway": "stripe",
       "currency": "USD",
       "testMode": true,
       "stripeConnected": false,
@@ -2438,7 +2437,19 @@
         "clientSecret": "",
         "webhookId": "",
         "environment": "sandbox"
-      }
+      },
+      "manualSettlement": {
+        "enabled": false,
+        "bankName": "",
+        "accountHolder": "",
+        "accountNumber": "",
+        "routingNumber": "",
+        "swiftBic": "",
+        "branchName": "",
+        "instructions": "Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.",
+        "requireReference": true
+      },
+      "activeGateway": "stripe"
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -3783,7 +3794,6 @@
     "titlebar_image": "",
     "maintenanceMode": false,
     "paymentSettings": {
-      "activeGateway": "stripe",
       "currency": "USD",
       "testMode": true,
       "stripeConnected": false,
@@ -3801,7 +3811,19 @@
         "clientSecret": "",
         "webhookId": "",
         "environment": "sandbox"
-      }
+      },
+      "manualSettlement": {
+        "enabled": false,
+        "bankName": "",
+        "accountHolder": "",
+        "accountNumber": "",
+        "routingNumber": "",
+        "swiftBic": "",
+        "branchName": "",
+        "instructions": "Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.",
+        "requireReference": true
+      },
+      "activeGateway": "stripe"
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -3909,5 +3931,5 @@
     ],
     "recommendedRecipeUrls": []
   },
-  "updatedAt": "2026-10-02T16:17:58.258Z"
+  "updatedAt": "2026-10-02T16:50:44.520Z"
 }
