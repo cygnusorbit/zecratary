@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.84",
+  "version": "8.0.85",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.84",
+  "version": "8.0.85",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -641,10 +641,13 @@ export default function DynamicHomePage() {
     siteName: string;
     titlebarEmoji: string;
     titlebarImage: string;
+    tagline: string;
   }>({
+    
     siteName: 'Zecratary',
     titlebarEmoji: '🍳',
     titlebarImage: '',
+    tagline: 'Culinary AI',
   });
 
   const fetchSiteBranding = useCallback(async () => {
@@ -657,6 +660,7 @@ export default function DynamicHomePage() {
           siteName: payload.siteName || payload.site_name || 'Zecratary',
           titlebarEmoji: payload.titlebarEmoji || payload.titlebar_emoji || '🍳',
           titlebarImage: payload.titlebarImage || payload.titlebar_image || '',
+          tagline: payload.tagline || payload.siteTagline || payload.site_tagline || 'Culinary AI',
         });
         return;
       }
@@ -669,6 +673,7 @@ export default function DynamicHomePage() {
           siteName: cfg.siteName || 'Zecratary',
           titlebarEmoji: cfg.titlebarEmoji || '🍳',
           titlebarImage: cfg.titlebarImage || '',
+          tagline: (cfg as any).tagline || (cfg as any).siteTagline || 'Culinary AI',
         });
       }
     } catch (_) {}
@@ -813,7 +818,19 @@ export default function DynamicHomePage() {
     fetchLivePlans();
     fetchAllRecipes();
 
-    const handleSync = () => {
+    const handleSync = (e?: any) => {
+      if (e?.detail) {
+        const detail = e.detail;
+        if (detail.siteName || detail.titlebarEmoji || detail.titlebarImage !== undefined || detail.tagline !== undefined || detail.siteTagline !== undefined) {
+          setSiteBranding((prev) => ({
+            ...prev,
+            siteName: detail.siteName || detail.site_name || prev.siteName,
+            titlebarEmoji: detail.titlebarEmoji || detail.titlebar_emoji || prev.titlebarEmoji,
+            titlebarImage: detail.titlebarImage !== undefined ? detail.titlebarImage : prev.titlebarImage,
+            tagline: detail.tagline !== undefined ? detail.tagline : (detail.siteTagline !== undefined ? detail.siteTagline : prev.tagline)
+          }));
+        }
+      }
       fetchSiteBranding();
       fetchFrontendSettings();
       fetchAllRecipes();
@@ -993,8 +1010,8 @@ export default function DynamicHomePage() {
               <span className="text-lg font-black tracking-tight" style={{ color: 'var(--color-text, #f1f5f9)' }}>
                 {siteBranding.siteName || 'Zecratary'}
               </span>
-              <span className="block text-[9px] font-bold uppercase tracking-widest text-[var(--color-primary)]">
-                Culinary AI
+              <span className="block text-[9px] font-bold uppercase tracking-widest text-[var(--color-primary)] truncate max-w-[200px] sm:max-w-xs">
+                {siteBranding.tagline || t('common.tagline', 'Culinary AI')}
               </span>
             </div>
           </Link>
@@ -1478,7 +1495,7 @@ export default function DynamicHomePage() {
                   </span>
                 </div>
                 <p className="text-xs sm:text-sm leading-relaxed opacity-75 max-w-md">
-                  {activePage?.footer?.aboutText || 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.'}
+                  {activePage?.footer?.aboutText || siteBranding.tagline || t('admin.defaultTagline', 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.')}
                 </p>
 
                 {/* Social Links */}
@@ -15324,6 +15341,7 @@ export default function AdminSettingsPage() {
 
   // Site Identity State
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
+  const [siteTagline, setSiteTagline] = useState<string>('');
   const [titlebarEmoji, setTitlebarEmoji] = useState<string>(DEFAULT_SITE_ICON);
   const [titlebarImage, setTitlebarImage] = useState<string>('');
   const [faviconEmoji, setFaviconEmoji] = useState<string>(DEFAULT_SITE_ICON);
@@ -15443,6 +15461,9 @@ export default function AdminSettingsPage() {
 
         if (payload.siteName || payload.site_name) {
           setSiteName(payload.siteName || payload.site_name);
+        }
+        if (payload.siteTagline !== undefined || payload.site_tagline !== undefined || payload.tagline !== undefined) {
+          setSiteTagline(payload.siteTagline ?? payload.site_tagline ?? payload.tagline ?? '');
         }
         if (payload.titlebarEmoji || payload.titlebar_emoji) {
           setTitlebarEmoji(payload.titlebarEmoji || payload.titlebar_emoji);
@@ -15617,6 +15638,8 @@ export default function AdminSettingsPage() {
     try {
       const updatedBranding: SiteIdentityConfig = {
         siteName: siteName.trim() || DEFAULT_SITE_NAME,
+        siteTagline: siteTagline.trim(),
+        tagline: siteTagline.trim(),
         titlebarEmoji: titlebarEmoji.trim() || DEFAULT_SITE_ICON,
         titlebarImage: titlebarImage || '',
         faviconEmoji: faviconEmoji.trim() || DEFAULT_SITE_ICON,
@@ -15671,6 +15694,9 @@ export default function AdminSettingsPage() {
       const payloadToSave = {
         siteName: updatedBranding.siteName,
         site_name: updatedBranding.siteName,
+        siteTagline: updatedBranding.siteTagline,
+        site_tagline: updatedBranding.siteTagline,
+        tagline: updatedBranding.tagline,
         titlebarEmoji: updatedBranding.titlebarEmoji,
         titlebar_emoji: updatedBranding.titlebarEmoji,
         titlebarImage: updatedBranding.titlebarImage || '',
@@ -15769,6 +15795,8 @@ export default function AdminSettingsPage() {
       const defaultSpacing = '0em';
 
       setSiteName(defaultName);
+      const defaultTagline = 'Autonomous culinary intelligence & AI meal planning';
+      setSiteTagline(defaultTagline);
       setTitlebarEmoji(defaultIcon);
       setTitlebarImage('');
       setFaviconEmoji(defaultIcon);
@@ -15790,6 +15818,9 @@ export default function AdminSettingsPage() {
       const defaultBranding = {
         siteName: defaultName,
         site_name: defaultName,
+        siteTagline: defaultTagline,
+        site_tagline: defaultTagline,
+        tagline: defaultTagline,
         titlebarEmoji: defaultIcon,
         titlebar_emoji: defaultIcon,
         titlebarImage: '',
@@ -16095,6 +16126,49 @@ export default function AdminSettingsPage() {
                 value={siteName} 
                 onChange={(e) => setSiteName(e.target.value)} 
                 placeholder="e.g. Zecratary" 
+                className="admin-input w-full sm:w-1/2 border rounded-xl px-3.5 py-2 font-bold outline-none transition" 
+                style={{ 
+                  backgroundColor: 'var(--color-inner-dark)', 
+                  borderColor: 'var(--color-border)', 
+                  color: 'var(--color-text)' 
+                }} 
+              />
+            </div>
+          </div>
+
+          {/* APPLICATION TAGLINE */}
+          <div 
+            className="border rounded-3xl p-6 shadow-xl space-y-4 text-xs" 
+            style={{ 
+              backgroundColor: 'var(--color-card)', 
+              borderColor: 'var(--color-border)' 
+            }}
+          >
+            <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+              {t('admin.appTagline', 'Application Tagline & Subtitle')}
+            </h2>
+            <div>
+              <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('admin.siteTagline', 'Tagline / Description')}
+              </label>
+              <input 
+                type="text" 
+                id="cfg_app_branding_tagline"
+                name="cfg_app_branding_tagline"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck="false"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                role="presentation"
+                readOnly
+                onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                value={siteTagline} 
+                onChange={(e) => setSiteTagline(e.target.value)} 
+                placeholder="e.g. Autonomous culinary intelligence & AI meal planning" 
                 className="admin-input w-full sm:w-1/2 border rounded-xl px-3.5 py-2 font-bold outline-none transition" 
                 style={{ 
                   backgroundColor: 'var(--color-inner-dark)', 
@@ -66311,6 +66385,8 @@ export async function persistServerAdminSettings(settings: any): Promise<boolean
 import { persistServerAdminSettings, fetchServerAdminSettings } from '@/lib/adminSync';
 
 export interface SiteIdentityConfig {
+  siteTagline?: string;
+  tagline?: string;
   siteName: string;
   titlebarEmoji: string;
   titlebarImage?: string;
@@ -66405,6 +66481,8 @@ if (typeof window !== 'undefined') {
     }
   }).catch(() => {});
 }
+
+export const DEFAULT_SITE_TAGLINE = 'Autonomous culinary intelligence & AI meal planning';
 
 ```
 
