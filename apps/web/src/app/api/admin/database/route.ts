@@ -469,6 +469,103 @@ export async function POST(req: NextRequest) {
     const { action } = body;
 
     // Action 1: Switch & Activate Database
+    
+    // Action: Clone Localhost Database to Supabase
+    if (action === 'clone_local_to_supabase') {
+      const env = readEnvFiles();
+      const localDbUrl = env.DATABASE_URL_LOCAL_PG || 
+        (env.DATABASE_URL && env.DATABASE_URL.includes('localhost') ? env.DATABASE_URL : 'postgresql://postgres:postgres@localhost:5432/zecratary?schema=public');
+
+      const targetSupaUrl = (body.supabaseUrl || env.SUPABASE_DATABASE_URL || '').trim();
+      if (!targetSupaUrl || (!targetSupaUrl.includes('supabase.co') && !targetSupaUrl.includes('pooler.supabase.com'))) {
+        return NextResponse.json({
+          success: false,
+          error: 'Valid Supabase pooled connection string (port 6543) is required.'
+        }, { status: 400 });
+      }
+
+      // @ts-ignore
+      const { Pool } = await import('pg');
+      const localPool = new Pool({
+        connectionString: localDbUrl,
+        ssl: localDbUrl.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined,
+        connectionTimeoutMillis: 5000,
+      });
+
+      const supaPool = new Pool({
+        connectionString: targetSupaUrl,
+        ssl: { rejectUnauthorized: false },
+        connectionTimeoutMillis: 10000,
+      });
+
+      try {
+        await localPool.query('SELECT 1;');
+        await supaPool.query('SELECT 1;');
+        await ensureCoreTables(targetSupaUrl, 'postgres');
+
+        const tablesToClone = [
+          'subscription_plans',
+          'users',
+          'admin_settings',
+          'payment_transactions',
+          'saved_recipes',
+          'page_contents',
+          'frontend_pages'
+        ];
+
+        let totalCloned = 0;
+        const details: Record<string, number> = {};
+
+        for (const tbl of tablesToClone) {
+          try {
+            const lRes = await localPool.query(`SELECT * FROM ${tbl};`);
+            for (const row of lRes.rows) {
+              const keys = Object.keys(row);
+              const values = Object.values(row).map((v) => {
+                if (v !== null && typeof v === 'object' && !(v instanceof Date)) {
+                  return JSON.stringify(v);
+                }
+                return v;
+              });
+
+              const cols = keys.join(', ');
+              const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+              const conflictCol = keys.includes('id') ? 'id' : keys.includes('page_slug') ? 'page_slug' : keys[0];
+
+              const updateCols = keys
+                .filter((k) => k !== conflictCol)
+                .map((k) => `${k} = EXCLUDED.${k}`)
+                .join(', ');
+
+              const upsertSql = updateCols
+                ? `INSERT INTO ${tbl} (${cols}) VALUES (${placeholders}) ON CONFLICT (${conflictCol}) DO UPDATE SET ${updateCols};`
+                : `INSERT INTO ${tbl} (${cols}) VALUES (${placeholders}) ON CONFLICT (${conflictCol}) DO NOTHING;`;
+
+              await supaPool.query(upsertSql, values);
+              totalCloned++;
+            }
+            details[tbl] = lRes.rows.length;
+          } catch (_) {}
+        }
+
+        await localPool.end();
+        await supaPool.end();
+
+        return NextResponse.json({
+          success: true,
+          message: `Successfully cloned ${totalCloned} records from Localhost to Supabase!`,
+          details
+        });
+      } catch (err: any) {
+        await localPool.end().catch(() => {});
+        await supaPool.end().catch(() => {});
+        return NextResponse.json({
+          success: false,
+          error: `Cloning failed: ${err.message}`
+        }, { status: 400 });
+      }
+    }
+
     if (action === 'switch_database') {
       const { targetType, customUrl } = body;
       const env = readEnvFiles();

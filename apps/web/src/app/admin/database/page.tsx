@@ -267,6 +267,40 @@ export default function AdminDatabasePage() {
     }
   };
 
+  
+  const [cloning, setCloning] = useState<boolean>(false);
+
+  const handleCloneToSupabase = async () => {
+    const targetUrl = supabaseDbUrl.trim() || data?.savedTargets?.supabasePooler || '';
+    if (!targetUrl) {
+      setFeedback({ type: 'error', message: 'Enter your Supabase pooled connection string before cloning.' });
+      return;
+    }
+    setCloning(true);
+    setFeedback(null);
+    try {
+      const res = await fetch('/api/admin/database', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clone_local_to_supabase', supabaseUrl: targetUrl }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setFeedback({
+          type: 'success',
+          message: `✨ ${json.message} All plans, users, settings, and recipes replicated to Supabase!`
+        });
+        await fetchDatabaseInfo();
+      } else {
+        setFeedback({ type: 'error', message: json.error || 'Cloning failed.' });
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err.message });
+    } finally {
+      setCloning(false);
+    }
+  };
+
   const handleSaveAndConnectSupabase = async () => {
     setSaving(true);
     setFeedback(null);
@@ -1237,6 +1271,33 @@ export default function AdminDatabasePage() {
                 </button>
               </div>
             </div>
+
+            {/* Clone Localhost to Supabase Card */}
+            <div
+              className="p-5 rounded-2xl border bg-indigo-500/5 border-indigo-500/20 space-y-3"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-sm flex items-center gap-2 text-indigo-400">
+                    <Sparkles className="w-4 h-4" />
+                    <span>Clone Localhost Database into Supabase</span>
+                  </h3>
+                  <p className="text-xs opacity-70 mt-0.5">
+                    Copy all current local records (plans, users, settings, recipes, pages) directly to your Supabase PostgreSQL cluster with full relational parity.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCloneToSupabase}
+                  disabled={cloning}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm transition active:scale-95 flex items-center gap-2 cursor-pointer flex-shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${cloning ? 'animate-spin' : ''}`} />
+                  <span>{cloning ? 'Cloning Records...' : 'Clone Localhost to Supabase'}</span>
+                </button>
+              </div>
+            </div>
+
           </div>
         )}
 
