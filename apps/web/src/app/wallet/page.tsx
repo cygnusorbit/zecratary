@@ -29,11 +29,25 @@ import {
   ExternalLink,
   Info,
   RotateCw,
-  Sparkles,
-  Sliders
+  Landmark,
+  X,
+  FileText,
+  Copy,
+  Check
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+
+interface ManualDetails {
+  enabled: boolean;
+  bankName: string;
+  accountHolder: string;
+  accountNumber: string;
+  routingNumber: string;
+  swiftBic: string;
+  branchName: string;
+  instructions: string;
+}
 
 interface WalletSettings {
   is_enabled: boolean;
@@ -49,6 +63,7 @@ interface WalletSettings {
   stripe_publishable_key?: string;
   paypal_configured?: boolean;
   test_mode?: boolean;
+  manual_details?: ManualDetails;
 }
 
 interface WalletTx {
@@ -78,17 +93,17 @@ function WalletContent() {
   const [reconciling, setReconciling] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; msg: string } | null>(null);
 
-  // Active User & Balances
+  // User & Balances
   const [user, setUser] = useState<User | null>(null);
   const currentUserRef = useRef<User | null>(null);
   const [balance, setBalance] = useState<number>(0);
 
-  // Concurrency and Idempotency Guard
+  // Concurrency Guard
   const verifyingIdRef = useRef<string | null>(null);
   const isFetchingWalletRef = useRef<boolean>(false);
   const fetchSeqRef = useRef<number>(0);
 
-  // Gateway & Wallet Settings (Synchronized from /admin/payment-gateway)
+  // Settings Dynamic Sync
   const [settings, setSettings] = useState<WalletSettings>({
     is_enabled: true,
     currency: 'USD',
@@ -96,8 +111,7 @@ function WalletContent() {
     max_topup: 1000,
     preset_amounts: [10, 25, 50, 100, 250],
     bonus_rules: [{ threshold: 50, bonus_percent: 5 }, { threshold: 100, bonus_percent: 10 }],
-    allowed_gateways: ['stripe', 'paypal', 'manual'],
-    active_gateway: 'stripe',
+    allowed_gateways: ['stripe'],
     allow_site_purchases: true,
     stripe_configured: false,
     paypal_configured: false,
@@ -109,6 +123,13 @@ function WalletContent() {
   const [customAmount, setCustomAmount] = useState<string>('');
   const [selectedGateway, setSelectedGateway] = useState<string>('stripe');
   const [focusedField, setFocusedField] = useState<string | null>(null);
+
+  // Manual Settlement Modal States
+  const [showManualModal, setShowManualModal] = useState<boolean>(false);
+  const [transferReference, setTransferReference] = useState<string>('');
+  const [transferNotes, setTransferNotes] = useState<string>('');
+  const [submittingManual, setSubmittingManual] = useState<boolean>(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // Ledger States
   const [transactions, setTransactions] = useState<WalletTx[]>([]);
@@ -126,7 +147,6 @@ function WalletContent() {
     return CURRENCY_SYMBOLS[settings.currency?.toUpperCase()] || '$';
   }, [settings.currency]);
 
-  // Non-destructive custom amount input handler
   const handleCustomAmountChange = (raw: string) => {
     const clean = raw.replace(/[^0-9.]/g, '');
     const parts = clean.split('.');
@@ -176,19 +196,6 @@ function WalletContent() {
       }
     }
 
-    if (!active && typeof document !== 'undefined') {
-      const authKeys = ['zecratary_session', 'zecratary_current_user', 'currentUser'];
-      for (const k of authKeys) {
-        const match = document.cookie.match(new RegExp('(?:^|;\\s*)' + k + '=([^;]+)'));
-        if (match && match[1]) {
-          try {
-            active = JSON.parse(decodeURIComponent(match[1]));
-            if (active?.email || active?.id) break;
-          } catch (_) {}
-        }
-      }
-    }
-
     if (!active) {
       router.replace('/login');
       return;
@@ -212,12 +219,6 @@ function WalletContent() {
     force = false
   ) => {
     let active = currentUserRef.current || getCurrentUser();
-    if (!active && typeof window !== 'undefined') {
-      try {
-        const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
-        if (raw) active = JSON.parse(raw);
-      } catch (_) {}
-    }
     if (!active?.email && !active?.id) return;
 
     if (!force && isFetchingWalletRef.current) return;
@@ -255,8 +256,6 @@ function WalletContent() {
         }
         if (typeof data.wallet_balance === 'number') {
           setBalance(data.wallet_balance);
-        } else if (data.user && typeof data.user.wallet_balance !== 'undefined') {
-          setBalance(parseFloat(data.user.wallet_balance || 0));
         }
 
         setTransactions(Array.isArray(data.transactions) ? data.transactions : []);
@@ -286,7 +285,6 @@ function WalletContent() {
   const fetchWalletRef = useRef(fetchWalletData);
   fetchWalletRef.current = fetchWalletData;
 
-  // Mount Lifecycle & Event Listeners
   useEffect(() => {
     hydrateUserRef.current();
 
@@ -303,30 +301,17 @@ function WalletContent() {
     };
 
     window.addEventListener('zecratary_wallet_updated', handleSync);
-    window.addEventListener('zecratary_wallet_settings_updated', handleSync);
     window.addEventListener('zecratary_payment_updated', handleSync);
     window.addEventListener('zecratary_admin_settings_updated', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_wallet_updated', handleSync);
-      window.removeEventListener('zecratary_wallet_settings_updated', handleSync);
       window.removeEventListener('zecratary_payment_updated', handleSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
   }, [limit, debouncedSearch, page, typeFilter]);
 
-  // Filter & Pagination effect
-  useEffect(() => {
-    const incomingSessionId = searchParams.get('session_id');
-    const incomingStatus = searchParams.get('status');
-    if (incomingStatus === 'success' && incomingSessionId) return;
-
-    if (currentUserRef.current) {
-      fetchWalletRef.current(page, limit, debouncedSearch, typeFilter);
-    }
-  }, [page, limit, debouncedSearch, typeFilter]);
-
-  // Handle Stripe & PayPal Return Verification on Mount
+  // Handle Stripe Session Return
   useEffect(() => {
     const sessionId = searchParams.get('session_id');
     const status = searchParams.get('status');
@@ -342,14 +327,7 @@ function WalletContent() {
           msg: t('verifyingStripeSession', 'Confirming payment session and synchronizing your wallet balance...'),
         });
 
-        let active = currentUserRef.current || getCurrentUser();
-        if (!active && typeof window !== 'undefined') {
-          try {
-            const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
-            if (raw) active = JSON.parse(raw);
-          } catch (_) {}
-        }
-
+        const active = currentUserRef.current || getCurrentUser();
         try {
           const res = await fetch('/api/wallet', {
             method: 'POST',
@@ -371,50 +349,18 @@ function WalletContent() {
             if (typeof data.wallet_balance === 'number') {
               setBalance(data.wallet_balance);
             }
-            if (Array.isArray(data.transactions) && data.transactions.length > 0) {
-              setTransactions(data.transactions);
-              if (typeof data.totalCount === 'number') setTotalCount(data.totalCount);
-              if (typeof data.totalPages === 'number') setTotalPages(data.totalPages);
-              if (data.stats) setStats(data.stats);
-            } else {
-              fetchWalletRef.current(1, limit, '', 'all', true);
-            }
-
-            try {
-              if (typeof window !== 'undefined') {
-                const savedUserStr = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
-                if (savedUserStr) {
-                  const parsed = JSON.parse(savedUserStr);
-                  parsed.wallet_balance = data.wallet_balance;
-                  localStorage.setItem('zecratary_user', JSON.stringify(parsed));
-                }
-              }
-            } catch (_) {}
-
+            fetchWalletRef.current(1, limit, '', 'all', true);
             if (typeof window !== 'undefined') {
               window.history.replaceState({}, '', '/wallet');
               window.dispatchEvent(new Event('zecratary_wallet_updated'));
               window.dispatchEvent(new Event('zecratary_payment_updated'));
             }
           } else {
-            setFeedback({
-              type: 'error',
-              msg: data.error || t('topupVerifyFailed', 'Could not verify payment session.'),
-            });
+            setFeedback({ type: 'error', msg: data.error || t('topupVerifyFailed', 'Could not verify payment session.') });
             fetchWalletRef.current(1, limit, '', 'all', true);
-            if (typeof window !== 'undefined') {
-              window.history.replaceState({}, '', '/wallet');
-            }
           }
         } catch (err: any) {
-          setFeedback({
-            type: 'error',
-            msg: err.message || t('topupVerifyConnError', 'Failed to connect to verification service.'),
-          });
-          fetchWalletRef.current(1, limit, '', 'all', true);
-          if (typeof window !== 'undefined') {
-            window.history.replaceState({}, '', '/wallet');
-          }
+          setFeedback({ type: 'error', msg: err.message || t('topupVerifyConnError', 'Failed to connect to verification service.') });
         } finally {
           setSubmitting(false);
         }
@@ -432,17 +378,16 @@ function WalletContent() {
     }
   }, [searchParams, limit, t]);
 
-  const handleExecuteTopup = async () => {
-    setSubmitting(true);
-    setFeedback(null);
-
-    const active = currentUserRef.current || user || getCurrentUser();
-    if (!active) {
-      setFeedback({ type: 'error', msg: t('sessionExpiredMsg', 'Session expired. Please re-login.') });
-      setSubmitting(false);
-      return;
+  const handleCopy = (text: string, key: string) => {
+    if (typeof window !== 'undefined') {
+      navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2000);
     }
+  };
 
+  // Top-Up execution entry point
+  const handleExecuteTopup = async () => {
     const cleanAmt = customAmount.trim().replace(/[^0-9.]/g, '');
     const depositAmt = cleanAmt !== '' ? parseFloat(cleanAmt) : selectedAmount;
 
@@ -451,7 +396,6 @@ function WalletContent() {
         type: 'error',
         msg: `${t('minDepositError', 'Minimum deposit allowed is')} ${activeCurrencySymbol}${settings.min_topup.toFixed(2)}.`,
       });
-      setSubmitting(false);
       return;
     }
 
@@ -460,21 +404,30 @@ function WalletContent() {
         type: 'error',
         msg: `${t('maxDepositError', 'Maximum single deposit cap is')} ${activeCurrencySymbol}${settings.max_topup.toFixed(2)}.`,
       });
-      setSubmitting(false);
       return;
     }
+
+    // REQUIREMENT 2: When Using Manual gateway, modal popup to let user fill up the manual form for admin approval
+    if (selectedGateway === 'manual') {
+      setShowManualModal(true);
+      return;
+    }
+
+    // Stripe / PayPal Direct Checkout
+    setSubmitting(true);
+    setFeedback(null);
+    const active = currentUserRef.current || user || getCurrentUser();
 
     try {
       const res = await fetch('/api/wallet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: String(active.id || ''),
-          email: active.email,
+          userId: String(active?.id || ''),
+          email: active?.email || '',
           amount: depositAmt,
           gateway: selectedGateway,
           origin: typeof window !== 'undefined' ? window.location.origin : '',
-          gatewayTxId: `gw_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
         }),
       });
 
@@ -485,31 +438,8 @@ function WalletContent() {
             type: 'info',
             msg: selectedGateway === 'paypal' ? t('redirectingToPaypal', 'Redirecting to PayPal...') : t('redirectingToStripe', 'Redirecting to secure checkout...'),
           });
-          try {
-            window.location.assign(data.checkoutUrl);
-          } catch (_) {
-            window.location.href = data.checkoutUrl;
-          }
+          window.location.assign(data.checkoutUrl);
           return;
-        }
-
-        setFeedback({ type: 'success', msg: data.message });
-        if (typeof data.wallet_balance === 'number') {
-          setBalance(data.wallet_balance);
-        }
-
-        if (Array.isArray(data.transactions)) {
-          setTransactions(data.transactions);
-          if (typeof data.totalCount === 'number') setTotalCount(data.totalCount);
-          if (typeof data.totalPages === 'number') setTotalPages(data.totalPages);
-          if (data.stats) setStats(data.stats);
-        }
-
-        setCustomAmount('');
-        fetchWalletRef.current(1, limit, '', 'all', true);
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_wallet_updated'));
-          window.dispatchEvent(new Event('zecratary_payment_updated'));
         }
       } else {
         setFeedback({ type: 'error', msg: data.error || t('topupFailed', 'Top-up transaction failed.') });
@@ -521,63 +451,71 @@ function WalletContent() {
     }
   };
 
-  const handleReconcilePayments = async () => {
-    setReconciling(true);
-    setFeedback({
-      type: 'info',
-      msg: t('reconcilingLedger', 'Scanning payment gateway and synchronizing unrecorded top-ups...'),
-    });
+  // Submit Manual Settlement Form from Modal
+  const handleSubmitManualSettlement = async () => {
+    if (!transferReference.trim()) {
+      setFeedback({
+        type: 'error',
+        msg: t('refRequiredError', 'Please enter your bank transfer reference number or transaction memo.'),
+      });
+      return;
+    }
 
+    setSubmittingManual(true);
     const active = currentUserRef.current || user || getCurrentUser();
+    const cleanAmt = customAmount.trim().replace(/[^0-9.]/g, '');
+    const depositAmt = cleanAmt !== '' ? parseFloat(cleanAmt) : selectedAmount;
 
     try {
       const res = await fetch('/api/wallet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'reconcile_wallet',
+          action: 'submit_manual_settlement',
           userId: String(active?.id || ''),
           email: active?.email || '',
+          amount: depositAmt,
+          transferReference: transferReference.trim(),
+          notes: transferNotes.trim(),
         }),
       });
-      const data = await res.json();
 
+      const data = await res.json();
       if (data.success) {
+        setShowManualModal(false);
+        setTransferReference('');
+        setTransferNotes('');
         setFeedback({
           type: 'success',
-          msg: data.message || t('reconcileSuccessMsg', 'Ledger is fully synchronized with payment gateways.'),
+          msg: data.message || t('manualSubmittedMsg', 'Bank wire transfer submitted! Your deposit will be credited once verified by administrators.'),
         });
-        if (typeof data.wallet_balance === 'number') {
-          setBalance(data.wallet_balance);
-        }
-        if (Array.isArray(data.transactions)) {
-          setTransactions(data.transactions);
-          if (typeof data.totalCount === 'number') setTotalCount(data.totalCount);
-          if (typeof data.totalPages === 'number') setTotalPages(data.totalPages);
-          if (data.stats) setStats(data.stats);
-        }
+        fetchWalletRef.current(1, limit, '', 'all', true);
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('zecratary_wallet_updated'));
           window.dispatchEvent(new Event('zecratary_payment_updated'));
         }
       } else {
-        setFeedback({
-          type: 'error',
-          msg: data.error || t('reconcileFailed', 'Failed to synchronize with payment gateway.'),
-        });
+        setFeedback({ type: 'error', msg: data.error || t('manualSubmitFailed', 'Failed to submit bank wire details.') });
       }
     } catch (err: any) {
-      setFeedback({
-        type: 'error',
-        msg: err.message || t('reconcileConnError', 'Connection error while synchronizing with payment gateway.'),
-      });
+      setFeedback({ type: 'error', msg: err.message || t('manualSubmitConnError', 'Connection error submitting wire details.') });
     } finally {
-      setReconciling(false);
+      setSubmittingManual(false);
     }
   };
 
-  const renderWalletBadge = (type?: string) => {
+  const renderWalletBadge = (type?: string, status?: string) => {
     const rawType = String(type || '').toLowerCase().trim();
+    const isPending = status === 'pending' || status === 'review';
+
+    if (isPending) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/20">
+          <Activity className="h-3 w-3 animate-pulse" /> {t('badgePendingReview', 'Pending Review')}
+        </span>
+      );
+    }
+
     if (rawType === 'topup') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
@@ -735,21 +673,10 @@ function WalletContent() {
             )}
             <span className="font-semibold text-xs leading-relaxed">{feedback.msg}</span>
           </div>
-
-          {feedback.type === 'error' && (feedback.msg.includes('Admin Payment Settings') || feedback.msg.includes('Stripe')) && (
-            <Link
-              href="/admin/payment-gateway"
-              className="px-3.5 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shrink-0 bg-black/20 hover:bg-black/40 border-rose-500/40 text-white shadow-xs"
-            >
-              <Sliders className="w-3.5 h-3.5" />
-              <span>{t('configureGatewayBtn', 'Configure Gateway')}</span>
-              <ExternalLink className="w-3.5 h-3.5" />
-            </Link>
-          )}
         </div>
       )}
 
-      {/* Top-Up Configuration Area (Form-Free <div> Container) */}
+      {/* Top-Up Configuration Area */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div
           className="lg:col-span-2 p-6 sm:p-7 rounded-3xl border space-y-6 shadow-md transition-colors duration-200"
@@ -819,37 +746,14 @@ function WalletContent() {
               </span>
               <input
                 type="text"
-                id="cfg_wallet_custom_amount"
-                name="cfg_wallet_custom_amount"
-                autoComplete="new-password"
-                autoCorrect="off"
-                spellCheck={false}
-                data-lpignore="true"
-                data-1p-ignore="true"
-                data-bwignore="true"
-                data-form-type="other"
-                role="presentation"
-                inputMode="decimal"
                 placeholder="e.g. 5.00"
                 value={customAmount}
-                readOnly={focusedField !== 'customAmount'}
                 onChange={(e) => handleCustomAmountChange(e.target.value)}
-                onFocus={(e) => {
-                  e.currentTarget.readOnly = false;
-                  setFocusedField('customAmount');
-                  e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)';
-                }}
-                onBlur={(e) => {
+                onFocus={() => setFocusedField('customAmount')}
+                onBlur={() => {
                   setFocusedField(null);
-                  e.currentTarget.style.borderColor = customAmount ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)';
                   if (!customAmount && selectedAmount === 0) {
                     setSelectedAmount(settings.preset_amounts?.[0] || 50);
-                  }
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleExecuteTopup();
                   }
                 }}
                 className="w-full pl-9 pr-4 py-3 rounded-2xl border text-base font-bold font-mono outline-none transition"
@@ -869,19 +773,27 @@ function WalletContent() {
             )}
           </div>
 
+          {/* DYNAMIC PAYMENT GATEWAYS (SYNCED FROM /admin/payment-gateway) */}
           <div>
-            <label className="block text-xs font-semibold uppercase opacity-70 mb-3">
-              {t('selectPaymentGateway', '2. Select Payment Gateway')}
-            </label>
+            <div className="flex items-center justify-between mb-3">
+              <label className="block text-xs font-semibold uppercase opacity-70">
+                {t('selectPaymentGateway', '2. Select Payment Gateway')}
+              </label>
+              <span className="text-[11px] opacity-60">
+                {t('dynamicGatewaySyncNotice', 'Active channels synced with Admin Gateway')}
+              </span>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {[
-                { id: 'stripe', label: t('gatewayStripe', 'Credit Card (Stripe)') },
-                { id: 'paypal', label: t('gatewayPaypal', 'PayPal') },
-                { id: 'manual', label: t('gatewayManual', 'Manual Settlement') },
+                { id: 'stripe', label: 'Credit Card (Stripe)', desc: 'Instant Card Settlement', icon: CreditCard },
+                { id: 'paypal', label: 'PayPal', desc: 'Wallet & Account Balance', icon: Coins },
+                { id: 'manual', label: 'Bank Wire / Manual', desc: 'Manual Approval Transfer', icon: Landmark },
               ]
                 .filter((gw) => !settings.allowed_gateways || settings.allowed_gateways.includes(gw.id))
                 .map((gw) => {
                   const isSelected = selectedGateway === gw.id;
+                  const Icon = gw.icon;
                   return (
                     <div
                       key={gw.id}
@@ -896,43 +808,30 @@ function WalletContent() {
                         borderColor: isSelected ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
                       }}
                     >
-                      <span className="text-xs font-semibold">{gw.label}</span>
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 rounded-xl bg-black/20 text-white">
+                          <Icon className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold">{gw.label}</div>
+                          <div className="text-[10px] opacity-60">{gw.desc}</div>
+                        </div>
+                      </div>
                       <div
-                        className={`w-3.5 h-3.5 rounded-full border ${
+                        className={`w-4 h-4 rounded-full border flex items-center justify-center ${
                           isSelected ? 'bg-[var(--color-primary,#3b82f6)] border-[var(--color-primary,#3b82f6)]' : 'border-gray-500'
                         }`}
-                      />
+                      >
+                        {isSelected && <Check className="w-3 h-3 text-white" />}
+                      </div>
                     </div>
                   );
                 })}
             </div>
           </div>
-
-          {/* Test Card Guidance Helper */}
-          {settings.test_mode && selectedGateway === 'stripe' && (
-            <div 
-              className="p-3.5 rounded-2xl border space-y-1.5 transition-colors shadow-xs animate-in fade-in"
-              style={{
-                backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                borderColor: 'var(--color-border, #334155)'
-              }}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-xs flex items-center gap-1.5 text-amber-400">
-                  <CreditCard className="h-3.5 w-3.5" />
-                  {t('stripeTestCardGuide', 'Stripe Test Card Helper')}
-                </span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/30">
-                  {t('sandboxActiveBadge', 'Sandbox Active')}
-                </span>
-              </div>
-              <p className="text-[11px] leading-relaxed opacity-75">
-                {t('testCardInstructions', 'Use card number')} <code className="px-1.5 py-0.5 rounded font-mono font-bold text-[11px] border bg-[var(--color-card,#1e293b)] border-[var(--color-border,#334155)] text-white">4242 4242 4242 4242</code>, {t('anyFutureExpiry', 'any future MM/YY (e.g. 12/28), and any 3-digit CVC (e.g. 123).')}
-              </p>
-            </div>
-          )}
         </div>
 
+        {/* Deposit Summary Card */}
         <div
           className="p-6 sm:p-7 rounded-3xl border flex flex-col justify-between space-y-6 shadow-md transition-colors duration-200"
           style={{ backgroundColor: 'var(--color-card, #1e293b)', borderColor: 'var(--color-border, #334155)' }}
@@ -959,7 +858,7 @@ function WalletContent() {
               )}
               <div className="flex justify-between opacity-70 text-xs">
                 <span>{t('selectedGateway', 'Selected Gateway:')}</span>
-                <span className="uppercase font-semibold font-mono">{selectedGateway}</span>
+                <span className="uppercase font-semibold font-mono">{selectedGateway === 'manual' ? 'Bank Wire / Manual' : selectedGateway}</span>
               </div>
               <div className="flex justify-between opacity-70 text-xs">
                 <span>{t('currencyLabel', 'Processing Currency:')}</span>
@@ -997,7 +896,7 @@ function WalletContent() {
                     ? t('checkoutWithStripe', 'Pay with Stripe Checkout')
                     : selectedGateway === 'paypal'
                     ? t('checkoutWithPaypal', 'Pay with PayPal')
-                    : t('completeTopup', 'Complete Top-Up')}
+                    : t('submitBankWire', 'Submit Bank Wire Details')}
                 </span>
                 <ArrowRight className="w-4 h-4" />
               </>
@@ -1006,7 +905,206 @@ function WalletContent() {
         </div>
       </div>
 
-      {/* Wallet Transactions Ledger & Reconcile */}
+      {/* REQUIREMENT 2: MANUAL SETTLEMENT MODAL POPUP FOR USER TO FILL UP MANUAL FORM FOR ADMIN APPROVAL */}
+      {showManualModal && (
+        <div 
+          onClick={() => setShowManualModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-xl w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card, #1e293b)',
+              borderColor: 'var(--color-border, #334155)',
+              color: 'var(--color-text, #ffffff)'
+            }}
+          >
+            <button 
+              type="button"
+              onClick={() => setShowManualModal(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs hover:opacity-80"
+              style={{
+                backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                color: 'var(--color-text, #ffffff)'
+              }}
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <div className="space-y-1.5 pr-8">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-blue-500/15 text-[var(--color-primary,#3b82f6)]">
+                  <Landmark className="h-5 w-5" />
+                </div>
+                <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text, #ffffff)' }}>
+                  {t('manualSettlementModalTitle', 'Bank Wire Transfer Settlement')}
+                </h2>
+              </div>
+              <p className="text-xs leading-relaxed opacity-75">
+                {t('manualSettlementModalSub', 'Transfer the exact amount to the beneficiary bank account below and submit your reference code for administrative verification.')}
+              </p>
+            </div>
+
+            {/* Beneficiary Details Grid from /admin/payment-gateway */}
+            <div 
+              className="p-4 rounded-2xl border space-y-3 font-mono text-[11px]"
+              style={{
+                backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                borderColor: 'var(--color-border, #334155)'
+              }}
+            >
+              <div className="font-bold text-xs uppercase text-[var(--color-primary,#3b82f6)] font-sans border-b pb-2 flex items-center justify-between" style={{ borderColor: 'var(--color-border, #334155)' }}>
+                <span>{t('beneficiaryDetails', 'Beneficiary Account Details')}</span>
+                <span className="font-bold font-mono text-emerald-400">
+                  {t('amountDue', 'Amount:')} {activeCurrencySymbol}{activeAmount.toFixed(2)}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div>
+                  <span className="opacity-60 block text-[10px]">{t('bankName', 'Bank Name')}:</span>
+                  <span className="font-bold">{settings.manual_details?.bankName || 'Direct Settlement Bank'}</span>
+                </div>
+
+                <div>
+                  <span className="opacity-60 block text-[10px]">{t('accountHolder', 'Account Holder')}:</span>
+                  <span className="font-bold">{settings.manual_details?.accountHolder || 'Zecratary Treasury'}</span>
+                </div>
+
+                <div>
+                  <span className="opacity-60 block text-[10px]">{t('accountNumber', 'Account Number / IBAN')}:</span>
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <span>{settings.manual_details?.accountNumber || '123-456-7890'}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy(settings.manual_details?.accountNumber || '123-456-7890', 'acc_num')}
+                      className="opacity-70 hover:opacity-100 cursor-pointer"
+                      title="Copy Account Number"
+                    >
+                      {copiedKey === 'acc_num' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    </button>
+                  </div>
+                </div>
+
+                {settings.manual_details?.swiftBic && (
+                  <div>
+                    <span className="opacity-60 block text-[10px]">{t('swiftBic', 'SWIFT / BIC')}:</span>
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <span>{settings.manual_details.swiftBic}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(settings.manual_details?.swiftBic || '', 'swift')}
+                        className="opacity-70 hover:opacity-100 cursor-pointer"
+                        title="Copy SWIFT Code"
+                      >
+                        {copiedKey === 'swift' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {settings.manual_details?.routingNumber && (
+                  <div>
+                    <span className="opacity-60 block text-[10px]">{t('routingNumber', 'Routing Number')}:</span>
+                    <span className="font-bold">{settings.manual_details.routingNumber}</span>
+                  </div>
+                )}
+
+                {settings.manual_details?.branchName && (
+                  <div>
+                    <span className="opacity-60 block text-[10px]">{t('branch', 'Branch')}:</span>
+                    <span className="font-bold">{settings.manual_details.branchName}</span>
+                  </div>
+                )}
+              </div>
+
+              {settings.manual_details?.instructions && (
+                <div className="pt-2 border-t text-[10px] opacity-80 font-sans leading-relaxed" style={{ borderColor: 'var(--color-border, #334155)' }}>
+                  <span className="font-bold text-white block mb-0.5">{t('instructions', 'Instructions')}:</span>
+                  {settings.manual_details.instructions}
+                </div>
+              )}
+            </div>
+
+            {/* User Form Submission Inputs */}
+            <div className="space-y-3.5 pt-1">
+              <div>
+                <label className="block text-xs font-bold uppercase mb-1 opacity-80">
+                  {t('wireReferenceLabel', 'Transfer Reference / Transaction ID *')}
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. WIRE-98214389 / Bank Ref No."
+                  value={transferReference}
+                  onChange={(e) => setTransferReference(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border text-xs font-mono font-bold outline-none transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: 'var(--color-text, #ffffff)'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase mb-1 opacity-80">
+                  {t('wireNotesLabel', 'Sender Name / Transfer Memo (Optional)')}
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="e.g. Transferred from John Doe Account via Online Banking."
+                  value={transferNotes}
+                  onChange={(e) => setTransferNotes(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl border text-xs outline-none transition leading-relaxed"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: 'var(--color-text, #ffffff)'
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t" style={{ borderColor: 'var(--color-border, #334155)' }}>
+              <button
+                type="button"
+                onClick={() => setShowManualModal(false)}
+                className="px-4 py-2.5 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                  borderColor: 'var(--color-border, #334155)',
+                  color: 'var(--color-text, #ffffff)'
+                }}
+              >
+                {t('cancel', 'Cancel')}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSubmitManualSettlement}
+                disabled={submittingManual || !transferReference.trim()}
+                className="px-5 py-2.5 rounded-xl text-white text-xs font-bold transition flex items-center gap-2 shadow-md cursor-pointer disabled:opacity-50 hover:brightness-110"
+                style={{ backgroundColor: 'var(--color-primary, #3b82f6)' }}
+              >
+                {submittingManual ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>{t('submitting', 'Submitting for Approval...')}</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{t('submitForApprovalBtn', 'Submit for Admin Approval')}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Wallet Transactions Ledger */}
       <div
         className="p-6 sm:p-7 rounded-3xl border space-y-4 shadow-md transition-colors duration-200"
         style={{ backgroundColor: 'var(--color-card, #1e293b)', borderColor: 'var(--color-border, #334155)' }}
@@ -1023,27 +1121,6 @@ function WalletContent() {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleReconcilePayments}
-              disabled={reconciling || txLoading}
-              className="text-xs font-bold px-3 py-1.5 rounded-xl border flex items-center gap-1.5 transition cursor-pointer hover:border-emerald-500 text-emerald-400 disabled:opacity-50"
-              style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}
-              title={t('reconcileStripeTooltip', 'Check and reconcile any unrecorded checkout payments')}
-            >
-              <RotateCw className={`w-3.5 h-3.5 ${reconciling ? 'animate-spin' : ''}`} />
-              <span>{reconciling ? t('reconcilingBtn', 'Reconciling...') : t('reconcileBtn', 'Reconcile Payments')}</span>
-            </button>
-
-            <Link
-              href="/admin/payment-gateway"
-              className="text-xs font-bold px-3 py-1.5 rounded-xl border flex items-center gap-1.5 transition hover:opacity-80"
-              style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}
-            >
-              <span>{t('gatewaySettings', 'Gateway Settings')}</span>
-              <ExternalLink className="w-3.5 h-3.5 opacity-60" />
-            </Link>
-
             <button
               type="button"
               onClick={() => fetchWalletRef.current(page, limit, debouncedSearch, typeFilter, true)}
@@ -1146,7 +1223,7 @@ function WalletContent() {
                   const txRef = tx.gateway_tx_id || tx.id;
                   return (
                     <tr key={tx.id} className="hover:bg-slate-500/5 transition font-medium">
-                      <td className="p-3.5">{renderWalletBadge(tx.type)}</td>
+                      <td className="p-3.5">{renderWalletBadge(tx.type, tx.status)}</td>
                       <td className="p-3.5">
                         <span className={`font-mono font-black text-xs ${isNeg ? 'text-red-400' : 'text-emerald-400'}`}>
                           {isNeg ? '' : '+'}{activeCurrencySymbol}{Math.abs(Number(tx.amount)).toFixed(2)}

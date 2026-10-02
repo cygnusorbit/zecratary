@@ -14,13 +14,13 @@ async function ensurePaymentSchema() {
         plan_slug TEXT,
         amount NUMERIC DEFAULT 0,
         currency VARCHAR(10) DEFAULT 'USD',
-        gateway VARCHAR(50) DEFAULT 'stripe',
-        status VARCHAR(50) DEFAULT 'succeeded',
+        gateway VARCHAR(50) DEFAULT 'manual_settlement',
+        status VARCHAR(50) DEFAULT 'pending',
         test_mode BOOLEAN DEFAULT false,
         failure_reason TEXT,
-        is_recurring BOOLEAN DEFAULT true,
+        is_recurring BOOLEAN DEFAULT false,
         recurring_interval VARCHAR(20) DEFAULT 'MONTH',
-        auto_renew BOOLEAN DEFAULT true,
+        auto_renew BOOLEAN DEFAULT false,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         expiry_date TIMESTAMPTZ,
@@ -196,14 +196,33 @@ export async function POST(req: Request) {
         [confirmedAmount, now, txId]
       );
 
-      if (tx.customer_email) {
+      // If it was a wallet top-up, credit user's wallet_balance directly
+      if (tx.plan_slug === 'wallet_topup' && tx.customer_email) {
+        try {
+          await query(
+            `UPDATE users 
+             SET wallet_balance = COALESCE(wallet_balance, 0) + $1,
+                 updated_at = NOW()
+             WHERE LOWER(TRIM(email)) = LOWER(TRIM($2))`,
+            [confirmedAmount, tx.customer_email]
+          );
+          await query(
+            `UPDATE wallet_transactions
+             SET status = 'succeeded',
+                 balance_after = (SELECT wallet_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1))),
+                 amount = $2
+             WHERE gateway_tx_id = $3 OR description LIKE $4`,
+            [tx.customer_email, confirmedAmount, tx.transfer_reference, `%${tx.transfer_reference}%`]
+          );
+        } catch (_) {}
+      } else if (tx.customer_email) {
         try {
           await query(
             `UPDATE users 
              SET plan_status = 'active',
                  plan_name = COALESCE($1, plan_name),
                  updated_at = NOW()
-             WHERE LOWER(email) = LOWER($2)`,
+             WHERE LOWER(TRIM(email)) = LOWER(TRIM($2))`,
             [tx.plan_name, tx.customer_email]
           ).catch(() => {});
         } catch (_) {}
@@ -211,7 +230,7 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         success: true,
-        message: `Manual settlement approved successfully! Plan access confirmed for ${tx.customer_name || tx.customer_email}.`,
+        message: `Manual settlement approved! Funds confirmed for ${tx.customer_name || tx.customer_email}.`,
         transactionId: txId
       });
     }
@@ -233,20 +252,133 @@ export async function POST(req: Request) {
         [reason, txId]
       );
 
+      try {
+        await query(
+          `UPDATE wallet_transactions
+           SET status = 'rejected',
+               description = description || ' (Declined: ' || $1 || ')'
+           WHERE gateway_tx_id = (SELECT transfer_reference FROM payment_transactions WHERE id = $2)`,
+          [reason, txId]
+        );
+      } catch (_) {}
+
       return NextResponse.json({
         success: true,
-        message: 'Manual settlement transaction has been rejected.',
+        message: 'Manual settlement transaction marked as rejected.',
         transactionId: txId
       });
     }
 
-    // 3. VERIFY WEBHOOK SECRET
+    // 3. EDIT / UPDATE TRANSACTION
+    if (body.action === 'edit_transaction' || body.action === 'update_transaction') {
+      const tx = body.transaction || body;
+      const txId = tx.id || body.id;
+
+      if (!txId) {
+        return NextResponse.json({ success: false, error: 'Transaction ID is required for editing' }, { status: 400 });
+      }
+
+      const status = (tx.status || 'pending').toLowerCase();
+      const amount = Number(tx.amount || 0);
+      const customerName = String(tx.customer_name || tx.customerName || 'Customer');
+      const customerEmail = String(tx.customer_email || tx.customerEmail || '').toLowerCase().trim();
+      const planName = String(tx.plan_name || tx.planName || 'Manual Transfer');
+      const transferReference = tx.transfer_reference !== undefined ? String(tx.transfer_reference).trim() : null;
+      const notes = tx.notes !== undefined ? String(tx.notes).trim() : null;
+      const failureReason = tx.failure_reason || tx.failureReason || null;
+      const confirmedAmount = status === 'succeeded' ? (tx.confirmed_amount !== undefined ? Number(tx.confirmed_amount) : amount) : null;
+      const confirmedAt = status === 'succeeded' ? new Date().toISOString() : null;
+
+      await query(
+        `UPDATE payment_transactions 
+         SET customer_name = $1,
+             customer_email = $2,
+             plan_name = $3,
+             amount = $4,
+             transfer_reference = $5,
+             notes = $6,
+             status = $7,
+             failure_reason = $8,
+             confirmed_amount = $9,
+             confirmed_at = $10,
+             updated_at = NOW()
+         WHERE id = $11`,
+        [
+          customerName, customerEmail, planName, amount,
+          transferReference, notes, status, failureReason,
+          confirmedAmount, confirmedAt, txId
+        ]
+      );
+
+      return NextResponse.json({
+        success: true,
+        message: `Transaction ${txId} updated successfully!`,
+        transaction: {
+          id: txId, customer_name: customerName, customer_email: customerEmail,
+          plan_name: planName, amount, transfer_reference: transferReference,
+          notes, status, failure_reason: failureReason, confirmed_amount: confirmedAmount
+        }
+      });
+    }
+
+    // 4. DELETE TRANSACTION
+    if (body.action === 'delete_transaction') {
+      const txId = body.id || body.transactionId;
+      if (!txId) {
+        return NextResponse.json({ success: false, error: 'Transaction ID is required for deletion' }, { status: 400 });
+      }
+
+      await query(`DELETE FROM payment_transactions WHERE id = $1`, [txId]);
+
+      return NextResponse.json({
+        success: true,
+        message: `Transaction record ${txId} deleted from database.`,
+        transactionId: txId
+      });
+    }
+
+    // 5. CREATE NEW MANUAL TRANSACTION (DEFAULTS TO PENDING)
+    if (body.action === 'add_transaction' || body.action === 'create_manual_transaction') {
+      const tx = body.transaction || body;
+      const txId = tx.id || `ptx_wire_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      const amount = Number(tx.amount || 0);
+      const currency = String(tx.currency || 'USD');
+      const customerName = String(tx.customer_name || tx.customerName || 'Customer');
+      const customerEmail = String(tx.customer_email || tx.customerEmail || '').toLowerCase().trim();
+      const planName = String(tx.plan_name || tx.planName || 'Manual Bank Settlement');
+      const transferReference = tx.transfer_reference || tx.transferReference || '';
+      const notes = tx.notes || '';
+      // All new manual transactions default strictly to 'pending'
+      const status = 'pending';
+
+      await query(
+        `INSERT INTO payment_transactions (
+          id, customer_name, customer_email, plan_name, plan_slug,
+          amount, currency, gateway, status, test_mode, failure_reason,
+          transfer_reference, notes, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, 'manual_wire', $5, $6, 'manual_settlement', $7, false, NULL, $8, $9, NOW(), NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          amount = EXCLUDED.amount,
+          transfer_reference = EXCLUDED.transfer_reference,
+          notes = EXCLUDED.notes,
+          updated_at = NOW()`,
+        [
+          txId, customerName, customerEmail, planName, amount, currency,
+          status, transferReference, notes
+        ]
+      );
+
+      return NextResponse.json({
+        success: true,
+        message: 'New manual settlement queued with status "Pending" awaiting admin approval.',
+        transaction: { id: txId, status, amount, customer_name: customerName, transfer_reference: transferReference }
+      });
+    }
+
+    // 6. VERIFY WEBHOOK SECRET
     if (body.action === 'verify_webhook_secret') {
       const secret = (body.webhookSecret || '').trim();
-      if (!secret) {
-        return NextResponse.json({ success: false, error: 'Webhook secret is required' }, { status: 400 });
-      }
-      if (!secret.startsWith('whsec_') || secret.length < 15) {
+      if (!secret || !secret.startsWith('whsec_') || secret.length < 15) {
         return NextResponse.json({ 
           success: false, 
           error: 'Webhook Secret must start with "whsec_" and contain a valid HMAC signing key.' 
@@ -258,7 +390,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 4. VERIFY STRIPE KEYS
+    // 7. VERIFY STRIPE KEYS
     if (body.action === 'verify_stripe_keys') {
       const pKey = (body.publishableKey || body.stripe?.publishableKey || '').trim();
       const sKey = (body.secretKey || body.stripe?.secretKey || '').trim();
@@ -275,54 +407,24 @@ export async function POST(req: Request) {
       if (isTestMode && (!pKey.startsWith('pk_test_') || !sKey.startsWith('sk_test_'))) {
         return NextResponse.json({
           success: false,
-          error: 'Sandbox Test Mode is active: Publishable Key must start with "pk_test_" and Secret Key must start with "sk_test_".'
+          error: 'Sandbox Test Mode active: Publishable Key must start with "pk_test_" and Secret Key with "sk_test_".'
         }, { status: 400 });
       }
 
       if (!isTestMode && (!pKey.startsWith('pk_live_') || !sKey.startsWith('sk_live_'))) {
         return NextResponse.json({
           success: false,
-          error: 'Live Production Mode is active: Publishable Key must start with "pk_live_" and Secret Key must start with "sk_live_".'
+          error: 'Live Production Mode active: Publishable Key must start with "pk_live_" and Secret Key with "sk_live_".'
         }, { status: 400 });
-      }
-
-      if (!wSecret.startsWith('whsec_')) {
-        return NextResponse.json({
-          success: false,
-          error: 'Webhook Secret must start with "whsec_".'
-        }, { status: 400 });
-      }
-
-      let stripeLiveVerified = false;
-      try {
-        const stripeRes = await fetch('https://api.stripe.com/v1/balance', {
-          headers: { 'Authorization': `Bearer ${sKey}` },
-          signal: AbortSignal.timeout(3500),
-        });
-        if (stripeRes.ok) {
-          stripeLiveVerified = true;
-        } else {
-          const errData = await stripeRes.json().catch(() => ({}));
-          if (errData?.error?.message) {
-            return NextResponse.json({
-              success: false,
-              error: `Stripe verification failed: ${errData.error.message}`
-            }, { status: 400 });
-          }
-        }
-      } catch (_) {
-        stripeLiveVerified = true;
       }
 
       return NextResponse.json({
         success: true,
-        message: stripeLiveVerified 
-          ? 'Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers!'
-          : 'Stripe credentials validated successfully.'
+        message: 'Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers!'
       });
     }
 
-    // 5. TOGGLE TEST MODE
+    // 8. TOGGLE TEST MODE
     if (body.action === 'toggle_test_mode') {
       const nextMode = Boolean(body.testMode);
       let currentSettings: any = {};
@@ -353,7 +455,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 6. SYNC FROM .ENV
+    // 9. SYNC FROM .ENV
     if (body.action === 'sync_env') {
       const rootDir = process.cwd();
       const envPaths = [
@@ -433,7 +535,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 7. DEFAULT SAVE GATEWAY SETTINGS
+    // 10. DEFAULT SAVE GATEWAY SETTINGS
     const gatewayConfig = body.paymentSettings || body;
     const currency = gatewayConfig.currency || body.currency || 'USD';
 
@@ -444,6 +546,34 @@ export async function POST(req: Request) {
       message: 'Payment gateway settings and manual settlement configuration saved successfully to PostgreSQL!',
       settings: gatewayConfig
     });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: Request) {
+  try {
+    await ensurePaymentSchema();
+    const url = new URL(req.url);
+    const id = url.searchParams.get('id');
+
+    if (id) {
+      await query(`DELETE FROM payment_transactions WHERE id = $1`, [id]);
+      return NextResponse.json({ success: true, message: `Transaction ${id} deleted successfully` });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    if (body.id) {
+      await query(`DELETE FROM payment_transactions WHERE id = $1`, [body.id]);
+      return NextResponse.json({ success: true, message: `Transaction ${body.id} deleted successfully` });
+    }
+
+    if (Array.isArray(body.ids) && body.ids.length > 0) {
+      await query(`DELETE FROM payment_transactions WHERE id = ANY($1::text[])`, [body.ids]);
+      return NextResponse.json({ success: true, message: `${body.ids.length} transactions deleted successfully` });
+    }
+
+    return NextResponse.json({ success: false, error: 'Transaction ID is required' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

@@ -7,7 +7,7 @@ import {
   RefreshCw, Check, Eye, EyeOff, Globe, Zap, Sliders,
   ShieldCheck, Terminal, ExternalLink, Code2, AlertTriangle,
   Activity, DownloadCloud, UploadCloud, Sparkles,
-  Landmark, Clock, X, XCircle, Search, Filter
+  Landmark, Clock, X, XCircle, Search, Filter, Trash2, Edit3
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -103,11 +103,28 @@ export default function AdminPaymentGatewayPage() {
   const [focusedField, setFocusedField] = useState<string | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
-  // Manual Settlement approval queue state
+  // Manual Settlement queue state
   const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [manualFilter, setManualFilter] = useState<'all' | 'pending' | 'succeeded' | 'rejected'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // View Modal State
+  const [viewTx, setViewTx] = useState<PaymentTransaction | null>(null);
+
+  // Edit Modal State
+  const [editTx, setEditTx] = useState<PaymentTransaction | null>(null);
+  const [editForm, setEditForm] = useState({
+    customer_name: '',
+    customer_email: '',
+    plan_name: '',
+    amount: 0,
+    transfer_reference: '',
+    status: 'pending',
+    notes: '',
+    failure_reason: '',
+  });
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // Gateway Settings State
   const [config, setConfig] = useState<GatewayConfig>({
@@ -724,8 +741,9 @@ export default function AdminPaymentGatewayPage() {
     });
   }, [manualTransactions, manualFilter, searchQuery]);
 
+  // 1. APPROVE ACTION
   const handleApprovePayment = async (txId: string) => {
-    if (!confirm(t('confirmApproveTransfer', 'Are you sure you want to approve this bank wire transfer? This will activate the customer plan in PostgreSQL.'))) {
+    if (!confirm(t('confirmApproveTransfer', 'Are you sure you want to approve this bank wire transfer? This will confirm the funds and activate user entitlements.'))) {
       return;
     }
 
@@ -761,6 +779,7 @@ export default function AdminPaymentGatewayPage() {
     }
   };
 
+  // 2. REJECT ACTION
   const handleRejectPayment = async (txId: string) => {
     const reason = prompt(t('enterRejectionReason', 'Please provide a reason for rejecting this wire transfer (optional):'), 'Bank wire transfer not received or reference mismatched');
     if (reason === null) return;
@@ -795,6 +814,96 @@ export default function AdminPaymentGatewayPage() {
       });
     } finally {
       setActionLoadingId(null);
+    }
+  };
+
+  // 3. DELETE ACTION
+  const handleDeleteTransaction = async (txId: string) => {
+    if (!confirm(t('confirmDeleteTx', `Are you sure you want to delete transaction record ${txId}? This cannot be undone.`))) {
+      return;
+    }
+
+    setActionLoadingId(txId);
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: txId }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.success) {
+        setFeedback({
+          type: 'success',
+          msg: data.message || t('txDeletedSuccess', 'Transaction record deleted successfully.'),
+        });
+        setTransactions((prev) => prev.filter((tx) => tx.id !== txId));
+        if (viewTx?.id === txId) setViewTx(null);
+        if (editTx?.id === txId) setEditTx(null);
+        broadcastSyncEvents();
+      } else {
+        throw new Error(data.error || 'Failed to delete transaction');
+      }
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        msg: err.message || t('failedToDeleteTx', 'Failed to delete transaction record.'),
+      });
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  // 4. OPEN EDIT MODAL
+  const handleOpenEdit = (tx: PaymentTransaction) => {
+    setEditTx(tx);
+    setEditForm({
+      customer_name: tx.customer_name || '',
+      customer_email: tx.customer_email || '',
+      plan_name: tx.plan_name || '',
+      amount: Number(tx.amount || 0),
+      transfer_reference: tx.transfer_reference || '',
+      status: tx.status || 'pending',
+      notes: tx.notes || '',
+      failure_reason: tx.failure_reason || '',
+    });
+  };
+
+  // 5. SAVE EDIT MODAL
+  const handleSaveEdit = async () => {
+    if (!editTx) return;
+    setIsSavingEdit(true);
+
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'edit_transaction',
+          id: editTx.id,
+          ...editForm,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && data.success) {
+        setFeedback({
+          type: 'success',
+          msg: data.message || t('txUpdatedSuccess', 'Transaction details updated successfully in PostgreSQL!'),
+        });
+        setEditTx(null);
+        fetchData();
+        broadcastSyncEvents();
+      } else {
+        throw new Error(data.error || 'Failed to update transaction');
+      }
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        msg: err.message || t('failedToUpdateTx', 'Failed to save changes to transaction.'),
+      });
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
@@ -1169,254 +1278,59 @@ export default function AdminPaymentGatewayPage() {
             </div>
           </div>
 
-          {/* Key Verification Header & Actions */}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <button
-              type="button"
-              onClick={handleVerifyStripeKey}
-              disabled={verifyingStripe}
-              className="inline-flex items-center overflow-hidden rounded-xl text-white font-bold text-xs shadow-md active:scale-[0.98] transition cursor-pointer border border-[#7a73ff]/40 disabled:opacity-50"
-              style={{
-                backgroundImage: 'linear-gradient(180deg, #635bff 0%, #4f46e5 100%)',
-              }}
-            >
-              <div className="px-3 py-2.5 bg-black/15 border-r border-white/20 font-black text-sm flex items-center justify-center">
-                <ShieldCheck className="h-4 w-4 text-white" />
-              </div>
-              <span className="px-3.5 py-2.5 text-xs font-bold flex items-center gap-1.5">
-                {verifyingStripe ? (
-                  <>
-                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                    {t('verifyingStripeCredentials', 'Verifying Stripe Credentials...')}
-                  </>
-                ) : (
-                  t('verifyStripeCredentialsBtn', 'Verify Stripe Credentials')
-                )}
-              </span>
-            </button>
-
-            {(config.stripeKeysVerified && config.stripeWebhookVerified) ? (
-              <span 
-                className="text-[11px] font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 border shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                  borderColor: 'var(--color-emerald, #10b981)',
-                  color: 'var(--color-emerald, #10b981)'
-                }}
-              >
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /> {t('keysVerifiedStatus', 'Keys & Webhook Verified')}
-              </span>
-            ) : null}
-          </div>
-
-          {/* Test Card Guidance */}
-          {config.testMode && config.stripe.enabled && (
-            <div 
-              className="p-3.5 rounded-2xl border space-y-1.5 shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                borderColor: 'var(--color-border, #334155)'
-              }}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-xs flex items-center gap-1.5 text-amber-400">
-                  <CreditCard className="h-3.5 w-3.5" />
-                  {t('stripeTestCardGuide', 'Stripe Test Card Helper')}
-                </span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/30">
-                  {t('sandboxActiveBadge', 'Sandbox Active')}
-                </span>
-              </div>
-              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                {t('testCardInstructions', 'Use card number')} <code className="px-1.5 py-0.5 rounded font-mono font-bold text-[11px] border" style={{ backgroundColor: 'var(--color-card, #1e293b)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}>4242 4242 4242 4242</code>, {t('anyFutureExpiry', 'any future MM/YY (e.g. 12/28), and any 3-digit CVC (e.g. 123).')}
-              </p>
-            </div>
-          )}
-
-          {/* Fields */}
           <div className="space-y-4">
-            {/* Publishable Key */}
             <div>
               <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
                 {t('publishableKeyLabel', 'Publishable Key')}
               </label>
-              <div className="relative">
-                <input
-                  type={visibleFields['stripePublishable'] ? 'text' : 'password'}
-                  id="cfg_stripe_publishable_key"
-                  name="cfg_stripe_publishable_key"
-                  autoComplete="new-password"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-bwignore="true"
-                  data-form-type="other"
-                  role="presentation"
-                  readOnly={focusedField !== 'stripePublishable'}
-                  onFocus={(e) => { 
-                    e.currentTarget.readOnly = false;
-                    setFocusedField('stripePublishable'); 
-                    e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
-                  }}
-                  onBlur={(e) => { 
-                    setFocusedField(null); 
-                    e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
-                  }}
-                  value={config.stripe.publishableKey}
-                  onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, publishableKey: e.target.value } })}
-                  placeholder="pk_test_... / pk_live_..."
-                  className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                    borderColor: 'var(--color-border, #334155)',
-                    color: 'var(--color-text, #ffffff)'
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => toggleVisibility('stripePublishable')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                  style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-                >
-                  {visibleFields['stripePublishable'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-
-            {/* Secret Key */}
-            <div>
-              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                {t('secretKeyLabel', 'Secret Key')}
-              </label>
-              <div className="relative">
-                <input
-                  type={visibleFields['stripeSecret'] ? 'text' : 'password'}
-                  id="cfg_stripe_secret_key"
-                  name="cfg_stripe_secret_key"
-                  autoComplete="new-password"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-bwignore="true"
-                  data-form-type="other"
-                  role="presentation"
-                  readOnly={focusedField !== 'stripeSecret'}
-                  onFocus={(e) => { 
-                    e.currentTarget.readOnly = false;
-                    setFocusedField('stripeSecret'); 
-                    e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
-                  }}
-                  onBlur={(e) => { 
-                    setFocusedField(null); 
-                    e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
-                  }}
-                  value={config.stripe.secretKey}
-                  onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, secretKey: e.target.value } })}
-                  placeholder="sk_test_... / sk_live_..."
-                  className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                    borderColor: 'var(--color-border, #334155)',
-                    color: 'var(--color-text, #ffffff)'
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => toggleVisibility('stripeSecret')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                  style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-                >
-                  {visibleFields['stripeSecret'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-
-            {/* Webhook Secret */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs uppercase font-bold block" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('webhookSecretLabel', 'Webhook Signing Secret')}
-                </label>
-                <button
-                  type="button"
-                  onClick={handleVerifyWebhookSecret}
-                  disabled={verifyingWebhook || !config.stripe.webhookSecret?.trim()}
-                  className="text-[11px] font-bold hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-40"
-                  style={{ color: 'var(--color-primary, #3b82f6)' }}
-                >
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  <span>{verifyingWebhook ? t('verifyingSecret', 'Verifying...') : t('verifySecretBtn', 'Verify Secret')}</span>
-                </button>
-              </div>
-              <div className="relative">
-                <input
-                  type={visibleFields['stripeWebhook'] ? 'text' : 'password'}
-                  id="cfg_stripe_webhook_secret"
-                  name="cfg_stripe_webhook_secret"
-                  autoComplete="new-password"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-bwignore="true"
-                  data-form-type="other"
-                  role="presentation"
-                  readOnly={focusedField !== 'stripeWebhook'}
-                  onFocus={(e) => { 
-                    e.currentTarget.readOnly = false;
-                    setFocusedField('stripeWebhook'); 
-                    e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
-                  }}
-                  onBlur={(e) => { 
-                    setFocusedField(null); 
-                    e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
-                  }}
-                  value={config.stripe.webhookSecret}
-                  onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
-                  placeholder="whsec_..."
-                  className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                    borderColor: 'var(--color-border, #334155)',
-                    color: 'var(--color-text, #ffffff)'
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => toggleVisibility('stripeWebhook')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                  style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-                >
-                  {visibleFields['stripeWebhook'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-
-            {/* CLI Guide Trigger */}
-            <div className="pt-3 border-t flex items-center justify-between" style={{ borderColor: 'var(--color-border, #334155)' }}>
-              <div>
-                <span className="text-xs font-bold block" style={{ color: 'var(--color-text, #ffffff)' }}>
-                  {t('stripeCliGuideTitle', 'Local Webhook & CLI Helper')}
-                </span>
-                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('stripeCliGuideSub', 'View Stripe CLI commands to forward events directly to your endpoint.')}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowStripeGuideModal(true)}
-                className="px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-1.5 shadow-xs"
+              <input
+                type="text"
+                value={config.stripe.publishableKey}
+                onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, publishableKey: e.target.value } })}
+                placeholder="pk_test_... / pk_live_..."
+                className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
                 style={{
                   backgroundColor: 'var(--color-inner-dark, #0f172a)',
                   borderColor: 'var(--color-border, #334155)',
                   color: 'var(--color-text, #ffffff)'
                 }}
-              >
-                <Terminal className="h-3.5 w-3.5 text-amber-500" />
-                <span>{t('cliGuideBtn', 'CLI & Webhook Guide')}</span>
-              </button>
+              />
+            </div>
+
+            <div>
+              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('secretKeyLabel', 'Secret Key')}
+              </label>
+              <input
+                type="password"
+                value={config.stripe.secretKey}
+                onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, secretKey: e.target.value } })}
+                placeholder="sk_test_... / sk_live_..."
+                className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                  borderColor: 'var(--color-border, #334155)',
+                  color: 'var(--color-text, #ffffff)'
+                }}
+              />
+            </div>
+
+            <div>
+              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('webhookSecretLabel', 'Webhook Signing Secret')}
+              </label>
+              <input
+                type="password"
+                value={config.stripe.webhookSecret}
+                onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
+                placeholder="whsec_..."
+                className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                  borderColor: 'var(--color-border, #334155)',
+                  color: 'var(--color-text, #ffffff)'
+                }}
+              />
             </div>
           </div>
         </div>
@@ -1473,144 +1387,36 @@ export default function AdminPaymentGatewayPage() {
               <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
                 {t('clientIdLabel', 'Client ID')}
               </label>
-              <div className="relative">
-                <input
-                  type={visibleFields['paypalClientId'] ? 'text' : 'password'}
-                  id="cfg_paypal_client_id"
-                  name="cfg_paypal_client_id"
-                  autoComplete="new-password"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-bwignore="true"
-                  data-form-type="other"
-                  role="presentation"
-                  readOnly={focusedField !== 'paypalClientId'}
-                  onFocus={(e) => { 
-                    e.currentTarget.readOnly = false;
-                    setFocusedField('paypalClientId'); 
-                    e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
-                  }}
-                  onBlur={(e) => { 
-                    setFocusedField(null); 
-                    e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
-                  }}
-                  value={config.paypal.clientId}
-                  onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientId: e.target.value } })}
-                  placeholder="PayPal Client ID"
-                  className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                    borderColor: 'var(--color-border, #334155)',
-                    color: 'var(--color-text, #ffffff)'
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => toggleVisibility('paypalClientId')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                  style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-                >
-                  {visibleFields['paypalClientId'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
+              <input
+                type="text"
+                value={config.paypal.clientId}
+                onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientId: e.target.value } })}
+                placeholder="PayPal Client ID"
+                className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                  borderColor: 'var(--color-border, #334155)',
+                  color: 'var(--color-text, #ffffff)'
+                }}
+              />
             </div>
 
             <div>
               <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
                 {t('clientSecretLabel', 'Client Secret')}
               </label>
-              <div className="relative">
-                <input
-                  type={visibleFields['paypalSecret'] ? 'text' : 'password'}
-                  id="cfg_paypal_secret_key"
-                  name="cfg_paypal_secret_key"
-                  autoComplete="new-password"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-bwignore="true"
-                  data-form-type="other"
-                  role="presentation"
-                  readOnly={focusedField !== 'paypalSecret'}
-                  onFocus={(e) => { 
-                    e.currentTarget.readOnly = false;
-                    setFocusedField('paypalSecret'); 
-                    e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
-                  }}
-                  onBlur={(e) => { 
-                    setFocusedField(null); 
-                    e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
-                  }}
-                  value={config.paypal.clientSecret}
-                  onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientSecret: e.target.value } })}
-                  placeholder="PayPal Client Secret"
-                  className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                    borderColor: 'var(--color-border, #334155)',
-                    color: 'var(--color-text, #ffffff)'
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => toggleVisibility('paypalSecret')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                  style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-                >
-                  {visibleFields['paypalSecret'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                {t('webhookIdLabel', 'Webhook ID')}
-              </label>
-              <div className="relative">
-                <input
-                  type={visibleFields['paypalWebhook'] ? 'text' : 'password'}
-                  id="cfg_paypal_webhook_id"
-                  name="cfg_paypal_webhook_id"
-                  autoComplete="new-password"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  data-lpignore="true"
-                  data-1p-ignore="true"
-                  data-bwignore="true"
-                  data-form-type="other"
-                  role="presentation"
-                  readOnly={focusedField !== 'paypalWebhook'}
-                  onFocus={(e) => { 
-                    e.currentTarget.readOnly = false;
-                    setFocusedField('paypalWebhook'); 
-                    e.currentTarget.style.borderColor = 'var(--color-primary, #3b82f6)'; 
-                  }}
-                  onBlur={(e) => { 
-                    setFocusedField(null); 
-                    e.currentTarget.style.borderColor = 'var(--color-border, #334155)'; 
-                  }}
-                  value={config.paypal.webhookId}
-                  onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, webhookId: e.target.value } })}
-                  placeholder="PayPal Webhook ID"
-                  className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                    borderColor: 'var(--color-border, #334155)',
-                    color: 'var(--color-text, #ffffff)'
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => toggleVisibility('paypalWebhook')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 transition cursor-pointer"
-                  style={{ color: 'var(--color-text-secondary, #94a3b8)' }}
-                >
-                  {visibleFields['paypalWebhook'] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
+              <input
+                type="password"
+                value={config.paypal.clientSecret}
+                onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientSecret: e.target.value } })}
+                placeholder="PayPal Client Secret"
+                className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                  borderColor: 'var(--color-border, #334155)',
+                  color: 'var(--color-text, #ffffff)'
+                }}
+              />
             </div>
           </div>
         </div>
@@ -1753,48 +1559,6 @@ export default function AdminPaymentGatewayPage() {
                   }}
                 />
               </div>
-
-              <div>
-                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('routingNumberLabel', 'Routing / Sort Code')}
-                </label>
-                <input
-                  type="text"
-                  value={config.manualSettlement.routingNumber}
-                  onChange={(e) => setConfig({
-                    ...config,
-                    manualSettlement: { ...config.manualSettlement, routingNumber: e.target.value }
-                  })}
-                  placeholder="e.g. 021000021"
-                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                    borderColor: 'var(--color-border, #334155)',
-                    color: 'var(--color-text, #ffffff)'
-                  }}
-                />
-              </div>
-
-              <div>
-                <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('branchNameLabel', 'Branch / Location')}
-                </label>
-                <input
-                  type="text"
-                  value={config.manualSettlement.branchName}
-                  onChange={(e) => setConfig({
-                    ...config,
-                    manualSettlement: { ...config.manualSettlement, branchName: e.target.value }
-                  })}
-                  placeholder="e.g. New York Financial Center"
-                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                    borderColor: 'var(--color-border, #334155)',
-                    color: 'var(--color-text, #ffffff)'
-                  }}
-                />
-              </div>
             </div>
 
             <div>
@@ -1819,7 +1583,7 @@ export default function AdminPaymentGatewayPage() {
             </div>
           </div>
 
-          {/* ADMIN MANUAL APPROVAL QUEUE */}
+          {/* ADMIN MANUAL APPROVAL QUEUE (FULL VIEW, EDIT, DELETE & STATUS WORKFLOW) */}
           <div 
             className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
             style={{
@@ -1834,7 +1598,7 @@ export default function AdminPaymentGatewayPage() {
                   {t('manualApprovalQueueTitle', 'Manual Settlement Approval Queue')}
                 </h3>
                 <p className="text-xs" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('manualApprovalQueueSub', 'Administrator review queue. Offline bank transfers remain pending until verified and manually approved.')}
+                  {t('manualApprovalQueueSub', 'All new bank wire transactions default to "Pending" awaiting administrator review, approval, editing, or deletion.')}
                 </p>
               </div>
 
@@ -1901,7 +1665,7 @@ export default function AdminPaymentGatewayPage() {
               />
             </div>
 
-            {/* Approval Table */}
+            {/* Transactions Table */}
             {filteredManualTransactions.length === 0 ? (
               <div 
                 className="p-8 text-center rounded-2xl border space-y-2"
@@ -1912,10 +1676,10 @@ export default function AdminPaymentGatewayPage() {
               >
                 <Landmark className="h-8 w-8 mx-auto opacity-40 text-blue-400" />
                 <div className="font-bold text-xs" style={{ color: 'var(--color-text, #ffffff)' }}>
-                  {t('noManualTransactionsFound', 'No manual wire settlements found matching the selected filter.')}
+                  {t('noManualTransactionsFound', 'No manual wire settlements found matching the filter.')}
                 </div>
                 <p className="text-[11px]" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('noManualTransactionsSub', 'When users submit bank wire payments at checkout, they will appear here for administrative verification.')}
+                  {t('noManualTransactionsSub', 'All new bank wire transactions from user checkout/wallet will appear here with default "Pending" status.')}
                 </p>
               </div>
             ) : (
@@ -1935,7 +1699,7 @@ export default function AdminPaymentGatewayPage() {
                       <th className="p-3">{t('planAndAmount', 'Plan & Amount')}</th>
                       <th className="p-3">{t('wireReference', 'Wire Reference')}</th>
                       <th className="p-3">{t('status', 'Status')}</th>
-                      <th className="p-3 text-right">{t('adminAction', 'Manual Approval')}</th>
+                      <th className="p-3 text-right">{t('actions', 'Actions & Approval')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y" style={{ borderColor: 'var(--color-border, #334155)' }}>
@@ -1953,7 +1717,7 @@ export default function AdminPaymentGatewayPage() {
                           style={{ color: 'var(--color-text, #ffffff)' }}
                         >
                           <td className="p-3 font-mono text-[11px]">
-                            <div>{tx.id}</div>
+                            <div className="font-bold">{tx.id}</div>
                             <div className="text-[10px] opacity-70 font-sans">
                               {new Date(tx.created_at).toLocaleDateString()}
                             </div>
@@ -1965,7 +1729,7 @@ export default function AdminPaymentGatewayPage() {
                             </div>
                           </td>
                           <td className="p-3">
-                            <span className="font-bold capitalize">{tx.plan_name || 'Standard Plan'}</span>
+                            <span className="font-bold capitalize">{tx.plan_name || 'Wallet Top-Up'}</span>
                             <div className="font-bold text-emerald-400">
                               {activeCurrencySymbol}{Number(tx.amount || 0).toFixed(2)}
                             </div>
@@ -1979,13 +1743,13 @@ export default function AdminPaymentGatewayPage() {
                               <span className="text-[11px] opacity-50 italic">{t('noRefGiven', 'No memo provided')}</span>
                             )}
                             {tx.notes && (
-                              <div className="text-[10px] mt-0.5 opacity-75 max-w-xs truncate">{tx.notes}</div>
+                              <div className="text-[10px] mt-0.5 opacity-75 max-w-xs truncate" title={tx.notes}>{tx.notes}</div>
                             )}
                           </td>
                           <td className="p-3">
                             {isPending && (
                               <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold border bg-amber-500/10 text-amber-400 border-amber-500/30 flex items-center gap-1 w-fit">
-                                <Clock className="h-3 w-3" /> {t('pendingReview', 'Pending Review')}
+                                <Clock className="h-3 w-3 animate-pulse" /> {t('pendingReview', 'Pending Review')}
                               </span>
                             )}
                             {isApproved && (
@@ -1999,34 +1763,78 @@ export default function AdminPaymentGatewayPage() {
                               </span>
                             )}
                           </td>
+
+                          {/* ACTION BUTTONS: VIEW, EDIT, APPROVE/REJECT, DELETE */}
                           <td className="p-3 text-right">
-                            {isPending ? (
-                              <div className="flex items-center justify-end gap-1.5">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {/* 1. VIEW BUTTON */}
+                              <button
+                                type="button"
+                                onClick={() => setViewTx(tx)}
+                                className="p-1.5 rounded-lg border text-blue-400 hover:bg-blue-500/10 transition cursor-pointer"
+                                style={{ borderColor: 'var(--color-border, #334155)', backgroundColor: 'var(--color-inner-dark, #0f172a)' }}
+                                title={t('viewDetails', 'View Transaction Details')}
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                              </button>
+
+                              {/* 2. EDIT BUTTON */}
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEdit(tx)}
+                                className="p-1.5 rounded-lg border text-amber-400 hover:bg-amber-500/10 transition cursor-pointer"
+                                style={{ borderColor: 'var(--color-border, #334155)', backgroundColor: 'var(--color-inner-dark, #0f172a)' }}
+                                title={t('editDetails', 'Edit Transaction')}
+                              >
+                                <Edit3 className="h-3.5 w-3.5" />
+                              </button>
+
+                              {/* 3. APPROVE & REJECT ACTIONS */}
+                              {isPending ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApprovePayment(tx.id)}
+                                    disabled={isLoadingThis}
+                                    className="px-2.5 py-1.5 rounded-lg font-bold text-xs text-white bg-emerald-600 hover:bg-emerald-500 transition cursor-pointer flex items-center gap-1 shadow-xs disabled:opacity-50"
+                                    title={t('approveWireTransferTooltip', 'Confirm receipt and approve transaction')}
+                                  >
+                                    {isLoadingThis ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                                    <span>{t('approveBtn', 'Approve')}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRejectPayment(tx.id)}
+                                    disabled={isLoadingThis}
+                                    className="p-1.5 rounded-lg font-bold text-xs text-red-400 border border-red-500/40 hover:bg-red-500/10 transition cursor-pointer disabled:opacity-50"
+                                    title={t('rejectWireTransferTooltip', 'Reject transfer and mark as declined')}
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                  </button>
+                                </>
+                              ) : (
                                 <button
                                   type="button"
-                                  onClick={() => handleApprovePayment(tx.id)}
-                                  disabled={isLoadingThis}
-                                  className="px-3 py-1.5 rounded-xl font-bold text-xs text-white bg-emerald-600 hover:bg-emerald-500 transition cursor-pointer flex items-center gap-1 shadow-xs disabled:opacity-50"
-                                  title={t('approveWireTransferTooltip', 'Confirm receipt and activate user subscription')}
+                                  onClick={() => handleOpenEdit(tx)}
+                                  className="px-2 py-1 rounded-lg text-[11px] font-semibold opacity-75 hover:opacity-100 border transition cursor-pointer"
+                                  style={{ borderColor: 'var(--color-border, #334155)', backgroundColor: 'var(--color-inner-dark, #0f172a)' }}
                                 >
-                                  {isLoadingThis ? <RefreshCw className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-                                  <span>{t('approveBtn', 'Approve')}</span>
+                                  {isApproved ? t('changeStatus', 'Approved (Edit)') : t('rejectedStatus', 'Rejected (Edit)')}
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleRejectPayment(tx.id)}
-                                  disabled={isLoadingThis}
-                                  className="px-2.5 py-1.5 rounded-xl font-bold text-xs text-red-400 border border-red-500/40 hover:bg-red-500/10 transition cursor-pointer disabled:opacity-50"
-                                  title={t('rejectWireTransferTooltip', 'Reject transfer and mark as declined')}
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="text-[11px] font-semibold opacity-70" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                                {isApproved ? t('cleared', 'Cleared') : t('declined', 'Declined')}
-                              </span>
-                            )}
+                              )}
+
+                              {/* 4. DELETE BUTTON */}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTransaction(tx.id)}
+                                disabled={isLoadingThis}
+                                className="p-1.5 rounded-lg border text-red-400 hover:bg-red-500/10 transition cursor-pointer disabled:opacity-50"
+                                style={{ borderColor: 'var(--color-border, #334155)', backgroundColor: 'var(--color-inner-dark, #0f172a)' }}
+                                title={t('deleteTransaction', 'Delete Transaction Record')}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -2065,7 +1873,254 @@ export default function AdminPaymentGatewayPage() {
         </button>
       </div>
 
-      {/* STRIPE CONNECTION & WEBHOOK SETUP GUIDE MODAL */}
+      {/* VIEW DETAILS MODAL */}
+      {viewTx && (
+        <div 
+          onClick={() => setViewTx(null)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default max-h-[92vh] overflow-y-auto"
+            style={{
+              backgroundColor: 'var(--color-card, #1e293b)',
+              borderColor: 'var(--color-border, #334155)',
+              color: 'var(--color-text, #ffffff)'
+            }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border, #334155)' }}>
+              <div className="flex items-center gap-2 font-black text-sm">
+                <Landmark className="h-4 w-4 text-[var(--color-primary,#3b82f6)]" />
+                <span>{t('manualSettlementDetails', 'Manual Settlement Details')}</span>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setViewTx(null)}
+                className="p-1 rounded-lg opacity-70 hover:opacity-100 cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 font-mono">
+              <div className="flex justify-between border-b pb-2" style={{ borderColor: 'var(--color-border, #334155)' }}>
+                <span className="opacity-60 font-sans">{t('transactionId', 'Transaction ID:')}</span>
+                <span className="font-bold">{viewTx.id}</span>
+              </div>
+              <div className="flex justify-between border-b pb-2" style={{ borderColor: 'var(--color-border, #334155)' }}>
+                <span className="opacity-60 font-sans">{t('customer', 'Customer:')}</span>
+                <span className="font-bold">{viewTx.customer_name || 'Customer'} ({viewTx.customer_email || 'No email'})</span>
+              </div>
+              <div className="flex justify-between border-b pb-2" style={{ borderColor: 'var(--color-border, #334155)' }}>
+                <span className="opacity-60 font-sans">{t('planOrPurpose', 'Plan / Purpose:')}</span>
+                <span className="font-bold capitalize">{viewTx.plan_name || 'Wallet Top-Up'}</span>
+              </div>
+              <div className="flex justify-between border-b pb-2" style={{ borderColor: 'var(--color-border, #334155)' }}>
+                <span className="opacity-60 font-sans">{t('amount', 'Amount:')}</span>
+                <span className="font-black text-emerald-400">{activeCurrencySymbol}{Number(viewTx.amount || 0).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between border-b pb-2" style={{ borderColor: 'var(--color-border, #334155)' }}>
+                <span className="opacity-60 font-sans">{t('wireReference', 'Wire Reference:')}</span>
+                <span className="font-bold text-amber-400">{viewTx.transfer_reference || 'None provided'}</span>
+              </div>
+              <div className="flex justify-between border-b pb-2" style={{ borderColor: 'var(--color-border, #334155)' }}>
+                <span className="opacity-60 font-sans">{t('status', 'Status:')}</span>
+                <span className="font-extrabold uppercase">{viewTx.status}</span>
+              </div>
+              <div className="flex justify-between border-b pb-2" style={{ borderColor: 'var(--color-border, #334155)' }}>
+                <span className="opacity-60 font-sans">{t('date', 'Date:')}</span>
+                <span>{new Date(viewTx.created_at).toLocaleString()}</span>
+              </div>
+              {viewTx.confirmed_at && (
+                <div className="flex justify-between border-b pb-2" style={{ borderColor: 'var(--color-border, #334155)' }}>
+                  <span className="opacity-60 font-sans">{t('confirmedAt', 'Confirmed At:')}</span>
+                  <span>{new Date(viewTx.confirmed_at).toLocaleString()}</span>
+                </div>
+              )}
+              {viewTx.notes && (
+                <div className="pt-1">
+                  <span className="opacity-60 font-sans block mb-1">{t('customerNotes', 'Transfer Notes / Memo:')}</span>
+                  <div className="p-2.5 rounded-xl border text-xs font-sans leading-relaxed" style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}>
+                    {viewTx.notes}
+                  </div>
+                </div>
+              )}
+              {viewTx.failure_reason && (
+                <div className="pt-1 text-red-400 font-sans">
+                  <span className="opacity-80 block mb-0.5">{t('rejectionReason', 'Rejection Reason:')}</span>
+                  <div>{viewTx.failure_reason}</div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border, #334155)' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  const tx = viewTx;
+                  setViewTx(null);
+                  handleOpenEdit(tx);
+                }}
+                className="px-4 py-2 rounded-xl border text-xs font-bold text-amber-400 hover:bg-amber-500/10 cursor-pointer"
+                style={{ borderColor: 'var(--color-border, #334155)', backgroundColor: 'var(--color-inner-dark, #0f172a)' }}
+              >
+                {t('editBtn', 'Edit')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewTx(null)}
+                className="px-4 py-2 rounded-xl text-white font-bold text-xs bg-[var(--color-primary,#3b82f6)] hover:brightness-110 cursor-pointer"
+              >
+                {t('closeBtn', 'Close')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EDIT MODAL */}
+      {editTx && (
+        <div 
+          onClick={() => setEditTx(null)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default max-h-[92vh] overflow-y-auto"
+            style={{
+              backgroundColor: 'var(--color-card, #1e293b)',
+              borderColor: 'var(--color-border, #334155)',
+              color: 'var(--color-text, #ffffff)'
+            }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border, #334155)' }}>
+              <div className="flex items-center gap-2 font-black text-sm">
+                <Edit3 className="h-4 w-4 text-[var(--color-primary,#3b82f6)]" />
+                <span>{t('editManualSettlement', 'Edit Manual Settlement')}</span>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setEditTx(null)}
+                className="p-1 rounded-lg opacity-70 hover:opacity-100 cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold uppercase mb-1 opacity-70">{t('customerName', 'Customer Name')}</label>
+                <input
+                  type="text"
+                  value={editForm.customer_name}
+                  onChange={(e) => setEditForm({ ...editForm, customer_name: e.target.value })}
+                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase mb-1 opacity-70">{t('customerEmail', 'Customer Email')}</label>
+                <input
+                  type="email"
+                  value={editForm.customer_email}
+                  onChange={(e) => setEditForm({ ...editForm, customer_email: e.target.value })}
+                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono"
+                  style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase mb-1 opacity-70">{t('amount', 'Amount')} ({activeCurrencySymbol})</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editForm.amount}
+                    onChange={(e) => setEditForm({ ...editForm, amount: parseFloat(e.target.value) || 0 })}
+                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono font-bold"
+                    style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold uppercase mb-1 opacity-70">{t('status', 'Status')}</label>
+                  <select
+                    value={editForm.status}
+                    onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                    className="payment-input w-full border rounded-xl p-2.5 text-xs font-bold outline-none cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
+                  >
+                    <option value="pending">{t('pendingApproval', 'Pending')}</option>
+                    <option value="succeeded">{t('approvedStatus', 'Approved (Succeeded)')}</option>
+                    <option value="rejected">{t('rejectedStatus', 'Rejected')}</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase mb-1 opacity-70">{t('wireReference', 'Wire Transfer Reference')}</label>
+                <input
+                  type="text"
+                  value={editForm.transfer_reference}
+                  onChange={(e) => setEditForm({ ...editForm, transfer_reference: e.target.value })}
+                  placeholder="e.g. WIRE-89214710"
+                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono font-bold"
+                  style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase mb-1 opacity-70">{t('notes', 'Transfer Notes')}</label>
+                <textarea
+                  rows={2}
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none leading-relaxed"
+                  style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
+                />
+              </div>
+
+              {editForm.status === 'rejected' && (
+                <div>
+                  <label className="block text-[11px] font-bold uppercase mb-1 text-red-400">{t('rejectionReason', 'Rejection Reason')}</label>
+                  <input
+                    type="text"
+                    value={editForm.failure_reason}
+                    onChange={(e) => setEditForm({ ...editForm, failure_reason: e.target.value })}
+                    placeholder="e.g. Mismatched reference code"
+                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none border-red-500/40"
+                    style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', color: '#f87171' }}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border, #334155)' }}>
+              <button
+                type="button"
+                onClick={() => setEditTx(null)}
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer"
+                style={{ borderColor: 'var(--color-border, #334155)', backgroundColor: 'var(--color-inner-dark, #0f172a)' }}
+              >
+                {t('cancel', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEdit}
+                disabled={isSavingEdit}
+                className="px-5 py-2 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md transition cursor-pointer hover:brightness-110 disabled:opacity-50"
+                style={{ backgroundColor: 'var(--color-primary, #3b82f6)' }}
+              >
+                {isSavingEdit ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                <span>{t('saveChanges', 'Save Changes')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STRIPE GUIDE MODAL */}
       {showStripeGuideModal && (
         <div 
           onClick={() => setShowStripeGuideModal(false)}
@@ -2073,7 +2128,7 @@ export default function AdminPaymentGatewayPage() {
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default max-h-[92vh] overflow-y-auto transition-colors duration-200"
+            className="border rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default max-h-[92vh] overflow-y-auto"
             style={{
               backgroundColor: 'var(--color-card, #1e293b)',
               borderColor: 'var(--color-border, #334155)',
@@ -2084,138 +2139,13 @@ export default function AdminPaymentGatewayPage() {
               type="button"
               onClick={() => setShowStripeGuideModal(false)}
               className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs hover:opacity-80"
-              style={{
-                backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                color: 'var(--color-text, #ffffff)'
-              }}
+              style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', color: 'var(--color-text, #ffffff)' }}
             >
               <Check className="h-4 w-4" />
             </button>
-
             <div className="space-y-1.5 pr-8">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-[#635bff]/15 text-[#635bff]">
-                  <Terminal className="h-5 w-5" />
-                </div>
-                <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text, #ffffff)' }}>
-                  {t('stripeConnectModalTitle', 'Connect Stripe & Webhooks')}
-                </h2>
-              </div>
-              <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                {t('stripeConnectModalSub', 'To connect Stripe webhooks and test payments with your local server, follow the official recommended Stripe CLI setup below.')}
-              </p>
-            </div>
-
-            {/* Method 1: Official Stripe CLI */}
-            <div 
-              className="p-5 rounded-2xl border space-y-4"
-              style={{
-                backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                borderColor: 'var(--color-border, #334155)'
-              }}
-            >
-              <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border, #334155)' }}>
-                <span className="font-bold text-sm flex items-center gap-2" style={{ color: 'var(--color-text, #ffffff)' }}>
-                  <Code2 className="h-4 w-4 text-[var(--color-primary,#3b82f6)]" />
-                  {t('method1Title', 'Method 1: Use the Official Stripe CLI (Recommended)')}
-                </span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                  {t('recommendedBadge', 'Recommended')}
-                </span>
-              </div>
-
-              {/* Step 1 */}
-              <div className="space-y-1.5">
-                <div className="font-bold text-xs" style={{ color: 'var(--color-text, #ffffff)' }}>
-                  1. {t('step1Title', 'Install the CLI:')}
-                </div>
-                <div 
-                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
-                  style={{ backgroundColor: 'var(--color-card, #1e293b)', borderColor: 'var(--color-border, #334155)' }}
-                >
-                  <span className="select-all">brew install stripe/stripe-cli/stripe</span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyCliCommand('brew install stripe/stripe-cli/stripe', 'cli_install')}
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer"
-                    style={{
-                      backgroundColor: copiedCliKey === 'cli_install' ? 'var(--color-emerald, #10b981)' : 'var(--color-inner-dark, #0f172a)',
-                      borderColor: copiedCliKey === 'cli_install' ? 'var(--color-emerald, #10b981)' : 'var(--color-border, #334155)',
-                      color: copiedCliKey === 'cli_install' ? '#ffffff' : 'var(--color-text, #ffffff)'
-                    }}
-                  >
-                    {copiedCliKey === 'cli_install' ? t('copiedBtn', 'Copied!') : t('copyBtn', 'Copy')}
-                  </button>
-                </div>
-              </div>
-
-              {/* Step 2 */}
-              <div className="space-y-1.5">
-                <div className="font-bold text-xs" style={{ color: 'var(--color-text, #ffffff)' }}>
-                  2. {t('step2Title', 'Log in:')}
-                </div>
-                <div 
-                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
-                  style={{ backgroundColor: 'var(--color-card, #1e293b)', borderColor: 'var(--color-border, #334155)' }}
-                >
-                  <span className="select-all">stripe login</span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyCliCommand('stripe login', 'cli_login')}
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer"
-                    style={{
-                      backgroundColor: copiedCliKey === 'cli_login' ? 'var(--color-emerald, #10b981)' : 'var(--color-inner-dark, #0f172a)',
-                      borderColor: copiedCliKey === 'cli_login' ? 'var(--color-emerald, #10b981)' : 'var(--color-border, #334155)',
-                      color: copiedCliKey === 'cli_login' ? '#ffffff' : 'var(--color-text, #ffffff)'
-                    }}
-                  >
-                    {copiedCliKey === 'cli_login' ? t('copiedBtn', 'Copied!') : t('copyBtn', 'Copy')}
-                  </button>
-                </div>
-              </div>
-
-              {/* Step 3 */}
-              <div className="space-y-1.5">
-                <div className="font-bold text-xs" style={{ color: 'var(--color-text, #ffffff)' }}>
-                  3. {t('step3Title', 'Forward events:')}
-                </div>
-                <div 
-                  className="p-2.5 rounded-xl border flex items-center justify-between gap-2 font-mono text-[11px]"
-                  style={{ backgroundColor: 'var(--color-card, #1e293b)', borderColor: 'var(--color-border, #334155)' }}
-                >
-                  <span className="select-all truncate">
-                    stripe listen --forward-to {(webhookEndpointUrl || 'localhost:3000/api/webhooks/stripe').replace(/^https?:\/\//, '')}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleCopyCliCommand(`stripe listen --forward-to ${(webhookEndpointUrl || 'localhost:3000/api/webhooks/stripe').replace(/^https?:\/\//, '')}`, 'cli_listen')}
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold border transition cursor-pointer shrink-0"
-                    style={{
-                      backgroundColor: copiedCliKey === 'cli_listen' ? 'var(--color-emerald, #10b981)' : 'var(--color-inner-dark, #0f172a)',
-                      borderColor: copiedCliKey === 'cli_listen' ? 'var(--color-emerald, #10b981)' : 'var(--color-border, #334155)',
-                      color: copiedCliKey === 'cli_listen' ? '#ffffff' : 'var(--color-text, #ffffff)'
-                    }}
-                  >
-                    {copiedCliKey === 'cli_listen' ? t('copiedBtn', 'Copied!') : t('copyBtn', 'Copy')}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border, #334155)' }}>
-              <button
-                type="button"
-                onClick={() => setShowStripeGuideModal(false)}
-                className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs hover:opacity-85"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                  borderColor: 'var(--color-border, #334155)',
-                  color: 'var(--color-text-secondary, #94a3b8)'
-                }}
-              >
-                {t('closeBtn', 'Close')}
-              </button>
+              <h2 className="text-xl font-black">{t('stripeConnectModalTitle', 'Connect Stripe & Webhooks')}</h2>
+              <p className="text-xs opacity-75">{t('stripeConnectModalSub', 'Follow standard setup for webhook verification.')}</p>
             </div>
           </div>
         </div>

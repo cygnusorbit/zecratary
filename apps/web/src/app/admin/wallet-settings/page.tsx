@@ -6,7 +6,6 @@ import {
   Wallet,
   Settings,
   ShieldCheck,
-  CreditCard,
   Plus,
   RefreshCw,
   Search,
@@ -21,25 +20,9 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Columns3,
-  ChevronDown,
-  ExternalLink,
-  Sparkles,
-  AlertTriangle,
-  Landmark
+  ChevronDown
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
-
-interface SyncedGateway {
-  id: string;
-  name: string;
-  description: string;
-  enabledInGateway: boolean;
-  isConfigured: boolean;
-  isVerified?: boolean;
-  keysVerifiedOnly?: boolean;
-  testMode?: boolean;
-  bankName?: string;
-}
 
 interface WalletConfig {
   is_enabled: boolean;
@@ -48,7 +31,6 @@ interface WalletConfig {
   max_topup: number;
   preset_amounts: number[];
   bonus_rules: Array<{ threshold: number; bonus_percent: number }>;
-  allowed_gateways: string[];
   allow_site_purchases: boolean;
 }
 
@@ -143,7 +125,6 @@ export default function AdminWalletSettingsPage() {
   const [activeTab, setActiveTab] = useState<'settings' | 'ledger'>('settings');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [syncingGateways, setSyncingGateways] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
   const [config, setConfig] = useState<WalletConfig>({
@@ -156,36 +137,8 @@ export default function AdminWalletSettingsPage() {
       { threshold: 50, bonus_percent: 5 },
       { threshold: 100, bonus_percent: 10 }
     ],
-    allowed_gateways: ['stripe', 'paypal', 'manual'],
     allow_site_purchases: true,
   });
-
-  const [syncedGateways, setSyncedGateways] = useState<SyncedGateway[]>([
-    {
-      id: 'stripe',
-      name: 'Stripe Gateway',
-      description: 'Credit / Debit Cards, Apple Pay, Google Pay',
-      enabledInGateway: true,
-      isConfigured: true,
-      isVerified: false,
-      testMode: true
-    },
-    {
-      id: 'paypal',
-      name: 'PayPal Gateway',
-      description: 'PayPal Digital Wallet, Venmo & Pay Later',
-      enabledInGateway: false,
-      isConfigured: false,
-      testMode: true
-    },
-    {
-      id: 'manual',
-      name: 'Manual Settlement / Bank Wire',
-      description: 'Direct Bank Wire Transfer with Admin Approval Queue',
-      enabledInGateway: true,
-      isConfigured: true
-    }
-  ]);
 
   const [transactions, setTransactions] = useState<WalletTx[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]);
@@ -236,7 +189,9 @@ export default function AdminWalletSettingsPage() {
             ...data.settings,
             min_topup: parseFloat(data.settings.min_topup || 5),
             max_topup: parseFloat(data.settings.max_topup || 1000),
+            bonus_rules: Array.isArray(data.settings.bonus_rules) ? data.settings.bonus_rules : prev.bonus_rules,
           }));
+
           if (Array.isArray(data.settings.preset_amounts)) {
             setPresetInput(data.settings.preset_amounts.join(', '));
           }
@@ -244,16 +199,14 @@ export default function AdminWalletSettingsPage() {
             setVisibleColumns((prev) => ({ ...prev, ...data.settings.ledger_columns }));
           }
         }
-        if (Array.isArray(data.available_gateways) && data.available_gateways.length > 0) {
-          setSyncedGateways(data.available_gateways);
-        }
+
         if (Array.isArray(data.transactions)) setTransactions(data.transactions);
         if (Array.isArray(data.users)) setUsers(data.users);
 
         if (isManualRefresh) {
           setFeedback({
             type: 'success',
-            msg: t('walletDataRefreshed', 'Wallet configurations and payment gateways synchronized successfully.')
+            msg: t('walletDataRefreshed', 'Wallet settings refreshed successfully.')
           });
         }
       }
@@ -264,7 +217,6 @@ export default function AdminWalletSettingsPage() {
     }
   }, [t]);
 
-  // Mount & Real-time Cross-Module Synchronization with /admin/payment-gateway
   useEffect(() => {
     fetchData();
 
@@ -287,36 +239,6 @@ export default function AdminWalletSettingsPage() {
       window.removeEventListener('zecratary_wallet_settings_updated', handleSync);
     };
   }, [fetchData]);
-
-  // Explicit Gateway Sync Trigger
-  const handleSyncGateways = async () => {
-    if (syncingGateways) return;
-    setSyncingGateways(true);
-    try {
-      const res = await fetch('/api/admin/wallet-settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'sync_payment_gateways' }),
-      });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.available_gateways)) {
-        setSyncedGateways(data.available_gateways);
-        setFeedback({
-          type: 'success',
-          msg: data.message || t('gatewaysSyncedSuccess', 'Top-Up Gateways dynamically synced with /admin/payment-gateway!'),
-        });
-      } else {
-        throw new Error(data.error || 'Failed to sync gateways');
-      }
-    } catch (err: any) {
-      setFeedback({
-        type: 'error',
-        msg: err.message || t('gatewaysSyncFailed', 'Error syncing with Payment Gateway engine.'),
-      });
-    } finally {
-      setSyncingGateways(false);
-    }
-  };
 
   const handleSaveSettings = async () => {
     setSaving(true);
@@ -341,9 +263,8 @@ export default function AdminWalletSettingsPage() {
       });
       const data = await res.json();
       if (data.success) {
-        setFeedback({ type: 'success', msg: data.message || 'Wallet settings saved successfully to PostgreSQL!' });
+        setFeedback({ type: 'success', msg: data.message || 'Wallet settings and bonus incentives saved successfully to PostgreSQL!' });
         window.dispatchEvent(new Event('zecratary_wallet_settings_updated'));
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
       } else {
         setFeedback({ type: 'error', msg: data.error || 'Failed to save settings.' });
       }
@@ -374,7 +295,6 @@ export default function AdminWalletSettingsPage() {
         setShowAdjModal(false);
         fetchData();
         window.dispatchEvent(new Event('zecratary_wallet_updated'));
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
       } else {
         setFeedback({ type: 'error', msg: data.error || 'Adjustment failed.' });
       }
@@ -383,18 +303,6 @@ export default function AdminWalletSettingsPage() {
     } finally {
       setIsSubmittingAdj(false);
     }
-  };
-
-  const toggleGateway = (gwId: string) => {
-    setConfig((prev) => {
-      const exists = prev.allowed_gateways.includes(gwId);
-      return {
-        ...prev,
-        allowed_gateways: exists
-          ? prev.allowed_gateways.filter((g) => g !== gwId)
-          : [...prev.allowed_gateways, gwId],
-      };
-    });
   };
 
   const filteredTransactions = useMemo(() => {
@@ -623,12 +531,9 @@ export default function AdminWalletSettingsPage() {
               <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--color-text, #ffffff)' }}>
                 {t('walletSettingsTitle', 'Wallet Settings & Balance Engine')}
               </h1>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
-                {t('gatewaySynced', 'Gateway Synced')}
-              </span>
             </div>
             <p className="text-sm opacity-70 mt-0.5" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-              {t('walletSettingsSubtitle', 'Configure top-up limits, payment gateways, promotional bonuses, and customer store credit.')}
+              {t('walletSettingsSubtitle', 'Configure top-up limits, promotional bonus incentives, and customer store credit.')}
             </p>
           </div>
         </div>
@@ -773,7 +678,7 @@ export default function AdminWalletSettingsPage() {
                     type="button"
                     role="switch"
                     aria-checked={config.is_enabled}
-                    onClick={() => setConfig(prev => ({ ...prev, is_enabled: !prev.is_enabled }))}
+                    onClick={() => setConfig((prev) => ({ ...prev, is_enabled: !prev.is_enabled }))}
                     className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
                     style={{
                       backgroundColor: config.is_enabled
@@ -827,7 +732,7 @@ export default function AdminWalletSettingsPage() {
                     type="button"
                     role="switch"
                     aria-checked={config.allow_site_purchases}
-                    onClick={() => setConfig(prev => ({ ...prev, allow_site_purchases: !prev.allow_site_purchases }))}
+                    onClick={() => setConfig((prev) => ({ ...prev, allow_site_purchases: !prev.allow_site_purchases }))}
                     className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
                     style={{
                       backgroundColor: config.allow_site_purchases
@@ -929,182 +834,63 @@ export default function AdminWalletSettingsPage() {
             </div>
           </div>
 
-          {/* Section 2: DYNAMICALLY SYNCED TOP-UP GATEWAYS */}
+          {/* Section 2: Top-Up Bonus Incentives (Dedicated) */}
           <div
-            className="p-6 rounded-2xl border space-y-5 shadow-sm transition-colors duration-200"
+            className="p-6 rounded-2xl border space-y-6 shadow-sm transition-colors duration-200"
             style={{
               backgroundColor: 'var(--color-card, #1e293b)',
               borderColor: 'var(--color-border, #334155)',
             }}
           >
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border, #334155)' }}>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border, #334155)' }}>
               <div>
                 <h2 className="text-lg font-semibold flex items-center gap-2.5" style={{ color: 'var(--color-text, #ffffff)' }}>
-                  <CreditCard className="w-5 h-5" style={{ color: 'var(--color-primary, #3b82f6)' }} />
-                  {t('allowedGateways', 'Accepted Top-Up Gateways')}
+                  <Gift className="w-5 h-5 text-emerald-400" />
+                  {t('promotionalBonuses', 'Top-Up Bonus Incentives (Tiered Credit Rewards)')}
                 </h2>
                 <p className="text-xs opacity-70 mt-0.5" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('dynamicGatewaySyncNotice', 'Dynamically synchronized with /admin/payment-gateway. Enable or restrict gateway channels for store credit deposits.')}
+                  {t('promotionalBonusesSub', 'Reward customers with bonus credit percentages when they deposit above specific thresholds.')}
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSyncGateways}
-                  disabled={syncingGateways}
-                  className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer hover:border-blue-400 shadow-xs disabled:opacity-50"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                    borderColor: 'var(--color-border, #334155)',
-                    color: 'var(--color-primary, #3b82f6)'
-                  }}
-                  title={t('syncGatewaysTooltip', 'Pull latest gateway status from /admin/payment-gateway')}
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${syncingGateways ? 'animate-spin' : ''}`} />
-                  <span>{syncingGateways ? t('syncing', 'Syncing...') : t('syncPaymentGatewayBtn', 'Sync with Payment Gateway')}</span>
-                </button>
-
-                <Link
-                  href="/admin/payment-gateway"
-                  className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-85 shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                    borderColor: 'var(--color-border, #334155)',
-                    color: 'var(--color-text, #ffffff)'
-                  }}
-                >
-                  <Sliders className="w-3.5 h-3.5 text-blue-400" />
-                  <span>{t('manageGateways', 'Manage Gateways')}</span>
-                  <ExternalLink className="w-3 h-3 opacity-60" />
-                </Link>
-              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  setConfig((prev) => ({
+                    ...prev,
+                    bonus_rules: [...prev.bonus_rules, { threshold: 150, bonus_percent: 15 }],
+                  }))
+                }
+                className="px-3.5 py-2 rounded-xl text-xs font-bold border transition flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0 hover:border-emerald-500"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                  borderColor: 'var(--color-border, #334155)',
+                  color: 'var(--color-emerald, #10b981)'
+                }}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>{t('addBonusTier', 'Add Bonus Tier')}</span>
+              </button>
             </div>
 
-            {/* Dynamic Synced Gateway Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
-              {syncedGateways.map((gw) => {
-                const isAllowedForWallet = config.allowed_gateways.includes(gw.id);
-                const isEnabledInGateway = Boolean(gw.enabledInGateway);
-
-                return (
-                  <div
-                    key={gw.id}
-                    onClick={() => toggleGateway(gw.id)}
-                    className="p-4 rounded-2xl border-2 cursor-pointer flex flex-col justify-between transition-all select-none gap-3 shadow-xs"
-                    style={{
-                      borderColor: isAllowedForWallet
-                        ? 'var(--color-primary, #3b82f6)'
-                        : 'var(--color-border, #334155)',
-                      backgroundColor: isAllowedForWallet
-                        ? 'color-mix(in srgb, var(--color-primary, #3b82f6) 10%, transparent)'
-                        : 'var(--color-inner-dark, #0f172a)',
-                      opacity: isAllowedForWallet ? 1 : 0.75,
-                    }}
-                  >
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div 
-                            className="w-7 h-7 rounded-lg flex items-center justify-center font-black text-xs text-white shadow-xs"
-                            style={{
-                              backgroundColor: gw.id === 'stripe' ? '#635bff' : gw.id === 'paypal' ? '#ffc439' : 'var(--color-primary, #3b82f6)',
-                              color: gw.id === 'paypal' ? '#0f172a' : '#ffffff'
-                            }}
-                          >
-                            {gw.id === 'stripe' ? 'S' : gw.id === 'paypal' ? 'P' : <Landmark className="w-4 h-4" />}
-                          </div>
-                          <span className="text-sm font-bold" style={{ color: 'var(--color-text, #ffffff)' }}>{gw.name}</span>
-                        </div>
-
-                        <div
-                          className="w-4 h-4 rounded-full border flex items-center justify-center transition-colors"
-                          style={{
-                            backgroundColor: isAllowedForWallet ? 'var(--color-primary, #3b82f6)' : 'transparent',
-                            borderColor: isAllowedForWallet ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
-                          }}
-                        >
-                          {isAllowedForWallet && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
-                        </div>
-                      </div>
-
-                      <p className="text-xs opacity-70 mt-2" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                        {gw.description}
-                      </p>
-                    </div>
-
-                    {/* Dynamic Gateway State Flags */}
-                    <div className="pt-2 border-t space-y-1.5" style={{ borderColor: 'var(--color-border, #334155)' }}>
-                      <div className="flex items-center justify-between text-[11px] font-semibold">
-                        <span className="opacity-60">{t('gatewayEngineStatus', 'Payment Gateway:')}</span>
-                        {isEnabledInGateway ? (
-                          <span className="text-emerald-400 flex items-center gap-1 font-bold">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                            {t('activeEnabled', 'Active / Enabled')}
-                          </span>
-                        ) : (
-                          <span className="text-amber-400 flex items-center gap-1 font-bold">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                            {t('disabledInEngine', 'Disabled')}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center justify-between text-[11px] font-semibold">
-                        <span className="opacity-60">{t('walletChannelStatus', 'Wallet Top-Up:')}</span>
-                        <span style={{ color: isAllowedForWallet ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}>
-                          {isAllowedForWallet ? t('acceptedForTopup', 'Accepted') : t('restricted', 'Restricted')}
-                        </span>
-                      </div>
-
-                      {/* Mismatch Warning Alert if allowed in wallet but disabled globally */}
-                      {isAllowedForWallet && !isEnabledInGateway && (
-                        <div 
-                          onClick={(e) => e.stopPropagation()} 
-                          className="p-2 rounded-xl border mt-2 flex items-start gap-1.5 text-[10px] leading-tight"
-                          style={{
-                            backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                            borderColor: 'rgba(245, 158, 11, 0.3)',
-                            color: '#fbbf24'
-                          }}
-                        >
-                          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-400" />
-                          <div>
-                            <span>{t('disabledGloballyNotice', 'Disabled globally in Payment Gateway. Users will not see this channel at checkout until activated.')} </span>
-                            <Link href="/admin/payment-gateway" className="underline font-bold hover:text-white">
-                              {t('activateInGateway', 'Activate in Gateway →')}
-                            </Link>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Bonus Rules Area */}
-            <div className="pt-4 border-t" style={{ borderColor: 'var(--color-border, #334155)' }}>
-              <div className="flex items-center justify-between mb-3">
-                <label className="block text-xs font-semibold uppercase opacity-70" style={{ color: 'var(--color-text, #ffffff)' }}>
-                  {t('promotionalBonuses', 'Top-Up Bonus Incentives (Tiered Credit Rewards)')}
-                </label>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setConfig({
-                      ...config,
-                      bonus_rules: [...config.bonus_rules, { threshold: 150, bonus_percent: 15 }],
-                    })
-                  }
-                  className="text-xs hover:underline flex items-center gap-1 cursor-pointer font-bold"
-                  style={{ color: 'var(--color-primary, #3b82f6)' }}
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  {t('addBonusTier', 'Add Bonus Tier')}
-                </button>
+            {config.bonus_rules.length === 0 ? (
+              <div 
+                className="p-8 text-center rounded-xl border border-dashed text-xs opacity-70 space-y-2"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                  borderColor: 'var(--color-border, #334155)',
+                  color: 'var(--color-text-secondary, #94a3b8)'
+                }}
+              >
+                <Gift className="w-8 h-8 mx-auto opacity-40 text-emerald-400" />
+                <div className="font-semibold" style={{ color: 'var(--color-text, #ffffff)' }}>
+                  {t('noBonusTiers', 'No bonus reward tiers currently configured.')}
+                </div>
+                <p>
+                  {t('noBonusTiersSub', 'Click "Add Bonus Tier" above to incentivize larger customer deposits with promotional bonus credits.')}
+                </p>
               </div>
-
+            ) : (
               <div className="space-y-3">
                 {config.bonus_rules.map((rule, idx) => (
                   <div
@@ -1116,7 +902,7 @@ export default function AdminWalletSettingsPage() {
                     }}
                   >
                     <div className="flex items-center gap-2">
-                      <Gift className="w-4 h-4" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                      <Gift className="w-4 h-4 text-emerald-400" />
                       <span className="opacity-70 text-xs" style={{ color: 'var(--color-text, #ffffff)' }}>Deposit ≥</span>
                       <input
                         type="number"
@@ -1127,14 +913,18 @@ export default function AdminWalletSettingsPage() {
                           updated[idx].threshold = parseFloat(e.target.value) || 0;
                           setConfig({ ...config, bonus_rules: updated });
                         }}
-                        className="wallet-input w-24 px-2.5 py-1.5 rounded-lg border text-xs focus:outline-none transition-colors"
+                        className="wallet-input w-24 px-2.5 py-1.5 rounded-lg border text-xs focus:outline-none transition-colors font-mono font-bold"
                         style={{
                           borderColor: 'var(--color-border, #334155)',
                           backgroundColor: 'var(--color-card, #1e293b)',
                           color: 'var(--color-text, #ffffff)',
                         }}
                       />
+                      <span className="text-xs opacity-60 font-mono" style={{ color: 'var(--color-text, #ffffff)' }}>
+                        {activeCurrencySymbol}
+                      </span>
                     </div>
+
                     <div className="flex items-center gap-2">
                       <span className="opacity-70 text-xs" style={{ color: 'var(--color-text, #ffffff)' }}>Give Bonus %</span>
                       <input
@@ -1147,14 +937,14 @@ export default function AdminWalletSettingsPage() {
                           updated[idx].bonus_percent = parseFloat(e.target.value) || 0;
                           setConfig({ ...config, bonus_rules: updated });
                         }}
-                        className="wallet-input w-20 px-2.5 py-1.5 rounded-lg border text-xs focus:outline-none transition-colors"
+                        className="wallet-input w-20 px-2.5 py-1.5 rounded-lg border text-xs focus:outline-none transition-colors font-mono font-bold"
                         style={{
                           borderColor: 'var(--color-border, #334155)',
                           backgroundColor: 'var(--color-card, #1e293b)',
                           color: 'var(--color-text, #ffffff)',
                         }}
                       />
-                      <span className="text-xs opacity-60" style={{ color: 'var(--color-text, #ffffff)' }}>%</span>
+                      <span className="text-xs opacity-60 font-bold" style={{ color: 'var(--color-text, #ffffff)' }}>%</span>
                     </div>
 
                     <button
@@ -1170,7 +960,7 @@ export default function AdminWalletSettingsPage() {
                   </div>
                 ))}
               </div>
-            </div>
+            )}
           </div>
 
           {/* Form-free Submit */}
