@@ -2424,8 +2424,8 @@
       "currency": "USD",
       "testMode": true,
       "stripeConnected": false,
-      "stripeKeysVerified": false,
-      "stripeWebhookVerified": false,
+      "stripeKeysVerified": true,
+      "stripeWebhookVerified": true,
       "stripe": {
         "enabled": true,
         "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG",
@@ -3787,8 +3787,8 @@
       "currency": "USD",
       "testMode": true,
       "stripeConnected": false,
-      "stripeKeysVerified": false,
-      "stripeWebhookVerified": false,
+      "stripeKeysVerified": true,
+      "stripeWebhookVerified": true,
       "stripe": {
         "enabled": true,
         "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG",
@@ -3909,5 +3909,5 @@
     ],
     "recommendedRecipeUrls": []
   },
-  "updatedAt": "2026-10-02T13:35:45.724Z"
+  "updatedAt": "2026-10-02T14:04:18.460Z"
 }

@@ -684,7 +684,7 @@ function WalletContent() {
 
       {feedback && (
         <div
-          className={`p-4 rounded-2xl border flex items-center gap-3 text-sm animate-fade-in ${
+          className={`p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-sm animate-fade-in ${
             feedback.type === 'success'
               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
               : feedback.type === 'info'
@@ -692,14 +692,26 @@ function WalletContent() {
               : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
           }`}
         >
-          {feedback.type === 'success' ? (
-            <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-          ) : feedback.type === 'info' ? (
-            <Info className="w-5 h-5 flex-shrink-0" />
-          ) : (
-            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          <div className="flex items-center gap-3">
+            {feedback.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+            ) : feedback.type === 'info' ? (
+              <Info className="w-5 h-5 flex-shrink-0" />
+            ) : (
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            )}
+            <span className="font-semibold text-xs leading-relaxed">{feedback.msg}</span>
+          </div>
+
+          {feedback.type === 'error' && (feedback.msg.includes('Admin Payment Settings') || feedback.msg.includes('Stripe')) && (
+            <Link
+              href="/admin/payment-gateway"
+              className="px-3.5 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shrink-0 bg-black/20 hover:bg-black/40 border-rose-500/40 text-white shadow-xs"
+            >
+              <span>{t('configureGatewayBtn', 'Configure Gateway')}</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </Link>
           )}
-          <span className="font-semibold text-xs">{feedback.msg}</span>
         </div>
       )}
 

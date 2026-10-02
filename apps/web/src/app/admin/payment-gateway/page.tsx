@@ -6,7 +6,7 @@ import {
   CreditCard, Shield, CheckCircle2, AlertCircle, Save, 
   RefreshCw, Check, Eye, EyeOff, Globe, Zap, Sliders,
   ShieldCheck, Terminal, ExternalLink, Code2, AlertTriangle,
-  Activity, CheckCheck
+  Activity, CheckCheck, DownloadCloud, UploadCloud, Sparkles
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -56,6 +56,8 @@ export default function AdminPaymentGatewayPage() {
   const version = langContext?.version;
 
   const [loading, setLoading] = useState(false);
+  const [syncingEnv, setSyncingEnv] = useState(false);
+  const [updatingEnv, setUpdatingEnv] = useState(false);
   const [verifyingStripe, setVerifyingStripe] = useState(false);
   const [verifyingWebhook, setVerifyingWebhook] = useState(false);
   const [showStripeGuideModal, setShowStripeGuideModal] = useState(false);
@@ -63,6 +65,7 @@ export default function AdminPaymentGatewayPage() {
   const [webhookEndpointUrl, setWebhookEndpointUrl] = useState('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
+  const [focusedField, setFocusedField] = useState<string | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
   // Gateway Settings State
@@ -90,6 +93,7 @@ export default function AdminPaymentGatewayPage() {
 
   const configRef = useRef<GatewayConfig>(config);
   const isFetchingRef = useRef<boolean>(false);
+  const isSavingRef = useRef<boolean>(false);
 
   useEffect(() => {
     configRef.current = config;
@@ -97,7 +101,7 @@ export default function AdminPaymentGatewayPage() {
 
   useEffect(() => {
     if (feedback) {
-      const timer = setTimeout(() => setFeedback(null), 4500);
+      const timer = setTimeout(() => setFeedback(null), 5000);
       return () => clearTimeout(timer);
     }
   }, [feedback]);
@@ -139,17 +143,162 @@ export default function AdminPaymentGatewayPage() {
     setVisibleFields((prev) => ({ ...prev, [field]: !prev[field] }));
   };
 
+  // SYNC FROM .ENV FILE DATA
+  const handleSyncFromEnv = useCallback(async (isManual = true) => {
+    if (syncingEnv || isSavingRef.current) return;
+    setSyncingEnv(true);
+    isSavingRef.current = true;
+    if (isManual) setFeedback(null);
+
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'sync_env' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success && data.settings) {
+        const merged: GatewayConfig = {
+          ...configRef.current,
+          ...data.settings,
+          stripe: { ...configRef.current.stripe, ...(data.settings.stripe || {}) },
+          paypal: { ...configRef.current.paypal, ...(data.settings.paypal || {}) },
+        };
+        setConfig(merged);
+        configRef.current = merged;
+        persistServerAdminSettings({ 
+          paymentSettings: merged,
+          currency: merged.currency 
+        }).catch(() => {});
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        }
+
+        const count = data.syncedCount !== undefined ? data.syncedCount : (data.syncedFields?.length || 0);
+        const fields = Array.isArray(data.syncedFields) && data.syncedFields.length > 0 
+          ? ` (${data.syncedFields.join(', ')})` 
+          : '';
+
+        if (isManual || count > 0) {
+          setFeedback({
+            type: 'success',
+            msg: count > 0
+              ? t('syncEnvSuccess', `Successfully synced ${count} credential(s) from .env${fields} and updated PostgreSQL!`)
+              : t('syncEnvUpToDate', 'Dashboard is already up to date with your server .env credentials.'),
+          });
+        }
+      } else {
+        if (isManual) {
+          setFeedback({
+            type: 'error',
+            msg: data.error || t('syncEnvFailed', 'Failed to sync credentials from .env. Please check server environment configuration.'),
+          });
+        }
+      }
+    } catch (e: any) {
+      if (isManual) {
+        setFeedback({
+          type: 'error',
+          msg: e.message || t('syncEnvError', 'Error connecting to server for .env synchronization.'),
+        });
+      }
+    } finally {
+      setSyncingEnv(false);
+      setTimeout(() => { isSavingRef.current = false; }, 500);
+    }
+  }, [syncingEnv, t]);
+
+  // UPDATE / SAVE EXPLICITLY TO .ENV FILE DATA
+  const handleUpdateToEnv = useCallback(async () => {
+    if (updatingEnv || isSavingRef.current) return;
+    setUpdatingEnv(true);
+    isSavingRef.current = true;
+    setFeedback(null);
+
+    const currentPayload = { ...configRef.current };
+
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          action: 'update_env', 
+          paymentSettings: currentPayload,
+          currency: currentPayload.currency,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setFeedback({
+          type: 'success',
+          msg: data.message || t('updateEnvSuccess', 'API Keys and Gateway settings successfully written to .env file!'),
+        });
+      } else {
+        throw new Error(data.error || 'Failed to update .env file on server.');
+      }
+    } catch (e: any) {
+      setFeedback({
+        type: 'error',
+        msg: e.message || t('updateEnvError', 'Failed to update .env file on server.'),
+      });
+    } finally {
+      setUpdatingEnv(false);
+      setTimeout(() => { isSavingRef.current = false; }, 500);
+    }
+  }, [updatingEnv, t]);
+
   const fetchData = useCallback(async () => {
-    if (isFetchingRef.current) return;
+    if (isFetchingRef.current || isSavingRef.current) return;
     isFetchingRef.current = true;
     purgeLegacyBrowserAdminStorage();
     try {
       const res = await fetch('/api/admin/payment?t=' + Date.now(), { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        if (data.success && data.settings) {
-          const merged = { ...configRef.current, ...data.settings };
-          if (JSON.stringify(configRef.current) !== JSON.stringify(merged)) {
+        let serverSettings = data.settings;
+
+        if (!serverSettings) {
+          try {
+            const adminData = await fetchServerAdminSettings();
+            if (adminData && (adminData.paymentSettings || adminData.payment_gateway_config)) {
+              serverSettings = adminData.paymentSettings || adminData.payment_gateway_config;
+            }
+          } catch (_) {}
+        }
+
+        if (serverSettings) {
+          if (typeof serverSettings === 'string') {
+            try {
+              serverSettings = JSON.parse(serverSettings);
+            } catch (_) {}
+          }
+          if (serverSettings && typeof serverSettings === 'object') {
+            const merged: GatewayConfig = {
+              ...configRef.current,
+              ...serverSettings,
+              currency: serverSettings.currency || configRef.current.currency || 'USD',
+              testMode: serverSettings.testMode !== undefined ? Boolean(serverSettings.testMode) : configRef.current.testMode,
+              activeGateway: serverSettings.activeGateway || configRef.current.activeGateway || 'stripe',
+              stripe: {
+                ...configRef.current.stripe,
+                ...(serverSettings.stripe || {}),
+                publishableKey: serverSettings.stripe?.publishableKey !== undefined ? serverSettings.stripe.publishableKey : configRef.current.stripe.publishableKey,
+                secretKey: serverSettings.stripe?.secretKey !== undefined ? serverSettings.stripe.secretKey : configRef.current.stripe.secretKey,
+                webhookSecret: serverSettings.stripe?.webhookSecret !== undefined ? serverSettings.stripe.webhookSecret : configRef.current.stripe.webhookSecret,
+                enabled: serverSettings.stripe?.enabled !== undefined ? Boolean(serverSettings.stripe.enabled) : configRef.current.stripe.enabled,
+              },
+              paypal: {
+                ...configRef.current.paypal,
+                ...(serverSettings.paypal || {}),
+                clientId: serverSettings.paypal?.clientId !== undefined ? serverSettings.paypal.clientId : configRef.current.paypal.clientId,
+                clientSecret: serverSettings.paypal?.clientSecret !== undefined ? serverSettings.paypal.clientSecret : configRef.current.paypal.clientSecret,
+                webhookId: serverSettings.paypal?.webhookId !== undefined ? serverSettings.paypal.webhookId : configRef.current.paypal.webhookId,
+                environment: serverSettings.paypal?.environment || configRef.current.paypal.environment || 'sandbox',
+                enabled: serverSettings.paypal?.enabled !== undefined ? Boolean(serverSettings.paypal.enabled) : configRef.current.paypal.enabled,
+              },
+            };
             configRef.current = merged;
             setConfig(merged);
           }
@@ -171,10 +320,13 @@ export default function AdminPaymentGatewayPage() {
 
     let debounceTimer: NodeJS.Timeout | null = null;
     const handleDebouncedSync = () => {
+      if (isSavingRef.current) return;
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        fetchDataRef.current();
-      }, 300);
+        if (!isSavingRef.current) {
+          fetchDataRef.current();
+        }
+      }, 350);
     };
 
     window.addEventListener('zecratary_payment_updated', handleDebouncedSync);
@@ -209,28 +361,40 @@ export default function AdminPaymentGatewayPage() {
     setConfig(updatedConfig);
     configRef.current = updatedConfig;
 
-    await persistServerAdminSettings({ currency: newCurrency, paymentSettings: updatedConfig });
+    isSavingRef.current = true;
     try {
-      await fetch('/api/admin/payment', {
+      persistServerAdminSettings({ currency: newCurrency, paymentSettings: updatedConfig }).catch(() => {});
+      const res = await fetch('/api/admin/payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedConfig),
+        body: JSON.stringify({
+          action: 'save_gateway_settings',
+          currency: newCurrency,
+          paymentSettings: updatedConfig,
+        }),
       });
+      const data = await res.json().catch(() => ({}));
 
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      if (res.ok && data.success) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        }
+
+        setFeedback({
+          type: 'success',
+          msg: `Processing currency updated to ${newCurrency} (${getCurrencySymbol(newCurrency)}) and saved to server & .env!`,
+        });
+      } else {
+        throw new Error(data.error || 'Failed to save currency');
       }
-
-      setFeedback({
-        type: 'success',
-        msg: `Processing currency updated to ${newCurrency} (${getCurrencySymbol(newCurrency)}) and saved to server!`,
-      });
     } catch (err: any) {
       setFeedback({
         type: 'error',
         msg: `Failed to persist currency: ${err.message || 'Server error'}`,
       });
+    } finally {
+      setTimeout(() => { isSavingRef.current = false; }, 500);
     }
   };
 
@@ -245,30 +409,42 @@ export default function AdminPaymentGatewayPage() {
     setConfig(updatedConfig);
     configRef.current = updatedConfig;
 
+    isSavingRef.current = true;
     try {
       const res = await fetch('/api/admin/payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'toggle_test_mode', testMode: nextMode }),
+        body: JSON.stringify({
+          action: 'toggle_test_mode',
+          testMode: nextMode,
+          paymentSettings: updatedConfig,
+        }),
       });
-      await persistServerAdminSettings({ paymentSettings: updatedConfig });
+      const data = await res.json().catch(() => ({}));
+      persistServerAdminSettings({ paymentSettings: updatedConfig }).catch(() => {});
 
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      if (res.ok && data.success) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_payment_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+        }
+
+        setFeedback({
+          type: 'success',
+          msg: nextMode
+            ? t('sandboxTestModeEnabled', 'Sandbox (Test Mode) enabled and saved to server & .env!')
+            : t('liveProductionModeEnabled', 'Live Production mode enabled and saved to server & .env!'),
+        });
+      } else {
+        throw new Error(data.error || 'Failed to update gateway environment');
       }
-
-      setFeedback({
-        type: 'success',
-        msg: nextMode
-          ? t('sandboxTestModeEnabled', 'Sandbox (Test Mode) enabled and saved to server!')
-          : t('liveProductionModeEnabled', 'Live Production mode enabled and saved to server!'),
-      });
     } catch (err: any) {
       setFeedback({
         type: 'error',
         msg: err.message || 'Failed to update gateway environment.',
       });
+    } finally {
+      setTimeout(() => { isSavingRef.current = false; }, 500);
     }
   };
 
@@ -301,7 +477,7 @@ export default function AdminPaymentGatewayPage() {
         };
         setConfig(updated);
         configRef.current = updated;
-        await persistServerAdminSettings({ paymentSettings: updated });
+        persistServerAdminSettings({ paymentSettings: updated }).catch(() => {});
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('zecratary_payment_updated'));
           window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
@@ -377,7 +553,7 @@ export default function AdminPaymentGatewayPage() {
         };
         setConfig(updated);
         configRef.current = updated;
-        await persistServerAdminSettings({ paymentSettings: updated });
+        persistServerAdminSettings({ paymentSettings: updated }).catch(() => {});
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new Event('zecratary_payment_updated'));
           window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
@@ -410,50 +586,66 @@ export default function AdminPaymentGatewayPage() {
   };
 
   const handleSaveSettings = async (e?: React.SyntheticEvent) => {
+    if (config.stripe.secretKey && (config.stripe.secretKey.includes('...') || config.stripe.secretKey.includes('*'))) {
+      setFeedback({
+        type: 'error',
+        msg: t('invalidSecretKeyFormat', 'Please enter a valid Stripe Secret Key. Do not submit placeholder dots (...) or masked asterisks (*).'),
+      });
+      return;
+    }
     if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    if (loading || isSavingRef.current) return;
+
     setLoading(true);
+    isSavingRef.current = true;
     setFeedback(null);
 
-    const updatedConfig: GatewayConfig = { ...config };
+    const updatedConfig: GatewayConfig = {
+      ...config,
+      stripe: { ...config.stripe },
+      paypal: { ...config.paypal },
+    };
 
     try {
       const res = await fetch('/api/admin/payment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedConfig),
+        body: JSON.stringify({
+          action: 'save_gateway_settings',
+          paymentSettings: updatedConfig,
+          currency: updatedConfig.currency,
+        }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
-      await persistServerAdminSettings({
-        paymentSettings: updatedConfig,
-        currency: updatedConfig.currency
-      });
-
-      if (data.success) {
-        setConfig(updatedConfig);
-        configRef.current = updatedConfig;
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_payment_updated'));
-          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-        }
-        setFeedback({ type: 'success', msg: t('gatewaySettingsSavedSuccess', 'Payment gateway settings and currency saved successfully to server!') });
-      } else {
-        setFeedback({ type: 'error', msg: data.error || 'Failed to save gateway settings.' });
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to save gateway settings to server.');
       }
-    } catch (e: any) {
-      await persistServerAdminSettings({
+
+      persistServerAdminSettings({
         paymentSettings: updatedConfig,
         currency: updatedConfig.currency
-      });
+      }).catch((err) => console.warn('persistServerAdminSettings non-blocking warning:', err));
+
       setConfig(updatedConfig);
       configRef.current = updatedConfig;
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_payment_updated'));
         window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       }
-      setFeedback({ type: 'success', msg: t('gatewaySettingsSavedSuccess', 'Payment gateway settings saved to server.') });
+      setFeedback({ 
+        type: 'success', 
+        msg: t('gatewaySettingsSavedSuccess', 'Payment gateway settings and API keys saved successfully to PostgreSQL and .env!') 
+      });
+    } catch (e: any) {
+      console.error('Save gateway settings error:', e);
+      setFeedback({ 
+        type: 'error', 
+        msg: e.message || t('failedToSaveSettings', 'Failed to save payment gateway settings.') 
+      });
     } finally {
       setLoading(false);
+      setTimeout(() => { isSavingRef.current = false; }, 500);
     }
   };
 
@@ -492,7 +684,41 @@ export default function AdminPaymentGatewayPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* SYNC FROM .ENV BUTTON */}
+          <button
+            type="button"
+            onClick={() => handleSyncFromEnv(true)}
+            disabled={syncingEnv}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50 hover:border-[var(--color-primary)]"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+            title={t('syncFromEnvTooltip', 'Import API credentials directly from server .env file into PostgreSQL')}
+          >
+            <DownloadCloud className={`h-4 w-4 text-[var(--color-primary)] ${syncingEnv ? 'animate-bounce' : ''}`} />
+            <span>{syncingEnv ? t('syncingEnv', 'Syncing .env...') : t('syncFromEnvBtn', 'Sync from .env')}</span>
+          </button>
+
+          {/* UPDATE / SAVE TO .ENV BUTTON */}
+          <button
+            type="button"
+            onClick={handleUpdateToEnv}
+            disabled={updatingEnv}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50 hover:border-emerald-500"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+            title={t('updateToEnvTooltip', 'Save current API credentials and environment settings directly into .env file')}
+          >
+            <UploadCloud className={`h-4 w-4 text-emerald-500 ${updatingEnv ? 'animate-pulse' : ''}`} />
+            <span>{updatingEnv ? t('updatingEnv', 'Updating .env...') : t('updateEnvBtn', 'Update .env')}</span>
+          </button>
+
           <Link
             href="/admin/plans"
             className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs"
@@ -567,6 +793,30 @@ export default function AdminPaymentGatewayPage() {
             >
               {(config.stripeKeysVerified && config.stripeWebhookVerified) ? t('verifiedStatus', 'Verified') : t('unverifiedStatus', 'Unverified')}
             </span>
+          </div>
+
+          <div className="flex items-center gap-2 pl-2 border-l" style={{ borderColor: 'var(--color-border)' }}>
+            <button
+              type="button"
+              onClick={() => handleSyncFromEnv(true)}
+              disabled={syncingEnv}
+              className="font-bold text-[11px] flex items-center gap-1 text-[var(--color-primary)] hover:underline cursor-pointer disabled:opacity-40"
+              title={t('syncFromEnvTooltip', 'Sync credentials from .env')}
+            >
+              <Sparkles className="h-3 w-3" />
+              <span>{syncingEnv ? t('syncing', 'Syncing...') : t('syncEnvText', 'Sync .env')}</span>
+            </button>
+            <span style={{ color: 'var(--color-border)' }}>•</span>
+            <button
+              type="button"
+              onClick={handleUpdateToEnv}
+              disabled={updatingEnv}
+              className="font-bold text-[11px] flex items-center gap-1 text-emerald-500 hover:underline cursor-pointer disabled:opacity-40"
+              title={t('updateToEnvTooltip', 'Save current settings to .env')}
+            >
+              <UploadCloud className="h-3 w-3" />
+              <span>{updatingEnv ? t('saving', 'Saving...') : t('updateEnvText', 'Update .env')}</span>
+            </button>
           </div>
         </div>
       </div>
@@ -739,6 +989,17 @@ export default function AdminPaymentGatewayPage() {
                 <h3 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('stripeApiConfig', 'Stripe API Configuration')}</h3>
               </div>
               <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => handleSyncFromEnv(true)}
+                  disabled={syncingEnv}
+                  className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                  title={t('syncStripeEnvTooltip', 'Sync Stripe credentials from .env')}
+                >
+                  <DownloadCloud className="h-3 w-3" />
+                  <span>{t('syncFromEnv', '.env Sync')}</span>
+                </button>
+
                 <span
                   className="text-[11px] font-bold tracking-tight select-none transition-colors duration-200"
                   style={{ color: config.stripe.enabled ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
@@ -903,15 +1164,21 @@ export default function AdminPaymentGatewayPage() {
                     name="cfg_stripe_publishable_key"
                     autoComplete="new-password"
                     autoCorrect="off"
-                    spellCheck="false"
+                    spellCheck={false}
                     data-lpignore="true"
                     data-1p-ignore="true"
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    readOnly={focusedField !== 'stripePublishable'}
+                    onFocus={(e) => { 
+                      setFocusedField('stripePublishable'); 
+                      e.currentTarget.style.borderColor = 'var(--color-primary)'; 
+                    }}
+                    onBlur={(e) => { 
+                      setFocusedField(null); 
+                      e.currentTarget.style.borderColor = 'var(--color-border)'; 
+                    }}
                     value={config.stripe.publishableKey}
                     onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, publishableKey: e.target.value } })}
                     placeholder="pk_test_... / pk_live_..."
@@ -944,15 +1211,21 @@ export default function AdminPaymentGatewayPage() {
                     name="cfg_stripe_secret_key"
                     autoComplete="new-password"
                     autoCorrect="off"
-                    spellCheck="false"
+                    spellCheck={false}
                     data-lpignore="true"
                     data-1p-ignore="true"
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    readOnly={focusedField !== 'stripeSecret'}
+                    onFocus={(e) => { 
+                      setFocusedField('stripeSecret'); 
+                      e.currentTarget.style.borderColor = 'var(--color-primary)'; 
+                    }}
+                    onBlur={(e) => { 
+                      setFocusedField(null); 
+                      e.currentTarget.style.borderColor = 'var(--color-border)'; 
+                    }}
                     value={config.stripe.secretKey}
                     onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, secretKey: e.target.value } })}
                     placeholder="sk_test_... / sk_live_..."
@@ -1020,15 +1293,21 @@ export default function AdminPaymentGatewayPage() {
                     name="cfg_stripe_webhook_secret"
                     autoComplete="new-password"
                     autoCorrect="off"
-                    spellCheck="false"
+                    spellCheck={false}
                     data-lpignore="true"
                     data-1p-ignore="true"
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    readOnly={focusedField !== 'stripeWebhook'}
+                    onFocus={(e) => { 
+                      setFocusedField('stripeWebhook'); 
+                      e.currentTarget.style.borderColor = 'var(--color-primary)'; 
+                    }}
+                    onBlur={(e) => { 
+                      setFocusedField(null); 
+                      e.currentTarget.style.borderColor = 'var(--color-border)'; 
+                    }}
                     value={config.stripe.webhookSecret}
                     onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
                     placeholder="whsec_..."
@@ -1096,6 +1375,17 @@ export default function AdminPaymentGatewayPage() {
                 <h3 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{t('paypalApiConfig', 'PayPal API Configuration')}</h3>
               </div>
               <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => handleSyncFromEnv(true)}
+                  disabled={syncingEnv}
+                  className="text-[11px] font-bold text-[var(--color-primary)] hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                  title={t('syncPaypalEnvTooltip', 'Sync PayPal credentials from .env')}
+                >
+                  <DownloadCloud className="h-3 w-3" />
+                  <span>{t('syncFromEnv', '.env Sync')}</span>
+                </button>
+
                 <span
                   className="text-[11px] font-bold tracking-tight select-none transition-colors duration-200"
                   style={{ color: config.paypal.enabled ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
@@ -1138,15 +1428,21 @@ export default function AdminPaymentGatewayPage() {
                     name="cfg_paypal_client_id"
                     autoComplete="new-password"
                     autoCorrect="off"
-                    spellCheck="false"
+                    spellCheck={false}
                     data-lpignore="true"
                     data-1p-ignore="true"
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    readOnly={focusedField !== 'paypalClientId'}
+                    onFocus={(e) => { 
+                      setFocusedField('paypalClientId'); 
+                      e.currentTarget.style.borderColor = 'var(--color-primary)'; 
+                    }}
+                    onBlur={(e) => { 
+                      setFocusedField(null); 
+                      e.currentTarget.style.borderColor = 'var(--color-border)'; 
+                    }}
                     value={config.paypal.clientId}
                     onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientId: e.target.value } })}
                     placeholder="PayPal Client ID"
@@ -1179,15 +1475,21 @@ export default function AdminPaymentGatewayPage() {
                     name="cfg_paypal_secret_key"
                     autoComplete="new-password"
                     autoCorrect="off"
-                    spellCheck="false"
+                    spellCheck={false}
                     data-lpignore="true"
                     data-1p-ignore="true"
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    readOnly={focusedField !== 'paypalSecret'}
+                    onFocus={(e) => { 
+                      setFocusedField('paypalSecret'); 
+                      e.currentTarget.style.borderColor = 'var(--color-primary)'; 
+                    }}
+                    onBlur={(e) => { 
+                      setFocusedField(null); 
+                      e.currentTarget.style.borderColor = 'var(--color-border)'; 
+                    }}
                     value={config.paypal.clientSecret}
                     onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientSecret: e.target.value } })}
                     placeholder="PayPal Client Secret"
@@ -1220,15 +1522,21 @@ export default function AdminPaymentGatewayPage() {
                     name="cfg_paypal_webhook_id"
                     autoComplete="new-password"
                     autoCorrect="off"
-                    spellCheck="false"
+                    spellCheck={false}
                     data-lpignore="true"
                     data-1p-ignore="true"
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    readOnly
-                    onFocus={(e) => { e.currentTarget.readOnly = false; e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                    onBlur={(e) => { e.currentTarget.readOnly = true; e.currentTarget.style.borderColor = 'var(--color-border)'; }}
+                    readOnly={focusedField !== 'paypalWebhook'}
+                    onFocus={(e) => { 
+                      setFocusedField('paypalWebhook'); 
+                      e.currentTarget.style.borderColor = 'var(--color-primary)'; 
+                    }}
+                    onBlur={(e) => { 
+                      setFocusedField(null); 
+                      e.currentTarget.style.borderColor = 'var(--color-border)'; 
+                    }}
                     value={config.paypal.webhookId}
                     onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, webhookId: e.target.value } })}
                     placeholder="PayPal Webhook ID"
