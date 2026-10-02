@@ -86,7 +86,7 @@ export default function AdminTokenSettingPage() {
   // Packages
   const [packages, setPackages] = useState<TokenPackage[]>([]);
   
-  // Subscription Plan Monthly Tokens (Synchronized with /admin/plans)
+  // Subscription Plan Monthly Tokens (Synchronized with /admin/plans and PostgreSQL)
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [planAllocations, setPlanAllocations] = useState<{ [slug: string]: number }>({});
 
@@ -177,11 +177,11 @@ export default function AdminTokenSettingPage() {
 
   const activeColumnCount = columns.filter(c => c.visible).length;
 
-  // Dynamic Settings and Plans Fetching (Direct from /api/admin/plans & PostgreSQL)
+  // Dynamic Settings and Plans Fetching (Direct from PostgreSQL and /api/admin/plans)
   const fetchSettings = useCallback(async () => {
     setLoading(true);
     try {
-      // 1. Fetch token settings
+      // 1. Fetch token settings and plans from token-settings endpoint
       const res = await fetch('/api/admin/token-settings', { cache: 'no-store' });
       const data = await res.json();
       let activeAllocations: { [slug: string]: number } = {};
@@ -211,9 +211,9 @@ export default function AdminTokenSettingPage() {
             dynamicPlans = list.map((p: any) => {
               const assignedLimit = Number(p.tokenLimit ?? p.token_limit ?? 500);
               return {
-                id: p.id,
+                id: p.id || p.slug,
                 slug: p.slug,
-                name: p.name,
+                name: p.name || p.slug,
                 token_limit: assignedLimit,
                 monthly_tokens: assignedLimit,
                 tokenLimit: assignedLimit,
@@ -227,14 +227,14 @@ export default function AdminTokenSettingPage() {
         }
       } catch (_) {}
 
-      // Fallback to data.plans from token-settings if needed
+      // Fallback 1: Use data.plans returned directly by /api/admin/token-settings
       if (dynamicPlans.length === 0 && Array.isArray(data.plans) && data.plans.length > 0) {
         dynamicPlans = data.plans.map((p: any) => {
           const assignedLimit = Number(p.token_limit ?? p.monthly_tokens ?? 500);
           return {
-            id: p.id,
+            id: p.id || p.slug,
             slug: p.slug,
-            name: p.name,
+            name: p.name || p.slug,
             token_limit: assignedLimit,
             monthly_tokens: assignedLimit,
             tokenLimit: assignedLimit,
@@ -246,9 +246,25 @@ export default function AdminTokenSettingPage() {
         });
       }
 
+      // Fallback 2: Construct from planAllocations if available
+      if (dynamicPlans.length === 0 && activeAllocations && Object.keys(activeAllocations).length > 0) {
+        dynamicPlans = Object.entries(activeAllocations).map(([slug, limit]) => ({
+          id: slug,
+          slug: slug,
+          name: slug.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' '),
+          token_limit: Number(limit),
+          monthly_tokens: Number(limit),
+          tokenLimit: Number(limit),
+          is_free: slug.includes('free') || slug === 'taster',
+          isFree: slug.includes('free') || slug === 'taster',
+          monthly_price_dollars: slug.includes('free') ? 0 : 9.99,
+          annual_price_dollars: slug.includes('free') ? 0 : 99.99
+        }));
+      }
+
       setPlans(dynamicPlans);
 
-      // Build consolidated allocation map prioritizing plan's token_limit from /admin/plans
+      // Build consolidated allocation map prioritizing plan token limits
       const map: { [slug: string]: number } = {};
       dynamicPlans.forEach((p: SubscriptionPlan) => {
         const val = p.token_limit ?? p.tokenLimit ?? p.monthly_tokens ?? activeAllocations[p.slug] ?? (p.is_free || p.isFree ? 50 : 500);
@@ -266,7 +282,7 @@ export default function AdminTokenSettingPage() {
   useEffect(() => {
     fetchSettings();
 
-    // Automatically re-sync whenever plans are updated in /admin/plans
+    // Automatically re-sync whenever plans or settings are updated
     const handlePlansUpdated = () => {
       fetchSettings();
     };
@@ -361,40 +377,8 @@ export default function AdminTokenSettingPage() {
         throw new Error(data.error || 'Failed to delete transaction');
       }
 
-      // Synchronize localStorage if currently logged-in user was affected
-      if (Array.isArray(data.affectedUsers) && data.affectedUsers.length > 0) {
-        try {
-          const rawCurrent = localStorage.getItem('zecratary_current_user');
-          if (rawCurrent) {
-            const parsed = JSON.parse(rawCurrent);
-            const found = data.affectedUsers.find((u: any) => 
-              (u.id && u.id === parsed.id) || 
-              (u.email && parsed.email && u.email.toLowerCase() === parsed.email.toLowerCase())
-            );
-            if (found) {
-              parsed.token_balance = found.newBalance;
-              parsed.tokenBalance = found.newBalance;
-              localStorage.setItem('zecratary_current_user', JSON.stringify(parsed));
-            }
-          }
-          const rawUser = localStorage.getItem('zecratary_user');
-          if (rawUser) {
-            const parsed = JSON.parse(rawUser);
-            const found = data.affectedUsers.find((u: any) => 
-              (u.id && u.id === parsed.id) || 
-              (u.email && parsed.email && u.email.toLowerCase() === parsed.email.toLowerCase())
-            );
-            if (found) {
-              parsed.token_balance = found.newBalance;
-              parsed.tokenBalance = found.newBalance;
-              localStorage.setItem('zecratary_user', JSON.stringify(parsed));
-            }
-          }
-        } catch (_) {}
-      }
-
       setSelectedTxIds(prev => prev.filter(item => item !== id));
-      setSuccessMsg(data.message || t('tokenTxDeletedSuccess', 'Transaction record deleted and user token balance updated successfully.'));
+      setSuccessMsg(data.message || t('tokenTxDeletedSuccess', 'Transaction record deleted successfully from PostgreSQL.'));
       await fetchTransactions(txPage, txLimit);
 
       if (typeof window !== 'undefined') {
@@ -430,41 +414,9 @@ export default function AdminTokenSettingPage() {
         throw new Error(data.error || 'Failed to delete selected transactions');
       }
 
-      // Synchronize localStorage if currently logged-in user was affected
-      if (Array.isArray(data.affectedUsers) && data.affectedUsers.length > 0) {
-        try {
-          const rawCurrent = localStorage.getItem('zecratary_current_user');
-          if (rawCurrent) {
-            const parsed = JSON.parse(rawCurrent);
-            const found = data.affectedUsers.find((u: any) => 
-              (u.id && u.id === parsed.id) || 
-              (u.email && parsed.email && u.email.toLowerCase() === parsed.email.toLowerCase())
-            );
-            if (found) {
-              parsed.token_balance = found.newBalance;
-              parsed.tokenBalance = found.newBalance;
-              localStorage.setItem('zecratary_current_user', JSON.stringify(parsed));
-            }
-          }
-          const rawUser = localStorage.getItem('zecratary_user');
-          if (rawUser) {
-            const parsed = JSON.parse(rawUser);
-            const found = data.affectedUsers.find((u: any) => 
-              (u.id && u.id === parsed.id) || 
-              (u.email && parsed.email && u.email.toLowerCase() === parsed.email.toLowerCase())
-            );
-            if (found) {
-              parsed.token_balance = found.newBalance;
-              parsed.tokenBalance = found.newBalance;
-              localStorage.setItem('zecratary_user', JSON.stringify(parsed));
-            }
-          }
-        } catch (_) {}
-      }
-
       const count = selectedTxIds.length;
       setSelectedTxIds([]);
-      setSuccessMsg(data.message || t('bulkTokenTxDeletedSuccess', `Successfully deleted ${count} transaction record(s) and updated user token balance(s).`));
+      setSuccessMsg(data.message || t('bulkTokenTxDeletedSuccess', `Successfully deleted ${count} transaction record(s) from PostgreSQL.`));
       await fetchTransactions(txPage, txLimit);
 
       if (typeof window !== 'undefined') {
@@ -749,9 +701,7 @@ export default function AdminTokenSettingPage() {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* TAB 1: TOKEN SETTINGS CONFIGURATION                                       */}
-      {/* ========================================================================= */}
+      {/* TAB 1: TOKEN SETTINGS CONFIGURATION */}
       {activeTab === 'settings' && (
         <div className="space-y-6 animate-in fade-in">
           {/* Section 1: Token Identity & System Status */}
@@ -841,7 +791,6 @@ export default function AdminTokenSettingPage() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Chef Chat Cost */}
               <div className="p-4 rounded-2xl border space-y-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                 <div className="flex items-center gap-2">
                   <ChefHat className="h-4 w-4 text-amber-500" />
@@ -863,7 +812,6 @@ export default function AdminTokenSettingPage() {
                 </div>
               </div>
 
-              {/* Import URL Cost */}
               <div className="p-4 rounded-2xl border space-y-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                 <div className="flex items-center gap-2">
                   <DownloadCloud className="h-4 w-4 text-emerald-500" />
@@ -885,7 +833,6 @@ export default function AdminTokenSettingPage() {
                 </div>
               </div>
 
-              {/* Import Text Cost */}
               <div className="p-4 rounded-2xl border space-y-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 text-blue-400" />
@@ -907,7 +854,6 @@ export default function AdminTokenSettingPage() {
                 </div>
               </div>
 
-              {/* Import Photo Cost */}
               <div className="p-4 rounded-2xl border space-y-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                 <div className="flex items-center gap-2">
                   <Camera className="h-4 w-4 text-purple-400" />
@@ -1036,7 +982,7 @@ export default function AdminTokenSettingPage() {
             </div>
           </div>
 
-          {/* Section 4: Subscription Plan Monthly Grants (Dynamically Synced with /admin/plans) */}
+          {/* Section 4: Subscription Plan Monthly Grants */}
           <div 
             className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -1058,7 +1004,7 @@ export default function AdminTokenSettingPage() {
             </div>
 
             <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('planMonthlyGrantsSubtitle', 'Subscribers automatically receive these tokens every recurring monthly billing cycle. Values dynamically synchronize with /admin/plans and PostgreSQL.')}
+              {t('planMonthlyGrantsSubtitle', 'Subscribers automatically receive these tokens every recurring monthly billing cycle. Synchronized with PostgreSQL subscription_plans.')}
             </p>
 
             {plans.length === 0 ? (
@@ -1126,9 +1072,7 @@ export default function AdminTokenSettingPage() {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* TAB 2: TOKEN TRANSACTIONS AUDIT LEDGER                                    */}
-      {/* ========================================================================= */}
+      {/* TAB 2: TOKEN TRANSACTIONS AUDIT LEDGER */}
       {activeTab === 'transactions' && (
         <div className="space-y-6 animate-in fade-in">
           {/* Summary KPI Cards */}
@@ -1263,7 +1207,6 @@ export default function AdminTokenSettingPage() {
                   </span>
                 </button>
 
-                {/* Column Picker Modal / Popup */}
                 {showColumnPicker && (
                   <div 
                     className="absolute right-0 mt-2 w-64 rounded-2xl border p-3.5 shadow-2xl z-50 space-y-2 animate-in fade-in slide-in-from-top-2"
@@ -1505,7 +1448,7 @@ export default function AdminTokenSettingPage() {
               </table>
             </div>
 
-            {/* Comprehensive Pagination Controls */}
+            {/* Pagination */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t text-xs" style={{ borderColor: 'var(--color-border)' }}>
               <span style={{ color: 'var(--color-text-secondary)' }}>
                 {t('showing', 'Showing')}{' '}
@@ -1521,7 +1464,6 @@ export default function AdminTokenSettingPage() {
                 {t('transactionsLabel', 'transactions')}
               </span>
 
-              {/* Page Button Bar */}
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"

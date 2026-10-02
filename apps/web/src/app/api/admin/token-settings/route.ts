@@ -11,28 +11,50 @@ export async function GET() {
 
     let plans: any[] = [];
     try {
+      // Use SELECT * to avoid "column does not exist" failures if a column is missing
       const planRows = await query(`
-        SELECT id, slug, name, token_limit, monthly_tokens, is_free, monthly_price_dollars, annual_price_dollars, monthly_badge, annual_badge 
-        FROM subscription_plans 
-        ORDER BY is_free DESC, monthly_price_dollars ASC
+        SELECT * FROM subscription_plans 
+        ORDER BY COALESCE(is_free, false) DESC, COALESCE(monthly_price_dollars, 0) ASC
       `);
 
-      plans = planRows.map((p: any) => {
-        const tokenLimit = Number(p.token_limit ?? p.monthly_tokens ?? settings.planAllocations?.[p.slug] ?? (p.is_free ? 50 : 500));
-        return {
-          id: p.id,
-          slug: p.slug,
-          name: p.name,
-          token_limit: tokenLimit,
-          monthly_tokens: tokenLimit,
-          tokenLimit: tokenLimit,
-          is_free: Boolean(p.is_free),
-          isFree: Boolean(p.is_free),
-          monthly_price_dollars: Number(p.monthly_price_dollars ?? 0),
-          annual_price_dollars: Number(p.annual_price_dollars ?? 0)
-        };
-      });
-    } catch (_) {}
+      if (planRows && planRows.length > 0) {
+        plans = planRows.map((p: any) => {
+          const tokenLimit = Number(p.token_limit ?? p.monthly_tokens ?? settings.planAllocations?.[p.slug] ?? (p.is_free ? 50 : 500));
+          return {
+            id: p.id || p.slug,
+            slug: p.slug,
+            name: p.name || p.slug,
+            token_limit: tokenLimit,
+            monthly_tokens: tokenLimit,
+            tokenLimit: tokenLimit,
+            is_free: Boolean(p.is_free),
+            isFree: Boolean(p.is_free),
+            monthly_price_dollars: Number(p.monthly_price_dollars ?? 0),
+            annual_price_dollars: Number(p.annual_price_dollars ?? 0),
+            monthly_badge: p.monthly_badge || undefined,
+            annual_badge: p.annual_badge || undefined
+          };
+        });
+      }
+    } catch (e) {
+      console.warn('GET token-settings plan query warning:', e);
+    }
+
+    // If database returned no plans, fallback to plan allocations from settings
+    if (plans.length === 0 && settings.planAllocations && Object.keys(settings.planAllocations).length > 0) {
+      plans = Object.entries(settings.planAllocations).map(([slug, limit]) => ({
+        id: slug,
+        slug: slug,
+        name: slug.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' '),
+        token_limit: Number(limit),
+        monthly_tokens: Number(limit),
+        tokenLimit: Number(limit),
+        is_free: slug.includes('free') || slug === 'taster',
+        isFree: slug.includes('free') || slug === 'taster',
+        monthly_price_dollars: slug.includes('free') ? 0 : 9.99,
+        annual_price_dollars: slug.includes('free') ? 0 : 99.99
+      }));
+    }
 
     return NextResponse.json({
       success: true,
@@ -61,15 +83,25 @@ export async function POST(req: NextRequest) {
       planAllocations: planAllocations || {}
     });
 
-    // Update subscription_plans table in PostgreSQL for each plan slug
+    // Update subscription_plans table in PostgreSQL with resilient fallback
     if (planAllocations && typeof planAllocations === 'object') {
       for (const [slug, amount] of Object.entries(planAllocations)) {
         const num = Math.max(0, Number(amount));
-        await query(`
-          UPDATE subscription_plans 
-          SET token_limit = $1, monthly_tokens = $1, updated_at = NOW() 
-          WHERE LOWER(slug) = LOWER($2) OR LOWER(id) = LOWER($2)
-        `, [num, slug]);
+        try {
+          await query(`
+            UPDATE subscription_plans 
+            SET token_limit = $1, monthly_tokens = $1, updated_at = NOW() 
+            WHERE LOWER(slug) = LOWER($2) OR LOWER(id) = LOWER($2)
+          `, [num, slug]);
+        } catch (_) {
+          try {
+            await query(`
+              UPDATE subscription_plans 
+              SET token_limit = $1, updated_at = NOW() 
+              WHERE LOWER(slug) = LOWER($2) OR LOWER(id) = LOWER($2)
+            `, [num, slug]);
+          } catch (_) {}
+        }
       }
     }
 
