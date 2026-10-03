@@ -119,8 +119,13 @@ export default function TokenPage() {
       if (currentUser?.email) params.append('email', currentUser.email);
 
       const res = await fetch(`/api/tokens?${params.toString()}`, { cache: 'no-store' });
-      if (!res.ok) throw new Error('Failed to fetch token records');
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (_) {
+        data = {};
+      }
 
       if (data.success) {
         if (typeof data.balance === 'number') setTokenBalance(data.balance);
@@ -128,8 +133,7 @@ export default function TokenPage() {
         if (data.tokenSymbol) setTokenSymbol(data.tokenSymbol);
         if (data.tokenName) setTokenName(data.tokenName);
 
-        // Dynamically sync and match packages configured in /admin/token-setting
-        if (Array.isArray(data.packages)) {
+        if (Array.isArray(data.packages) && data.packages.length > 0) {
           setPackages(data.packages);
           setSelectedPackageId(prev => {
             const exists = data.packages.some((p: TokenPackage) => p.id === prev);
@@ -138,7 +142,7 @@ export default function TokenPage() {
         }
 
         setTransactions(data.transactions || []);
-        setTotalCount(data.total || 0);
+        setTotalCount(data.total || data.totalCount || 0);
         setTotalPages(data.totalPages || 1);
 
         if (data.stats) {
@@ -169,7 +173,6 @@ export default function TokenPage() {
     window.addEventListener('zecratary_token_settings_updated', handleSync);
     window.addEventListener('zecratary_wallet_updated', handleSync);
 
-    // Cross-tab synchronization via storage event
     const handleStorage = (e: StorageEvent) => {
       if (!e.key || e.key.includes('token') || e.key.includes('settings')) {
         fetchTokenData(true);
@@ -177,7 +180,6 @@ export default function TokenPage() {
     };
     window.addEventListener('storage', handleStorage);
 
-    // Window focus refresh
     const handleFocus = () => fetchTokenData(true);
     window.addEventListener('focus', handleFocus);
 
@@ -190,7 +192,7 @@ export default function TokenPage() {
     };
   }, [fetchTokenData]);
 
-  // 3. Purchase Package Handler (Atomic PostgreSQL Settlement)
+  // 3. Purchase Package Handler (Defensive Deserialization & Settlement)
   const handlePurchase = async (pkgId: string) => {
     const pkg = packages.find(p => p.id === pkgId);
     if (!pkg) return;
@@ -198,28 +200,66 @@ export default function TokenPage() {
     setPurchasingPkgId(pkgId);
     setFeedback(null);
 
+    const price = Number(pkg.price) || 0;
+    if (walletBalance !== null && walletBalance < price) {
+      setFeedback({
+        type: 'error',
+        message: t(
+          'insufficientWalletForTokens',
+          `Insufficient wallet balance ($${walletBalance.toFixed(2)} available). This bundle requires $${price.toFixed(2)}. Please top up your wallet first.`
+        )
+      });
+      setPurchasingPkgId(null);
+      return;
+    }
+
     try {
+      const currentUser = getCurrentUser() || user;
       const res = await fetch('/api/tokens', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'purchase',
-          packageId: pkgId,
-          userId: user?.id || null,
-          userEmail: user?.email || null,
+          packageId: pkg.id,
+          tokens: Number(pkg.tokens),
+          price: Number(pkg.price),
+          packageName: pkg.name,
+          userId: currentUser?.id || null,
+          userEmail: currentUser?.email || null,
           paymentMethod: 'wallet'
         })
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to complete token purchase.');
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (_) {
+        throw new Error(
+          res.ok 
+            ? 'Unexpected response from server.' 
+            : `Server returned HTTP ${res.status}${text ? `: ${text.slice(0, 100)}` : ''}`
+        );
       }
 
-      const newBal = typeof data.newBalance === 'number' ? data.newBalance : (tokenBalance + pkg.tokens);
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Failed to complete token purchase.');
+      }
+
+      const newBal = typeof data.newBalance === 'number' 
+        ? data.newBalance 
+        : typeof data.balance === 'number'
+        ? data.balance
+        : (tokenBalance + pkg.tokens);
+
       setTokenBalance(newBal);
-      if (typeof data.walletBalance === 'number') {
-        setWalletBalance(data.walletBalance);
+
+      if (typeof data.newWalletBalance === 'number') {
+        setWalletBalance(data.newWalletBalance);
+      } else if (typeof data.wallet_balance === 'number') {
+        setWalletBalance(data.wallet_balance);
+      } else if (walletBalance !== null) {
+        setWalletBalance(prev => Math.max(0, (prev || 0) - price));
       }
 
       setFeedback({
@@ -228,6 +268,17 @@ export default function TokenPage() {
       });
 
       if (typeof window !== 'undefined') {
+        try {
+          const raw = localStorage.getItem('zecratary_user');
+          if (raw) {
+            const u = JSON.parse(raw);
+            u.token_balance = newBal;
+            u.tokenBalance = newBal;
+            if (typeof data.newWalletBalance === 'number') u.wallet_balance = data.newWalletBalance;
+            localStorage.setItem('zecratary_user', JSON.stringify(u));
+          }
+        } catch (_) {}
+
         window.dispatchEvent(new Event('zecratary_tokens_updated'));
         window.dispatchEvent(new Event('zecratary_wallet_updated'));
         window.dispatchEvent(new Event('zecratary_token_settings_updated'));
@@ -276,7 +327,7 @@ export default function TokenPage() {
       case 'manual_debit':
         return 'Admin Adjustment';
       default:
-        return type.replace(/_/g, ' ').replace(/\w/g, l => l.toUpperCase());
+        return type.replace(/_/g, ' ').replace(/ \w/g, l => l.toUpperCase());
     }
   };
 
@@ -386,7 +437,7 @@ export default function TokenPage() {
         </div>
       )}
 
-      {/* 2. Top-Up Package Catalog (Dynamic Match with /admin/token-setting) */}
+      {/* 2. Top-Up Package Catalog */}
       <div 
         className="p-6 rounded-3xl border shadow-sm space-y-4"
         style={{
@@ -458,7 +509,6 @@ export default function TokenPage() {
                       : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/40 bg-[var(--color-inner-dark)] hover:shadow-xs'
                   }`}
                 >
-                  {/* Badge */}
                   {pkg.badge && (
                     <div className="absolute top-4 right-4">
                       <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-500 border border-amber-500/30 shadow-xs">
@@ -526,7 +576,6 @@ export default function TokenPage() {
 
       {/* 3. 4-KPI Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI 1: Spendable Balance */}
         <div 
           className="p-5 rounded-3xl border shadow-sm flex items-center gap-4"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -542,7 +591,6 @@ export default function TokenPage() {
           </div>
         </div>
 
-        {/* KPI 2: Total Consumed */}
         <div 
           className="p-5 rounded-3xl border shadow-sm flex items-center gap-4"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -558,7 +606,6 @@ export default function TokenPage() {
           </div>
         </div>
 
-        {/* KPI 3: Total Granted / Bought */}
         <div 
           className="p-5 rounded-3xl border shadow-sm flex items-center gap-4"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -574,7 +621,6 @@ export default function TokenPage() {
           </div>
         </div>
 
-        {/* KPI 4: Total Events */}
         <div 
           className="p-5 rounded-3xl border shadow-sm flex items-center gap-4"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
