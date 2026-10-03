@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.04",
+  "version": "8.1.05",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.04",
+  "version": "8.1.05",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -2428,7 +2428,7 @@ export default function SavedRecipesPage() {
   }, []);
 
   const getCleanRecipeType = (rec: any): string => {
-    const raw = rec.recipeType || rec.category || (Array.isArray(rec.tags) ? rec.tags[0] : 'Main Dish');
+    const raw = rec.recipeType || rec.category || rec.recipe_type || (Array.isArray(rec.tags) ? rec.tags[0] : 'Main Dish');
     if (raw === 'Appetizer' || raw === 'Appetiser') return 'Appetiser';
     if (RECIPE_TYPES.includes(raw)) return raw;
     return 'Main Dish';
@@ -2452,53 +2452,166 @@ export default function SavedRecipesPage() {
     return `https://${urlStr}`;
   };
 
+  const normalizeRecipeFields = useCallback((r: any, targetUserId: string, userName: string) => {
+    const cleanType = getCleanRecipeType(r);
+    const resolvedImg = r.imageUrl || r.image || r.image_url || DEFAULT_RECIPE_IMAGE;
+
+    let ingredients = r.ingredients;
+    if (typeof ingredients === 'string') {
+      try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = []; }
+    }
+    if (!Array.isArray(ingredients)) ingredients = [];
+
+    let instructions = r.instructions || r.directions || r.steps;
+    if (typeof instructions === 'string') {
+      try { instructions = JSON.parse(instructions); } catch (_) { instructions = [instructions]; }
+    }
+    if (!Array.isArray(instructions)) instructions = [];
+
+    const prepMins = Number(r.prepTimeMinutes || r.prep_time || r.prepTime) || 15;
+    const cookMins = Number(r.cookTimeMinutes || r.cook_time || r.cookTime) || 25;
+
+    return {
+      ...r,
+      id: r.id || 'rcp_' + Math.random().toString(36).substring(2, 9),
+      userId: r.user_id || r.userId || targetUserId,
+      user_id: r.user_id || r.userId || targetUserId,
+      createdBy: r.created_by || r.createdBy || targetUserId,
+      created_by: r.created_by || r.createdBy || targetUserId,
+      creatorName: r.creator_name || r.creatorName || userName,
+      creator_name: r.creator_name || r.creatorName || userName,
+      title: r.title || r.name || 'Untitled Recipe',
+      name: r.title || r.name || 'Untitled Recipe',
+      description: r.description || '',
+      recipeType: cleanType,
+      category: cleanType,
+      recipe_type: cleanType,
+      imageUrl: resolvedImg,
+      image: resolvedImg,
+      image_url: resolvedImg,
+      servings: Number(r.servings || r.servingsCount) || 4,
+      prepTimeMinutes: prepMins,
+      cookTimeMinutes: cookMins,
+      prepTime: String(prepMins),
+      cookTime: String(cookMins),
+      prep_time: String(prepMins),
+      cook_time: String(cookMins),
+      ingredients,
+      directions: instructions,
+      instructions,
+      steps: instructions,
+      bookId: r.book_id || r.bookId || null,
+      book_id: r.book_id || r.bookId || null,
+      isFavorite: Boolean(r.is_favorite || r.isFavorite),
+      is_favorite: Boolean(r.is_favorite || r.isFavorite),
+      isCooked: Boolean(r.is_cooked || r.isCooked),
+      is_cooked: Boolean(r.is_cooked || r.isCooked),
+      rating: Number(r.rating) || 0,
+      note: r.note || '',
+      sourceUrl: r.source_url || r.sourceUrl || '',
+      source_url: r.source_url || r.sourceUrl || '',
+      tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
+    };
+  }, []);
+
   const loadData = useCallback(async (user: User | null, showSpinner = true) => {
     if (!user) return;
     setCategories(getStoredCategories());
-    const targetUserId = (user.id || user.email || '').trim();
-    if (!targetUserId) return;
+    const targetUserId = (user.id || user.email || 'usr_admin_1').trim();
+    const userName = user.name || 'You';
 
     try {
       if (showSpinner) setLoading(true);
-      const rawRecipes = await syncUserSavedRecipes(targetUserId);
 
-      const userRecipes = (Array.isArray(rawRecipes) ? rawRecipes : [])
-        .filter((r: any) => {
-          const rUser = String(r.user_id || r.userId || '').trim();
-          const rCreator = String(r.created_by || r.createdBy || '').trim();
-          return rUser === targetUserId || (user.email && (rUser === user.email || rCreator === user.email));
-        })
-        .map((r: any) => {
-          const cleanType = getCleanRecipeType(r);
-          const resolvedImg = r.imageUrl || r.image || r.image_url || '';
-          return {
-            ...r,
-            userId: targetUserId,
-            user_id: targetUserId,
-            createdBy: r.created_by || r.createdBy || user.email || targetUserId,
-            created_by: r.created_by || r.createdBy || user.email || targetUserId,
-            creatorName: r.creator_name || r.creatorName || user.name || 'You',
-            creator_name: r.creator_name || r.creatorName || user.name || 'You',
-            recipeType: cleanType,
-            category: cleanType,
-            imageUrl: resolvedImg,
-            image: resolvedImg,
-            image_url: resolvedImg,
-            bookId: r.book_id || r.bookId || null,
-            isFavorite: Boolean(r.is_favorite || r.isFavorite),
-            is_favorite: Boolean(r.is_favorite || r.isFavorite),
-            isCooked: Boolean(r.is_cooked || r.isCooked),
-            is_cooked: Boolean(r.is_cooked || r.isCooked),
-            rating: Number(r.rating) || 0,
-            note: r.note || '',
-            sourceUrl: r.source_url || r.sourceUrl || '',
-            source_url: r.source_url || r.sourceUrl || '',
-            tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
-          };
-        });
+      const candidateLists: any[][] = [];
 
-      setRecipes(userRecipes);
+      // 1. Direct API call to PostgreSQL /api/recipes/saved
+      try {
+        const res = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.recipes)) {
+            candidateLists.push(data.recipes);
+          } else if (Array.isArray(data)) {
+            candidateLists.push(data);
+          }
+        }
+      } catch (_) {}
 
+      // 2. Fallback check to syncUserSavedRecipes helper
+      try {
+        const syncRes = await syncUserSavedRecipes(targetUserId);
+        if (Array.isArray(syncRes)) {
+          candidateLists.push(syncRes);
+        } else if (syncRes && Array.isArray((syncRes as any).recipes)) {
+          candidateLists.push((syncRes as any).recipes);
+        }
+      } catch (_) {}
+
+      // 3. Fallback check to general /api/recipes
+      try {
+        const genRes = await fetch(`/api/recipes?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+        if (genRes.ok) {
+          const gData = await genRes.json();
+          if (Array.isArray(gData.recipes)) candidateLists.push(gData.recipes);
+          else if (Array.isArray(gData)) candidateLists.push(gData);
+        }
+      } catch (_) {}
+
+      // 4. Fallback check to local storage stores
+      const localKeys = [
+        'zecratary_saved_recipes',
+        'saved_recipes',
+        'zecratary_recipes',
+        'zecratary_user_recipes',
+        'zecratary_imported_recipes'
+      ];
+      for (const k of localKeys) {
+        try {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              candidateLists.push(parsed);
+            }
+          }
+        } catch (_) {}
+      }
+
+      // Merge and deduplicate by recipe id or normalized title
+      const recipeMap = new Map<string, any>();
+      for (const list of candidateLists) {
+        for (const item of list) {
+          if (!item) continue;
+          const rUser = String(item.user_id || item.userId || '').trim();
+          const rCreator = String(item.created_by || item.createdBy || '').trim();
+
+          const belongsToUser = !rUser ||
+            rUser === targetUserId ||
+            rUser === 'usr_admin_1' ||
+            rUser === 'undefined' ||
+            item.is_public ||
+            item.isPublic ||
+            (user.email && (rUser === user.email || rCreator === user.email));
+
+          if (belongsToUser) {
+            const normalized = normalizeRecipeFields(item, targetUserId, userName);
+            const key = normalized.id || normalized.title.toLowerCase();
+            if (!recipeMap.has(key)) {
+              recipeMap.set(key, normalized);
+            } else {
+              // Merge non-empty fields
+              const existing = recipeMap.get(key);
+              recipeMap.set(key, { ...existing, ...normalized, isFavorite: existing.isFavorite || normalized.isFavorite });
+            }
+          }
+        }
+      }
+
+      const mergedRecipes = Array.from(recipeMap.values());
+      setRecipes(mergedRecipes);
+
+      // Books loading
       let parsedBooks = defaultBooks;
       try {
         const bRes = await fetch(`/api/books?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
@@ -2524,14 +2637,14 @@ export default function SavedRecipesPage() {
 
       setBooks(userBooks.map((b: any) => ({
         ...b,
-        recipeCount: userRecipes.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
+        recipeCount: mergedRecipes.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
       })));
     } catch (e) {
       console.error('[SavedRecipesPage] Load error:', e);
     } finally {
       if (showSpinner) setLoading(false);
     }
-  }, []);
+  }, [normalizeRecipeFields]);
 
   useEffect(() => {
     applyGlobalTheme();
@@ -2589,39 +2702,30 @@ export default function SavedRecipesPage() {
     if (!currentUser) return;
     const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
 
-    const updatedWithId = updatedUserList.map(r => {
-      const resolvedImg = r.imageUrl || r.image || r.image_url || '';
-      return {
-        ...r,
-        userId: targetUserId,
-        user_id: targetUserId,
-        createdBy: r.createdBy || r.created_by || currentUser.email || targetUserId,
-        created_by: r.createdBy || r.created_by || currentUser.email || targetUserId,
-        creatorName: r.creatorName || r.creator_name || currentUser.name || 'You',
-        creator_name: r.creatorName || r.creator_name || currentUser.name || 'You',
-        imageUrl: resolvedImg,
-        image: resolvedImg,
-        image_url: resolvedImg,
-        bookId: r.bookId || r.book_id || null,
-        book_id: r.bookId || r.book_id || null,
-        isFavorite: Boolean(r.isFavorite ?? r.is_favorite),
-        is_favorite: Boolean(r.isFavorite ?? r.is_favorite),
-        isCooked: Boolean(r.isCooked ?? r.is_cooked),
-        is_cooked: Boolean(r.isCooked ?? r.is_cooked),
-        rating: Number(r.rating) || 0,
-        note: r.note || '',
-        sourceUrl: r.sourceUrl || r.source_url || '',
-        source_url: r.sourceUrl || r.source_url || ''
-      };
-    });
+    const updatedWithId = updatedUserList.map(r => normalizeRecipeFields(r, targetUserId, currentUser.name || 'You'));
 
     setRecipes(updatedWithId);
 
+    // Save to localStorage immediately
+    try {
+      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(updatedWithId));
+      localStorage.setItem('saved_recipes', JSON.stringify(updatedWithId));
+    } catch (_) {}
+
     isSyncingRef.current = true;
-    persistSavedRecipe(targetUserId, updatedWithId, {
-      createdBy: currentUser.email || targetUserId,
-      creatorName: currentUser.name || 'You'
-    }).then(() => {
+
+    // Persist via PostgreSQL POST API
+    Promise.allSettled([
+      fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedWithId)
+      }),
+      persistSavedRecipe(targetUserId, updatedWithId, {
+        createdBy: currentUser.email || targetUserId,
+        creatorName: currentUser.name || 'You'
+      })
+    ]).then(() => {
       setTimeout(() => {
         isSyncingRef.current = false;
       }, 400);
@@ -2654,6 +2758,13 @@ export default function SavedRecipesPage() {
     }
 
     saveAllRecipes(updated);
+
+    // Direct atomic PATCH
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, isFavorite: newFav, is_favorite: newFav })
+    }).catch(() => {});
   };
 
   const toggleCooked = (e: React.MouseEvent, id: string) => {
@@ -2670,6 +2781,13 @@ export default function SavedRecipesPage() {
     }
 
     saveAllRecipes(updated);
+
+    // Direct atomic PATCH
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, isCooked: newCooked, is_cooked: newCooked })
+    }).catch(() => {});
   };
 
   const handleAssignToBook = (bookId: string) => {
@@ -2687,6 +2805,12 @@ export default function SavedRecipesPage() {
     const updatedRecipes = recipes.map(r => r.id === selectedRecipe.id ? updatedRecipe : r);
     setRecipes(updatedRecipes);
     saveAllRecipes(updatedRecipes);
+
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: selectedRecipe.id, bookId: targetBookId, book_id: targetBookId })
+    }).catch(() => {});
   };
 
   const openAddToPlanModal = () => {
@@ -2778,6 +2902,12 @@ export default function SavedRecipesPage() {
     setSelectedRecipe(updatedRec);
     const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
     saveAllRecipes(updatedList);
+
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: selectedRecipe.id, [key]: val })
+    }).catch(() => {});
   };
 
   const handleDeleteRecipe = async (id: string) => {
@@ -2887,6 +3017,14 @@ export default function SavedRecipesPage() {
     }
     if (!Array.isArray(rawIngredients)) rawIngredients = [];
 
+    let rawSteps = selectedRecipe.instructions || selectedRecipe.directions || selectedRecipe.steps;
+    if (typeof rawSteps === 'string') {
+      try { rawSteps = JSON.parse(rawSteps); } catch (_) { rawSteps = [rawSteps]; }
+    }
+    if (!Array.isArray(rawSteps) || rawSteps.length === 0) {
+      rawSteps = [''];
+    }
+
     const currentImg = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || '';
 
     setEditForm({
@@ -2909,9 +3047,7 @@ export default function SavedRecipesPage() {
             };
           })
         : [{ amount: '', unit: '', item: '', category: defaultCat }],
-      instructions: selectedRecipe.instructions && selectedRecipe.instructions.length > 0
-        ? [...selectedRecipe.instructions]
-        : ['']
+      instructions: [...rawSteps]
     });
     setEditTab('info');
     setIsReorderingIngredients(false);
@@ -2946,7 +3082,11 @@ export default function SavedRecipesPage() {
       creator_name: selectedRecipe.creator_name || currentUser?.name || 'You',
       recipeType: cleanType,
       category: cleanType,
-      tags: [cleanType]
+      recipe_type: cleanType,
+      tags: [cleanType],
+      instructions: editForm.instructions,
+      directions: editForm.instructions,
+      steps: editForm.instructions
     };
 
     setSelectedRecipe(updatedRec);
@@ -3284,6 +3424,8 @@ export default function SavedRecipesPage() {
             <Search className="h-4 w-4 absolute left-3.5 top-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
             <input
               type="text"
+              autoComplete="off"
+              data-lpignore="true"
               placeholder={t('searchByNamePlaceholder') || 'Search by name or ingredient...'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -3376,6 +3518,7 @@ export default function SavedRecipesPage() {
                       <input
                         type="text"
                         autoFocus
+                        autoComplete="off"
                         placeholder={t('searchIngredientsPlaceholder') || 'Search ingredients'}
                         value={ingredientQuery}
                         onChange={(e) => setIngredientQuery(e.target.value)}
@@ -3710,6 +3853,8 @@ export default function SavedRecipesPage() {
             return (
               <div
                 key={r.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => {
                   setSelectedRecipe(r);
                   setCurrentServings(Math.max(1, Number(r.servings) || 4));
@@ -3717,6 +3862,17 @@ export default function SavedRecipesPage() {
                   setNoteText(r.note || '');
                   setIsBookDropdownOpen(false);
                   setIsEditing(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedRecipe(r);
+                    setCurrentServings(Math.max(1, Number(r.servings) || 4));
+                    setCompletedSteps([]);
+                    setNoteText(r.note || '');
+                    setIsBookDropdownOpen(false);
+                    setIsEditing(false);
+                  }
                 }}
                 className="border rounded-2xl overflow-hidden transition cursor-pointer group shadow-sm hover:shadow-md relative flex flex-col justify-between"
                 style={{
@@ -4326,6 +4482,8 @@ export default function SavedRecipesPage() {
                         <div className="flex gap-2 animate-in fade-in">
                           <input
                             type="text"
+                            autoComplete="off"
+                            data-lpignore="true"
                             placeholder={t('addNotesPlaceholder') || 'Add notes...'}
                             value={noteText}
                             onChange={(e) => setNoteText(e.target.value)}
@@ -4685,6 +4843,8 @@ export default function SavedRecipesPage() {
                         <input
                           type="text"
                           required
+                          autoComplete="off"
+                          data-lpignore="true"
                           value={editForm.title}
                           onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
                           className="w-full border rounded-xl p-3 text-sm outline-none"
@@ -4861,6 +5021,7 @@ export default function SavedRecipesPage() {
                           >
                             <input
                               type="text"
+                              autoComplete="off"
                               placeholder={t('amt') || 'Amt'}
                               value={ing.amount}
                               onChange={(e) => {
@@ -4877,6 +5038,7 @@ export default function SavedRecipesPage() {
                             />
                             <input
                               type="text"
+                              autoComplete="off"
                               placeholder={t('unit') || 'Unit'}
                               value={ing.unit}
                               onChange={(e) => {
@@ -4893,6 +5055,7 @@ export default function SavedRecipesPage() {
                             />
                             <input
                               type="text"
+                              autoComplete="off"
                               placeholder={t('ingredientNamePlaceholder') || 'Ingredient name...'}
                               value={ing.item}
                               onChange={(e) => {
@@ -5598,6 +5761,7 @@ export default function SavedRecipesPage() {
 
                   <input
                     type="text"
+                    autoComplete="off"
                     value={ing.amount}
                     onChange={(e) => {
                       const updated = [...shoppingModalIngredients];
@@ -5614,6 +5778,7 @@ export default function SavedRecipesPage() {
                   />
                   <input
                     type="text"
+                    autoComplete="off"
                     value={ing.unit}
                     onChange={(e) => {
                       const updated = [...shoppingModalIngredients];
@@ -5630,6 +5795,7 @@ export default function SavedRecipesPage() {
                   />
                   <input
                     type="text"
+                    autoComplete="off"
                     value={ing.name}
                     onChange={(e) => {
                       const updated = [...shoppingModalIngredients];
@@ -55827,155 +55993,144 @@ import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-async function ensureTableColumns(): Promise<Set<string>> {
+async function ensureTableAndColumns() {
   try {
     await query(`
       CREATE TABLE IF NOT EXISTS saved_recipes (
-        id VARCHAR(255) PRIMARY KEY,
-        user_id VARCHAR(255),
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
         title TEXT NOT NULL,
         description TEXT,
-        recipe_type VARCHAR(100),
-        category VARCHAR(100),
-        cuisine VARCHAR(100),
-        prep_time VARCHAR(50),
-        cook_time VARCHAR(50),
-        prep_time_minutes INTEGER DEFAULT 15,
-        cook_time_minutes INTEGER DEFAULT 10,
-        servings VARCHAR(50) DEFAULT '4',
-        difficulty VARCHAR(50),
+        recipe_type TEXT DEFAULT 'Main Dish',
+        cuisine TEXT,
+        prep_time TEXT DEFAULT '15',
+        cook_time TEXT DEFAULT '25',
+        servings INT DEFAULT 4,
+        difficulty TEXT DEFAULT 'Medium',
         ingredients JSONB DEFAULT '[]'::jsonb,
         directions JSONB DEFAULT '[]'::jsonb,
-        instructions JSONB DEFAULT '[]'::jsonb,
         nutrition JSONB DEFAULT '{}'::jsonb,
         tags JSONB DEFAULT '[]'::jsonb,
-        image TEXT,
         image_url TEXT,
+        is_public BOOLEAN DEFAULT FALSE,
         is_favorite BOOLEAN DEFAULT FALSE,
         is_cooked BOOLEAN DEFAULT FALSE,
-        rating INTEGER DEFAULT 0,
+        rating INT DEFAULT 0,
         note TEXT DEFAULT '',
-        book_id VARCHAR(255),
-        source_url TEXT DEFAULT '',
-        created_by VARCHAR(255),
-        creator_name VARCHAR(255),
-        is_public BOOLEAN DEFAULT FALSE,
+        book_id TEXT,
+        source_url TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);
-
-    const migrations = [
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS instructions JSONB DEFAULT \'[]\'::jsonb;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS directions JSONB DEFAULT \'[]\'::jsonb;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS ingredients JSONB DEFAULT \'[]\'::jsonb;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS nutrition JSONB DEFAULT \'{}\'::jsonb;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT \'[]\'::jsonb;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS image TEXT;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS image_url TEXT;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS rating INTEGER DEFAULT 0;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS note TEXT DEFAULT \'\';',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS book_id VARCHAR(255);',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS source_url TEXT DEFAULT \'\';',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS created_by VARCHAR(255);',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS creator_name VARCHAR(255);',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS prep_time_minutes INTEGER DEFAULT 15;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS cook_time_minutes INTEGER DEFAULT 10;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS category VARCHAR(100);',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS recipe_type VARCHAR(100);',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS cuisine VARCHAR(100);',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS difficulty VARCHAR(50);',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS servings VARCHAR(50) DEFAULT \'4\';',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT FALSE;'
-    ];
-
-    for (const sql of migrations) {
-      try {
-        await query(sql);
-      } catch (_) {}
-    }
-
-    try {
-      await query(`
-        UPDATE saved_recipes 
-        SET image = image_url 
-        WHERE (image IS NULL OR image = '') AND (image_url IS NOT NULL AND image_url != '');
-
-        UPDATE saved_recipes 
-        SET image_url = image 
-        WHERE (image_url IS NULL OR image_url = '') AND (image IS NOT NULL AND image != '');
-      `);
-    } catch (_) {}
-
-    try {
-      await query(`
-        INSERT INTO users (id, email, name, updated_at)
-        VALUES ('usr_admin_1', 'admin@zecratary.local', 'Admin', NOW())
-        ON CONFLICT (id) DO NOTHING;
-      `);
-    } catch (_) {}
-  } catch (e) {
-    console.warn('[saved_recipes:ensureTableColumns] Warning:', e);
-  }
-
-  try {
-    const colRows = await query(`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name = 'saved_recipes'
+    await query(`
+      ALTER TABLE saved_recipes 
+      ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS rating INT DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '',
+      ADD COLUMN IF NOT EXISTS book_id TEXT,
+      ADD COLUMN IF NOT EXISTS source_url TEXT;
     `);
-    return new Set(colRows.map((r: any) => String(r.column_name).toLowerCase()));
-  } catch (_) {
-    return new Set();
+  } catch (err) {
+    console.warn('[saved_recipes route] ensureTable warning:', err);
   }
 }
 
 export async function GET(req: NextRequest) {
   try {
-    await ensureTableColumns();
+    await ensureTableAndColumns();
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
+    const category = searchParams.get('category');
 
-    let rows: any[];
+    let sql = `SELECT * FROM saved_recipes WHERE 1=1`;
+    const params: any[] = [];
+
     if (userId) {
-      rows = await query(`
-        SELECT * FROM saved_recipes 
-        WHERE user_id = $1 OR is_public = TRUE 
-        ORDER BY created_at DESC
-      `, [userId]);
-    } else {
-      rows = await query(`
-        SELECT * FROM saved_recipes 
-        ORDER BY created_at DESC
-      `);
+      params.push(userId);
+      sql += ` AND (user_id = $${params.length} OR user_id = 'usr_admin_1' OR user_id IS NULL OR is_public = TRUE)`;
     }
 
-    const mapped = (rows || []).map((r: any) => {
-      const img = r.image || r.image_url || r.imageUrl || '';
-      const rawSteps = r.instructions || r.directions || [];
-      const safeSteps = Array.isArray(rawSteps)
-        ? rawSteps
-        : (typeof rawSteps === 'string' ? (() => { try { return JSON.parse(rawSteps); } catch { return [rawSteps]; } })() : []);
-      const rawIng = r.ingredients || [];
-      const safeIng = Array.isArray(rawIng)
-        ? rawIng
-        : (typeof rawIng === 'string' ? (() => { try { return JSON.parse(rawIng); } catch { return [rawIng]; } })() : []);
+    if (category && category !== 'all' && category !== 'All Types') {
+      params.push(category);
+      sql += ` AND LOWER(recipe_type) = LOWER($${params.length})`;
+    }
+
+    sql += ' ORDER BY created_at DESC';
+
+    const rows = await query(sql, params);
+
+    const formatted = rows.map((r: any) => {
+      let ingredients = r.ingredients;
+      if (typeof ingredients === 'string') {
+        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = []; }
+      }
+
+      let directions = r.directions;
+      if (typeof directions === 'string') {
+        try { directions = JSON.parse(directions); } catch (_) { directions = []; }
+      }
+
+      let nutrition = r.nutrition;
+      if (typeof nutrition === 'string') {
+        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
+      }
+
+      let tags = r.tags;
+      if (typeof tags === 'string') {
+        try { tags = JSON.parse(tags); } catch (_) { tags = []; }
+      }
+
+      const prepMins = Number(r.prep_time) || 15;
+      const cookMins = Number(r.cook_time) || 25;
 
       return {
         ...r,
-        image: img,
-        image_url: img,
-        imageUrl: img,
-        instructions: safeSteps,
-        directions: safeSteps,
-        ingredients: safeIng
+        id: r.id,
+        userId: r.user_id || r.userId || 'usr_admin_1',
+        user_id: r.user_id || r.userId || 'usr_admin_1',
+        title: r.title || r.name || 'Untitled Recipe',
+        name: r.title || r.name || 'Untitled Recipe',
+        description: r.description || '',
+        recipeType: r.recipe_type || 'Main Dish',
+        category: r.recipe_type || 'Main Dish',
+        recipe_type: r.recipe_type || 'Main Dish',
+        cuisine: r.cuisine || '',
+        prepTime: String(prepMins),
+        cookTime: String(cookMins),
+        prepTimeMinutes: prepMins,
+        cookTimeMinutes: cookMins,
+        servings: Number(r.servings) || 4,
+        difficulty: r.difficulty || 'Medium',
+        ingredients: Array.isArray(ingredients) ? ingredients : [],
+        directions: Array.isArray(directions) ? directions : [],
+        instructions: Array.isArray(directions) ? directions : [],
+        steps: Array.isArray(directions) ? directions : [],
+        nutrition: nutrition || {},
+        tags: Array.isArray(tags) ? tags : [],
+        imageUrl: r.image_url || r.imageUrl || r.image || '',
+        image: r.image_url || r.imageUrl || r.image || '',
+        image_url: r.image_url || r.imageUrl || r.image || '',
+        sourceUrl: r.source_url || r.sourceUrl || '',
+        source_url: r.source_url || r.sourceUrl || '',
+        isFavorite: Boolean(r.is_favorite || r.isFavorite),
+        is_favorite: Boolean(r.is_favorite || r.isFavorite),
+        isCooked: Boolean(r.is_cooked || r.isCooked),
+        is_cooked: Boolean(r.is_cooked || r.isCooked),
+        rating: Number(r.rating) || 0,
+        note: r.note || '',
+        bookId: r.book_id || r.bookId || null,
+        book_id: r.book_id || r.bookId || null,
+        isPublic: Boolean(r.is_public),
+        is_public: Boolean(r.is_public),
+        createdAt: r.created_at || new Date().toISOString(),
+        updatedAt: r.updated_at || new Date().toISOString()
       };
     });
 
     return NextResponse.json(
-      { success: true, recipes: mapped },
+      { success: true, recipes: formatted },
       { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
     );
   } catch (err: any) {
@@ -55985,136 +56140,165 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const existingCols = await ensureTableColumns();
+    await ensureTableAndColumns();
     const body = await req.json();
     const items = Array.isArray(body) ? body : (body.recipes || [body.recipe || body]);
 
     for (const item of items) {
-      if (!item || !item.id) continue;
-      const id = item.id;
+      if (!item) continue;
+      const id = item.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      const targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
 
-      let validUserId = 'usr_admin_1';
-      const candidateUserId = String(item.userId || item.user_id || '').trim();
-      if (candidateUserId) {
-        try {
-          const userCheck = await query('SELECT id FROM users WHERE id = $1', [candidateUserId]);
-          if (userCheck && userCheck.length > 0) {
-            validUserId = candidateUserId;
-          } else {
-            await query(
-              'INSERT INTO users (id, email, name, updated_at) VALUES ($1, $2, $3, NOW()) ON CONFLICT (id) DO NOTHING',
-              [candidateUserId, item.createdBy || item.email || candidateUserId, item.creatorName || 'User']
-            );
-            validUserId = candidateUserId;
-          }
-        } catch (_) {
-          validUserId = 'usr_admin_1';
+      try {
+        const userCheck = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
+        if (userCheck.length === 0) {
+          await query(`
+            INSERT INTO users (id, name, email, role, subscription_plan)
+            VALUES ($1, 'User', $2, 'user', 'taster')
+            ON CONFLICT (id) DO NOTHING;
+          `, [targetUserId, targetUserId.includes('@') ? targetUserId : `${targetUserId}@zecratary.local`]);
         }
+      } catch (_) {}
+
+      let ingredients = item.ingredients;
+      if (typeof ingredients === 'string') {
+        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = [ingredients]; }
+      }
+      if (!Array.isArray(ingredients)) ingredients = [];
+
+      let directions = item.directions || item.instructions || item.steps;
+      if (typeof directions === 'string') {
+        try { directions = JSON.parse(directions); } catch (_) { directions = [directions]; }
+      }
+      if (!Array.isArray(directions)) directions = [];
+
+      let tags = item.tags;
+      if (typeof tags === 'string') {
+        try { tags = JSON.parse(tags); } catch (_) { tags = [tags]; }
+      }
+      if (!Array.isArray(tags)) tags = [];
+
+      let nutrition = item.nutrition || item.macros || {};
+      if (typeof nutrition === 'string') {
+        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
       }
 
-      const safeIngredients = Array.isArray(item.ingredients)
-        ? item.ingredients
-        : (typeof item.ingredients === 'string' ? (() => { try { return JSON.parse(item.ingredients); } catch { return [item.ingredients]; } })() : []);
-
-      const safeInstructions = Array.isArray(item.instructions)
-        ? item.instructions
-        : (Array.isArray(item.directions) ? item.directions : (typeof item.instructions === 'string' ? [item.instructions] : []));
-
-      const safeTags = Array.isArray(item.tags) ? item.tags : [];
-      const safeNutrition = (item.nutrition && typeof item.nutrition === 'object') ? item.nutrition : {};
-
-      const prepMinutes = Number(item.prepTimeMinutes || item.prep_time_minutes) || (parseInt(item.prepTime) || 15);
-      const cookMinutes = Number(item.cookTimeMinutes || item.cook_time_minutes) || (parseInt(item.cookTime) || 10);
-      const recipeType = item.recipeType || item.category || 'Main Dish';
-      const resolvedImg = item.imageUrl || item.image || item.image_url || '';
-
-      const columnData: { col: string; val: any; isJson?: boolean }[] = [
-        { col: 'id', val: id },
-        { col: 'user_id', val: validUserId },
-        { col: 'title', val: item.title || item.name || 'Untitled Recipe' },
-        { col: 'description', val: item.description || '' },
-        { col: 'recipe_type', val: recipeType },
-        { col: 'category', val: recipeType },
-        { col: 'cuisine', val: item.cuisine || '' },
-        { col: 'prep_time', val: String(prepMinutes) + 'm' },
-        { col: 'cook_time', val: String(cookMinutes) + 'm' },
-        { col: 'prep_time_minutes', val: prepMinutes },
-        { col: 'cook_time_minutes', val: cookMinutes },
-        { col: 'servings', val: String(item.servings || '4') },
-        { col: 'difficulty', val: item.difficulty || '' },
-        { col: 'ingredients', val: JSON.stringify(safeIngredients), isJson: true },
-        { col: 'directions', val: JSON.stringify(safeInstructions), isJson: true },
-        { col: 'instructions', val: JSON.stringify(safeInstructions), isJson: true },
-        { col: 'nutrition', val: JSON.stringify(safeNutrition), isJson: true },
-        { col: 'tags', val: JSON.stringify(safeTags), isJson: true },
-        { col: 'image', val: resolvedImg },
-        { col: 'image_url', val: resolvedImg },
-        { col: 'is_favorite', val: Boolean(item.isFavorite ?? item.is_favorite) },
-        { col: 'is_cooked', val: Boolean(item.isCooked ?? item.is_cooked) },
-        { col: 'rating', val: Number(item.rating) || 0 },
-        { col: 'note', val: item.note || '' },
-        { col: 'book_id', val: item.bookId || item.book_id || null },
-        { col: 'source_url', val: item.sourceUrl || item.source_url || '' },
-        { col: 'created_by', val: item.createdBy || item.created_by || validUserId },
-        { col: 'creator_name', val: item.creatorName || item.creator_name || 'You' },
-        { col: 'is_public', val: Boolean(item.isPublic ?? item.is_public) }
-      ];
-
-      // Dynamically filter only columns that physically exist in the PostgreSQL table
-      const validEntries = columnData.filter(entry => existingCols.size === 0 || existingCols.has(entry.col));
-
-      const colNames: string[] = [];
-      const placeholders: string[] = [];
-      const values: any[] = [];
-      const updateClauses: string[] = [];
-
-      validEntries.forEach((entry) => {
-        colNames.push(entry.col);
-        values.push(entry.val);
-        const idx = values.length;
-        placeholders.push(entry.isJson ? `$${idx}::jsonb` : `$${idx}`);
-
-        if (entry.col !== 'id') {
-          if (entry.col === 'image') {
-            updateClauses.push(`image = COALESCE(NULLIF(EXCLUDED.image, ''), saved_recipes.image, EXCLUDED.image_url)`);
-          } else if (entry.col === 'image_url') {
-            updateClauses.push(`image_url = COALESCE(NULLIF(EXCLUDED.image_url, ''), saved_recipes.image_url, EXCLUDED.image)`);
-          } else if (entry.isJson) {
-            updateClauses.push(`${entry.col} = CASE WHEN EXCLUDED.${entry.col} IS NOT NULL AND EXCLUDED.${entry.col} != '[]'::jsonb AND EXCLUDED.${entry.col} != '{}'::jsonb THEN EXCLUDED.${entry.col} ELSE saved_recipes.${entry.col} END`);
-          } else if (['title', 'description', 'recipe_type', 'category', 'cuisine', 'servings', 'difficulty', 'source_url', 'created_by', 'creator_name'].includes(entry.col)) {
-            updateClauses.push(`${entry.col} = COALESCE(NULLIF(EXCLUDED.${entry.col}, ''), saved_recipes.${entry.col})`);
-          } else {
-            updateClauses.push(`${entry.col} = EXCLUDED.${entry.col}`);
-          }
-        }
-      });
-
-      if (existingCols.size === 0 || existingCols.has('updated_at')) {
-        colNames.push('updated_at');
-        placeholders.push('NOW()');
-        updateClauses.push('updated_at = NOW()');
-      }
-
-      const sql = `
-        INSERT INTO saved_recipes (${colNames.join(', ')})
-        VALUES (${placeholders.join(', ')})
+      await query(`
+        INSERT INTO saved_recipes (
+          id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
+          servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public,
+          is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+          $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16,
+          $17, $18, $19, $20, $21, $22, NOW()
+        )
         ON CONFLICT (id) DO UPDATE SET
-          ${updateClauses.join(',\n          ')};
-      `;
-
-      await query(sql, values);
+          user_id = COALESCE(EXCLUDED.user_id, saved_recipes.user_id),
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          recipe_type = EXCLUDED.recipe_type,
+          cuisine = EXCLUDED.cuisine,
+          prep_time = EXCLUDED.prep_time,
+          cook_time = EXCLUDED.cook_time,
+          servings = EXCLUDED.servings,
+          difficulty = EXCLUDED.difficulty,
+          ingredients = EXCLUDED.ingredients,
+          directions = EXCLUDED.directions,
+          nutrition = EXCLUDED.nutrition,
+          tags = EXCLUDED.tags,
+          image_url = EXCLUDED.image_url,
+          is_public = EXCLUDED.is_public,
+          is_favorite = EXCLUDED.is_favorite,
+          is_cooked = EXCLUDED.is_cooked,
+          rating = EXCLUDED.rating,
+          note = EXCLUDED.note,
+          book_id = EXCLUDED.book_id,
+          source_url = EXCLUDED.source_url,
+          updated_at = NOW();
+      `, [
+        id,
+        targetUserId,
+        item.title || item.name || 'Untitled Recipe',
+        item.description || '',
+        item.recipeType || item.category || item.recipe_type || 'Main Dish',
+        item.cuisine || '',
+        String(item.prepTime || item.prepTimeMinutes || item.prep_time || '15'),
+        String(item.cookTime || item.cookTimeMinutes || item.cook_time || '25'),
+        Number(item.servings || item.servingsCount) || 4,
+        item.difficulty || 'Medium',
+        JSON.stringify(ingredients),
+        JSON.stringify(directions),
+        JSON.stringify(nutrition),
+        JSON.stringify(tags),
+        item.imageUrl || item.image || item.image_url || '',
+        Boolean(item.isPublic || item.is_public),
+        Boolean(item.isFavorite || item.is_favorite),
+        Boolean(item.isCooked || item.is_cooked),
+        Number(item.rating) || 0,
+        item.note || '',
+        item.bookId || item.book_id || null,
+        item.sourceUrl || item.source_url || ''
+      ]);
     }
 
-    return NextResponse.json({ success: true, message: 'Recipe(s) persisted to PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Recipe(s) synchronized with PostgreSQL.' });
   } catch (err: any) {
-    console.error('[saved_recipes:POST] Error:', err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    await ensureTableAndColumns();
+    const body = await req.json();
+    const { id, isFavorite, is_favorite, isCooked, is_cooked, rating, note, bookId, book_id, sourceUrl, source_url } = body;
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
+    }
+
+    const updates: string[] = [];
+    const params: any[] = [id];
+
+    if (isFavorite !== undefined || is_favorite !== undefined) {
+      params.push(Boolean(isFavorite !== undefined ? isFavorite : is_favorite));
+      updates.push(`is_favorite = $${params.length}`);
+    }
+    if (isCooked !== undefined || is_cooked !== undefined) {
+      params.push(Boolean(isCooked !== undefined ? isCooked : is_cooked));
+      updates.push(`is_cooked = $${params.length}`);
+    }
+    if (rating !== undefined) {
+      params.push(Number(rating));
+      updates.push(`rating = $${params.length}`);
+    }
+    if (note !== undefined) {
+      params.push(String(note));
+      updates.push(`note = $${params.length}`);
+    }
+    if (bookId !== undefined || book_id !== undefined) {
+      params.push(bookId !== undefined ? bookId : book_id);
+      updates.push(`book_id = $${params.length}`);
+    }
+    if (sourceUrl !== undefined || source_url !== undefined) {
+      params.push(sourceUrl !== undefined ? sourceUrl : source_url);
+      updates.push(`source_url = $${params.length}`);
+    }
+
+    if (updates.length > 0) {
+      updates.push('updated_at = NOW()');
+      await query(`UPDATE saved_recipes SET ${updates.join(', ')} WHERE id = $1`, params);
+    }
+
+    return NextResponse.json({ success: true, message: 'Recipe updated in PostgreSQL.' });
+  } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function DELETE(req: NextRequest) {
   try {
-    await ensureTableColumns();
     const { searchParams } = new URL(req.url);
     let id = searchParams.get('id');
 
@@ -57993,155 +58177,144 @@ import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-async function ensureTableColumns(): Promise<Set<string>> {
+async function ensureTableAndColumns() {
   try {
     await query(`
       CREATE TABLE IF NOT EXISTS saved_recipes (
-        id VARCHAR(255) PRIMARY KEY,
-        user_id VARCHAR(255),
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
         title TEXT NOT NULL,
         description TEXT,
-        recipe_type VARCHAR(100),
-        category VARCHAR(100),
-        cuisine VARCHAR(100),
-        prep_time VARCHAR(50),
-        cook_time VARCHAR(50),
-        prep_time_minutes INTEGER DEFAULT 15,
-        cook_time_minutes INTEGER DEFAULT 10,
-        servings VARCHAR(50) DEFAULT '4',
-        difficulty VARCHAR(50),
+        recipe_type TEXT DEFAULT 'Main Dish',
+        cuisine TEXT,
+        prep_time TEXT DEFAULT '15',
+        cook_time TEXT DEFAULT '25',
+        servings INT DEFAULT 4,
+        difficulty TEXT DEFAULT 'Medium',
         ingredients JSONB DEFAULT '[]'::jsonb,
         directions JSONB DEFAULT '[]'::jsonb,
-        instructions JSONB DEFAULT '[]'::jsonb,
         nutrition JSONB DEFAULT '{}'::jsonb,
         tags JSONB DEFAULT '[]'::jsonb,
-        image TEXT,
         image_url TEXT,
+        is_public BOOLEAN DEFAULT FALSE,
         is_favorite BOOLEAN DEFAULT FALSE,
         is_cooked BOOLEAN DEFAULT FALSE,
-        rating INTEGER DEFAULT 0,
+        rating INT DEFAULT 0,
         note TEXT DEFAULT '',
-        book_id VARCHAR(255),
-        source_url TEXT DEFAULT '',
-        created_by VARCHAR(255),
-        creator_name VARCHAR(255),
-        is_public BOOLEAN DEFAULT FALSE,
+        book_id TEXT,
+        source_url TEXT,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
     `);
-
-    const migrations = [
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS instructions JSONB DEFAULT \'[]\'::jsonb;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS directions JSONB DEFAULT \'[]\'::jsonb;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS ingredients JSONB DEFAULT \'[]\'::jsonb;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS nutrition JSONB DEFAULT \'{}\'::jsonb;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT \'[]\'::jsonb;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS image TEXT;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS image_url TEXT;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS rating INTEGER DEFAULT 0;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS note TEXT DEFAULT \'\';',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS book_id VARCHAR(255);',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS source_url TEXT DEFAULT \'\';',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS created_by VARCHAR(255);',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS creator_name VARCHAR(255);',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS prep_time_minutes INTEGER DEFAULT 15;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS cook_time_minutes INTEGER DEFAULT 10;',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS category VARCHAR(100);',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS recipe_type VARCHAR(100);',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS cuisine VARCHAR(100);',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS difficulty VARCHAR(50);',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS servings VARCHAR(50) DEFAULT \'4\';',
-      'ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT FALSE;'
-    ];
-
-    for (const sql of migrations) {
-      try {
-        await query(sql);
-      } catch (_) {}
-    }
-
-    try {
-      await query(`
-        UPDATE saved_recipes 
-        SET image = image_url 
-        WHERE (image IS NULL OR image = '') AND (image_url IS NOT NULL AND image_url != '');
-
-        UPDATE saved_recipes 
-        SET image_url = image 
-        WHERE (image_url IS NULL OR image_url = '') AND (image IS NOT NULL AND image != '');
-      `);
-    } catch (_) {}
-
-    try {
-      await query(`
-        INSERT INTO users (id, email, name, updated_at)
-        VALUES ('usr_admin_1', 'admin@zecratary.local', 'Admin', NOW())
-        ON CONFLICT (id) DO NOTHING;
-      `);
-    } catch (_) {}
-  } catch (e) {
-    console.warn('[saved_recipes:ensureTableColumns] Warning:', e);
-  }
-
-  try {
-    const colRows = await query(`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name = 'saved_recipes'
+    await query(`
+      ALTER TABLE saved_recipes 
+      ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS rating INT DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '',
+      ADD COLUMN IF NOT EXISTS book_id TEXT,
+      ADD COLUMN IF NOT EXISTS source_url TEXT;
     `);
-    return new Set(colRows.map((r: any) => String(r.column_name).toLowerCase()));
-  } catch (_) {
-    return new Set();
+  } catch (err) {
+    console.warn('[saved_recipes route] ensureTable warning:', err);
   }
 }
 
 export async function GET(req: NextRequest) {
   try {
-    await ensureTableColumns();
+    await ensureTableAndColumns();
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
+    const category = searchParams.get('category');
 
-    let rows: any[];
+    let sql = `SELECT * FROM saved_recipes WHERE 1=1`;
+    const params: any[] = [];
+
     if (userId) {
-      rows = await query(`
-        SELECT * FROM saved_recipes 
-        WHERE user_id = $1 OR is_public = TRUE 
-        ORDER BY created_at DESC
-      `, [userId]);
-    } else {
-      rows = await query(`
-        SELECT * FROM saved_recipes 
-        ORDER BY created_at DESC
-      `);
+      params.push(userId);
+      sql += ` AND (user_id = $${params.length} OR user_id = 'usr_admin_1' OR user_id IS NULL OR is_public = TRUE)`;
     }
 
-    const mapped = (rows || []).map((r: any) => {
-      const img = r.image || r.image_url || r.imageUrl || '';
-      const rawSteps = r.instructions || r.directions || [];
-      const safeSteps = Array.isArray(rawSteps)
-        ? rawSteps
-        : (typeof rawSteps === 'string' ? (() => { try { return JSON.parse(rawSteps); } catch { return [rawSteps]; } })() : []);
-      const rawIng = r.ingredients || [];
-      const safeIng = Array.isArray(rawIng)
-        ? rawIng
-        : (typeof rawIng === 'string' ? (() => { try { return JSON.parse(rawIng); } catch { return [rawIng]; } })() : []);
+    if (category && category !== 'all' && category !== 'All Types') {
+      params.push(category);
+      sql += ` AND LOWER(recipe_type) = LOWER($${params.length})`;
+    }
+
+    sql += ' ORDER BY created_at DESC';
+
+    const rows = await query(sql, params);
+
+    const formatted = rows.map((r: any) => {
+      let ingredients = r.ingredients;
+      if (typeof ingredients === 'string') {
+        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = []; }
+      }
+
+      let directions = r.directions;
+      if (typeof directions === 'string') {
+        try { directions = JSON.parse(directions); } catch (_) { directions = []; }
+      }
+
+      let nutrition = r.nutrition;
+      if (typeof nutrition === 'string') {
+        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
+      }
+
+      let tags = r.tags;
+      if (typeof tags === 'string') {
+        try { tags = JSON.parse(tags); } catch (_) { tags = []; }
+      }
+
+      const prepMins = Number(r.prep_time) || 15;
+      const cookMins = Number(r.cook_time) || 25;
 
       return {
         ...r,
-        image: img,
-        image_url: img,
-        imageUrl: img,
-        instructions: safeSteps,
-        directions: safeSteps,
-        ingredients: safeIng
+        id: r.id,
+        userId: r.user_id || r.userId || 'usr_admin_1',
+        user_id: r.user_id || r.userId || 'usr_admin_1',
+        title: r.title || r.name || 'Untitled Recipe',
+        name: r.title || r.name || 'Untitled Recipe',
+        description: r.description || '',
+        recipeType: r.recipe_type || 'Main Dish',
+        category: r.recipe_type || 'Main Dish',
+        recipe_type: r.recipe_type || 'Main Dish',
+        cuisine: r.cuisine || '',
+        prepTime: String(prepMins),
+        cookTime: String(cookMins),
+        prepTimeMinutes: prepMins,
+        cookTimeMinutes: cookMins,
+        servings: Number(r.servings) || 4,
+        difficulty: r.difficulty || 'Medium',
+        ingredients: Array.isArray(ingredients) ? ingredients : [],
+        directions: Array.isArray(directions) ? directions : [],
+        instructions: Array.isArray(directions) ? directions : [],
+        steps: Array.isArray(directions) ? directions : [],
+        nutrition: nutrition || {},
+        tags: Array.isArray(tags) ? tags : [],
+        imageUrl: r.image_url || r.imageUrl || r.image || '',
+        image: r.image_url || r.imageUrl || r.image || '',
+        image_url: r.image_url || r.imageUrl || r.image || '',
+        sourceUrl: r.source_url || r.sourceUrl || '',
+        source_url: r.source_url || r.sourceUrl || '',
+        isFavorite: Boolean(r.is_favorite || r.isFavorite),
+        is_favorite: Boolean(r.is_favorite || r.isFavorite),
+        isCooked: Boolean(r.is_cooked || r.isCooked),
+        is_cooked: Boolean(r.is_cooked || r.isCooked),
+        rating: Number(r.rating) || 0,
+        note: r.note || '',
+        bookId: r.book_id || r.bookId || null,
+        book_id: r.book_id || r.bookId || null,
+        isPublic: Boolean(r.is_public),
+        is_public: Boolean(r.is_public),
+        createdAt: r.created_at || new Date().toISOString(),
+        updatedAt: r.updated_at || new Date().toISOString()
       };
     });
 
     return NextResponse.json(
-      { success: true, recipes: mapped },
+      { success: true, recipes: formatted },
       { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
     );
   } catch (err: any) {
@@ -58151,136 +58324,165 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const existingCols = await ensureTableColumns();
+    await ensureTableAndColumns();
     const body = await req.json();
     const items = Array.isArray(body) ? body : (body.recipes || [body.recipe || body]);
 
     for (const item of items) {
-      if (!item || !item.id) continue;
-      const id = item.id;
+      if (!item) continue;
+      const id = item.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      const targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
 
-      let validUserId = 'usr_admin_1';
-      const candidateUserId = String(item.userId || item.user_id || '').trim();
-      if (candidateUserId) {
-        try {
-          const userCheck = await query('SELECT id FROM users WHERE id = $1', [candidateUserId]);
-          if (userCheck && userCheck.length > 0) {
-            validUserId = candidateUserId;
-          } else {
-            await query(
-              'INSERT INTO users (id, email, name, updated_at) VALUES ($1, $2, $3, NOW()) ON CONFLICT (id) DO NOTHING',
-              [candidateUserId, item.createdBy || item.email || candidateUserId, item.creatorName || 'User']
-            );
-            validUserId = candidateUserId;
-          }
-        } catch (_) {
-          validUserId = 'usr_admin_1';
+      try {
+        const userCheck = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
+        if (userCheck.length === 0) {
+          await query(`
+            INSERT INTO users (id, name, email, role, subscription_plan)
+            VALUES ($1, 'User', $2, 'user', 'taster')
+            ON CONFLICT (id) DO NOTHING;
+          `, [targetUserId, targetUserId.includes('@') ? targetUserId : `${targetUserId}@zecratary.local`]);
         }
+      } catch (_) {}
+
+      let ingredients = item.ingredients;
+      if (typeof ingredients === 'string') {
+        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = [ingredients]; }
+      }
+      if (!Array.isArray(ingredients)) ingredients = [];
+
+      let directions = item.directions || item.instructions || item.steps;
+      if (typeof directions === 'string') {
+        try { directions = JSON.parse(directions); } catch (_) { directions = [directions]; }
+      }
+      if (!Array.isArray(directions)) directions = [];
+
+      let tags = item.tags;
+      if (typeof tags === 'string') {
+        try { tags = JSON.parse(tags); } catch (_) { tags = [tags]; }
+      }
+      if (!Array.isArray(tags)) tags = [];
+
+      let nutrition = item.nutrition || item.macros || {};
+      if (typeof nutrition === 'string') {
+        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
       }
 
-      const safeIngredients = Array.isArray(item.ingredients)
-        ? item.ingredients
-        : (typeof item.ingredients === 'string' ? (() => { try { return JSON.parse(item.ingredients); } catch { return [item.ingredients]; } })() : []);
-
-      const safeInstructions = Array.isArray(item.instructions)
-        ? item.instructions
-        : (Array.isArray(item.directions) ? item.directions : (typeof item.instructions === 'string' ? [item.instructions] : []));
-
-      const safeTags = Array.isArray(item.tags) ? item.tags : [];
-      const safeNutrition = (item.nutrition && typeof item.nutrition === 'object') ? item.nutrition : {};
-
-      const prepMinutes = Number(item.prepTimeMinutes || item.prep_time_minutes) || (parseInt(item.prepTime) || 15);
-      const cookMinutes = Number(item.cookTimeMinutes || item.cook_time_minutes) || (parseInt(item.cookTime) || 10);
-      const recipeType = item.recipeType || item.category || 'Main Dish';
-      const resolvedImg = item.imageUrl || item.image || item.image_url || '';
-
-      const columnData: { col: string; val: any; isJson?: boolean }[] = [
-        { col: 'id', val: id },
-        { col: 'user_id', val: validUserId },
-        { col: 'title', val: item.title || item.name || 'Untitled Recipe' },
-        { col: 'description', val: item.description || '' },
-        { col: 'recipe_type', val: recipeType },
-        { col: 'category', val: recipeType },
-        { col: 'cuisine', val: item.cuisine || '' },
-        { col: 'prep_time', val: String(prepMinutes) + 'm' },
-        { col: 'cook_time', val: String(cookMinutes) + 'm' },
-        { col: 'prep_time_minutes', val: prepMinutes },
-        { col: 'cook_time_minutes', val: cookMinutes },
-        { col: 'servings', val: String(item.servings || '4') },
-        { col: 'difficulty', val: item.difficulty || '' },
-        { col: 'ingredients', val: JSON.stringify(safeIngredients), isJson: true },
-        { col: 'directions', val: JSON.stringify(safeInstructions), isJson: true },
-        { col: 'instructions', val: JSON.stringify(safeInstructions), isJson: true },
-        { col: 'nutrition', val: JSON.stringify(safeNutrition), isJson: true },
-        { col: 'tags', val: JSON.stringify(safeTags), isJson: true },
-        { col: 'image', val: resolvedImg },
-        { col: 'image_url', val: resolvedImg },
-        { col: 'is_favorite', val: Boolean(item.isFavorite ?? item.is_favorite) },
-        { col: 'is_cooked', val: Boolean(item.isCooked ?? item.is_cooked) },
-        { col: 'rating', val: Number(item.rating) || 0 },
-        { col: 'note', val: item.note || '' },
-        { col: 'book_id', val: item.bookId || item.book_id || null },
-        { col: 'source_url', val: item.sourceUrl || item.source_url || '' },
-        { col: 'created_by', val: item.createdBy || item.created_by || validUserId },
-        { col: 'creator_name', val: item.creatorName || item.creator_name || 'You' },
-        { col: 'is_public', val: Boolean(item.isPublic ?? item.is_public) }
-      ];
-
-      // Dynamically filter only columns that physically exist in the PostgreSQL table
-      const validEntries = columnData.filter(entry => existingCols.size === 0 || existingCols.has(entry.col));
-
-      const colNames: string[] = [];
-      const placeholders: string[] = [];
-      const values: any[] = [];
-      const updateClauses: string[] = [];
-
-      validEntries.forEach((entry) => {
-        colNames.push(entry.col);
-        values.push(entry.val);
-        const idx = values.length;
-        placeholders.push(entry.isJson ? `$${idx}::jsonb` : `$${idx}`);
-
-        if (entry.col !== 'id') {
-          if (entry.col === 'image') {
-            updateClauses.push(`image = COALESCE(NULLIF(EXCLUDED.image, ''), saved_recipes.image, EXCLUDED.image_url)`);
-          } else if (entry.col === 'image_url') {
-            updateClauses.push(`image_url = COALESCE(NULLIF(EXCLUDED.image_url, ''), saved_recipes.image_url, EXCLUDED.image)`);
-          } else if (entry.isJson) {
-            updateClauses.push(`${entry.col} = CASE WHEN EXCLUDED.${entry.col} IS NOT NULL AND EXCLUDED.${entry.col} != '[]'::jsonb AND EXCLUDED.${entry.col} != '{}'::jsonb THEN EXCLUDED.${entry.col} ELSE saved_recipes.${entry.col} END`);
-          } else if (['title', 'description', 'recipe_type', 'category', 'cuisine', 'servings', 'difficulty', 'source_url', 'created_by', 'creator_name'].includes(entry.col)) {
-            updateClauses.push(`${entry.col} = COALESCE(NULLIF(EXCLUDED.${entry.col}, ''), saved_recipes.${entry.col})`);
-          } else {
-            updateClauses.push(`${entry.col} = EXCLUDED.${entry.col}`);
-          }
-        }
-      });
-
-      if (existingCols.size === 0 || existingCols.has('updated_at')) {
-        colNames.push('updated_at');
-        placeholders.push('NOW()');
-        updateClauses.push('updated_at = NOW()');
-      }
-
-      const sql = `
-        INSERT INTO saved_recipes (${colNames.join(', ')})
-        VALUES (${placeholders.join(', ')})
+      await query(`
+        INSERT INTO saved_recipes (
+          id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
+          servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public,
+          is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+          $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16,
+          $17, $18, $19, $20, $21, $22, NOW()
+        )
         ON CONFLICT (id) DO UPDATE SET
-          ${updateClauses.join(',\n          ')};
-      `;
-
-      await query(sql, values);
+          user_id = COALESCE(EXCLUDED.user_id, saved_recipes.user_id),
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          recipe_type = EXCLUDED.recipe_type,
+          cuisine = EXCLUDED.cuisine,
+          prep_time = EXCLUDED.prep_time,
+          cook_time = EXCLUDED.cook_time,
+          servings = EXCLUDED.servings,
+          difficulty = EXCLUDED.difficulty,
+          ingredients = EXCLUDED.ingredients,
+          directions = EXCLUDED.directions,
+          nutrition = EXCLUDED.nutrition,
+          tags = EXCLUDED.tags,
+          image_url = EXCLUDED.image_url,
+          is_public = EXCLUDED.is_public,
+          is_favorite = EXCLUDED.is_favorite,
+          is_cooked = EXCLUDED.is_cooked,
+          rating = EXCLUDED.rating,
+          note = EXCLUDED.note,
+          book_id = EXCLUDED.book_id,
+          source_url = EXCLUDED.source_url,
+          updated_at = NOW();
+      `, [
+        id,
+        targetUserId,
+        item.title || item.name || 'Untitled Recipe',
+        item.description || '',
+        item.recipeType || item.category || item.recipe_type || 'Main Dish',
+        item.cuisine || '',
+        String(item.prepTime || item.prepTimeMinutes || item.prep_time || '15'),
+        String(item.cookTime || item.cookTimeMinutes || item.cook_time || '25'),
+        Number(item.servings || item.servingsCount) || 4,
+        item.difficulty || 'Medium',
+        JSON.stringify(ingredients),
+        JSON.stringify(directions),
+        JSON.stringify(nutrition),
+        JSON.stringify(tags),
+        item.imageUrl || item.image || item.image_url || '',
+        Boolean(item.isPublic || item.is_public),
+        Boolean(item.isFavorite || item.is_favorite),
+        Boolean(item.isCooked || item.is_cooked),
+        Number(item.rating) || 0,
+        item.note || '',
+        item.bookId || item.book_id || null,
+        item.sourceUrl || item.source_url || ''
+      ]);
     }
 
-    return NextResponse.json({ success: true, message: 'Recipe(s) persisted to PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Recipe(s) synchronized with PostgreSQL.' });
   } catch (err: any) {
-    console.error('[saved_recipes:POST] Error:', err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    await ensureTableAndColumns();
+    const body = await req.json();
+    const { id, isFavorite, is_favorite, isCooked, is_cooked, rating, note, bookId, book_id, sourceUrl, source_url } = body;
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
+    }
+
+    const updates: string[] = [];
+    const params: any[] = [id];
+
+    if (isFavorite !== undefined || is_favorite !== undefined) {
+      params.push(Boolean(isFavorite !== undefined ? isFavorite : is_favorite));
+      updates.push(`is_favorite = $${params.length}`);
+    }
+    if (isCooked !== undefined || is_cooked !== undefined) {
+      params.push(Boolean(isCooked !== undefined ? isCooked : is_cooked));
+      updates.push(`is_cooked = $${params.length}`);
+    }
+    if (rating !== undefined) {
+      params.push(Number(rating));
+      updates.push(`rating = $${params.length}`);
+    }
+    if (note !== undefined) {
+      params.push(String(note));
+      updates.push(`note = $${params.length}`);
+    }
+    if (bookId !== undefined || book_id !== undefined) {
+      params.push(bookId !== undefined ? bookId : book_id);
+      updates.push(`book_id = $${params.length}`);
+    }
+    if (sourceUrl !== undefined || source_url !== undefined) {
+      params.push(sourceUrl !== undefined ? sourceUrl : source_url);
+      updates.push(`source_url = $${params.length}`);
+    }
+
+    if (updates.length > 0) {
+      updates.push('updated_at = NOW()');
+      await query(`UPDATE saved_recipes SET ${updates.join(', ')} WHERE id = $1`, params);
+    }
+
+    return NextResponse.json({ success: true, message: 'Recipe updated in PostgreSQL.' });
+  } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function DELETE(req: NextRequest) {
   try {
-    await ensureTableColumns();
     const { searchParams } = new URL(req.url);
     let id = searchParams.get('id');
 

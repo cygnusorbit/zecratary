@@ -109,6 +109,8 @@ const DEFAULT_SECTIONS = [
   }
 ];
 
+const DEFAULT_RECIPE_IMAGE = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80';
+
 export default function ChefChatPage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -126,7 +128,7 @@ export default function ChefChatPage() {
   const [activeTopicTitle, setActiveTopicTitle] = useState<string>('Standard Wizard');
   const [wizardQuestionsList, setWizardQuestionsList] = useState<string[]>([]);
   const [resultDisplayMode, setResultDisplayMode] = useState<'card' | 'compact' | 'detailed'>('card');
-  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.0-flash');
+  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.5-flash');
   const [strictDietEnforcement, setStrictDietEnforcement] = useState<boolean>(false);
   const [filterWordsList, setFilterWordsList] = useState<string[]>([]);
   const [enablePantryContext, setEnablePantryContext] = useState<boolean>(true);
@@ -144,7 +146,7 @@ export default function ChefChatPage() {
   const [isListening, setIsListening] = useState<boolean>(false);
   const speechRecognitionRef = useRef<any>(null);
 
-  // Token Telemetry (Synchronized with /admin/token-setting & PostgreSQL)
+  // Token Telemetry
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
@@ -203,8 +205,37 @@ export default function ChefChatPage() {
     }
   };
 
+  // Helper to prevent raw JSON strings from leaking into chat bubbles
+  const sanitizeChefMessage = (raw: string | undefined): { text: string; recipe?: any; plan?: any } => {
+    if (!raw) return { text: '' };
+    let str = String(raw).trim();
+
+    if (str.startsWith('```')) {
+      str = str.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    }
+
+    if (str.startsWith('{') && (str.includes('"reply"') || str.includes('"recommendedRecipe"') || str.includes('"plan"'))) {
+      try {
+        const parsed = JSON.parse(str);
+        return {
+          text: parsed.reply || parsed.response || parsed.content || '',
+          recipe: parsed.recommendedRecipe || parsed.recipe,
+          plan: parsed.plan
+        };
+      } catch (_) {
+        const replyMatch = str.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"?/s);
+        if (replyMatch) {
+          const cleanText = replyMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').trim();
+          return { text: cleanText };
+        }
+      }
+    }
+
+    return { text: str };
+  };
+
   // ------------------------------------------------------------------
-  // Active Chat Session Persistence (Maintained Until "New Chat")
+  // Active Chat Session Persistence
   // ------------------------------------------------------------------
   const loadActiveChat = useCallback((user: User | null) => {
     try {
@@ -250,7 +281,7 @@ export default function ChefChatPage() {
         localStorage.removeItem(`zecratary_chef_chat_messages_${userKey}`);
       }
     } catch (_) {}
-    showToast(t('newChatStarted', 'Started a new chat session.'));
+    showToast(t('newChatStarted') || 'Started a new chat session.');
   };
 
   const updateWizardStep = (step: number | null) => {
@@ -337,7 +368,7 @@ export default function ChefChatPage() {
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      showToast("Speech recognition is not supported in this browser.");
+      showToast(t('speechNotSupported') || "Speech recognition is not supported in this browser.");
       return;
     }
 
@@ -354,7 +385,7 @@ export default function ChefChatPage() {
 
       recognition.onstart = () => {
         setIsListening(true);
-        showToast("🎙️ Listening... Speak your request");
+        showToast(t('listeningPrompt') || "🎙️ Listening... Speak your request");
       };
 
       recognition.onresult = (event: any) => {
@@ -375,21 +406,62 @@ export default function ChefChatPage() {
   };
 
   // ------------------------------------------------------------------
+  // Pantry Context Integration
+  // ------------------------------------------------------------------
+  const loadPantryItems = useCallback(async (user: User | null) => {
+    const userKey = getUserKey(user);
+    try {
+      const res = await fetch(`/api/pantry?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
+      const data = await safeJsonParse(res);
+      if (data && Array.isArray(data.items)) {
+        const itemNames = data.items.map((i: any) => typeof i === 'string' ? i : i.name || i.item || '').filter(Boolean);
+        setPantryIngredientsList(itemNames);
+      } else if (Array.isArray(data)) {
+        const itemNames = data.map((i: any) => typeof i === 'string' ? i : i.name || i.item || '').filter(Boolean);
+        setPantryIngredientsList(itemNames);
+      }
+    } catch (_) {
+      try {
+        const local = localStorage.getItem('zecratary_pantry_items') || localStorage.getItem(`zecratary_pantry_${userKey}`);
+        if (local) {
+          const parsed = JSON.parse(local);
+          if (Array.isArray(parsed)) {
+            setPantryIngredientsList(parsed.map((i: any) => typeof i === 'string' ? i : i.name || i.item || '').filter(Boolean));
+          }
+        }
+      } catch (_) {}
+    }
+  }, [getUserKey]);
+
+  // ------------------------------------------------------------------
   // Saved Recipes & Planner Gated Synchronization
   // ------------------------------------------------------------------
   const loadUserSavedRecipes = useCallback(async (user: User | null) => {
     const userKey = getUserKey(user);
     try {
-      const res = await fetch(`/api/recipes?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
-      const data = await safeJsonParse(res);
-      if (data && Array.isArray(data.recipes)) {
-        setUserSavedRecipes(data.recipes);
-      } else if (Array.isArray(data)) {
-        setUserSavedRecipes(data);
+      let candidateList: any[] = [];
+      const resSaved = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
+      const dataSaved = await safeJsonParse(resSaved);
+      if (dataSaved && Array.isArray(dataSaved.recipes)) {
+        candidateList = dataSaved.recipes;
+      }
+
+      if (candidateList.length === 0) {
+        const res = await fetch(`/api/recipes?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
+        const data = await safeJsonParse(res);
+        if (data && Array.isArray(data.recipes)) {
+          candidateList = data.recipes;
+        } else if (Array.isArray(data)) {
+          candidateList = data;
+        }
+      }
+
+      if (candidateList.length > 0) {
+        setUserSavedRecipes(candidateList);
       }
     } catch (_) {
       try {
-        const local = localStorage.getItem(`zecratary_saved_recipes_${userKey}`);
+        const local = localStorage.getItem(`zecratary_saved_recipes_${userKey}`) || localStorage.getItem('zecratary_saved_recipes');
         if (local) setUserSavedRecipes(JSON.parse(local));
       } catch (_) {}
     }
@@ -399,7 +471,7 @@ export default function ChefChatPage() {
     if (!title) return false;
     const cleanTitle = title.trim().toLowerCase();
     return (Array.isArray(userSavedRecipes) ? userSavedRecipes : []).some(
-      r => (r?.title || '').trim().toLowerCase() === cleanTitle
+      r => (r?.title || r?.name || '').trim().toLowerCase() === cleanTitle
     );
   }, [userSavedRecipes]);
 
@@ -424,24 +496,38 @@ export default function ChefChatPage() {
         instructions: recipe.instructions || [],
         chefTip: recipe.chefTip || '',
         image: recipe.image || '',
+        imageUrl: recipe.image || '',
         sourceUrl: recipe.sourceUrl || '',
         isAiGenerated: true
       };
 
-      const res = await fetch('/api/recipes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await safeJsonParse(res);
+      await Promise.allSettled([
+        fetch('/api/recipes/saved', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }),
+        fetch('/api/recipes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+      ]);
 
-      const savedItem = { ...payload, id: data?.recipe?.id || data?.id || 'rec_' + Date.now() };
+      const savedItem = { ...payload, id: 'rec_' + Date.now() };
       setUserSavedRecipes(prev => [...prev, savedItem]);
+
       try {
         localStorage.setItem(`zecratary_saved_recipes_${userKey}`, JSON.stringify([...userSavedRecipes, savedItem]));
+        localStorage.setItem('zecratary_saved_recipes', JSON.stringify([...userSavedRecipes, savedItem]));
       } catch (_) {}
 
-      showToast(`"${recipe.title}" saved to /saved! You can now add it to /planner`);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_recipes_updated'));
+        window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+      }
+
+      showToast(`"${recipe.title}" saved! You can now suggest adding it to your Planner.`);
     } catch (_) {
       showToast("Recipe saved!");
       setUserSavedRecipes(prev => [...prev, { title: recipe.title, id: 'rec_' + Date.now() }]);
@@ -465,21 +551,36 @@ export default function ChefChatPage() {
       const userKey = getUserKey(active);
       const savedMatch = userSavedRecipes.find(r => (r?.title || '').trim().toLowerCase() === (recipeToSchedule.title || '').trim().toLowerCase());
 
-      await fetch('/api/planner', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userKey,
-          userEmail: active?.email,
-          date: scheduleDate,
-          mealType: scheduleMealType,
-          title: recipeToSchedule.title,
-          servings: scheduleServings,
-          recipeId: savedMatch?.id || null,
-          image: recipeToSchedule.image || '',
-          recipe: recipeToSchedule
+      const planItem = {
+        userId: userKey,
+        userEmail: active?.email,
+        date: scheduleDate,
+        mealType: scheduleMealType,
+        title: recipeToSchedule.title,
+        servings: scheduleServings,
+        recipeId: savedMatch?.id || null,
+        image: recipeToSchedule.image || '',
+        imageUrl: recipeToSchedule.image || '',
+        recipe: recipeToSchedule
+      };
+
+      await Promise.allSettled([
+        fetch('/api/planner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(planItem)
+        }),
+        fetch('/api/meal-plans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(planItem)
         })
-      });
+      ]);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_planner_updated'));
+        window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
+      }
 
       showToast(`"${recipeToSchedule.title}" scheduled for ${scheduleDate} (${scheduleMealType})!`);
       setShowPlannerModal(false);
@@ -496,14 +597,26 @@ export default function ChefChatPage() {
     try {
       const active = currentUserRef.current || getCurrentUser();
       const userKey = getUserKey(active);
-      await fetch('/api/grocery', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userKey,
-          items: ingredientsList.map(item => ({ name: item, checked: false }))
+      const items = ingredientsList.map(item => ({ name: item, checked: false }));
+
+      await Promise.allSettled([
+        fetch('/api/grocery', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: userKey, items })
+        }),
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(items)
         })
-      });
+      ]);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_shopping_updated'));
+        window.dispatchEvent(new Event('zecratary_grocery_updated'));
+      }
+
       showToast(`Added ${ingredientsList.length} ingredients to your Grocery List!`);
     } catch (_) {
       showToast("Ingredients added to Grocery List!");
@@ -522,8 +635,8 @@ export default function ChefChatPage() {
         const p = data.preferences;
         if (typeof p.servings === 'number') setServings(p.servings);
         if (p.country) setCountry(p.country);
-        if (Array.isArray(p.diets)) setSelectedDiets(p.diets);
-        if (Array.isArray(p.allergies)) setSelectedAllergies(p.allergies);
+        if (Array.isArray(p.diets || p.diet)) setSelectedDiets(p.diets || p.diet);
+        if (Array.isArray(p.allergies || p.allergy)) setSelectedAllergies(p.allergies || p.allergy);
         if (Array.isArray(p.avoid)) setIngredientsToAvoid(p.avoid);
         if (Array.isArray(p.tastes)) setTastesList(p.tastes);
       }
@@ -534,8 +647,9 @@ export default function ChefChatPage() {
     setSelectedDiets(prev => prev.includes(item) ? prev.filter(d => d !== item) : [...prev, item]);
   };
 
+  // FIXED TYPO: previously assigned to setSelectedAllergy = ... which caused a reference exception
   const handleToggleAllergy = (item: string) => {
-    setSelectedAllergy = (prev => prev.includes(item) ? prev.filter(a => a !== item) : [...prev, item]);
+    setSelectedAllergies(prev => prev.includes(item) ? prev.filter(a => a !== item) : [...prev, item]);
   };
 
   const handleAddAvoid = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
@@ -625,7 +739,6 @@ export default function ChefChatPage() {
       const active = currentUserRef.current || getCurrentUser();
       const queryParam = active?.id ? `?userId=${encodeURIComponent(active.id)}` : active?.email ? `?email=${encodeURIComponent(active.email)}` : '';
       
-      // 1. Fetch live user token balance & settings
       const res = await fetch(`/api/tokens${queryParam}${queryParam ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' });
       const data = await safeJsonParse(res);
       if (data && data.success) {
@@ -640,28 +753,6 @@ export default function ChefChatPage() {
         }
       }
 
-      // 2. Direct synchronization with /admin/token-setting endpoint
-      try {
-        let adminTokenRes = await fetch(`/api/admin/token-setting?t=${Date.now()}`, { cache: 'no-store' });
-        if (!adminTokenRes.ok) {
-          adminTokenRes = await fetch(`/api/admin/token-settings?t=${Date.now()}`, { cache: 'no-store' });
-        }
-        if (adminTokenRes.ok) {
-          const adminTokenData = await safeJsonParse(adminTokenRes);
-          const s = adminTokenData?.settings || adminTokenData;
-          if (s) {
-            if (s.tokenSymbol) setTokenSymbol(s.tokenSymbol);
-            if (s.tokenName) setTokenName(s.tokenName);
-            if (s.isEnabled !== undefined) setIsTokenEnabled(Boolean(s.isEnabled));
-            if (s.chefCost !== undefined) setChefCost(Number(s.chefCost));
-            if (Array.isArray(s.packages) && s.packages.length > 0) {
-              setTokenPackages(s.packages);
-            }
-          }
-        }
-      } catch (_) {}
-
-      // 3. AI Settings synchronization from /api/admin/settings
       const sRes = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
       const sData = await safeJsonParse(sRes);
       const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
@@ -703,7 +794,7 @@ export default function ChefChatPage() {
   }, []);
 
   useEffect(() => {
-    document.title = `${t('foodieChatHeading', 'Foodie Chat')} - FoodiePrep`;
+    document.title = `${t('foodieChatHeading') || 'Foodie Chat'} - FoodiePrep`;
     initAuthStorage();
     const user = getCurrentUser();
     setCurrentUser(user);
@@ -713,6 +804,7 @@ export default function ChefChatPage() {
     loadActiveChat(user);
     loadUserPreferences(user);
     loadUserSavedRecipes(user);
+    loadPantryItems(user);
     fetchTelemetry();
 
     const handleSync = () => {
@@ -721,6 +813,7 @@ export default function ChefChatPage() {
       currentUserRef.current = active;
       loadUserPreferences(active);
       loadUserSavedRecipes(active);
+      loadPantryItems(active);
       fetchTelemetry();
     };
 
@@ -732,6 +825,7 @@ export default function ChefChatPage() {
     window.addEventListener('zecratary_plans_updated', fetchTelemetry);
     window.addEventListener('zecratary_users_updated', fetchTelemetry);
     window.addEventListener('zecratary_chef_ai_settings_updated', fetchTelemetry);
+    window.addEventListener('zecratary_pantry_updated', () => loadPantryItems(getCurrentUser()));
 
     return () => {
       window.removeEventListener('storage', handleSync);
@@ -742,8 +836,9 @@ export default function ChefChatPage() {
       window.removeEventListener('zecratary_plans_updated', fetchTelemetry);
       window.removeEventListener('zecratary_users_updated', fetchTelemetry);
       window.removeEventListener('zecratary_chef_ai_settings_updated', fetchTelemetry);
+      window.removeEventListener('zecratary_pantry_updated', () => loadPantryItems(getCurrentUser()));
     };
-  }, [applySavedTheme, fetchTelemetry, loadActiveChat, loadUserPreferences, loadUserSavedRecipes, t]);
+  }, [applySavedTheme, fetchTelemetry, loadActiveChat, loadPantryItems, loadUserPreferences, loadUserSavedRecipes, t]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -937,10 +1032,9 @@ export default function ChefChatPage() {
       }
     }
 
-    // Token Balance Check (Bypassed if token consumption is disabled in /admin/token-setting)
     const cost = isTokenEnabled ? chefCost : 0;
     if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
-      showToast(`${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}`);
+      showToast(`${t('insufficientTokensError') || 'Insufficient'} ${tokenName}. ${t('required') || 'Required'}: ${cost} ${tokenSymbol}, ${t('balance') || 'Balance'}: ${tokenBalance} ${tokenSymbol}`);
       setIsTokenPurchaseOpen(true);
       return;
     }
@@ -1027,6 +1121,8 @@ export default function ChefChatPage() {
             }
           });
 
+          const synthPrompt = `Synthesize a comprehensive ${requestedDays}-day meal plan for ${requestedMealTypes.join(', ')} with theme "${requestedTheme}", budget "${requestedBudget}", starting ${startDate}.`;
+
           const res = await fetch('/api/ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1035,6 +1131,7 @@ export default function ChefChatPage() {
               topicTitle: activeTopicTitle,
               questionnaireSummary: qaSummary,
               questionnaireAnswers: updatedAnswers,
+              prompt: synthPrompt,
               requestedDays,
               requestedMealTypes,
               requestedTheme,
@@ -1060,12 +1157,15 @@ export default function ChefChatPage() {
             setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens ?? cost)));
           }
 
+          const rawReply = data.reply || `I have formulated your meal plan and signature recommended recipe based on your ${activeTopicTitle} questionnaire!`;
+          const sanitized = sanitizeChefMessage(rawReply);
+
           const planMsg: ChatMessage = {
             id: 'ast_plan_' + Date.now(),
             role: 'assistant',
-            content: data.reply || `I have formulated your meal plan and signature recommended recipe based on your ${activeTopicTitle} questionnaire!`,
-            plan: data.plan,
-            recommendedRecipe: data.recommendedRecipe || data.recipe,
+            content: sanitized.text || rawReply,
+            plan: data.plan || sanitized.plan,
+            recommendedRecipe: data.recommendedRecipe || data.recipe || sanitized.recipe,
             systemRecommendations: data.systemRecommendations || []
           };
 
@@ -1119,12 +1219,15 @@ export default function ChefChatPage() {
         showToast(`-${consumed} ${tokenSymbol} (${tokenName})`);
       }
 
+      const rawReply = data.reply || data.response || "Here are personalized culinary recommendations based on your preferences.";
+      const sanitized = sanitizeChefMessage(rawReply);
+
       const astMsg: ChatMessage = {
         id: 'ast_' + Date.now(),
         role: 'assistant',
-        content: data.reply || data.response || "Here are personalized culinary recommendations based on your preferences.",
-        plan: data.plan || undefined,
-        recommendedRecipe: data.recommendedRecipe || data.recipe,
+        content: sanitized.text || rawReply,
+        plan: data.plan || sanitized.plan || undefined,
+        recommendedRecipe: data.recommendedRecipe || data.recipe || sanitized.recipe,
         systemRecommendations: data.systemRecommendations || []
       };
 
@@ -1162,7 +1265,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOP HEADER WITH LIVE TOKEN WALLET & TELEMETRY */}
+      {/* TOP HEADER */}
       <div 
         className="space-y-3 border-b pb-3 shrink-0 transition-colors duration-200"
         style={{ borderColor: 'var(--color-border)' }}
@@ -1181,10 +1284,10 @@ export default function ChefChatPage() {
             </div>
             <div>
               <h1 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                {t('foodieChatHeading', 'Foodie Chat')}
+                {t('foodieChatHeading') || 'Foodie Chat'}
               </h1>
               <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('foodieChatSubtitle', 'Ask recipes, cooking questions, or launch multi-topic meal plan wizards')}
+                {t('foodieChatSubtitle') || 'Ask recipes, cooking questions, or launch multi-topic meal plan wizards'}
               </p>
             </div>
           </div>
@@ -1221,9 +1324,7 @@ export default function ChefChatPage() {
               <span className="font-mono">{activeAiModel}</span>
             </div>
 
-            
-
-            {/* PREFERENCES SLIDERS BUTTON */}
+            {/* PREFERENCES BUTTON */}
             <button
               type="button"
               onClick={() => setShowPreferences(true)}
@@ -1233,7 +1334,7 @@ export default function ChefChatPage() {
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-text-secondary)'
               }}
-              title={t('preferencesTooltip', 'Recipe Preferences')}
+              title={t('preferencesTooltip') || 'Recipe Preferences'}
             >
               <SlidersHorizontal className="h-4 w-4" />
             </button>
@@ -1248,10 +1349,10 @@ export default function ChefChatPage() {
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-primary)'
               }}
-              title={t('startNewChat', 'Start New Chat')}
+              title={t('startNewChat') || 'Start New Chat'}
             >
               <Edit3 className="h-4 w-4" />
-              <span className="hidden sm:inline">New Chat</span>
+              <span className="hidden sm:inline">{t('newChat') || 'New Chat'}</span>
             </button>
           </div>
         </div>
@@ -1284,7 +1385,7 @@ export default function ChefChatPage() {
               color: 'var(--color-emerald)'
             }}
           >
-            {t('servingsLabelPref', 'Servings:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{(t('peopleSuffix', '{count} people')).replace('{count}', String(servings))}</strong>
+            {t('servingsLabelPref') || 'Servings:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{(t('peopleSuffix') || '{count} people').replace('{count}', String(servings))}</strong>
           </span>
 
           <span 
@@ -1295,7 +1396,7 @@ export default function ChefChatPage() {
               color: 'var(--color-emerald)'
             }}
           >
-            {t('countryLabelPref', 'Country:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{country}</strong>
+            {t('countryLabelPref') || 'Country:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{country}</strong>
           </span>
 
           {selectedDiets.map((d) => (
@@ -1308,7 +1409,7 @@ export default function ChefChatPage() {
                 color: 'var(--color-emerald)'
               }}
             >
-              {t('dietLabelPref', 'Diet:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{d}</strong>
+              {t('dietLabelPref') || 'Diet:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{d}</strong>
             </span>
           ))}
 
@@ -1322,7 +1423,7 @@ export default function ChefChatPage() {
                 color: 'var(--color-primary)'
               }}
             >
-              {t('allergyLabelPref', 'Allergy:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{a}</strong>
+              {t('allergyLabelPref') || 'Allergy:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{a}</strong>
             </span>
           ))}
 
@@ -1336,7 +1437,7 @@ export default function ChefChatPage() {
                 color: 'var(--color-primary)'
               }}
             >
-              {t('avoidLabelPref', 'Avoid:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{av}</strong>
+              {t('avoidLabelPref') || 'Avoid:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{av}</strong>
             </span>
           ))}
 
@@ -1350,7 +1451,7 @@ export default function ChefChatPage() {
                 color: 'var(--color-primary)'
               }}
             >
-              {t('tasteLabelPref', 'Taste:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{itemTaste}</strong>
+              {t('tasteLabelPref') || 'Taste:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{itemTaste}</strong>
             </span>
           ))}
         </div>
@@ -1372,7 +1473,7 @@ export default function ChefChatPage() {
             </div>
             <div>
               <h2 className="text-2xl font-black" style={{ color: 'var(--color-text)' }}>
-                {t('heyImChef', "Hey, I'm Chef Foodie!")}
+                {t('heyImChef') || "Hey, I'm Chef Foodie!"}
               </h2>
               <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
                 Select a questionnaire topic below or speak into the microphone to plan meals
@@ -1451,6 +1552,10 @@ export default function ChefChatPage() {
           messages.map((m) => {
             const isUser = m.role === 'user';
             const hasAudioActive = isSpeaking && speakingMsgId === m.id;
+            const sanitized = sanitizeChefMessage(m.content);
+            const displayContent = sanitized.text || m.content;
+            const displayRecipe = m.recommendedRecipe || m.recipe || sanitized.recipe;
+            const displayPlan = m.plan || sanitized.plan;
 
             return (
               <div key={m.id} className={`flex items-start gap-2.5 ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -1468,7 +1573,7 @@ export default function ChefChatPage() {
                 )}
 
                 <div className={`max-w-xl sm:max-w-2xl space-y-3.5 ${isUser ? '' : 'w-full'}`}>
-                  {m.content && (
+                  {displayContent && (
                     <div 
                       className={`p-4 rounded-2xl text-sm leading-relaxed ${isUser ? 'ml-auto max-w-md shadow-md font-medium text-white' : 'border shadow-xs'}`}
                       style={isUser ? {
@@ -1480,11 +1585,11 @@ export default function ChefChatPage() {
                       }}
                     >
                       <div className="flex justify-between items-start gap-3">
-                        <p className="whitespace-pre-line flex-1">{m.content}</p>
+                        <p className="whitespace-pre-line flex-1">{displayContent}</p>
                         {!isUser && enableVoiceInteraction && (
                           <button
                             type="button"
-                            onClick={() => speakText(m.content || '', m.id)}
+                            onClick={() => speakText(displayContent, m.id)}
                             className="p-1 rounded-lg transition shrink-0 cursor-pointer hover:opacity-80"
                             style={{ color: hasAudioActive ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
                             title={hasAudioActive ? "Stop speech" : "Read aloud"}
@@ -1519,7 +1624,7 @@ export default function ChefChatPage() {
                   )}
 
                   {/* RECOMMENDATION RECIPE CARD PREVIEW */}
-                  {m.recommendedRecipe && (
+                  {displayRecipe && (
                     <div 
                       className="border rounded-2xl p-4 space-y-3.5 shadow-sm transition-all duration-200 hover:shadow-md"
                       style={{
@@ -1529,16 +1634,34 @@ export default function ChefChatPage() {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div 
+                          role="button"
+                          tabIndex={0}
                           onClick={() => {
-                            setSelectedRecipeForModal(m.recommendedRecipe);
+                            setSelectedRecipeForModal(displayRecipe);
                             setShowRecipeDetailsModal(true);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setSelectedRecipeForModal(displayRecipe);
+                              setShowRecipeDetailsModal(true);
+                            }
                           }}
                           className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer group"
                         >
                           <div className="relative shrink-0">
                             <img
-                              src={m.recommendedRecipe.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'}
-                              alt={m.recommendedRecipe.title}
+                              src={displayRecipe.image || displayRecipe.imageUrl || DEFAULT_RECIPE_IMAGE}
+                              alt={displayRecipe.title}
+                              referrerPolicy="no-referrer"
+                              crossOrigin="anonymous"
+                              onError={(e) => {
+                                const target = e.currentTarget;
+                                if (!target.dataset.failed) {
+                                  target.dataset.failed = 'true';
+                                  target.src = DEFAULT_RECIPE_IMAGE;
+                                }
+                              }}
                               className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover border transition group-hover:scale-105"
                               style={{ borderColor: 'var(--color-border)' }}
                             />
@@ -1553,9 +1676,9 @@ export default function ChefChatPage() {
                           <div className="space-y-1 min-w-0 flex-1">
                             <div className="flex items-center gap-2">
                               <h4 className="font-black text-sm leading-snug group-hover:underline truncate" style={{ color: 'var(--color-text)' }}>
-                                {m.recommendedRecipe.title}
+                                {displayRecipe.title}
                               </h4>
-                              {m.recommendedRecipe.sourceUrl && (
+                              {displayRecipe.sourceUrl && (
                                 <span 
                                   className="text-[9px] font-bold px-1.5 py-0.2 rounded border flex items-center gap-0.5 shrink-0"
                                   style={{
@@ -1569,17 +1692,17 @@ export default function ChefChatPage() {
                               )}
                             </div>
                             <p className="text-[11px] leading-relaxed line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>
-                              {m.recommendedRecipe.description}
+                              {displayRecipe.description}
                             </p>
                             <div className="flex flex-wrap items-center gap-2.5 text-[10px] font-bold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                               <span className="flex items-center gap-1">
-                                <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {(m.recommendedRecipe.prepMinutes || 0) + (m.recommendedRecipe.cookMinutes || 0)}m
+                                <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {(displayRecipe.prepMinutes || 0) + (displayRecipe.cookMinutes || 0)}m
                               </span>
                               <span className="flex items-center gap-1">
-                                <Users className="h-3 w-3" /> {m.recommendedRecipe.servings || servings} serv
+                                <Users className="h-3 w-3" /> {displayRecipe.servings || servings} serv
                               </span>
-                              {m.recommendedRecipe.calories && (
-                                <span className="font-mono text-emerald-500">{m.recommendedRecipe.calories} kcal</span>
+                              {displayRecipe.calories && (
+                                <span className="font-mono text-emerald-500">{displayRecipe.calories} kcal</span>
                               )}
                             </div>
                           </div>
@@ -1591,7 +1714,7 @@ export default function ChefChatPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            setSelectedRecipeForModal(m.recommendedRecipe);
+                            setSelectedRecipeForModal(displayRecipe);
                             setShowRecipeDetailsModal(true);
                           }}
                           className="px-3 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-80"
@@ -1606,7 +1729,7 @@ export default function ChefChatPage() {
                         </button>
 
                         <div className="flex items-center gap-2">
-                          {isRecipeSaved(m.recommendedRecipe.title) ? (
+                          {isRecipeSaved(displayRecipe.title) ? (
                             <span 
                               className="px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 shadow-2xs"
                               style={{
@@ -1620,8 +1743,8 @@ export default function ChefChatPage() {
                           ) : (
                             <button
                               type="button"
-                              disabled={savingRecipeTitle === m.recommendedRecipe.title}
-                              onClick={() => handleSaveRecipe(m.recommendedRecipe)}
+                              disabled={savingRecipeTitle === displayRecipe.title}
+                              onClick={() => handleSaveRecipe(displayRecipe)}
                               className="px-3.5 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-90"
                               style={{
                                 backgroundColor: 'var(--color-card)',
@@ -1629,7 +1752,7 @@ export default function ChefChatPage() {
                                 color: 'var(--color-primary)'
                               }}
                             >
-                              {savingRecipeTitle === m.recommendedRecipe.title ? (
+                              {savingRecipeTitle === displayRecipe.title ? (
                                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                               ) : (
                                 <Bookmark className="h-3.5 w-3.5" />
@@ -1638,10 +1761,10 @@ export default function ChefChatPage() {
                             </button>
                           )}
 
-                          {isRecipeSaved(m.recommendedRecipe.title) && (
+                          {isRecipeSaved(displayRecipe.title) && (
                             <button
                               type="button"
-                              onClick={() => handleOpenPlannerModal(m.recommendedRecipe)}
+                              onClick={() => handleOpenPlannerModal(displayRecipe)}
                               className="px-3.5 py-1.5 rounded-xl text-white text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90 animate-in fade-in"
                               style={{ backgroundColor: 'var(--color-primary)' }}
                             >
@@ -1655,7 +1778,7 @@ export default function ChefChatPage() {
                   )}
 
                   {/* MULTI-DAY PLAN PRESENTATION */}
-                  {m.plan && (
+                  {displayPlan && (
                     <div 
                       className="border rounded-3xl p-5 space-y-4 shadow-sm transition-colors duration-200"
                       style={{
@@ -1667,13 +1790,13 @@ export default function ChefChatPage() {
                         <div className="flex items-center gap-2">
                           <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                           <h3 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
-                            {m.plan.title} ({m.plan.totalDays} {m.plan.totalDays === 1 ? 'Day' : 'Days'})
+                            {displayPlan.title} ({displayPlan.totalDays} {displayPlan.totalDays === 1 ? 'Day' : 'Days'})
                           </h3>
                         </div>
 
                         <div className="flex items-center gap-1.5 self-end sm:self-auto">
                           <span className="text-[10px] font-bold mr-1 hidden sm:inline" style={{ color: 'var(--color-text-secondary)' }}>
-                            {m.plan.budgetPerServing ? `Budget: ${m.plan.budgetPerServing}` : '$5.00/serv'}
+                            {displayPlan.budgetPerServing ? `Budget: ${displayPlan.budgetPerServing}` : '$5.00/serv'}
                           </span>
                           <div className="border p-0.5 rounded-xl flex items-center gap-1" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                             {(['card', 'compact', 'detailed'] as const).map((mode) => (
@@ -1699,9 +1822,11 @@ export default function ChefChatPage() {
                       {/* 1. STANDARD CARDS VIEW */}
                       {resultDisplayMode === 'card' && (
                         <div className="space-y-3">
-                          {m.plan.meals.map((meal) => (
+                          {Array.isArray(displayPlan.meals) && displayPlan.meals.map((meal) => (
                             <div 
                               key={meal.id}
+                              role="button"
+                              tabIndex={0}
                               onClick={() => {
                                 setSelectedRecipeForModal({
                                   title: meal.title,
@@ -1714,9 +1839,27 @@ export default function ChefChatPage() {
                                   ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Fresh produce & proteins', 'Aromatics & seasonings', 'Cold-pressed olive oil'],
                                   instructions: ['Prepare and rinse all ingredients cleanly.', 'Sauté aromatics over medium heat until fragrant.', 'Cook protein and vegetables thoroughly.', 'Garnish with fresh herbs and serve warm.'],
                                   chefTip: meal.isBatchCook ? 'Double the quantity to save time for subsequent days.' : 'Serve immediately while hot for optimal flavor infusion.',
-                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+                                  image: meal.image || DEFAULT_RECIPE_IMAGE
                                 });
                                 setShowRecipeDetailsModal(true);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  setSelectedRecipeForModal({
+                                    title: meal.title,
+                                    description: meal.description,
+                                    prepMinutes: meal.prepMinutes || 15,
+                                    cookMinutes: meal.cookMinutes || 20,
+                                    servings: meal.servings || servings,
+                                    calories: meal.calories || 480,
+                                    mealType: meal.mealType,
+                                    ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Fresh produce & proteins', 'Aromatics & seasonings'],
+                                    instructions: ['Prepare and cook all ingredients cleanly.'],
+                                    image: meal.image || DEFAULT_RECIPE_IMAGE
+                                  });
+                                  setShowRecipeDetailsModal(true);
+                                }
                               }}
                               className="border rounded-2xl p-3.5 space-y-2.5 transition cursor-pointer hover:scale-[1.01] shadow-xs"
                               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -1751,8 +1894,17 @@ export default function ChefChatPage() {
 
                               <div className="flex items-start gap-3">
                                 <img 
-                                  src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'} 
+                                  src={meal.image || DEFAULT_RECIPE_IMAGE} 
                                   alt={meal.title} 
+                                  referrerPolicy="no-referrer"
+                                  crossOrigin="anonymous"
+                                  onError={(e) => {
+                                    const target = e.currentTarget;
+                                    if (!target.dataset.failed) {
+                                      target.dataset.failed = 'true';
+                                      target.src = DEFAULT_RECIPE_IMAGE;
+                                    }
+                                  }}
                                   className="w-16 h-16 rounded-xl object-cover border shrink-0" 
                                   style={{ borderColor: 'var(--color-border)' }} 
                                 />
@@ -1794,9 +1946,11 @@ export default function ChefChatPage() {
                             <span className="col-span-2 text-right">Time & Cals</span>
                           </div>
 
-                          {m.plan.meals.map((meal, rIdx) => (
+                          {Array.isArray(displayPlan.meals) && displayPlan.meals.map((meal, rIdx) => (
                             <div 
                               key={meal.id || rIdx}
+                              role="button"
+                              tabIndex={0}
                               onClick={() => {
                                 setSelectedRecipeForModal({
                                   title: meal.title,
@@ -1808,7 +1962,7 @@ export default function ChefChatPage() {
                                   mealType: meal.mealType,
                                   ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Fresh produce & proteins', 'Seasonings'],
                                   instructions: ['Follow standard chef cooking guidelines for this dish.'],
-                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+                                  image: meal.image || DEFAULT_RECIPE_IMAGE
                                 });
                                 setShowRecipeDetailsModal(true);
                               }}
@@ -1847,9 +2001,11 @@ export default function ChefChatPage() {
                       {/* 3. DETAILED MASTER VIEW */}
                       {resultDisplayMode === 'detailed' && (
                         <div className="space-y-3">
-                          {m.plan.meals.map((meal) => (
+                          {Array.isArray(displayPlan.meals) && displayPlan.meals.map((meal) => (
                             <div 
                               key={meal.id}
+                              role="button"
+                              tabIndex={0}
                               onClick={() => {
                                 setSelectedRecipeForModal({
                                   title: meal.title,
@@ -1861,7 +2017,7 @@ export default function ChefChatPage() {
                                   mealType: meal.mealType,
                                   ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Quality produce', 'Seasonings'],
                                   instructions: ['Follow standard chef cooking guidelines for this dish.'],
-                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+                                  image: meal.image || DEFAULT_RECIPE_IMAGE
                                 });
                                 setShowRecipeDetailsModal(true);
                               }}
@@ -1949,7 +2105,7 @@ export default function ChefChatPage() {
             }}
           >
             <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} /> 
-            {t('chefThinking', 'Chef Foodie is formulating your recipes...')}
+            {t('chefThinking') || 'Chef Foodie is formulating your recipes...'}
           </div>
         )}
         <div ref={chatEndRef} />
@@ -2039,7 +2195,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* PROMPT INPUT BAR (DYNAMIC TOKEN BADGE & FREE MODE) */}
+      {/* PROMPT INPUT BAR */}
       <div 
         className="border rounded-2xl p-1.5 flex items-center gap-2 shrink-0 shadow-xl transition-colors duration-200"
         style={{
@@ -2065,10 +2221,12 @@ export default function ChefChatPage() {
 
         <input
           type="text"
+          autoComplete="off"
+          data-lpignore="true"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder={isListening ? "Listening to your voice..." : `${t('askPromptPlaceholder', 'Ask recipes, cooking tips, or meal plan requests...')} (${isTokenEnabled && chefCost > 0 ? `${chefCost} ${tokenSymbol}` : t('freeBadge', 'Free')})`}
+          placeholder={isListening ? "Listening to your voice..." : `${t('askPromptPlaceholder') || 'Ask recipes, cooking tips, or meal plan requests...'} (${isTokenEnabled && chefCost > 0 ? `${chefCost} ${tokenSymbol}` : t('freeBadge') || 'Free'})`}
           className="bg-transparent border-none text-sm px-2 flex-1 outline-none font-normal"
           style={{ color: 'var(--color-text)' }}
         />
@@ -2083,7 +2241,7 @@ export default function ChefChatPage() {
             }}
             title={isTokenEnabled && chefCost > 0 ? `Each prompt costs ${chefCost} ${tokenName}` : 'Bypass token consumption'}
           >
-            {isTokenEnabled && chefCost > 0 ? `${chefCost} ${tokenSymbol}` : t('freeBadge', 'Free')}
+            {isTokenEnabled && chefCost > 0 ? `${chefCost} ${tokenSymbol}` : t('freeBadge') || 'Free'}
           </span>
 
           <button
@@ -2116,10 +2274,10 @@ export default function ChefChatPage() {
             <div className="flex justify-between items-start">
               <div>
                 <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
-                  {t('recipePreferencesTitle', 'Recipe Preferences')}
+                  {t('recipePreferencesTitle') || 'Recipe Preferences'}
                 </h2>
                 <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('recipePreferencesSub', 'Personalise your cooking experience')}
+                  {t('recipePreferencesSub') || 'Personalise your cooking experience'}
                 </p>
               </div>
 
@@ -2140,7 +2298,7 @@ export default function ChefChatPage() {
             <div className="overflow-y-auto flex-1 space-y-5 pr-1 text-xs">
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  {t('servingsTitle', 'Servings')}
+                  {t('servingsTitle') || 'Servings'}
                 </label>
                 <div className="flex items-center gap-3.5">
                   <button
@@ -2156,7 +2314,7 @@ export default function ChefChatPage() {
                     -
                   </button>
                   <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>
-                    {(t('peopleSuffix', '{count} people')).replace('{count}', String(servings))}
+                    {(t('peopleSuffix') || '{count} people').replace('{count}', String(servings))}
                   </span>
                   <button
                     type="button"
@@ -2175,7 +2333,7 @@ export default function ChefChatPage() {
 
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  {t('countryTitle', 'Country')}
+                  {t('countryTitle') || 'Country'}
                 </label>
                 <div className="relative">
                   <select
@@ -2198,7 +2356,7 @@ export default function ChefChatPage() {
 
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  {t('dietaryPreferencesTitle', 'Dietary Preferences')}
+                  {t('dietaryPreferencesTitle') || 'Dietary Preferences'}
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {DIETARY_OPTIONS.map((item) => {
@@ -2228,7 +2386,7 @@ export default function ChefChatPage() {
 
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  {t('allergiesTitle', 'Allergies')}
+                  {t('allergiesTitle') || 'Allergies'}
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {ALLERGY_OPTIONS.map((item) => {
@@ -2258,12 +2416,14 @@ export default function ChefChatPage() {
 
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  {t('ingredientsToAvoidTitle', 'Ingredients to Avoid')}
+                  {t('ingredientsToAvoidTitle') || 'Ingredients to Avoid'}
                 </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    placeholder={t('typeIngredientPlaceholder', 'Type an ingredient...')}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    placeholder={t('typeIngredientPlaceholder') || 'Type an ingredient...'}
                     value={newAvoidInput}
                     onChange={(e) => setNewAvoidInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -2298,7 +2458,7 @@ export default function ChefChatPage() {
                 >
                   {ingredientsToAvoid.length === 0 ? (
                     <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('noIngredientsAvoid', 'No ingredients added to avoid list')}
+                      {t('noIngredientsAvoid') || 'No ingredients added to avoid list'}
                     </span>
                   ) : (
                     ingredientsToAvoid.map((item) => (
@@ -2327,12 +2487,14 @@ export default function ChefChatPage() {
 
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  {t('tastesTitle', 'Tastes')}
+                  {t('tastesTitle') || 'Tastes'}
                 </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    placeholder={t('tastesPlaceholder', 'e.g. prefers larger portions, loves umami...')}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    placeholder={t('tastesPlaceholder') || 'e.g. prefers larger portions, loves umami...'}
                     value={newTasteInput}
                     onChange={(e) => setNewTasteInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -2367,7 +2529,7 @@ export default function ChefChatPage() {
                 >
                   {tastesList.length === 0 ? (
                     <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('noTastesSpecified', 'No taste preferences specified')}
+                      {t('noTastesSpecified') || 'No taste preferences specified'}
                     </span>
                   ) : (
                     tastesList.map((item) => (
@@ -2409,7 +2571,7 @@ export default function ChefChatPage() {
                   color: 'var(--color-text)'
                 }}
               >
-                {t('cancel', 'Cancel')}
+                {t('cancel') || 'Cancel'}
               </button>
 
               <button
@@ -2418,7 +2580,7 @@ export default function ChefChatPage() {
                 className="px-4 py-2.5 text-white font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md hover:opacity-90"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                <Trash2 className="h-3.5 w-3.5" /> {t('clearAllBtn', 'Clear All')}
+                <Trash2 className="h-3.5 w-3.5" /> {t('clearAllBtn') || 'Clear All'}
               </button>
 
               <button
@@ -2427,7 +2589,7 @@ export default function ChefChatPage() {
                 className="px-6 py-2.5 text-white font-bold text-xs rounded-xl transition shadow-lg cursor-pointer hover:opacity-90"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                {t('saveBtn', 'Save')}
+                {t('saveBtn') || 'Save'}
               </button>
             </div>
           </div>
@@ -2490,14 +2652,21 @@ export default function ChefChatPage() {
             </div>
 
             <div className="overflow-y-auto flex-1 space-y-4 pr-1 text-xs custom-scrollbar">
-              {selectedRecipeForModal.image && (
-                <img
-                  src={selectedRecipeForModal.image}
-                  alt={selectedRecipeForModal.title}
-                  className="w-full h-44 rounded-2xl object-cover border shadow-xs"
-                  style={{ borderColor: 'var(--color-border)' }}
-                />
-              )}
+              <img
+                src={selectedRecipeForModal.image || DEFAULT_RECIPE_IMAGE}
+                alt={selectedRecipeForModal.title}
+                referrerPolicy="no-referrer"
+                crossOrigin="anonymous"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  if (!target.dataset.failed) {
+                    target.dataset.failed = 'true';
+                    target.src = DEFAULT_RECIPE_IMAGE;
+                  }
+                }}
+                className="w-full h-44 rounded-2xl object-cover border shadow-xs"
+                style={{ borderColor: 'var(--color-border)' }}
+              />
 
               <p className="leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
                 {selectedRecipeForModal.description}
@@ -2726,6 +2895,8 @@ export default function ChefChatPage() {
                 </label>
                 <input
                   type="date"
+                  autoComplete="off"
+                  data-lpignore="true"
                   value={scheduleDate}
                   onChange={(e) => setScheduleDate(e.target.value)}
                   className="w-full border rounded-xl px-3.5 py-2 text-xs outline-none"
@@ -2814,7 +2985,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOKEN PURCHASE MODAL (SYNCHRONIZED WITH /admin/token-setting) */}
+      {/* TOKEN PURCHASE MODAL */}
       <TokenPurchaseModal
         isOpen={isTokenPurchaseOpen}
         onClose={() => setIsTokenPurchaseOpen(false)}
@@ -2826,7 +2997,7 @@ export default function ChefChatPage() {
           setTokenBalance(newBal);
           window.dispatchEvent(new Event('zecratary_tokens_updated'));
           window.dispatchEvent(new Event('zecratary_users_updated'));
-          showToast(`${t('tokensAddedSuccess', 'Tokens added!')} ${t('newBalance', 'New balance')}: ${newBal} ${tokenSymbol}`);
+          showToast(`${t('tokensAddedSuccess') || 'Tokens added!'} ${t('newBalance') || 'New balance'}: ${newBal} ${tokenSymbol}`);
         }}
       />
     </div>

@@ -33,7 +33,7 @@
   },
   "chefAiSettings": {
     "model": "gemini-3.5-flash",
-    "apiKey": "AQ.Ab8RN6Im8kfqkq_BdZOaXRZoB8QYFDTN4qKFdttKMA5u2jvVSg",
+    "apiKey": "AQ.Ab8RN6Il3zdVMdc644f9mWwYqVsOG6-gUUXV70Tep713lW5uOg",
     "provider": "gemini",
     "sections": [
       {
@@ -59,7 +59,7 @@
       }
     ],
     "maxTokens": 4096,
-    "updatedAt": "2026-10-03T06:39:53.626Z",
+    "updatedAt": "2026-10-03T11:00:14.516Z",
     "voiceSpeed": 1,
     "maxPlanDays": 7,
     "temperature": 0.7,
@@ -1266,7 +1266,7 @@
     "titlebarImage": "",
     "chefAiSettings": {
       "model": "gemini-3.5-flash",
-      "apiKey": "AQ.Ab8RN6Im8kfqkq_BdZOaXRZoB8QYFDTN4qKFdttKMA5u2jvVSg",
+      "apiKey": "AQ.Ab8RN6Il3zdVMdc644f9mWwYqVsOG6-gUUXV70Tep713lW5uOg",
       "provider": "gemini",
       "sections": [
         {
@@ -1292,7 +1292,7 @@
         }
       ],
       "maxTokens": 4096,
-      "updatedAt": "2026-10-03T06:39:53.626Z",
+      "updatedAt": "2026-10-03T11:00:14.516Z",
       "voiceSpeed": 1,
       "maxPlanDays": 7,
       "temperature": 0.7,
@@ -2420,56 +2420,56 @@
     "titlebar_image": "",
     "maintenanceMode": false,
     "paymentSettings": {
-      "currency": "USD",
-      "testMode": true,
-      "stripeConnected": false,
-      "stripeKeysVerified": false,
-      "stripeWebhookVerified": false,
-      "stripe": {
-        "enabled": true,
-        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG",
-        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
-        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019"
-      },
-      "paypal": {
-        "enabled": false,
-        "clientId": "",
-        "clientSecret": "",
-        "webhookId": "",
-        "environment": "sandbox"
-      },
-      "manualSettlement": {
-        "enabled": true,
-        "bankName": "OCBC",
-        "accountHolder": "ABC",
-        "accountNumber": "11232312312",
-        "routingNumber": "1212",
-        "swiftBic": "123213",
-        "branchName": "New York",
-        "instructions": "Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.",
-        "requireReference": true
-      },
       "id": "ptx_1790962799750_uvtta",
       "notes": "",
       "amount": 50,
       "manual": {
         "enabled": true,
         "bankName": "OCBC",
-        "accountHolder": "ABC",
-        "accountNumber": "11232312312",
-        "routingNumber": "1212",
         "swiftBic": "123213",
         "branchName": "New York",
         "instructions": "Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.",
+        "accountHolder": "ABC",
+        "accountNumber": "11232312312",
+        "routingNumber": "1212",
         "requireReference": true
       },
+      "paypal": {
+        "enabled": false,
+        "clientId": "",
+        "webhookId": "",
+        "environment": "sandbox",
+        "clientSecret": ""
+      },
       "status": "pending",
+      "stripe": {
+        "enabled": true,
+        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
+        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
+        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
+      },
+      "currency": "USD",
+      "testMode": true,
       "plan_name": "Store Wallet Top-Up",
       "activeGateway": "stripe",
       "customer_name": "System Administrator",
       "customer_email": "admin@zecratary.com",
       "failure_reason": "",
-      "transfer_reference": ""
+      "stripeConnected": false,
+      "manualSettlement": {
+        "enabled": true,
+        "bankName": "OCBC",
+        "swiftBic": "123213",
+        "branchName": "New York",
+        "instructions": "Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.",
+        "accountHolder": "ABC",
+        "accountNumber": "11232312312",
+        "routingNumber": "1212",
+        "requireReference": true
+      },
+      "stripeKeysVerified": false,
+      "transfer_reference": "",
+      "stripeWebhookVerified": false
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -2660,7 +2660,7 @@
     "titlebarImage": "",
     "chefAiSettings": {
       "model": "gemini-3.5-flash",
-      "apiKey": "AQ.Ab8RN6Im8kfqkq_BdZOaXRZoB8QYFDTN4qKFdttKMA5u2jvVSg",
+      "apiKey": "AQ.Ab8RN6Il3zdVMdc644f9mWwYqVsOG6-gUUXV70Tep713lW5uOg",
       "provider": "gemini",
       "sections": [
         {
@@ -2686,7 +2686,7 @@
         }
       ],
       "maxTokens": 4096,
-      "updatedAt": "2026-10-03T06:39:53.626Z",
+      "updatedAt": "2026-10-03T11:00:14.516Z",
       "voiceSpeed": 1,
       "maxPlanDays": 7,
       "temperature": 0.7,
@@ -3814,56 +3814,56 @@
     "titlebar_image": "",
     "maintenanceMode": false,
     "paymentSettings": {
-      "currency": "USD",
-      "testMode": true,
-      "stripeConnected": false,
-      "stripeKeysVerified": false,
-      "stripeWebhookVerified": false,
-      "stripe": {
-        "enabled": true,
-        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG",
-        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
-        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019"
-      },
-      "paypal": {
-        "enabled": false,
-        "clientId": "",
-        "clientSecret": "",
-        "webhookId": "",
-        "environment": "sandbox"
-      },
-      "manualSettlement": {
-        "enabled": true,
-        "bankName": "OCBC",
-        "accountHolder": "ABC",
-        "accountNumber": "11232312312",
-        "routingNumber": "1212",
-        "swiftBic": "123213",
-        "branchName": "New York",
-        "instructions": "Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.",
-        "requireReference": true
-      },
       "id": "ptx_1790962799750_uvtta",
       "notes": "",
       "amount": 50,
       "manual": {
         "enabled": true,
         "bankName": "OCBC",
-        "accountHolder": "ABC",
-        "accountNumber": "11232312312",
-        "routingNumber": "1212",
         "swiftBic": "123213",
         "branchName": "New York",
         "instructions": "Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.",
+        "accountHolder": "ABC",
+        "accountNumber": "11232312312",
+        "routingNumber": "1212",
         "requireReference": true
       },
+      "paypal": {
+        "enabled": false,
+        "clientId": "",
+        "webhookId": "",
+        "environment": "sandbox",
+        "clientSecret": ""
+      },
       "status": "pending",
+      "stripe": {
+        "enabled": true,
+        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
+        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019",
+        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG"
+      },
+      "currency": "USD",
+      "testMode": true,
       "plan_name": "Store Wallet Top-Up",
       "activeGateway": "stripe",
       "customer_name": "System Administrator",
       "customer_email": "admin@zecratary.com",
       "failure_reason": "",
-      "transfer_reference": ""
+      "stripeConnected": false,
+      "manualSettlement": {
+        "enabled": true,
+        "bankName": "OCBC",
+        "swiftBic": "123213",
+        "branchName": "New York",
+        "instructions": "Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.",
+        "accountHolder": "ABC",
+        "accountNumber": "11232312312",
+        "routingNumber": "1212",
+        "requireReference": true
+      },
+      "stripeKeysVerified": false,
+      "transfer_reference": "",
+      "stripeWebhookVerified": false
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -3971,58 +3971,5 @@
     ],
     "recommendedRecipeUrls": []
   },
-  "updatedAt": "2026-10-03T08:16:25.383Z",
-  "paymentSettings": {
-    "currency": "USD",
-    "testMode": true,
-    "stripeConnected": false,
-    "stripeKeysVerified": false,
-    "stripeWebhookVerified": false,
-    "stripe": {
-      "enabled": true,
-      "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG",
-      "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
-      "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019"
-    },
-    "paypal": {
-      "enabled": false,
-      "clientId": "",
-      "clientSecret": "",
-      "webhookId": "",
-      "environment": "sandbox"
-    },
-    "manualSettlement": {
-      "enabled": true,
-      "bankName": "OCBC",
-      "accountHolder": "ABC",
-      "accountNumber": "11232312312",
-      "routingNumber": "1212",
-      "swiftBic": "123213",
-      "branchName": "New York",
-      "instructions": "Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.",
-      "requireReference": true
-    },
-    "id": "ptx_1790962799750_uvtta",
-    "notes": "",
-    "amount": 50,
-    "manual": {
-      "enabled": true,
-      "bankName": "OCBC",
-      "accountHolder": "ABC",
-      "accountNumber": "11232312312",
-      "routingNumber": "1212",
-      "swiftBic": "123213",
-      "branchName": "New York",
-      "instructions": "Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.",
-      "requireReference": true
-    },
-    "status": "pending",
-    "plan_name": "Store Wallet Top-Up",
-    "activeGateway": "stripe",
-    "customer_name": "System Administrator",
-    "customer_email": "admin@zecratary.com",
-    "failure_reason": "",
-    "transfer_reference": ""
-  },
-  "currency": "USD"
+  "updatedAt": "2026-10-03T11:00:14.586Z"
 }
