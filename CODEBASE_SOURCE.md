@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.05",
+  "version": "8.1.06",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.05",
+  "version": "8.1.06",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -11098,6 +11098,8 @@ const DEFAULT_SECTIONS = [
   }
 ];
 
+const DEFAULT_RECIPE_IMAGE = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80';
+
 export default function ChefChatPage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -11115,7 +11117,7 @@ export default function ChefChatPage() {
   const [activeTopicTitle, setActiveTopicTitle] = useState<string>('Standard Wizard');
   const [wizardQuestionsList, setWizardQuestionsList] = useState<string[]>([]);
   const [resultDisplayMode, setResultDisplayMode] = useState<'card' | 'compact' | 'detailed'>('card');
-  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.0-flash');
+  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.5-flash');
   const [strictDietEnforcement, setStrictDietEnforcement] = useState<boolean>(false);
   const [filterWordsList, setFilterWordsList] = useState<string[]>([]);
   const [enablePantryContext, setEnablePantryContext] = useState<boolean>(true);
@@ -11133,7 +11135,7 @@ export default function ChefChatPage() {
   const [isListening, setIsListening] = useState<boolean>(false);
   const speechRecognitionRef = useRef<any>(null);
 
-  // Token Telemetry (Synchronized with /admin/token-setting & PostgreSQL)
+  // Token Telemetry
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
@@ -11192,8 +11194,37 @@ export default function ChefChatPage() {
     }
   };
 
+  // Helper to prevent raw JSON strings from leaking into chat bubbles
+  const sanitizeChefMessage = (raw: string | undefined): { text: string; recipe?: any; plan?: any } => {
+    if (!raw) return { text: '' };
+    let str = String(raw).trim();
+
+    if (str.startsWith('```')) {
+      str = str.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    }
+
+    if (str.startsWith('{') && (str.includes('"reply"') || str.includes('"recommendedRecipe"') || str.includes('"plan"'))) {
+      try {
+        const parsed = JSON.parse(str);
+        return {
+          text: parsed.reply || parsed.response || parsed.content || '',
+          recipe: parsed.recommendedRecipe || parsed.recipe,
+          plan: parsed.plan
+        };
+      } catch (_) {
+        const replyMatch = str.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)"?/s);
+        if (replyMatch) {
+          const cleanText = replyMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').trim();
+          return { text: cleanText };
+        }
+      }
+    }
+
+    return { text: str };
+  };
+
   // ------------------------------------------------------------------
-  // Active Chat Session Persistence (Maintained Until "New Chat")
+  // Active Chat Session Persistence
   // ------------------------------------------------------------------
   const loadActiveChat = useCallback((user: User | null) => {
     try {
@@ -11239,7 +11270,7 @@ export default function ChefChatPage() {
         localStorage.removeItem(`zecratary_chef_chat_messages_${userKey}`);
       }
     } catch (_) {}
-    showToast(t('newChatStarted', 'Started a new chat session.'));
+    showToast(t('newChatStarted') || 'Started a new chat session.');
   };
 
   const updateWizardStep = (step: number | null) => {
@@ -11326,7 +11357,7 @@ export default function ChefChatPage() {
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      showToast("Speech recognition is not supported in this browser.");
+      showToast(t('speechNotSupported') || "Speech recognition is not supported in this browser.");
       return;
     }
 
@@ -11343,7 +11374,7 @@ export default function ChefChatPage() {
 
       recognition.onstart = () => {
         setIsListening(true);
-        showToast("🎙️ Listening... Speak your request");
+        showToast(t('listeningPrompt') || "🎙️ Listening... Speak your request");
       };
 
       recognition.onresult = (event: any) => {
@@ -11364,21 +11395,62 @@ export default function ChefChatPage() {
   };
 
   // ------------------------------------------------------------------
+  // Pantry Context Integration
+  // ------------------------------------------------------------------
+  const loadPantryItems = useCallback(async (user: User | null) => {
+    const userKey = getUserKey(user);
+    try {
+      const res = await fetch(`/api/pantry?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
+      const data = await safeJsonParse(res);
+      if (data && Array.isArray(data.items)) {
+        const itemNames = data.items.map((i: any) => typeof i === 'string' ? i : i.name || i.item || '').filter(Boolean);
+        setPantryIngredientsList(itemNames);
+      } else if (Array.isArray(data)) {
+        const itemNames = data.map((i: any) => typeof i === 'string' ? i : i.name || i.item || '').filter(Boolean);
+        setPantryIngredientsList(itemNames);
+      }
+    } catch (_) {
+      try {
+        const local = localStorage.getItem('zecratary_pantry_items') || localStorage.getItem(`zecratary_pantry_${userKey}`);
+        if (local) {
+          const parsed = JSON.parse(local);
+          if (Array.isArray(parsed)) {
+            setPantryIngredientsList(parsed.map((i: any) => typeof i === 'string' ? i : i.name || i.item || '').filter(Boolean));
+          }
+        }
+      } catch (_) {}
+    }
+  }, [getUserKey]);
+
+  // ------------------------------------------------------------------
   // Saved Recipes & Planner Gated Synchronization
   // ------------------------------------------------------------------
   const loadUserSavedRecipes = useCallback(async (user: User | null) => {
     const userKey = getUserKey(user);
     try {
-      const res = await fetch(`/api/recipes?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
-      const data = await safeJsonParse(res);
-      if (data && Array.isArray(data.recipes)) {
-        setUserSavedRecipes(data.recipes);
-      } else if (Array.isArray(data)) {
-        setUserSavedRecipes(data);
+      let candidateList: any[] = [];
+      const resSaved = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
+      const dataSaved = await safeJsonParse(resSaved);
+      if (dataSaved && Array.isArray(dataSaved.recipes)) {
+        candidateList = dataSaved.recipes;
+      }
+
+      if (candidateList.length === 0) {
+        const res = await fetch(`/api/recipes?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
+        const data = await safeJsonParse(res);
+        if (data && Array.isArray(data.recipes)) {
+          candidateList = data.recipes;
+        } else if (Array.isArray(data)) {
+          candidateList = data;
+        }
+      }
+
+      if (candidateList.length > 0) {
+        setUserSavedRecipes(candidateList);
       }
     } catch (_) {
       try {
-        const local = localStorage.getItem(`zecratary_saved_recipes_${userKey}`);
+        const local = localStorage.getItem(`zecratary_saved_recipes_${userKey}`) || localStorage.getItem('zecratary_saved_recipes');
         if (local) setUserSavedRecipes(JSON.parse(local));
       } catch (_) {}
     }
@@ -11388,7 +11460,7 @@ export default function ChefChatPage() {
     if (!title) return false;
     const cleanTitle = title.trim().toLowerCase();
     return (Array.isArray(userSavedRecipes) ? userSavedRecipes : []).some(
-      r => (r?.title || '').trim().toLowerCase() === cleanTitle
+      r => (r?.title || r?.name || '').trim().toLowerCase() === cleanTitle
     );
   }, [userSavedRecipes]);
 
@@ -11413,24 +11485,38 @@ export default function ChefChatPage() {
         instructions: recipe.instructions || [],
         chefTip: recipe.chefTip || '',
         image: recipe.image || '',
+        imageUrl: recipe.image || '',
         sourceUrl: recipe.sourceUrl || '',
         isAiGenerated: true
       };
 
-      const res = await fetch('/api/recipes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await safeJsonParse(res);
+      await Promise.allSettled([
+        fetch('/api/recipes/saved', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }),
+        fetch('/api/recipes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+      ]);
 
-      const savedItem = { ...payload, id: data?.recipe?.id || data?.id || 'rec_' + Date.now() };
+      const savedItem = { ...payload, id: 'rec_' + Date.now() };
       setUserSavedRecipes(prev => [...prev, savedItem]);
+
       try {
         localStorage.setItem(`zecratary_saved_recipes_${userKey}`, JSON.stringify([...userSavedRecipes, savedItem]));
+        localStorage.setItem('zecratary_saved_recipes', JSON.stringify([...userSavedRecipes, savedItem]));
       } catch (_) {}
 
-      showToast(`"${recipe.title}" saved to /saved! You can now add it to /planner`);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_recipes_updated'));
+        window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+      }
+
+      showToast(`"${recipe.title}" saved! You can now suggest adding it to your Planner.`);
     } catch (_) {
       showToast("Recipe saved!");
       setUserSavedRecipes(prev => [...prev, { title: recipe.title, id: 'rec_' + Date.now() }]);
@@ -11454,21 +11540,36 @@ export default function ChefChatPage() {
       const userKey = getUserKey(active);
       const savedMatch = userSavedRecipes.find(r => (r?.title || '').trim().toLowerCase() === (recipeToSchedule.title || '').trim().toLowerCase());
 
-      await fetch('/api/planner', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userKey,
-          userEmail: active?.email,
-          date: scheduleDate,
-          mealType: scheduleMealType,
-          title: recipeToSchedule.title,
-          servings: scheduleServings,
-          recipeId: savedMatch?.id || null,
-          image: recipeToSchedule.image || '',
-          recipe: recipeToSchedule
+      const planItem = {
+        userId: userKey,
+        userEmail: active?.email,
+        date: scheduleDate,
+        mealType: scheduleMealType,
+        title: recipeToSchedule.title,
+        servings: scheduleServings,
+        recipeId: savedMatch?.id || null,
+        image: recipeToSchedule.image || '',
+        imageUrl: recipeToSchedule.image || '',
+        recipe: recipeToSchedule
+      };
+
+      await Promise.allSettled([
+        fetch('/api/planner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(planItem)
+        }),
+        fetch('/api/meal-plans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(planItem)
         })
-      });
+      ]);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_planner_updated'));
+        window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
+      }
 
       showToast(`"${recipeToSchedule.title}" scheduled for ${scheduleDate} (${scheduleMealType})!`);
       setShowPlannerModal(false);
@@ -11485,14 +11586,26 @@ export default function ChefChatPage() {
     try {
       const active = currentUserRef.current || getCurrentUser();
       const userKey = getUserKey(active);
-      await fetch('/api/grocery', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userKey,
-          items: ingredientsList.map(item => ({ name: item, checked: false }))
+      const items = ingredientsList.map(item => ({ name: item, checked: false }));
+
+      await Promise.allSettled([
+        fetch('/api/grocery', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: userKey, items })
+        }),
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(items)
         })
-      });
+      ]);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_shopping_updated'));
+        window.dispatchEvent(new Event('zecratary_grocery_updated'));
+      }
+
       showToast(`Added ${ingredientsList.length} ingredients to your Grocery List!`);
     } catch (_) {
       showToast("Ingredients added to Grocery List!");
@@ -11511,8 +11624,8 @@ export default function ChefChatPage() {
         const p = data.preferences;
         if (typeof p.servings === 'number') setServings(p.servings);
         if (p.country) setCountry(p.country);
-        if (Array.isArray(p.diets)) setSelectedDiets(p.diets);
-        if (Array.isArray(p.allergies)) setSelectedAllergies(p.allergies);
+        if (Array.isArray(p.diets || p.diet)) setSelectedDiets(p.diets || p.diet);
+        if (Array.isArray(p.allergies || p.allergy)) setSelectedAllergies(p.allergies || p.allergy);
         if (Array.isArray(p.avoid)) setIngredientsToAvoid(p.avoid);
         if (Array.isArray(p.tastes)) setTastesList(p.tastes);
       }
@@ -11523,8 +11636,9 @@ export default function ChefChatPage() {
     setSelectedDiets(prev => prev.includes(item) ? prev.filter(d => d !== item) : [...prev, item]);
   };
 
+  // FIXED TYPO: previously assigned to setSelectedAllergy = ... which caused a reference exception
   const handleToggleAllergy = (item: string) => {
-    setSelectedAllergy = (prev => prev.includes(item) ? prev.filter(a => a !== item) : [...prev, item]);
+    setSelectedAllergies(prev => prev.includes(item) ? prev.filter(a => a !== item) : [...prev, item]);
   };
 
   const handleAddAvoid = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
@@ -11614,7 +11728,6 @@ export default function ChefChatPage() {
       const active = currentUserRef.current || getCurrentUser();
       const queryParam = active?.id ? `?userId=${encodeURIComponent(active.id)}` : active?.email ? `?email=${encodeURIComponent(active.email)}` : '';
       
-      // 1. Fetch live user token balance & settings
       const res = await fetch(`/api/tokens${queryParam}${queryParam ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' });
       const data = await safeJsonParse(res);
       if (data && data.success) {
@@ -11629,28 +11742,6 @@ export default function ChefChatPage() {
         }
       }
 
-      // 2. Direct synchronization with /admin/token-setting endpoint
-      try {
-        let adminTokenRes = await fetch(`/api/admin/token-setting?t=${Date.now()}`, { cache: 'no-store' });
-        if (!adminTokenRes.ok) {
-          adminTokenRes = await fetch(`/api/admin/token-settings?t=${Date.now()}`, { cache: 'no-store' });
-        }
-        if (adminTokenRes.ok) {
-          const adminTokenData = await safeJsonParse(adminTokenRes);
-          const s = adminTokenData?.settings || adminTokenData;
-          if (s) {
-            if (s.tokenSymbol) setTokenSymbol(s.tokenSymbol);
-            if (s.tokenName) setTokenName(s.tokenName);
-            if (s.isEnabled !== undefined) setIsTokenEnabled(Boolean(s.isEnabled));
-            if (s.chefCost !== undefined) setChefCost(Number(s.chefCost));
-            if (Array.isArray(s.packages) && s.packages.length > 0) {
-              setTokenPackages(s.packages);
-            }
-          }
-        }
-      } catch (_) {}
-
-      // 3. AI Settings synchronization from /api/admin/settings
       const sRes = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
       const sData = await safeJsonParse(sRes);
       const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
@@ -11692,7 +11783,7 @@ export default function ChefChatPage() {
   }, []);
 
   useEffect(() => {
-    document.title = `${t('foodieChatHeading', 'Foodie Chat')} - FoodiePrep`;
+    document.title = `${t('foodieChatHeading') || 'Foodie Chat'} - FoodiePrep`;
     initAuthStorage();
     const user = getCurrentUser();
     setCurrentUser(user);
@@ -11702,6 +11793,7 @@ export default function ChefChatPage() {
     loadActiveChat(user);
     loadUserPreferences(user);
     loadUserSavedRecipes(user);
+    loadPantryItems(user);
     fetchTelemetry();
 
     const handleSync = () => {
@@ -11710,6 +11802,7 @@ export default function ChefChatPage() {
       currentUserRef.current = active;
       loadUserPreferences(active);
       loadUserSavedRecipes(active);
+      loadPantryItems(active);
       fetchTelemetry();
     };
 
@@ -11721,6 +11814,7 @@ export default function ChefChatPage() {
     window.addEventListener('zecratary_plans_updated', fetchTelemetry);
     window.addEventListener('zecratary_users_updated', fetchTelemetry);
     window.addEventListener('zecratary_chef_ai_settings_updated', fetchTelemetry);
+    window.addEventListener('zecratary_pantry_updated', () => loadPantryItems(getCurrentUser()));
 
     return () => {
       window.removeEventListener('storage', handleSync);
@@ -11731,8 +11825,9 @@ export default function ChefChatPage() {
       window.removeEventListener('zecratary_plans_updated', fetchTelemetry);
       window.removeEventListener('zecratary_users_updated', fetchTelemetry);
       window.removeEventListener('zecratary_chef_ai_settings_updated', fetchTelemetry);
+      window.removeEventListener('zecratary_pantry_updated', () => loadPantryItems(getCurrentUser()));
     };
-  }, [applySavedTheme, fetchTelemetry, loadActiveChat, loadUserPreferences, loadUserSavedRecipes, t]);
+  }, [applySavedTheme, fetchTelemetry, loadActiveChat, loadPantryItems, loadUserPreferences, loadUserSavedRecipes, t]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -11926,10 +12021,9 @@ export default function ChefChatPage() {
       }
     }
 
-    // Token Balance Check (Bypassed if token consumption is disabled in /admin/token-setting)
     const cost = isTokenEnabled ? chefCost : 0;
     if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
-      showToast(`${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}`);
+      showToast(`${t('insufficientTokensError') || 'Insufficient'} ${tokenName}. ${t('required') || 'Required'}: ${cost} ${tokenSymbol}, ${t('balance') || 'Balance'}: ${tokenBalance} ${tokenSymbol}`);
       setIsTokenPurchaseOpen(true);
       return;
     }
@@ -12016,6 +12110,8 @@ export default function ChefChatPage() {
             }
           });
 
+          const synthPrompt = `Synthesize a comprehensive ${requestedDays}-day meal plan for ${requestedMealTypes.join(', ')} with theme "${requestedTheme}", budget "${requestedBudget}", starting ${startDate}.`;
+
           const res = await fetch('/api/ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -12024,6 +12120,7 @@ export default function ChefChatPage() {
               topicTitle: activeTopicTitle,
               questionnaireSummary: qaSummary,
               questionnaireAnswers: updatedAnswers,
+              prompt: synthPrompt,
               requestedDays,
               requestedMealTypes,
               requestedTheme,
@@ -12049,12 +12146,15 @@ export default function ChefChatPage() {
             setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens ?? cost)));
           }
 
+          const rawReply = data.reply || `I have formulated your meal plan and signature recommended recipe based on your ${activeTopicTitle} questionnaire!`;
+          const sanitized = sanitizeChefMessage(rawReply);
+
           const planMsg: ChatMessage = {
             id: 'ast_plan_' + Date.now(),
             role: 'assistant',
-            content: data.reply || `I have formulated your meal plan and signature recommended recipe based on your ${activeTopicTitle} questionnaire!`,
-            plan: data.plan,
-            recommendedRecipe: data.recommendedRecipe || data.recipe,
+            content: sanitized.text || rawReply,
+            plan: data.plan || sanitized.plan,
+            recommendedRecipe: data.recommendedRecipe || data.recipe || sanitized.recipe,
             systemRecommendations: data.systemRecommendations || []
           };
 
@@ -12108,12 +12208,15 @@ export default function ChefChatPage() {
         showToast(`-${consumed} ${tokenSymbol} (${tokenName})`);
       }
 
+      const rawReply = data.reply || data.response || "Here are personalized culinary recommendations based on your preferences.";
+      const sanitized = sanitizeChefMessage(rawReply);
+
       const astMsg: ChatMessage = {
         id: 'ast_' + Date.now(),
         role: 'assistant',
-        content: data.reply || data.response || "Here are personalized culinary recommendations based on your preferences.",
-        plan: data.plan || undefined,
-        recommendedRecipe: data.recommendedRecipe || data.recipe,
+        content: sanitized.text || rawReply,
+        plan: data.plan || sanitized.plan || undefined,
+        recommendedRecipe: data.recommendedRecipe || data.recipe || sanitized.recipe,
         systemRecommendations: data.systemRecommendations || []
       };
 
@@ -12151,7 +12254,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOP HEADER WITH LIVE TOKEN WALLET & TELEMETRY */}
+      {/* TOP HEADER */}
       <div 
         className="space-y-3 border-b pb-3 shrink-0 transition-colors duration-200"
         style={{ borderColor: 'var(--color-border)' }}
@@ -12170,10 +12273,10 @@ export default function ChefChatPage() {
             </div>
             <div>
               <h1 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                {t('foodieChatHeading', 'Foodie Chat')}
+                {t('foodieChatHeading') || 'Foodie Chat'}
               </h1>
               <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('foodieChatSubtitle', 'Ask recipes, cooking questions, or launch multi-topic meal plan wizards')}
+                {t('foodieChatSubtitle') || 'Ask recipes, cooking questions, or launch multi-topic meal plan wizards'}
               </p>
             </div>
           </div>
@@ -12210,9 +12313,7 @@ export default function ChefChatPage() {
               <span className="font-mono">{activeAiModel}</span>
             </div>
 
-            
-
-            {/* PREFERENCES SLIDERS BUTTON */}
+            {/* PREFERENCES BUTTON */}
             <button
               type="button"
               onClick={() => setShowPreferences(true)}
@@ -12222,7 +12323,7 @@ export default function ChefChatPage() {
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-text-secondary)'
               }}
-              title={t('preferencesTooltip', 'Recipe Preferences')}
+              title={t('preferencesTooltip') || 'Recipe Preferences'}
             >
               <SlidersHorizontal className="h-4 w-4" />
             </button>
@@ -12237,10 +12338,10 @@ export default function ChefChatPage() {
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-primary)'
               }}
-              title={t('startNewChat', 'Start New Chat')}
+              title={t('startNewChat') || 'Start New Chat'}
             >
               <Edit3 className="h-4 w-4" />
-              <span className="hidden sm:inline">New Chat</span>
+              <span className="hidden sm:inline">{t('newChat') || 'New Chat'}</span>
             </button>
           </div>
         </div>
@@ -12273,7 +12374,7 @@ export default function ChefChatPage() {
               color: 'var(--color-emerald)'
             }}
           >
-            {t('servingsLabelPref', 'Servings:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{(t('peopleSuffix', '{count} people')).replace('{count}', String(servings))}</strong>
+            {t('servingsLabelPref') || 'Servings:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{(t('peopleSuffix') || '{count} people').replace('{count}', String(servings))}</strong>
           </span>
 
           <span 
@@ -12284,7 +12385,7 @@ export default function ChefChatPage() {
               color: 'var(--color-emerald)'
             }}
           >
-            {t('countryLabelPref', 'Country:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{country}</strong>
+            {t('countryLabelPref') || 'Country:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{country}</strong>
           </span>
 
           {selectedDiets.map((d) => (
@@ -12297,7 +12398,7 @@ export default function ChefChatPage() {
                 color: 'var(--color-emerald)'
               }}
             >
-              {t('dietLabelPref', 'Diet:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{d}</strong>
+              {t('dietLabelPref') || 'Diet:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{d}</strong>
             </span>
           ))}
 
@@ -12311,7 +12412,7 @@ export default function ChefChatPage() {
                 color: 'var(--color-primary)'
               }}
             >
-              {t('allergyLabelPref', 'Allergy:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{a}</strong>
+              {t('allergyLabelPref') || 'Allergy:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{a}</strong>
             </span>
           ))}
 
@@ -12325,7 +12426,7 @@ export default function ChefChatPage() {
                 color: 'var(--color-primary)'
               }}
             >
-              {t('avoidLabelPref', 'Avoid:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{av}</strong>
+              {t('avoidLabelPref') || 'Avoid:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{av}</strong>
             </span>
           ))}
 
@@ -12339,7 +12440,7 @@ export default function ChefChatPage() {
                 color: 'var(--color-primary)'
               }}
             >
-              {t('tasteLabelPref', 'Taste:')} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{itemTaste}</strong>
+              {t('tasteLabelPref') || 'Taste:'} <strong className="font-bold" style={{ color: 'var(--color-text)' }}>{itemTaste}</strong>
             </span>
           ))}
         </div>
@@ -12361,7 +12462,7 @@ export default function ChefChatPage() {
             </div>
             <div>
               <h2 className="text-2xl font-black" style={{ color: 'var(--color-text)' }}>
-                {t('heyImChef', "Hey, I'm Chef Foodie!")}
+                {t('heyImChef') || "Hey, I'm Chef Foodie!"}
               </h2>
               <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
                 Select a questionnaire topic below or speak into the microphone to plan meals
@@ -12440,6 +12541,10 @@ export default function ChefChatPage() {
           messages.map((m) => {
             const isUser = m.role === 'user';
             const hasAudioActive = isSpeaking && speakingMsgId === m.id;
+            const sanitized = sanitizeChefMessage(m.content);
+            const displayContent = sanitized.text || m.content;
+            const displayRecipe = m.recommendedRecipe || m.recipe || sanitized.recipe;
+            const displayPlan = m.plan || sanitized.plan;
 
             return (
               <div key={m.id} className={`flex items-start gap-2.5 ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -12457,7 +12562,7 @@ export default function ChefChatPage() {
                 )}
 
                 <div className={`max-w-xl sm:max-w-2xl space-y-3.5 ${isUser ? '' : 'w-full'}`}>
-                  {m.content && (
+                  {displayContent && (
                     <div 
                       className={`p-4 rounded-2xl text-sm leading-relaxed ${isUser ? 'ml-auto max-w-md shadow-md font-medium text-white' : 'border shadow-xs'}`}
                       style={isUser ? {
@@ -12469,11 +12574,11 @@ export default function ChefChatPage() {
                       }}
                     >
                       <div className="flex justify-between items-start gap-3">
-                        <p className="whitespace-pre-line flex-1">{m.content}</p>
+                        <p className="whitespace-pre-line flex-1">{displayContent}</p>
                         {!isUser && enableVoiceInteraction && (
                           <button
                             type="button"
-                            onClick={() => speakText(m.content || '', m.id)}
+                            onClick={() => speakText(displayContent, m.id)}
                             className="p-1 rounded-lg transition shrink-0 cursor-pointer hover:opacity-80"
                             style={{ color: hasAudioActive ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
                             title={hasAudioActive ? "Stop speech" : "Read aloud"}
@@ -12508,7 +12613,7 @@ export default function ChefChatPage() {
                   )}
 
                   {/* RECOMMENDATION RECIPE CARD PREVIEW */}
-                  {m.recommendedRecipe && (
+                  {displayRecipe && (
                     <div 
                       className="border rounded-2xl p-4 space-y-3.5 shadow-sm transition-all duration-200 hover:shadow-md"
                       style={{
@@ -12518,16 +12623,34 @@ export default function ChefChatPage() {
                     >
                       <div className="flex items-start justify-between gap-3">
                         <div 
+                          role="button"
+                          tabIndex={0}
                           onClick={() => {
-                            setSelectedRecipeForModal(m.recommendedRecipe);
+                            setSelectedRecipeForModal(displayRecipe);
                             setShowRecipeDetailsModal(true);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setSelectedRecipeForModal(displayRecipe);
+                              setShowRecipeDetailsModal(true);
+                            }
                           }}
                           className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer group"
                         >
                           <div className="relative shrink-0">
                             <img
-                              src={m.recommendedRecipe.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'}
-                              alt={m.recommendedRecipe.title}
+                              src={displayRecipe.image || displayRecipe.imageUrl || DEFAULT_RECIPE_IMAGE}
+                              alt={displayRecipe.title}
+                              referrerPolicy="no-referrer"
+                              crossOrigin="anonymous"
+                              onError={(e) => {
+                                const target = e.currentTarget;
+                                if (!target.dataset.failed) {
+                                  target.dataset.failed = 'true';
+                                  target.src = DEFAULT_RECIPE_IMAGE;
+                                }
+                              }}
                               className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover border transition group-hover:scale-105"
                               style={{ borderColor: 'var(--color-border)' }}
                             />
@@ -12542,9 +12665,9 @@ export default function ChefChatPage() {
                           <div className="space-y-1 min-w-0 flex-1">
                             <div className="flex items-center gap-2">
                               <h4 className="font-black text-sm leading-snug group-hover:underline truncate" style={{ color: 'var(--color-text)' }}>
-                                {m.recommendedRecipe.title}
+                                {displayRecipe.title}
                               </h4>
-                              {m.recommendedRecipe.sourceUrl && (
+                              {displayRecipe.sourceUrl && (
                                 <span 
                                   className="text-[9px] font-bold px-1.5 py-0.2 rounded border flex items-center gap-0.5 shrink-0"
                                   style={{
@@ -12558,17 +12681,17 @@ export default function ChefChatPage() {
                               )}
                             </div>
                             <p className="text-[11px] leading-relaxed line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>
-                              {m.recommendedRecipe.description}
+                              {displayRecipe.description}
                             </p>
                             <div className="flex flex-wrap items-center gap-2.5 text-[10px] font-bold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                               <span className="flex items-center gap-1">
-                                <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {(m.recommendedRecipe.prepMinutes || 0) + (m.recommendedRecipe.cookMinutes || 0)}m
+                                <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {(displayRecipe.prepMinutes || 0) + (displayRecipe.cookMinutes || 0)}m
                               </span>
                               <span className="flex items-center gap-1">
-                                <Users className="h-3 w-3" /> {m.recommendedRecipe.servings || servings} serv
+                                <Users className="h-3 w-3" /> {displayRecipe.servings || servings} serv
                               </span>
-                              {m.recommendedRecipe.calories && (
-                                <span className="font-mono text-emerald-500">{m.recommendedRecipe.calories} kcal</span>
+                              {displayRecipe.calories && (
+                                <span className="font-mono text-emerald-500">{displayRecipe.calories} kcal</span>
                               )}
                             </div>
                           </div>
@@ -12580,7 +12703,7 @@ export default function ChefChatPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            setSelectedRecipeForModal(m.recommendedRecipe);
+                            setSelectedRecipeForModal(displayRecipe);
                             setShowRecipeDetailsModal(true);
                           }}
                           className="px-3 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-80"
@@ -12595,7 +12718,7 @@ export default function ChefChatPage() {
                         </button>
 
                         <div className="flex items-center gap-2">
-                          {isRecipeSaved(m.recommendedRecipe.title) ? (
+                          {isRecipeSaved(displayRecipe.title) ? (
                             <span 
                               className="px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 shadow-2xs"
                               style={{
@@ -12609,8 +12732,8 @@ export default function ChefChatPage() {
                           ) : (
                             <button
                               type="button"
-                              disabled={savingRecipeTitle === m.recommendedRecipe.title}
-                              onClick={() => handleSaveRecipe(m.recommendedRecipe)}
+                              disabled={savingRecipeTitle === displayRecipe.title}
+                              onClick={() => handleSaveRecipe(displayRecipe)}
                               className="px-3.5 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-90"
                               style={{
                                 backgroundColor: 'var(--color-card)',
@@ -12618,7 +12741,7 @@ export default function ChefChatPage() {
                                 color: 'var(--color-primary)'
                               }}
                             >
-                              {savingRecipeTitle === m.recommendedRecipe.title ? (
+                              {savingRecipeTitle === displayRecipe.title ? (
                                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                               ) : (
                                 <Bookmark className="h-3.5 w-3.5" />
@@ -12627,10 +12750,10 @@ export default function ChefChatPage() {
                             </button>
                           )}
 
-                          {isRecipeSaved(m.recommendedRecipe.title) && (
+                          {isRecipeSaved(displayRecipe.title) && (
                             <button
                               type="button"
-                              onClick={() => handleOpenPlannerModal(m.recommendedRecipe)}
+                              onClick={() => handleOpenPlannerModal(displayRecipe)}
                               className="px-3.5 py-1.5 rounded-xl text-white text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90 animate-in fade-in"
                               style={{ backgroundColor: 'var(--color-primary)' }}
                             >
@@ -12644,7 +12767,7 @@ export default function ChefChatPage() {
                   )}
 
                   {/* MULTI-DAY PLAN PRESENTATION */}
-                  {m.plan && (
+                  {displayPlan && (
                     <div 
                       className="border rounded-3xl p-5 space-y-4 shadow-sm transition-colors duration-200"
                       style={{
@@ -12656,13 +12779,13 @@ export default function ChefChatPage() {
                         <div className="flex items-center gap-2">
                           <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                           <h3 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
-                            {m.plan.title} ({m.plan.totalDays} {m.plan.totalDays === 1 ? 'Day' : 'Days'})
+                            {displayPlan.title} ({displayPlan.totalDays} {displayPlan.totalDays === 1 ? 'Day' : 'Days'})
                           </h3>
                         </div>
 
                         <div className="flex items-center gap-1.5 self-end sm:self-auto">
                           <span className="text-[10px] font-bold mr-1 hidden sm:inline" style={{ color: 'var(--color-text-secondary)' }}>
-                            {m.plan.budgetPerServing ? `Budget: ${m.plan.budgetPerServing}` : '$5.00/serv'}
+                            {displayPlan.budgetPerServing ? `Budget: ${displayPlan.budgetPerServing}` : '$5.00/serv'}
                           </span>
                           <div className="border p-0.5 rounded-xl flex items-center gap-1" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                             {(['card', 'compact', 'detailed'] as const).map((mode) => (
@@ -12688,9 +12811,11 @@ export default function ChefChatPage() {
                       {/* 1. STANDARD CARDS VIEW */}
                       {resultDisplayMode === 'card' && (
                         <div className="space-y-3">
-                          {m.plan.meals.map((meal) => (
+                          {Array.isArray(displayPlan.meals) && displayPlan.meals.map((meal) => (
                             <div 
                               key={meal.id}
+                              role="button"
+                              tabIndex={0}
                               onClick={() => {
                                 setSelectedRecipeForModal({
                                   title: meal.title,
@@ -12703,9 +12828,27 @@ export default function ChefChatPage() {
                                   ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Fresh produce & proteins', 'Aromatics & seasonings', 'Cold-pressed olive oil'],
                                   instructions: ['Prepare and rinse all ingredients cleanly.', 'Sauté aromatics over medium heat until fragrant.', 'Cook protein and vegetables thoroughly.', 'Garnish with fresh herbs and serve warm.'],
                                   chefTip: meal.isBatchCook ? 'Double the quantity to save time for subsequent days.' : 'Serve immediately while hot for optimal flavor infusion.',
-                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+                                  image: meal.image || DEFAULT_RECIPE_IMAGE
                                 });
                                 setShowRecipeDetailsModal(true);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  setSelectedRecipeForModal({
+                                    title: meal.title,
+                                    description: meal.description,
+                                    prepMinutes: meal.prepMinutes || 15,
+                                    cookMinutes: meal.cookMinutes || 20,
+                                    servings: meal.servings || servings,
+                                    calories: meal.calories || 480,
+                                    mealType: meal.mealType,
+                                    ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Fresh produce & proteins', 'Aromatics & seasonings'],
+                                    instructions: ['Prepare and cook all ingredients cleanly.'],
+                                    image: meal.image || DEFAULT_RECIPE_IMAGE
+                                  });
+                                  setShowRecipeDetailsModal(true);
+                                }
                               }}
                               className="border rounded-2xl p-3.5 space-y-2.5 transition cursor-pointer hover:scale-[1.01] shadow-xs"
                               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -12740,8 +12883,17 @@ export default function ChefChatPage() {
 
                               <div className="flex items-start gap-3">
                                 <img 
-                                  src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'} 
+                                  src={meal.image || DEFAULT_RECIPE_IMAGE} 
                                   alt={meal.title} 
+                                  referrerPolicy="no-referrer"
+                                  crossOrigin="anonymous"
+                                  onError={(e) => {
+                                    const target = e.currentTarget;
+                                    if (!target.dataset.failed) {
+                                      target.dataset.failed = 'true';
+                                      target.src = DEFAULT_RECIPE_IMAGE;
+                                    }
+                                  }}
                                   className="w-16 h-16 rounded-xl object-cover border shrink-0" 
                                   style={{ borderColor: 'var(--color-border)' }} 
                                 />
@@ -12783,9 +12935,11 @@ export default function ChefChatPage() {
                             <span className="col-span-2 text-right">Time & Cals</span>
                           </div>
 
-                          {m.plan.meals.map((meal, rIdx) => (
+                          {Array.isArray(displayPlan.meals) && displayPlan.meals.map((meal, rIdx) => (
                             <div 
                               key={meal.id || rIdx}
+                              role="button"
+                              tabIndex={0}
                               onClick={() => {
                                 setSelectedRecipeForModal({
                                   title: meal.title,
@@ -12797,7 +12951,7 @@ export default function ChefChatPage() {
                                   mealType: meal.mealType,
                                   ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Fresh produce & proteins', 'Seasonings'],
                                   instructions: ['Follow standard chef cooking guidelines for this dish.'],
-                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+                                  image: meal.image || DEFAULT_RECIPE_IMAGE
                                 });
                                 setShowRecipeDetailsModal(true);
                               }}
@@ -12836,9 +12990,11 @@ export default function ChefChatPage() {
                       {/* 3. DETAILED MASTER VIEW */}
                       {resultDisplayMode === 'detailed' && (
                         <div className="space-y-3">
-                          {m.plan.meals.map((meal) => (
+                          {Array.isArray(displayPlan.meals) && displayPlan.meals.map((meal) => (
                             <div 
                               key={meal.id}
+                              role="button"
+                              tabIndex={0}
                               onClick={() => {
                                 setSelectedRecipeForModal({
                                   title: meal.title,
@@ -12850,7 +13006,7 @@ export default function ChefChatPage() {
                                   mealType: meal.mealType,
                                   ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Quality produce', 'Seasonings'],
                                   instructions: ['Follow standard chef cooking guidelines for this dish.'],
-                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+                                  image: meal.image || DEFAULT_RECIPE_IMAGE
                                 });
                                 setShowRecipeDetailsModal(true);
                               }}
@@ -12938,7 +13094,7 @@ export default function ChefChatPage() {
             }}
           >
             <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} /> 
-            {t('chefThinking', 'Chef Foodie is formulating your recipes...')}
+            {t('chefThinking') || 'Chef Foodie is formulating your recipes...'}
           </div>
         )}
         <div ref={chatEndRef} />
@@ -13028,7 +13184,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* PROMPT INPUT BAR (DYNAMIC TOKEN BADGE & FREE MODE) */}
+      {/* PROMPT INPUT BAR */}
       <div 
         className="border rounded-2xl p-1.5 flex items-center gap-2 shrink-0 shadow-xl transition-colors duration-200"
         style={{
@@ -13054,10 +13210,12 @@ export default function ChefChatPage() {
 
         <input
           type="text"
+          autoComplete="off"
+          data-lpignore="true"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder={isListening ? "Listening to your voice..." : `${t('askPromptPlaceholder', 'Ask recipes, cooking tips, or meal plan requests...')} (${isTokenEnabled && chefCost > 0 ? `${chefCost} ${tokenSymbol}` : t('freeBadge', 'Free')})`}
+          placeholder={isListening ? "Listening to your voice..." : `${t('askPromptPlaceholder') || 'Ask recipes, cooking tips, or meal plan requests...'} (${isTokenEnabled && chefCost > 0 ? `${chefCost} ${tokenSymbol}` : t('freeBadge') || 'Free'})`}
           className="bg-transparent border-none text-sm px-2 flex-1 outline-none font-normal"
           style={{ color: 'var(--color-text)' }}
         />
@@ -13072,7 +13230,7 @@ export default function ChefChatPage() {
             }}
             title={isTokenEnabled && chefCost > 0 ? `Each prompt costs ${chefCost} ${tokenName}` : 'Bypass token consumption'}
           >
-            {isTokenEnabled && chefCost > 0 ? `${chefCost} ${tokenSymbol}` : t('freeBadge', 'Free')}
+            {isTokenEnabled && chefCost > 0 ? `${chefCost} ${tokenSymbol}` : t('freeBadge') || 'Free'}
           </span>
 
           <button
@@ -13105,10 +13263,10 @@ export default function ChefChatPage() {
             <div className="flex justify-between items-start">
               <div>
                 <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
-                  {t('recipePreferencesTitle', 'Recipe Preferences')}
+                  {t('recipePreferencesTitle') || 'Recipe Preferences'}
                 </h2>
                 <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('recipePreferencesSub', 'Personalise your cooking experience')}
+                  {t('recipePreferencesSub') || 'Personalise your cooking experience'}
                 </p>
               </div>
 
@@ -13129,7 +13287,7 @@ export default function ChefChatPage() {
             <div className="overflow-y-auto flex-1 space-y-5 pr-1 text-xs">
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  {t('servingsTitle', 'Servings')}
+                  {t('servingsTitle') || 'Servings'}
                 </label>
                 <div className="flex items-center gap-3.5">
                   <button
@@ -13145,7 +13303,7 @@ export default function ChefChatPage() {
                     -
                   </button>
                   <span className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>
-                    {(t('peopleSuffix', '{count} people')).replace('{count}', String(servings))}
+                    {(t('peopleSuffix') || '{count} people').replace('{count}', String(servings))}
                   </span>
                   <button
                     type="button"
@@ -13164,7 +13322,7 @@ export default function ChefChatPage() {
 
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  {t('countryTitle', 'Country')}
+                  {t('countryTitle') || 'Country'}
                 </label>
                 <div className="relative">
                   <select
@@ -13187,7 +13345,7 @@ export default function ChefChatPage() {
 
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  {t('dietaryPreferencesTitle', 'Dietary Preferences')}
+                  {t('dietaryPreferencesTitle') || 'Dietary Preferences'}
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {DIETARY_OPTIONS.map((item) => {
@@ -13217,7 +13375,7 @@ export default function ChefChatPage() {
 
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  {t('allergiesTitle', 'Allergies')}
+                  {t('allergiesTitle') || 'Allergies'}
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {ALLERGY_OPTIONS.map((item) => {
@@ -13247,12 +13405,14 @@ export default function ChefChatPage() {
 
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  {t('ingredientsToAvoidTitle', 'Ingredients to Avoid')}
+                  {t('ingredientsToAvoidTitle') || 'Ingredients to Avoid'}
                 </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    placeholder={t('typeIngredientPlaceholder', 'Type an ingredient...')}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    placeholder={t('typeIngredientPlaceholder') || 'Type an ingredient...'}
                     value={newAvoidInput}
                     onChange={(e) => setNewAvoidInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -13287,7 +13447,7 @@ export default function ChefChatPage() {
                 >
                   {ingredientsToAvoid.length === 0 ? (
                     <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('noIngredientsAvoid', 'No ingredients added to avoid list')}
+                      {t('noIngredientsAvoid') || 'No ingredients added to avoid list'}
                     </span>
                   ) : (
                     ingredientsToAvoid.map((item) => (
@@ -13316,12 +13476,14 @@ export default function ChefChatPage() {
 
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  {t('tastesTitle', 'Tastes')}
+                  {t('tastesTitle') || 'Tastes'}
                 </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    placeholder={t('tastesPlaceholder', 'e.g. prefers larger portions, loves umami...')}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    placeholder={t('tastesPlaceholder') || 'e.g. prefers larger portions, loves umami...'}
                     value={newTasteInput}
                     onChange={(e) => setNewTasteInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -13356,7 +13518,7 @@ export default function ChefChatPage() {
                 >
                   {tastesList.length === 0 ? (
                     <span className="text-[11px] italic" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('noTastesSpecified', 'No taste preferences specified')}
+                      {t('noTastesSpecified') || 'No taste preferences specified'}
                     </span>
                   ) : (
                     tastesList.map((item) => (
@@ -13398,7 +13560,7 @@ export default function ChefChatPage() {
                   color: 'var(--color-text)'
                 }}
               >
-                {t('cancel', 'Cancel')}
+                {t('cancel') || 'Cancel'}
               </button>
 
               <button
@@ -13407,7 +13569,7 @@ export default function ChefChatPage() {
                 className="px-4 py-2.5 text-white font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-md hover:opacity-90"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                <Trash2 className="h-3.5 w-3.5" /> {t('clearAllBtn', 'Clear All')}
+                <Trash2 className="h-3.5 w-3.5" /> {t('clearAllBtn') || 'Clear All'}
               </button>
 
               <button
@@ -13416,7 +13578,7 @@ export default function ChefChatPage() {
                 className="px-6 py-2.5 text-white font-bold text-xs rounded-xl transition shadow-lg cursor-pointer hover:opacity-90"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                {t('saveBtn', 'Save')}
+                {t('saveBtn') || 'Save'}
               </button>
             </div>
           </div>
@@ -13479,14 +13641,21 @@ export default function ChefChatPage() {
             </div>
 
             <div className="overflow-y-auto flex-1 space-y-4 pr-1 text-xs custom-scrollbar">
-              {selectedRecipeForModal.image && (
-                <img
-                  src={selectedRecipeForModal.image}
-                  alt={selectedRecipeForModal.title}
-                  className="w-full h-44 rounded-2xl object-cover border shadow-xs"
-                  style={{ borderColor: 'var(--color-border)' }}
-                />
-              )}
+              <img
+                src={selectedRecipeForModal.image || DEFAULT_RECIPE_IMAGE}
+                alt={selectedRecipeForModal.title}
+                referrerPolicy="no-referrer"
+                crossOrigin="anonymous"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  if (!target.dataset.failed) {
+                    target.dataset.failed = 'true';
+                    target.src = DEFAULT_RECIPE_IMAGE;
+                  }
+                }}
+                className="w-full h-44 rounded-2xl object-cover border shadow-xs"
+                style={{ borderColor: 'var(--color-border)' }}
+              />
 
               <p className="leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
                 {selectedRecipeForModal.description}
@@ -13715,6 +13884,8 @@ export default function ChefChatPage() {
                 </label>
                 <input
                   type="date"
+                  autoComplete="off"
+                  data-lpignore="true"
                   value={scheduleDate}
                   onChange={(e) => setScheduleDate(e.target.value)}
                   className="w-full border rounded-xl px-3.5 py-2 text-xs outline-none"
@@ -13803,7 +13974,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOKEN PURCHASE MODAL (SYNCHRONIZED WITH /admin/token-setting) */}
+      {/* TOKEN PURCHASE MODAL */}
       <TokenPurchaseModal
         isOpen={isTokenPurchaseOpen}
         onClose={() => setIsTokenPurchaseOpen(false)}
@@ -13815,7 +13986,7 @@ export default function ChefChatPage() {
           setTokenBalance(newBal);
           window.dispatchEvent(new Event('zecratary_tokens_updated'));
           window.dispatchEvent(new Event('zecratary_users_updated'));
-          showToast(`${t('tokensAddedSuccess', 'Tokens added!')} ${t('newBalance', 'New balance')}: ${newBal} ${tokenSymbol}`);
+          showToast(`${t('tokensAddedSuccess') || 'Tokens added!'} ${t('newBalance') || 'New balance'}: ${newBal} ${tokenSymbol}`);
         }}
       />
     </div>
@@ -57902,267 +58073,427 @@ export async function GET(req: NextRequest) {
 ## File: `apps/web/src/app/api/ai/import/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { query } from '@/lib/db';
+import { recordTokenUsage } from '@/lib/tokenUsage';
+import { getTokenSettings, deductUserTokens } from '@/lib/tokenService';
+import { scrapeRecipeFromUrl } from '@/lib/recipeScraper';
+import { downloadAndSaveImage, downloadAndSaveScrapedImage } from '@/lib/imageDownloader';
 
 export const dynamic = 'force-dynamic';
 
-let cachedPool: any = null;
-
-async function getPostgresPool() {
-  if (cachedPool) return cachedPool;
-  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
-  if (!connStr) return null;
-  try {
-    const { Pool } = await import('pg');
-    const requiresSsl = connStr.includes('sslmode=require') || 
-                        connStr.includes('neon.tech') || 
-                        connStr.includes('supabase.co') || 
-                        process.env.NODE_ENV === 'production';
-    cachedPool = new Pool({
-      connectionString: connStr,
-      ssl: requiresSsl ? { rejectUnauthorized: false } : false
-    });
-    return cachedPool;
-  } catch (err) {
-    return null;
-  }
-}
-
-async function getActiveAiConfiguration() {
-  let model = 'gemini-2.5-flash';
-  let provider = 'gemini';
-  let apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
+async function getAdminApiKeyAndModel(requestedModel?: string) {
+  let activeModel = requestedModel || 'gemini-2.5-flash';
+  let geminiApiKey = '';
   let enableWebSearch = true;
   let strictDietEnforcement = false;
   let filterWordsList: string[] = [];
 
   try {
-    const pool = await getPostgresPool();
-    if (pool) {
-      // 1. Fetch configured AI model and settings
-      const sRes = await pool.query('SELECT * FROM admin_settings ORDER BY updated_at DESC LIMIT 1;');
-      if (sRes.rows && sRes.rows.length > 0) {
-        const row = sRes.rows[0];
-        let val = row.value || {};
-        if (typeof val === 'string') {
-          try { val = JSON.parse(val); } catch (_) { val = {}; }
-        }
-        let chef = row.chef_ai_settings;
-        if (typeof chef === 'string') {
-          try { chef = JSON.parse(chef); } catch (_) { chef = {}; }
-        }
-        chef = chef || val.chefAiSettings || val.aiSettings || {};
-
-        model = row.ai_model || chef.model || val.aiModel || val.model || model;
-        provider = row.ai_provider || chef.provider || val.aiProvider || provider;
-        if (chef.apiKey) apiKey = chef.apiKey;
-        if (chef.enableWebSearch !== undefined) enableWebSearch = Boolean(chef.enableWebSearch);
-        if (chef.strictDietEnforcement !== undefined) strictDietEnforcement = Boolean(chef.strictDietEnforcement);
-        if (Array.isArray(chef.filterWordsList)) filterWordsList = chef.filterWordsList;
+    const sRows = await query('SELECT * FROM admin_settings ORDER BY updated_at DESC LIMIT 1;');
+    if (sRows && sRows.length > 0) {
+      const row = sRows[0];
+      const chef = row.chef_ai_settings || {};
+      if (!requestedModel && (row.ai_model || chef.model)) {
+        activeModel = row.ai_model || chef.model;
       }
-
-      // 2. Fetch API key from admin_api_keys table if not set
-      if (!apiKey || apiKey.includes('sample')) {
-        const keyQuery = provider === 'openai' 
-          ? "SELECT key_value FROM admin_api_keys WHERE env_key = 'OPENAI_API_KEY' OR provider = 'openai' LIMIT 1;"
-          : "SELECT key_value FROM admin_api_keys WHERE env_key IN ('GEMINI_API_KEY', 'GOOGLE_API_KEY') OR provider = 'gemini' LIMIT 1;";
-        const kRes = await pool.query(keyQuery);
-        if (kRes.rows && kRes.rows.length > 0 && kRes.rows[0].key_value) {
-          apiKey = kRes.rows[0].key_value;
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('[AI Import Route] PostgreSQL config read warning:', err);
-  }
-
-  // Disk fallback if database returned empty
-  if (!apiKey) {
-    apiKey = provider === 'openai' ? (process.env.OPENAI_API_KEY || '') : (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '');
-  }
-
-  return { model, provider, apiKey, enableWebSearch, strictDietEnforcement, filterWordsList };
-}
-
-async function getTokenSettings() {
-  let isEnabled = true;
-  let importUrlCost = 2;
-  let importTextCost = 1;
-  let importPhotoCost = 3;
-
-  try {
-    const pool = await getPostgresPool();
-    if (pool) {
-      const res = await pool.query('SELECT * FROM token_settings LIMIT 1;');
-      if (res.rows && res.rows.length > 0) {
-        const row = res.rows[0];
-        let val = row.value || {};
-        if (typeof val === 'string') {
-          try { val = JSON.parse(val); } catch (_) { val = {}; }
-        }
-        if (row.is_enabled !== undefined) isEnabled = Boolean(row.is_enabled);
-        else if (val.isEnabled !== undefined) isEnabled = Boolean(val.isEnabled);
-        
-        importUrlCost = Number(row.import_url_cost ?? val.importUrlCost ?? 2);
-        importTextCost = Number(row.import_text_cost ?? val.importTextCost ?? 1);
-        importPhotoCost = Number(row.import_photo_cost ?? val.importPhotoCost ?? 3);
-      }
+      geminiApiKey = row.gemini_api_key || chef.apiKey || '';
+      if (chef.enableWebSearch !== undefined) enableWebSearch = Boolean(chef.enableWebSearch);
+      if (chef.strictDietEnforcement !== undefined) strictDietEnforcement = Boolean(chef.strictDietEnforcement);
+      if (Array.isArray(chef.filterWordsList)) filterWordsList = chef.filterWordsList.filter(Boolean);
     }
   } catch (_) {}
 
-  return { isEnabled, importUrlCost, importTextCost, importPhotoCost };
+  if (!geminiApiKey) {
+    try {
+      const kRes = await query("SELECT key_value FROM admin_api_keys WHERE env_key IN ('GEMINI_API_KEY', 'GOOGLE_API_KEY') LIMIT 1;");
+      if (kRes && kRes.length > 0 && kRes[0].key_value) {
+        geminiApiKey = kRes[0].key_value;
+      }
+    } catch (_) {}
+  }
+
+  if (!geminiApiKey) {
+    geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GOOGLE_AI_API_KEY || '';
+  }
+
+  activeModel = activeModel.replace(/^models\//, '');
+  return { activeModel, geminiApiKey, enableWebSearch, strictDietEnforcement, filterWordsList };
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { type, url, text, title, category, image, userId, userEmail } = body;
+    const type = body.type || 'url';
+    const inputContent = (body.url || body.text || body.image || body.base64 || '').trim();
+    const recipeTitleInput = (body.title || '').trim();
+    const selectedCategory = body.category || 'Main Dish';
 
-    const aiConfig = await getActiveAiConfiguration();
-    const resolvedModel = body.model || aiConfig.model;
-    const resolvedProvider = body.provider || aiConfig.provider;
-    const apiKey = aiConfig.apiKey;
+    let userId = body.userId;
+    let userEmail = body.userEmail || body.email;
 
-    if (type === 'url' && !aiConfig.enableWebSearch) {
-      return NextResponse.json({
-        success: false,
-        error: 'Web URL recipe imports are currently disabled by the administrator in AI Settings.'
-      }, { status: 403 });
-    }
-
-    const tokenConfig = await getTokenSettings();
-    const costMap: Record<string, number> = {
-      url: tokenConfig.importUrlCost,
-      text: tokenConfig.importTextCost,
-      photo: tokenConfig.importPhotoCost
-    };
-    const requiredCost = tokenConfig.isEnabled ? (costMap[type] ?? 1) : 0;
-
-    // Deduct user balance in PostgreSQL if enabled
-    let remainingBal = 100;
-    const pool = await getPostgresPool();
-    const targetUid = (userId || userEmail || 'usr_admin_1').toString();
-
-    if (pool && tokenConfig.isEnabled && requiredCost > 0) {
-      try {
-        const uRes = await pool.query('SELECT balance FROM user_tokens WHERE user_id = $1 LIMIT 1;', [targetUid]);
-        const curBal = (uRes.rows && uRes.rows.length > 0) ? Number(uRes.rows[0].balance ?? 0) : 0;
-        if (curBal < requiredCost) {
-          return NextResponse.json({
-            success: false,
-            insufficientTokens: true,
-            error: `Insufficient token balance. Required: ${requiredCost}, Balance: ${curBal}`
-          }, { status: 402 });
-        }
-        remainingBal = Math.max(0, curBal - requiredCost);
-        await pool.query('UPDATE user_tokens SET balance = $1, updated_at = NOW() WHERE user_id = $2;', [remainingBal, targetUid]);
-      } catch (_) {}
-    }
-
-    // Call dynamic AI model via Google Gemini REST endpoint
-    let extractedRecipe: any = null;
-    const systemPrompt = `You are an expert culinary AI parser. Extract or generate complete, structured recipe data strictly conforming to JSON format with the following keys:
-{
-  "title": string,
-  "category": string,
-  "description": string,
-  "prepTime": string,
-  "cookTime": string,
-  "totalTime": string,
-  "servings": number,
-  "difficulty": "Easy" | "Medium" | "Hard",
-  "ingredients": string[],
-  "instructions": string[],
-  "nutrition": {
-    "calories": number,
-    "protein": string,
-    "carbs": string,
-    "fat": string
-  },
-  "tags": string[]
-}`;
-
-    const userPrompt = type === 'url'
-      ? `Extract and structure the complete culinary recipe from this URL: ${url}. Category: ${category || 'Main Dish'}.`
-      : type === 'photo'
-        ? `Perform culinary OCR and image recipe structure for food photo titled: "${title || 'Cookbook Photo'}". Category: ${category || 'Main Dish'}.`
-        : `Parse and structure the following recipe text:\n\nTitle: ${title || 'Homemade'}\nCategory: ${category || 'Main Dish'}\n\n${text}`;
-
-    if (apiKey && resolvedProvider === 'gemini') {
-      try {
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${resolvedModel}:generateContent?key=${apiKey}`;
-        const aiResponse = await fetch(geminiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [{ text: `${systemPrompt}\n\n${userPrompt}\n\nRespond ONLY with valid JSON.` }]
-            }],
-            generationConfig: {
-              temperature: 0.2,
-              responseMimeType: "application/json"
-            }
-          })
-        });
-
-        if (aiResponse.ok) {
-          const aiJson = await aiResponse.json();
-          const rawCandidate = aiJson?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (rawCandidate) {
-            extractedRecipe = JSON.parse(rawCandidate);
-          }
-        }
-      } catch (e) {
-        console.warn(`[AI Import] Gemini invocation error with model (${resolvedModel}):`, e);
+    if (!userId || !userEmail) {
+      const cookieHeader = req.cookies.get('zecratary_session')?.value;
+      if (cookieHeader) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(cookieHeader));
+          userId = userId || parsed.id;
+          userEmail = userEmail || parsed.email;
+        } catch (_) {}
       }
     }
 
-    // Fallback parser if API key is unconfigured or AI responded without JSON
-    if (!extractedRecipe) {
-      extractedRecipe = {
-        title: title || (type === 'url' ? 'Imported Web Recipe' : 'Imported Custom Recipe'),
-        category: category || 'Main Dish',
-        description: 'Nutritious chef-curated home recipe imported via Zecratary AI Importer.',
-        prepTime: '15 mins',
-        cookTime: '25 mins',
-        totalTime: '40 mins',
-        servings: 4,
-        difficulty: 'Easy',
-        ingredients: [
-          '2 cups fresh ingredients',
-          '1 tbsp extra virgin olive oil',
-          '1 tsp salt and cracked black pepper to taste'
-        ],
-        instructions: [
-          'Wash and prepare all required ingredients.',
-          'Heat a pan over medium heat and sauté seasonings until fragrant.',
-          'Combine all elements and simmer to perfection.',
-          'Garnish and serve fresh.'
-        ],
-        nutrition: {
-          calories: 380,
-          protein: '22g',
-          carbs: '34g',
-          fat: '14g'
-        },
-        tags: ['Imported', category || 'Main Dish']
-      };
+    if (!inputContent) {
+      return NextResponse.json({ success: false, error: 'Import content is required.' }, { status: 400 });
     }
 
-    extractedRecipe.id = 'rec_' + Date.now();
-    extractedRecipe.modelUsed = resolvedModel;
-    extractedRecipe.image = image || '/uploads/recipes/default.jpg';
-    extractedRecipe.imageUrl = extractedRecipe.image;
-    extractedRecipe.createdAt = new Date().toISOString();
+    const { activeModel, geminiApiKey, enableWebSearch, strictDietEnforcement, filterWordsList } = 
+      await getAdminApiKeyAndModel(body.model);
+
+    if (type === 'url' && !enableWebSearch) {
+      return NextResponse.json({
+        success: false,
+        error: 'Web URL recipe importing is disabled by the administrator in AI Settings.',
+        restrictionType: 'web_search_disabled'
+      }, { status: 403 });
+    }
+
+    let parsedTitle = recipeTitleInput;
+    let parsedDescription = '';
+    let ingredientsList: string[] = [];
+    let directionsList: string[] = [];
+    let parsedImageUrl = '/uploads/recipes/default.jpg';
+    let prepTime = '15 mins';
+    let cookTime = '25 mins';
+    let servings = 4;
+    let cuisine = 'International';
+    let nutrition: any = {};
+    let promptTokens = 150;
+    let completionTokens = 200;
+
+    // 1. URL IMPORT
+    if (type === 'url') {
+      try {
+        const scraped = await scrapeRecipeFromUrl(inputContent);
+        parsedTitle = scraped?.title || recipeTitleInput || 'Imported Recipe';
+        parsedDescription = scraped?.description || `Imported from ${inputContent}`;
+        ingredientsList = Array.isArray(scraped?.ingredients) ? scraped.ingredients : [];
+        directionsList = Array.isArray(scraped?.directions) && scraped.directions.length > 0
+          ? scraped.directions
+          : (Array.isArray(scraped?.instructions) ? scraped.instructions : []);
+        parsedImageUrl = scraped?.imageUrl || scraped?.image || '/uploads/recipes/default.jpg';
+        prepTime = scraped?.prepTime || prepTime;
+        cookTime = scraped?.cookTime || cookTime;
+        servings = Number(scraped?.servings) || 4;
+        cuisine = scraped?.cuisine || cuisine;
+        nutrition = scraped?.nutrition || nutrition;
+
+        promptTokens = Math.max(140, Math.ceil((inputContent.length + 800) / 4));
+        completionTokens = Math.max(180, Math.ceil(directionsList.join(' ').length / 4));
+      } catch (err: any) {
+        return NextResponse.json({
+          success: false,
+          error: `Failed to scrape recipe: ${err.message || 'Target website blocked scraper or contains no recipe markup.'}`
+        }, { status: 422 });
+      }
+    } 
+    // 2. IMAGE / PHOTO OCR IMPORT (AI VISION)
+    else if (type === 'photo' || type === 'image') {
+      parsedTitle = recipeTitleInput || 'Scanned Recipe';
+      let visionSucceeded = false;
+
+      if (geminiApiKey) {
+        try {
+          const rawBase64 = body.base64 || (inputContent.startsWith('data:image/') ? inputContent : '');
+          let mimeType = 'image/jpeg';
+          let cleanBase64 = '';
+
+          if (rawBase64.startsWith('data:')) {
+            const m = rawBase64.match(/^data:([^;]+);base64,(.+)$/);
+            if (m) {
+              mimeType = m[1];
+              cleanBase64 = m[2];
+            }
+          }
+
+          if (cleanBase64) {
+            const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${geminiApiKey}`;
+            const visionRes = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{
+                  role: 'user',
+                  parts: [
+                    {
+                      text: `You are an expert culinary OCR assistant. Extract the full recipe from this image.
+Return ONLY valid JSON matching this schema:
+{
+  "title": "Dish Title",
+  "description": "Short appetizing description",
+  "ingredients": ["1 cup flour", "2 eggs"],
+  "instructions": ["1. Mix ingredients", "2. Bake at 180°C"],
+  "prepTime": "15 mins",
+  "cookTime": "25 mins",
+  "servings": 4,
+  "category": "${selectedCategory}",
+  "cuisine": "International"
+}`
+                    },
+                    {
+                      inlineData: {
+                        mimeType,
+                        data: cleanBase64
+                      }
+                    }
+                  ]
+                }],
+                generationConfig: { temperature: 0.2, responseMimeType: "application/json" }
+              })
+            });
+
+            if (visionRes.ok) {
+              const vData = await visionRes.json();
+              const textOutput = vData?.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (textOutput) {
+                const parsed = JSON.parse(textOutput);
+                if (parsed.title) parsedTitle = parsed.title;
+                if (parsed.description) parsedDescription = parsed.description;
+                if (Array.isArray(parsed.ingredients) && parsed.ingredients.length > 0) ingredientsList = parsed.ingredients;
+                if (Array.isArray(parsed.instructions) && parsed.instructions.length > 0) directionsList = parsed.instructions;
+                else if (Array.isArray(parsed.directions) && parsed.directions.length > 0) directionsList = parsed.directions;
+                if (parsed.prepTime) prepTime = parsed.prepTime;
+                if (parsed.cookTime) cookTime = parsed.cookTime;
+                if (parsed.servings) servings = Number(parsed.servings) || 4;
+                if (parsed.cuisine) cuisine = parsed.cuisine;
+                visionSucceeded = true;
+              }
+            }
+          }
+        } catch (visionErr) {
+          console.warn('[AI Vision Import] OCR error:', visionErr);
+        }
+      }
+
+      if (!visionSucceeded) {
+        parsedDescription = 'Imported recipe from visual photo upload.';
+        ingredientsList = [
+          'Fresh Seasonal Produce (assorted)',
+          'Extra Virgin Olive Oil & Sea Salt',
+          'Aromatics (Garlic, Fresh Herbs & Pepper)'
+        ];
+        directionsList = [
+          'Wash, prepare, and chop all ingredients evenly.',
+          'Cook over medium heat until tender and aromatic.',
+          'Season to taste and serve hot.'
+        ];
+      }
+
+      parsedImageUrl = inputContent.startsWith('/uploads/') ? inputContent : '/uploads/recipes/default.jpg';
+    } 
+    // 3. RAW TEXT RECIPE IMPORT (AI PARSER)
+    else {
+      let aiParsed = false;
+      if (geminiApiKey) {
+        try {
+          const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${geminiApiKey}`;
+          const gRes = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{
+                role: 'user',
+                parts: [{
+                  text: `You are an expert culinary AI parser. Extract and structure this recipe text into structured JSON:
+"${inputContent}"
+
+Title hint: "${recipeTitleInput || 'Homemade Recipe'}"
+Category: "${selectedCategory}"
+
+Return ONLY valid JSON matching this schema:
+{
+  "title": "Dish Title",
+  "description": "Appetizing summary",
+  "ingredients": ["1 cup flour", "2 tsp olive oil"],
+  "instructions": ["1. Step one", "2. Step two"],
+  "prepTime": "15 mins",
+  "cookTime": "25 mins",
+  "servings": 4,
+  "category": "${selectedCategory}",
+  "cuisine": "International"
+}`
+                }]
+              }],
+              generationConfig: { temperature: 0.2, responseMimeType: "application/json" }
+            })
+          });
+
+          if (gRes.ok) {
+            const gData = await gRes.json();
+            const textOutput = gData?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (textOutput) {
+              const parsed = JSON.parse(textOutput);
+              if (parsed.title) parsedTitle = parsed.title;
+              if (parsed.description) parsedDescription = parsed.description;
+              if (Array.isArray(parsed.ingredients) && parsed.ingredients.length > 0) ingredientsList = parsed.ingredients;
+              if (Array.isArray(parsed.instructions) && parsed.instructions.length > 0) directionsList = parsed.instructions;
+              else if (Array.isArray(parsed.directions) && parsed.directions.length > 0) directionsList = parsed.directions;
+              if (parsed.prepTime) prepTime = parsed.prepTime;
+              if (parsed.cookTime) cookTime = parsed.cookTime;
+              if (parsed.servings) servings = Number(parsed.servings) || 4;
+              if (parsed.cuisine) cuisine = parsed.cuisine;
+              aiParsed = true;
+            }
+          }
+        } catch (e) {
+          console.warn('[AI Text Import] Gemini text parsing error:', e);
+        }
+      }
+
+      if (!aiParsed) {
+        const lines = inputContent.split('\n').map((l: string) => l.trim()).filter(Boolean);
+        if (!parsedTitle) {
+          parsedTitle = lines[0]?.slice(0, 45).replace(/^[#*-\s]+/, '') || 'Handcrafted Recipe';
+        }
+        parsedDescription = inputContent.slice(0, 140);
+        const customIngs = lines.filter((l: string) => /^[-*•]/.test(l) || /\d+\s*(g|oz|cup|tbsp|tsp|pinch|clove|slice)/i.test(l));
+        const customSteps = lines.filter((l: string) => /^(\d+\.|step)/i.test(l) || l.length > 70);
+
+        ingredientsList = customIngs.length > 0 ? customIngs.map((i: string) => i.replace(/^[-*•\d.)\s]+/, '')) : [inputContent.slice(0, 50)];
+        directionsList = customSteps.length > 0 ? customSteps.map((s: string) => s.replace(/^(\d+\.|step\s*\d+[:.-]?|[-*•])\s*/i, '')) : ['Follow cooking instructions.'];
+      }
+    }
+
+    if (parsedImageUrl && /^https?:\/\//i.test(parsedImageUrl)) {
+      try {
+        const localImg = await downloadAndSaveImage(parsedImageUrl, 'scraped');
+        if (localImg) parsedImageUrl = localImg;
+      } catch (_) {}
+    }
+
+    if (strictDietEnforcement && filterWordsList.length > 0) {
+      const combined = `${parsedTitle} ${parsedDescription} ${ingredientsList.join(' ')}`.toLowerCase();
+      const matched = filterWordsList.find(w => w.trim().length > 1 && combined.includes(w.trim().toLowerCase()));
+      if (matched) {
+        return NextResponse.json({
+          success: false,
+          error: `Import blocked: Recipe contains restricted ingredient "${matched}" under AI Strict Dietary Policy.`,
+          restrictionType: 'filter_word_violation'
+        }, { status: 422 });
+      }
+    }
+
+    const tokenSettings = await getTokenSettings();
+    let importCost = tokenSettings.importUrlCost;
+    if (type === 'text') importCost = tokenSettings.importTextCost;
+    if (type === 'photo' || type === 'image') importCost = tokenSettings.importPhotoCost;
+
+    let deduction: any = { success: true, deducted: 0, currentBalance: 0 };
+    if (tokenSettings.isEnabled && importCost > 0) {
+      deduction = await deductUserTokens({
+        userId,
+        userEmail,
+        cost: importCost,
+        feature: `import_${type}`,
+        description: `Import recipe: "${parsedTitle}" via ${type.toUpperCase()}`
+      });
+
+      if (!deduction.success) {
+        return NextResponse.json({
+          success: false,
+          error: deduction.error,
+          insufficientTokens: true,
+          required: importCost,
+          currentBalance: deduction.currentBalance,
+          tokenSymbol: tokenSettings.tokenSymbol
+        }, { status: 402 });
+      }
+    }
+
+    const recipeId = 'rcp_imp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+    const parsedRecipe = {
+      id: recipeId,
+      userId: userId || null,
+      user_id: userId || null,
+      createdBy: userEmail || 'user',
+      created_by: userEmail || 'user',
+      creatorName: body.userName || 'You',
+      creator_name: body.userName || 'You',
+      title: parsedTitle,
+      name: parsedTitle,
+      description: parsedDescription,
+      recipeType: selectedCategory,
+      recipe_type: selectedCategory,
+      category: selectedCategory,
+      cuisine,
+      prepTime,
+      cookTime,
+      servings: Number(servings) || 4,
+      difficulty: 'Easy',
+      ingredients: ingredientsList,
+      instructions: directionsList,
+      directions: directionsList,
+      steps: directionsList,
+      nutrition,
+      tags: [selectedCategory, 'Imported', type.toUpperCase()],
+      imageUrl: parsedImageUrl,
+      image: parsedImageUrl,
+      image_url: parsedImageUrl,
+      sourceUrl: type === 'url' ? inputContent : '',
+      source_url: type === 'url' ? inputContent : '',
+      isFavorite: false,
+      rating: 0
+    };
+
+    try {
+      await query(`
+        INSERT INTO saved_recipes (
+          id, user_id, created_by, creator_name, creator_email, title, description,
+          recipe_type, cuisine, prep_time, cook_time, servings, difficulty,
+          ingredients, directions, nutrition, tags, image_url, source_url, is_public, created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7,
+          $8, $9, $10, $11, $12, $13,
+          $14::jsonb, $15::jsonb, $16::jsonb, $17::jsonb, $18, $19, $20, NOW(), NOW()
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          ingredients = EXCLUDED.ingredients,
+          directions = EXCLUDED.directions,
+          image_url = EXCLUDED.image_url,
+          updated_at = NOW();
+      `, [
+        recipeId, userId || null, userEmail || 'user', body.userName || 'You', userEmail || 'user',
+        parsedRecipe.title, parsedRecipe.description, parsedRecipe.recipeType, parsedRecipe.cuisine,
+        parsedRecipe.prepTime, parsedRecipe.cookTime, String(parsedRecipe.servings), parsedRecipe.difficulty,
+        JSON.stringify(parsedRecipe.ingredients), JSON.stringify(parsedRecipe.directions),
+        JSON.stringify(parsedRecipe.nutrition), JSON.stringify(parsedRecipe.tags),
+        parsedRecipe.imageUrl, parsedRecipe.sourceUrl, false
+      ]);
+    } catch (dbErr) {
+      console.error('[AI Import] PostgreSQL persistence notice:', dbErr);
+    }
+
+    try {
+      await recordTokenUsage({
+        userId,
+        userEmail,
+        promptTokens,
+        completionTokens,
+        model: activeModel,
+        source: `import-${type}`
+      });
+    } catch (_) {}
 
     return NextResponse.json({
       success: true,
-      recipe: extractedRecipe,
-      consumedSystemTokens: requiredCost,
-      remainingBalance: remainingBal,
-      modelUsed: resolvedModel
-    });
+      recipe: parsedRecipe,
+      consumedSystemTokens: importCost,
+      tokenSymbol: tokenSettings.tokenSymbol,
+      remainingBalance: deduction.currentBalance,
+      activeModel,
+      message: `Successfully imported "${parsedRecipe.title}".`
+    }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -62258,7 +62589,6 @@ export default function GroceriesPage() {
 
 ## File: `apps/web/src/app/import/page.tsx`
 ```typescript
-// Generated / Updated by AI Collaborator
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -62282,6 +62612,7 @@ const DEFAULT_RECIPE_TYPES = [
 function decodeHtmlEntities(str: string): string {
   if (!str) return '';
   return str
+    .replace(/<[^>]*>/g, '')
     .replace(/&quot;/g, '"')
     .replace(/&#0*39;/g, "'")
     .replace(/&apos;/g, "'")
@@ -62314,7 +62645,7 @@ export default function ImportPage() {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Token & AI Settings Telemetry (Synchronized with /admin/token-setting and /admin/ai-settings)
+  // Token & AI Settings Telemetry
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
@@ -62327,7 +62658,7 @@ export default function ImportPage() {
   const [tokenPackages, setTokenPackages] = useState<any[]>([]);
   const [isTokenPurchaseOpen, setIsTokenPurchaseOpen] = useState(false);
 
-  // Synchronized dynamically from /admin/ai-settings
+  // Synced from /admin/ai-settings
   const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.5-flash');
   const [activeAiProvider, setActiveAiProvider] = useState<string>('gemini');
   const [enableWebSearch, setEnableWebSearch] = useState<boolean>(true);
@@ -62347,36 +62678,37 @@ export default function ImportPage() {
   const fetchTokenAndAiTelemetry = useCallback(async () => {
     try {
       const user = getCurrentUser();
-      const queryParam = user?.id ? `?userId=${encodeURIComponent(user.id)}` : user?.email ? `?email=${encodeURIComponent(user.email)}` : '';
-      
+      const params = new URLSearchParams();
+      if (user?.id) params.set('userId', user.id);
+      if (user?.email) params.set('email', user.email);
+      const queryParam = params.toString() ? `?${params.toString()}` : '';
+
       // 1. Authoritative synchronization with /admin/ai-settings via /api/admin/settings
       try {
         const aiRes = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
         if (aiRes.ok) {
           const aiData = await aiRes.json();
-          if (aiData.success || aiData.settings) {
-            const s = aiData.settings || aiData;
-            const chef = aiData.chefAiSettings || s.chefAiSettings || s.aiSettings || {};
-            const resolvedModel = aiData.aiModel || chef.model || s.aiModel || s.model;
-            const resolvedProvider = aiData.aiProvider || chef.provider || s.aiProvider || 'gemini';
+          const s = aiData.settings || aiData;
+          const chef = aiData.chefAiSettings || s.chefAiSettings || s.aiSettings || {};
+          const resolvedModel = aiData.aiModel || chef.model || s.aiModel || s.model;
+          const resolvedProvider = aiData.aiProvider || chef.provider || s.aiProvider || 'gemini';
 
-            if (resolvedModel) {
-              setActiveAiModel(resolvedModel);
-            }
-            if (resolvedProvider) {
-              setActiveAiProvider(resolvedProvider);
-            }
-            if (chef.enableWebSearch !== undefined) {
-              setEnableWebSearch(Boolean(chef.enableWebSearch));
-            } else if (s.enableWebSearch !== undefined) {
-              setEnableWebSearch(Boolean(s.enableWebSearch));
-            }
-            if (chef.strictDietEnforcement !== undefined) {
-              setStrictDietEnforcement(Boolean(chef.strictDietEnforcement));
-            }
-            if (Array.isArray(chef.filterWordsList)) {
-              setFilterWordsList(chef.filterWordsList);
-            }
+          if (resolvedModel) {
+            setActiveAiModel(resolvedModel.replace(/^models\//, ''));
+          }
+          if (resolvedProvider) {
+            setActiveAiProvider(resolvedProvider);
+          }
+          if (chef.enableWebSearch !== undefined) {
+            setEnableWebSearch(Boolean(chef.enableWebSearch));
+          } else if (s.enableWebSearch !== undefined) {
+            setEnableWebSearch(Boolean(s.enableWebSearch));
+          }
+          if (chef.strictDietEnforcement !== undefined) {
+            setStrictDietEnforcement(Boolean(chef.strictDietEnforcement));
+          }
+          if (Array.isArray(chef.filterWordsList)) {
+            setFilterWordsList(chef.filterWordsList);
           }
         }
       } catch (_) {}
@@ -62400,13 +62732,6 @@ export default function ImportPage() {
             }
             if (Array.isArray(data.packages) && data.packages.length > 0) {
               setTokenPackages(data.packages);
-            }
-            if (data.aiSettings && !activeAiModel) {
-              if (data.aiSettings.model) setActiveAiModel(data.aiSettings.model);
-              if (data.aiSettings.provider) setActiveAiProvider(data.aiSettings.provider);
-              if (data.aiSettings.enableWebSearch !== undefined) setEnableWebSearch(Boolean(data.aiSettings.enableWebSearch));
-              if (data.aiSettings.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(data.aiSettings.strictDietEnforcement));
-              if (Array.isArray(data.aiSettings.filterWordsList)) setFilterWordsList(data.aiSettings.filterWordsList);
             }
           }
         }
@@ -62441,9 +62766,33 @@ export default function ImportPage() {
     } finally {
       setFetchingTelemetry(false);
     }
-  }, [activeAiModel]);
+  }, []);
 
-  const syncRecipeTypes = () => {
+  const fetchRecipeTypes = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/recipe-type', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const types = Array.isArray(data) 
+          ? data 
+          : Array.isArray(data?.types) 
+            ? data.types 
+            : Array.isArray(data?.recipeTypes) 
+              ? data.recipeTypes 
+              : [];
+        if (types.length > 0) {
+          const names = types.map((item: any) => 
+            typeof item === 'string' ? item : item.name || item.title || item.label
+          ).filter(Boolean);
+          if (names.length > 0) {
+            setRecipeTypes(names);
+            setTextCategory(prev => names.includes(prev) ? prev : names[0]);
+            return;
+          }
+        }
+      }
+    } catch (_) {}
+
     try {
       const stored = localStorage.getItem('zecratary_recipe_types') || 
                      localStorage.getItem('zecratary_recipe_categories');
@@ -62455,30 +62804,28 @@ export default function ImportPage() {
           ).filter(Boolean);
           if (names.length > 0) {
             setRecipeTypes(names);
-            if (!names.includes(textCategory)) {
-              setTextCategory(names[0]);
-            }
+            setTextCategory(prev => names.includes(prev) ? prev : names[0]);
             return;
           }
         }
       }
     } catch (_) {}
+
     setRecipeTypes(DEFAULT_RECIPE_TYPES);
-  };
+  }, []);
 
   useEffect(() => {
-    document.title = `${t('importRecipeTitle', 'Import Recipe')} - Zecratary`;
+    document.title = `${t('importRecipeTitle') || 'Import Recipe'} - Zecratary`;
     applySavedTheme();
-    syncRecipeTypes();
+    fetchRecipeTypes();
     fetchTokenAndAiTelemetry();
 
     const handleUpdates = () => {
       fetchTokenAndAiTelemetry();
-      syncRecipeTypes();
+      fetchRecipeTypes();
       applySavedTheme();
     };
 
-    // Global event listeners including /admin/ai-settings and /admin/token-setting broadcasts
     window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_updated', applySavedTheme);
@@ -62504,11 +62851,13 @@ export default function ImportPage() {
       window.removeEventListener('zecratary_engine_config_updated', handleUpdates);
       window.removeEventListener('storage', handleUpdates);
     };
-  }, [fetchTokenAndAiTelemetry, applySavedTheme, t]);
+  }, [fetchTokenAndAiTelemetry, fetchRecipeTypes, applySavedTheme, t]);
 
   const handlePostImportSuccess = async (recipeData: any, consumedTokens: number, newBalance?: number) => {
     const user = getCurrentUser();
     const targetUserId = (user?.id || user?.email || 'usr_admin_1').trim();
+    const createdBy = (user?.email || targetUserId).trim();
+    const creatorName = (user?.name || 'You').trim();
 
     if (typeof newBalance === 'number') {
       setTokenBalance(newBalance);
@@ -62516,9 +62865,10 @@ export default function ImportPage() {
       setTokenBalance(prev => Math.max(0, prev - consumedTokens));
     }
 
-    // Ensure scraped cover image is saved to localhost /uploads/recipes/
-    const processedRecipe = { ...recipeData };
-    const rawImage = processedRecipe.image || processedRecipe.imageUrl;
+    const cleanCategory = recipeData.recipeType || recipeData.category || textCategory || 'Main Dish';
+    const rawImage = recipeData.image || recipeData.imageUrl || recipeData.image_url || '/uploads/recipes/default.jpg';
+    let localhostImage = rawImage;
+
     if (rawImage && (rawImage.startsWith('http://') || rawImage.startsWith('https://'))) {
       try {
         const dlRes = await fetch('/api/recipes/save-remote-image', {
@@ -62527,36 +62877,74 @@ export default function ImportPage() {
           body: JSON.stringify({ imageUrl: rawImage })
         });
         const dlData = await dlRes.json();
-        if (dlData.success && dlData.localUrl) {
-          processedRecipe.image = dlData.localUrl;
-          processedRecipe.imageUrl = dlData.localUrl;
+        if (dlData.success && (dlData.localPath || dlData.localUrl)) {
+          localhostImage = dlData.localPath || dlData.localUrl;
         }
       } catch (_) {}
     }
 
-    // Ensure PostgreSQL saved_recipes persistence
+    const steps = Array.isArray(recipeData.instructions) && recipeData.instructions.length > 0
+      ? recipeData.instructions
+      : Array.isArray(recipeData.directions) && recipeData.directions.length > 0
+        ? recipeData.directions
+        : ['Follow standard chef cooking guidelines for this dish.'];
+
+    const normalizedRecipe = {
+      ...recipeData,
+      id: recipeData.id || ('recipe_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)),
+      title: decodeHtmlEntities(recipeData.title || textTitle || 'Imported Recipe'),
+      name: decodeHtmlEntities(recipeData.title || textTitle || 'Imported Recipe'),
+      description: recipeData.description || '',
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy: createdBy,
+      created_by: createdBy,
+      creatorName: creatorName,
+      creator_name: creatorName,
+      category: cleanCategory,
+      recipeType: cleanCategory,
+      recipe_type: cleanCategory,
+      imageUrl: localhostImage,
+      image: localhostImage,
+      image_url: localhostImage,
+      ingredients: Array.isArray(recipeData.ingredients) ? recipeData.ingredients : [],
+      instructions: steps,
+      directions: steps,
+      steps: steps,
+      prepTime: String(recipeData.prepTime || recipeData.prepTimeMinutes || '15 mins'),
+      cookTime: String(recipeData.cookTime || recipeData.cookTimeMinutes || '25 mins'),
+      servings: Number(recipeData.servings) || 4,
+      sourceUrl: recipeData.sourceUrl || recipeData.source_url || url || '',
+      source_url: recipeData.sourceUrl || recipeData.source_url || url || '',
+      isFavorite: false,
+      rating: 0
+    };
+
     try {
-      await persistSavedRecipe(targetUserId, processedRecipe, {
-        createdBy: user?.email || targetUserId,
-        creatorName: user?.name || 'You'
-      });
-      await fetch('/api/recipes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(processedRecipe)
-      });
+      await Promise.allSettled([
+        persistSavedRecipe(targetUserId, normalizedRecipe, { createdBy, creatorName }),
+        fetch('/api/recipes/saved', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(normalizedRecipe)
+        }),
+        fetch('/api/recipes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(normalizedRecipe)
+        })
+      ]);
     } catch (_) {}
 
-    // Synchronize to localStorage for instantaneous client response
     const storageKeys = ['zecratary_recipes', 'zecratary_saved_recipes', 'saved_recipes'];
     storageKeys.forEach((key) => {
       try {
         const raw = localStorage.getItem(key);
         const currentList = raw ? JSON.parse(raw) : [];
         const filtered = Array.isArray(currentList)
-          ? currentList.filter((r: any) => (r.id !== recipeData.id && (r.title || r.name)?.toLowerCase() !== recipeData.title?.toLowerCase()))
+          ? currentList.filter((r: any) => (r.id !== normalizedRecipe.id && (r.title || r.name)?.toLowerCase() !== normalizedRecipe.title?.toLowerCase()))
           : [];
-        localStorage.setItem(key, JSON.stringify([processedRecipe, ...filtered]));
+        localStorage.setItem(key, JSON.stringify([normalizedRecipe, ...filtered]));
       } catch (_) {}
     });
 
@@ -62567,12 +62955,12 @@ export default function ImportPage() {
     window.dispatchEvent(new Event('storage'));
 
     const deductionMsg = consumedTokens > 0
-      ? ` -${consumedTokens} ${tokenSymbol} ${t('deductedToast', 'deducted. Redirecting to Saved Recipes...')}`
-      : ` ${t('redirectingToSaved', 'Redirecting to Saved Recipes...')}`;
+      ? ` -${consumedTokens} ${tokenSymbol} ${t('deductedToast') || 'deducted. Redirecting to Saved Recipes...'}`
+      : ` ${t('redirectingToSaved') || 'Redirecting to Saved Recipes...'}`;
 
     setStatus({
       type: 'success',
-      msg: `${t('importSuccessToast', 'Successfully imported')} "${processedRecipe.title}"!${deductionMsg}`
+      msg: `${t('importSuccessToast') || 'Successfully imported'} "${normalizedRecipe.title}"!${deductionMsg}`
     });
 
     setTimeout(() => {
@@ -62580,14 +62968,18 @@ export default function ImportPage() {
     }, 850);
   };
 
-  const handleUrlImport = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
-    if (e && 'preventDefault' in e) e.preventDefault();
-    if (!url.trim()) return;
+  const handleUrlImport = async () => {
+    let cleanUrl = url.trim();
+    if (!cleanUrl) return;
+
+    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+      cleanUrl = `https://${cleanUrl}`;
+    }
 
     if (!enableWebSearch) {
       setStatus({
         type: 'warning',
-        msg: t('webSearchDisabledMsg', 'Web URL imports are disabled by the administrator in AI Settings.')
+        msg: t('webSearchDisabledMsg') || 'Web URL imports are disabled by the administrator in AI Settings.'
       });
       return;
     }
@@ -62596,7 +62988,7 @@ export default function ImportPage() {
     if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
       setStatus({
         type: 'error',
-        msg: `${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}.`
+        msg: `${t('insufficientTokensError') || 'Insufficient'} ${tokenName}. ${t('required') || 'Required'}: ${cost} ${tokenSymbol}, ${t('balance') || 'Balance'}: ${tokenBalance} ${tokenSymbol}.`
       });
       setIsTokenPurchaseOpen(true);
       return;
@@ -62612,8 +63004,8 @@ export default function ImportPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'url',
-          url: url.trim(),
-          userId: user?.id,
+          url: cleanUrl,
+          userId: user?.id || user?.email || 'usr_admin_1',
           userEmail: user?.email,
           userName: user?.name,
           category: textCategory,
@@ -62627,25 +63019,24 @@ export default function ImportPage() {
         if (data.insufficientTokens) {
           setIsTokenPurchaseOpen(true);
         }
-        throw new Error(data.error || t('failedToExtractUrl', 'Failed to extract recipe from URL.'));
+        throw new Error(data.error || t('failedToExtractUrl') || 'Failed to extract recipe from URL.');
       }
 
       await handlePostImportSuccess(data.recipe, data.consumedSystemTokens ?? cost, data.remainingBalance);
     } catch (err: any) {
-      setStatus({ type: 'error', msg: err.message || t('networkError', 'Network error during URL import.') });
+      setStatus({ type: 'error', msg: err.message || t('networkError') || 'Network error during URL import.' });
       setLoading(false);
     }
   };
 
-  const handleTextImport = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
-    if (e && 'preventDefault' in e) e.preventDefault();
+  const handleTextImport = async () => {
     if (!rawText.trim()) return;
 
     const cost = isTokenEnabled ? tokenCosts.text : 0;
     if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
       setStatus({
         type: 'error',
-        msg: `${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}.`
+        msg: `${t('insufficientTokensError') || 'Insufficient'} ${tokenName}. ${t('required') || 'Required'}: ${cost} ${tokenSymbol}, ${t('balance') || 'Balance'}: ${tokenBalance} ${tokenSymbol}.`
       });
       setIsTokenPurchaseOpen(true);
       return;
@@ -62664,7 +63055,7 @@ export default function ImportPage() {
           text: rawText.trim(),
           title: textTitle.trim(),
           category: textCategory,
-          userId: user?.id,
+          userId: user?.id || user?.email || 'usr_admin_1',
           userEmail: user?.email,
           userName: user?.name,
           model: activeAiModel,
@@ -62677,12 +63068,12 @@ export default function ImportPage() {
         if (data.insufficientTokens) {
           setIsTokenPurchaseOpen(true);
         }
-        throw new Error(data.error || t('failedToParseText', 'Failed to parse recipe text.'));
+        throw new Error(data.error || t('failedToParseText') || 'Failed to parse recipe text.');
       }
 
       await handlePostImportSuccess(data.recipe, data.consumedSystemTokens ?? cost, data.remainingBalance);
     } catch (err: any) {
-      setStatus({ type: 'error', msg: err.message || t('networkError', 'Network error during text import.') });
+      setStatus({ type: 'error', msg: err.message || t('networkError') || 'Network error during text import.' });
       setLoading(false);
     }
   };
@@ -62695,24 +63086,27 @@ export default function ImportPage() {
     if (validFiles.length === 0) return;
     const merged = [...selectedFiles, ...validFiles].slice(0, 5);
     setSelectedFiles(merged);
+    previewUrls.forEach(url => URL.revokeObjectURL(url));
     setPreviewUrls(merged.map(f => URL.createObjectURL(f)));
   };
 
   const removeFile = (index: number) => {
+    if (previewUrls[index]) {
+      URL.revokeObjectURL(previewUrls[index]);
+    }
     const updatedFiles = selectedFiles.filter((_, idx) => idx !== index);
     setSelectedFiles(updatedFiles);
     setPreviewUrls(previewUrls.filter((_, idx) => idx !== index));
   };
 
-  const handleImageImport = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
-    if (e && 'preventDefault' in e) e.preventDefault();
+  const handleImageImport = async () => {
     if (selectedFiles.length === 0) return;
 
     const cost = isTokenEnabled ? tokenCosts.photo : 0;
     if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
       setStatus({
         type: 'error',
-        msg: `${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}.`
+        msg: `${t('insufficientTokensError') || 'Insufficient'} ${tokenName}. ${t('required') || 'Required'}: ${cost} ${tokenSymbol}, ${t('balance') || 'Balance'}: ${tokenBalance} ${tokenSymbol}.`
       });
       setIsTokenPurchaseOpen(true);
       return;
@@ -62727,14 +63121,26 @@ export default function ImportPage() {
       const formData = new FormData();
       formData.append('file', primaryFile);
 
-      let localPhotoPath = '/uploads/recipes/default.jpg';
+      let localPhotoPath = '';
       try {
         const uploadRes = await fetch('/api/recipes/upload', {
           method: 'POST',
           body: formData
         });
-        const uploadData = await uploadRes.json();
-        if (uploadData?.url) localPhotoPath = uploadData.url;
+        if (uploadRes.ok) {
+          const uploadData = await uploadRes.json();
+          if (uploadData?.url) localPhotoPath = uploadData.url;
+        }
+      } catch (_) {}
+
+      let base64Data = '';
+      try {
+        base64Data = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve((reader.result as string) || '');
+          reader.onerror = () => resolve('');
+          reader.readAsDataURL(primaryFile);
+        });
       } catch (_) {}
 
       const res = await fetch('/api/ai/import', {
@@ -62742,10 +63148,11 @@ export default function ImportPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'photo',
-          image: localPhotoPath,
+          image: localPhotoPath || base64Data,
+          base64: base64Data,
           title: primaryFile.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' '),
           category: textCategory,
-          userId: user?.id,
+          userId: user?.id || user?.email || 'usr_admin_1',
           userEmail: user?.email,
           userName: user?.name,
           model: activeAiModel,
@@ -62758,12 +63165,12 @@ export default function ImportPage() {
         if (data.insufficientTokens) {
           setIsTokenPurchaseOpen(true);
         }
-        throw new Error(data.error || t('failedToProcessPhoto', 'Failed to process recipe image.'));
+        throw new Error(data.error || t('failedToProcessPhoto') || 'Failed to process recipe image.');
       }
 
       await handlePostImportSuccess(data.recipe, data.consumedSystemTokens ?? cost, data.remainingBalance);
     } catch (err: any) {
-      setStatus({ type: 'error', msg: err.message || t('imageAnalysisFailed', 'Image analysis failed.') });
+      setStatus({ type: 'error', msg: err.message || t('imageAnalysisFailed') || 'Image analysis failed.' });
       setLoading(false);
     }
   };
@@ -62777,10 +63184,10 @@ export default function ImportPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
         <div>
           <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-            <Sparkles className="h-6 w-6" /> {t('importRecipeTitle', 'AI Recipe Importer')}
+            <Sparkles className="h-6 w-6" /> {t('importRecipeTitle') || 'AI Recipe Importer'}
           </h1>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('importRecipeSubtitle', 'Import recipes from websites, text notes, or photos and save directly to your recipe library.')}
+            {t('importRecipeSubtitle') || 'Import recipes from websites, text notes, or photos and save directly to your recipe library.'}
           </p>
         </div>
 
@@ -62788,21 +63195,29 @@ export default function ImportPage() {
         <div className="flex flex-wrap items-center gap-2.5">
           <div 
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-            title={t('activeModelConfiguredTooltip', 'Active Model configured dynamically in /admin/ai-settings')}
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)', 
+              color: 'var(--color-text)' 
+            }}
+            title={t('activeModelConfiguredTooltip') || 'Active Model configured dynamically in /admin/ai-settings'}
           >
-            <Cpu className="h-3.5 w-3.5 text-orange-400" />
+            <Cpu className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
             <span className="font-mono">{activeAiModel}</span>
           </div>
 
           {!isTokenEnabled && (
             <div 
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider text-emerald-400"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              title={t('tokenFreeModeTooltip', 'Token consumption is currently bypassed (Free Mode) in /admin/token-setting')}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider"
+              style={{ 
+                backgroundColor: 'var(--color-inner-dark)', 
+                borderColor: 'var(--color-emerald)',
+                color: 'var(--color-emerald)'
+              }}
+              title={t('tokenFreeModeTooltip') || 'Token consumption is currently bypassed (Free Mode) in /admin/token-setting'}
             >
               <Sparkles className="h-3 w-3" />
-              <span>{t('tokenFreeModeBadge', 'Free Token Mode')}</span>
+              <span>{t('tokenFreeModeBadge') || 'Free Token Mode'}</span>
             </div>
           )}
 
@@ -62813,7 +63228,7 @@ export default function ImportPage() {
               title={`Strict Dietary Policy active with ${filterWordsList.length} filter terms.`}
             >
               <ShieldAlert className="h-3 w-3" />
-              <span>{t('strictFiltersBadge', 'Strict Filters Active')}</span>
+              <span>{t('strictFiltersBadge') || 'Strict Filters Active'}</span>
             </div>
           )}
 
@@ -62821,9 +63236,9 @@ export default function ImportPage() {
             className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl border shadow-sm"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
           >
-            <Coins className="h-4 w-4 text-amber-500" />
+            <Coins className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
             <div className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
-              {tokenBalance} <span className="text-amber-500">{tokenSymbol}</span>
+              {tokenBalance} <span style={{ color: 'var(--color-primary)' }}>{tokenSymbol}</span>
             </div>
             <button
               type="button"
@@ -62831,7 +63246,7 @@ export default function ImportPage() {
               className="ml-1 text-[10px] font-extrabold px-2 py-0.5 rounded-lg text-white transition hover:opacity-90 cursor-pointer"
               style={{ backgroundColor: 'var(--color-primary)' }}
             >
-              {t('topUpBtn', 'Top Up')}
+              {t('topUpBtn') || 'Top Up'}
             </button>
           </div>
         </div>
@@ -62854,9 +63269,9 @@ export default function ImportPage() {
           }}
         >
           {[
-            { id: 'url', label: t('urlTab', 'URL'), icon: Link2, cost: tokenCosts.url },
-            { id: 'text', label: t('textTab', 'Text'), icon: FileText, cost: tokenCosts.text },
-            { id: 'image', label: t('imageTab', 'Image'), icon: ImageIcon, cost: tokenCosts.photo },
+            { id: 'url', label: t('urlTab') || 'URL', icon: Link2, cost: tokenCosts.url },
+            { id: 'text', label: t('textTab') || 'Text', icon: FileText, cost: tokenCosts.text },
+            { id: 'image', label: t('imageTab') || 'Image', icon: ImageIcon, cost: tokenCosts.photo },
           ].map((tab) => {
             const isActive = activeTab === tab.id;
             return (
@@ -62870,8 +63285,8 @@ export default function ImportPage() {
                 className="flex-1 py-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
                 style={isActive ? {
                   backgroundColor: 'var(--color-card)',
-                  color: 'var(--color-emerald)',
-                  borderColor: 'var(--color-emerald)',
+                  color: 'var(--color-primary)',
+                  borderColor: 'var(--color-primary)',
                   borderWidth: '1px',
                   boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
                 } : {
@@ -62888,7 +63303,7 @@ export default function ImportPage() {
                     color: 'var(--color-text)'
                   }}
                 >
-                  {isTokenEnabled && tab.cost > 0 ? `${tab.cost} ${tokenSymbol}` : t('freeBadge', 'Free')}
+                  {isTokenEnabled && tab.cost > 0 ? `${tab.cost} ${tokenSymbol}` : t('freeBadge') || 'Free'}
                 </span>
               </button>
             );
@@ -62902,9 +63317,9 @@ export default function ImportPage() {
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
           >
             <div className="flex items-center gap-2">
-              <ShieldAlert className="h-4 w-4 shrink-0 text-amber-500" />
+              <ShieldAlert className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }} />
               <span>
-                <strong>{t('dietNoticeTitle', 'AI Dietary Restrictions Enforced')}:</strong> {t('dietNoticeDesc', 'Recipes containing avoid terms')} ({filterWordsList.slice(0, 4).join(', ')}{filterWordsList.length > 4 ? '...' : ''}) {t('willBeBlocked', 'will be automatically blocked.')}
+                <strong>{t('dietNoticeTitle') || 'AI Dietary Restrictions Enforced'}:</strong> {t('dietNoticeDesc') || 'Recipes containing avoid terms'} ({filterWordsList.slice(0, 4).join(', ')}{filterWordsList.length > 4 ? '...' : ''}) {t('willBeBlocked') || 'will be automatically blocked.'}
               </span>
             </div>
           </div>
@@ -62915,23 +63330,29 @@ export default function ImportPage() {
           <div className="space-y-4">
             {!enableWebSearch && (
               <div 
-                className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 text-amber-500"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'rgba(245, 158, 11, 0.4)' }}
+                className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2"
+                style={{ 
+                  backgroundColor: 'var(--color-inner-dark)', 
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-primary)'
+                }}
               >
                 <AlertTriangle className="h-4 w-4 shrink-0" />
-                <span>{t('webSearchDisabledWarning', 'Web URL imports are currently disabled by the administrator in AI Settings.')}</span>
+                <span>{t('webSearchDisabledWarning') || 'Web URL imports are currently disabled by the administrator in AI Settings.'}</span>
               </div>
             )}
 
             <div>
               <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                {t('recipeWebUrlLabel', 'Recipe Web URL *')}
+                {t('recipeWebUrlLabel') || 'Recipe Web URL *'}
               </label>
               <input
                 type="url"
                 required
+                autoComplete="off"
+                data-lpignore="true"
                 disabled={!enableWebSearch}
-                placeholder={t('recipeWebUrlPlaceholder', 'https://www.recipetineats.com/... or food blog URL')}
+                placeholder={t('recipeWebUrlPlaceholder') || 'https://www.recipetineats.com/... or food blog URL'}
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 onKeyDown={(e) => {
@@ -62960,10 +63381,10 @@ export default function ImportPage() {
             >
               <Sparkles className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {loading 
-                ? t('downloadingPhotoParsingSteps', 'Parsing recipe & deducting tokens...') 
+                ? t('downloadingPhotoParsingSteps') || 'Parsing recipe & deducting tokens...' 
                 : isTokenEnabled && tokenCosts.url > 0
-                  ? `${t('importRecipeBtn', 'Import Recipe')} (${tokenCosts.url} ${tokenSymbol})`
-                  : `${t('importRecipeBtn', 'Import Recipe')} (${t('freeBadge', 'Free')})`}
+                  ? `${t('importRecipeBtn') || 'Import Recipe'} (${tokenCosts.url} ${tokenSymbol})`
+                  : `${t('importRecipeBtn') || 'Import Recipe'} (${t('freeBadge') || 'Free'})`}
             </button>
           </div>
         )}
@@ -62974,11 +63395,13 @@ export default function ImportPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  {t('recipeTitleLabel', 'Recipe Title (Optional)')}
+                  {t('recipeTitleLabel') || 'Recipe Title (Optional)'}
                 </label>
                 <input
                   type="text"
-                  placeholder={t('recipeTitlePlaceholder', 'e.g. Homemade Apple Cake')}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  placeholder={t('recipeTitlePlaceholder') || 'e.g. Homemade Apple Cake'}
                   value={textTitle}
                   onChange={(e) => setTextTitle(e.target.value)}
                   onKeyDown={(e) => {
@@ -62999,7 +63422,7 @@ export default function ImportPage() {
               </div>
               <div>
                 <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  {t('categoryLabel', 'Category (Recipe Type)')}
+                  {t('categoryLabel') || 'Category (Recipe Type)'}
                 </label>
                 <select
                   value={textCategory}
@@ -63022,14 +63445,22 @@ export default function ImportPage() {
 
             <div>
               <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                {t('pasteIngredientsSteps', 'Paste Ingredients & Steps *')}
+                {t('pasteIngredientsSteps') || 'Paste Ingredients & Steps *'}
               </label>
               <textarea
                 required
+                autoComplete="off"
+                data-lpignore="true"
                 rows={7}
-                placeholder={t('pasteRecipeContentPlaceholder', 'Paste ingredients and cooking steps here...')}
+                placeholder={t('pasteRecipeContentPlaceholder') || 'Paste ingredients and cooking steps here... (Ctrl+Enter to Import)'}
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    handleTextImport();
+                  }
+                }}
                 className="w-full border rounded-xl p-4 text-xs outline-none resize-none font-mono"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
@@ -63050,10 +63481,10 @@ export default function ImportPage() {
             >
               <Sparkles className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {loading 
-                ? t('processingSavingRecipe', 'Processing & saving recipe...') 
+                ? t('processingSavingRecipe') || 'Processing & saving recipe...' 
                 : isTokenEnabled && tokenCosts.text > 0
-                  ? `${t('saveAndImportRecipe', 'Save & Import Recipe')} (${tokenCosts.text} ${tokenSymbol})`
-                  : `${t('saveAndImportRecipe', 'Save & Import Recipe')} (${t('freeBadge', 'Free')})`}
+                  ? `${t('saveAndImportRecipe') || 'Save & Import Recipe'} (${tokenCosts.text} ${tokenSymbol})`
+                  : `${t('saveAndImportRecipe') || 'Save & Import Recipe'} (${t('freeBadge') || 'Free'})`}
             </button>
           </div>
         )}
@@ -63063,7 +63494,7 @@ export default function ImportPage() {
           <div className="space-y-4">
             <div>
               <label className="block text-xs font-bold mb-2" style={{ color: 'var(--color-text)' }}>
-                {t('recipeImagesMax5', 'Recipe Images (up to 5)')}
+                {t('recipeImagesMax5') || 'Recipe Images (up to 5)'}
               </label>
 
               <div
@@ -63071,11 +63502,9 @@ export default function ImportPage() {
                 onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}
                 onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); if (e.dataTransfer.files) handleFilesAdded(e.dataTransfer.files); }}
                 onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-2xl py-12 px-6 flex flex-col items-center justify-center text-center cursor-pointer transition relative ${
-                  isDragging ? 'border-emerald-400' : 'hover:border-emerald-400'
-                }`}
+                className="border-2 border-dashed rounded-2xl py-12 px-6 flex flex-col items-center justify-center text-center cursor-pointer transition relative"
                 style={{
-                  borderColor: isDragging ? 'var(--color-emerald)' : 'var(--color-border)',
+                  borderColor: isDragging ? 'var(--color-primary)' : 'var(--color-border)',
                   backgroundColor: 'var(--color-inner-dark)'
                 }}
               >
@@ -63088,18 +63517,18 @@ export default function ImportPage() {
                   className="hidden"
                 />
                 <div className="w-14 h-14 rounded-full flex items-center justify-center mb-3">
-                  <Upload className="h-10 w-10 stroke-[2.2]" style={{ color: 'var(--color-emerald)' }} />
+                  <Upload className="h-10 w-10 stroke-[2.2]" style={{ color: 'var(--color-primary)' }} />
                 </div>
                 <p className="text-xs sm:text-sm font-semibold tracking-wide" style={{ color: 'var(--color-text)' }}>
                   <span style={{ color: 'var(--color-primary)' }} className="font-bold">
-                    {t('clickToUpload', 'Click to upload')}
+                    {t('clickToUpload') || 'Click to upload'}
                   </span>{' '}
-                  <span className="font-semibold" style={{ color: 'var(--color-emerald)' }}>
-                    {t('orDragAndDrop', 'or drag and drop')}
+                  <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('orDragAndDrop') || 'or drag and drop'}
                   </span>
                 </p>
-                <p className="text-[11px] font-medium mt-1" style={{ color: 'var(--color-emerald)' }}>
-                  {t('pngJpgWebpMax5', 'PNG, JPG, or WEBP (Cookbook captures or food photos)')}
+                <p className="text-[11px] font-medium mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('pngJpgWebpMax5') || 'PNG, JPG, or WEBP (Cookbook captures or food photos)'}
                 </p>
               </div>
             </div>
@@ -63107,7 +63536,7 @@ export default function ImportPage() {
             {previewUrls.length > 0 && (
               <div className="space-y-1.5">
                 <div className="text-[11px] font-bold" style={{ color: 'var(--color-text)' }}>
-                  {t('selectedPhotos', 'Selected Photos')} ({previewUrls.length}/5):
+                  {t('selectedPhotos') || 'Selected Photos'} ({previewUrls.length}/5):
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                   {previewUrls.map((previewUrl, idx) => (
@@ -63142,10 +63571,10 @@ export default function ImportPage() {
             >
               <Upload className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {loading 
-                ? t('aiSearchingRecipeImporting', 'AI OCR analyzing & importing...') 
+                ? t('aiSearchingRecipeImporting') || 'AI OCR analyzing & importing...' 
                 : isTokenEnabled && tokenCosts.photo > 0
-                  ? `${t('importRecipeFromImages', 'Import Recipe from Images')} (${tokenCosts.photo} ${tokenSymbol})`
-                  : `${t('importRecipeFromImages', 'Import Recipe from Images')} (${t('freeBadge', 'Free')})`}
+                  ? `${t('importRecipeFromImages') || 'Import Recipe from Images'} (${tokenCosts.photo} ${tokenSymbol})`
+                  : `${t('importRecipeFromImages') || 'Import Recipe from Images'} (${t('freeBadge') || 'Free'})`}
             </button>
           </div>
         )}
@@ -63154,18 +63583,14 @@ export default function ImportPage() {
         {status && (
           <div
             className="p-4 rounded-2xl border text-xs font-semibold flex items-center justify-between gap-2 animate-in fade-in"
-            style={status.type === 'success' ? {
+            style={{
               backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-emerald)',
-              color: 'var(--color-emerald)'
-            } : status.type === 'warning' ? {
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'rgba(245, 158, 11, 0.5)',
-              color: '#f59e0b'
-            } : {
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'rgba(239, 68, 68, 0.4)',
-              color: '#ef4444'
+              borderColor: status.type === 'success' 
+                ? 'var(--color-emerald)' 
+                : status.type === 'warning' 
+                  ? 'var(--color-border)' 
+                  : 'rgba(239, 68, 68, 0.4)',
+              color: status.type === 'success' ? 'var(--color-emerald)' : status.type === 'warning' ? '#f59e0b' : '#ef4444'
             }}
           >
             <div className="flex items-center gap-2">
@@ -63186,7 +63611,7 @@ export default function ImportPage() {
                 className="px-3 py-1 rounded-xl font-bold text-[11px] text-white shrink-0 cursor-pointer shadow-sm"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                {t('buyTokensNowBtn', 'Buy Tokens')}
+                {t('buyTokensNowBtn') || 'Buy Tokens'}
               </button>
             )}
           </div>
@@ -63197,7 +63622,7 @@ export default function ImportPage() {
       <TokenPurchaseModal
         isOpen={isTokenPurchaseOpen}
         onClose={() => setIsTokenPurchaseOpen(false)}
-        userId={getCurrentUser()?.id}
+        userId={getCurrentUser()?.id || getCurrentUser()?.email || 'usr_admin_1'}
         userEmail={getCurrentUser()?.email}
         tokenSymbol={tokenSymbol}
         packages={tokenPackages}
@@ -63205,7 +63630,7 @@ export default function ImportPage() {
           setTokenBalance(newBal);
           setStatus({
             type: 'success',
-            msg: `${t('tokensAddedSuccess', 'Tokens added successfully!')} ${t('newBalance', 'New Balance')}: ${newBal} ${tokenSymbol}`
+            msg: `${t('tokensAddedSuccess') || 'Tokens added successfully!'} ${t('newBalance') || 'New Balance'}: ${newBal} ${tokenSymbol}`
           });
         }}
       />
@@ -71039,85 +71464,56 @@ export async function registerUser(payload: { email: string; name?: string; pass
 import fs from 'fs';
 import path from 'path';
 
-/**
- * Downloads a remote image binary from an external URL and writes it
- * directly to /uploads/recipes/ on localhost disk storage.
- * Returns the localhost relative URL: '/uploads/recipes/<filename>'.
- */
-export async function downloadAndSaveImage(
-  imageUrl: string,
-  prefix: string = 'scraped'
-): Promise<string> {
-  const fallbackPath = '/uploads/recipes/default.jpg';
-  if (!imageUrl || typeof imageUrl !== 'string') return fallbackPath;
-
-  const cleanUrl = imageUrl.trim();
-  if (cleanUrl.startsWith('/uploads/recipes/')) {
-    return cleanUrl;
-  }
-  if (!/^https?:\/\//i.test(cleanUrl)) {
-    return fallbackPath;
-  }
+export async function downloadAndSaveImage(imageUrl: string, prefix = 'recipe'): Promise<string | null> {
+  if (!imageUrl || typeof imageUrl !== 'string') return null;
+  if (imageUrl.startsWith('/uploads/') || imageUrl.startsWith('/images/')) return imageUrl;
+  if (!imageUrl.startsWith('http://') && !imageUrl.startsWith('https://')) return null;
 
   try {
-    const origin = new URL(cleanUrl).origin;
-    const response = await fetch(cleanUrl, {
+    const res = await fetch(imageUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Referer': origin,
-        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9'
-      },
-      signal: AbortSignal.timeout(9000),
-      redirect: 'follow'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+      }
     });
 
-    if (!response.ok) {
-      console.warn(`[ImageDownloader] Remote image fetch failed: ${response.status} for ${cleanUrl}`);
-      return fallbackPath;
-    }
+    if (!res.ok) return null;
 
-    const contentType = response.headers.get('content-type') || '';
-    let ext = 'jpg';
-    if (contentType.includes('webp')) ext = 'webp';
-    else if (contentType.includes('png')) ext = 'png';
-    else if (contentType.includes('jpeg')) ext = 'jpg';
-    else if (cleanUrl.includes('.webp')) ext = 'webp';
-    else if (cleanUrl.includes('.png')) ext = 'png';
+    const contentType = res.headers.get('content-type') || '';
+    let ext = '.jpg';
+    if (contentType.includes('png')) ext = '.png';
+    else if (contentType.includes('webp')) ext = '.webp';
+    else if (contentType.includes('gif')) ext = '.gif';
+    else if (contentType.includes('jpeg') || contentType.includes('jpg')) ext = '.jpg';
 
-    const timestamp = Date.now();
-    const randomSuffix = Math.random().toString(36).substring(2, 8);
-    const filename = `${prefix}_${timestamp}_${randomSuffix}.${ext}`;
-    const relativeUrl = `/uploads/recipes/${filename}`;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.length < 100) return null;
 
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
-    // Target multiple candidate public directories across monorepo layouts
+    const filename = `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}${ext}`;
+    
     const targetDirs = [
       path.join(process.cwd(), 'apps', 'web', 'public', 'uploads', 'recipes'),
       path.join(process.cwd(), 'public', 'uploads', 'recipes')
     ];
 
-    let written = false;
+    let savedPath = '';
     for (const dir of targetDirs) {
       try {
         fs.mkdirSync(dir, { recursive: true });
-        const filePath = path.join(dir, filename);
-        fs.writeFileSync(filePath, buffer);
-        written = true;
+        fs.writeFileSync(path.join(dir, filename), buffer);
+        savedPath = `/uploads/recipes/${filename}`;
       } catch (_) {}
     }
 
-    if (written) {
-      return relativeUrl;
-    }
+    return savedPath || `/uploads/recipes/${filename}`;
   } catch (err) {
-    console.warn('[ImageDownloader] Error downloading image:', err);
+    console.warn('[imageDownloader] Error downloading image:', err);
+    return null;
   }
-
-  return fallbackPath;
 }
+
+export const downloadAndSaveScrapedImage = downloadAndSaveImage;
+export default downloadAndSaveImage;
 
 ```
 

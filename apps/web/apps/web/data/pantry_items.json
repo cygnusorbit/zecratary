@@ -1,1 +1,12 @@
-[]
+[
+  {
+    "id": "p_1791026914039_8xpd",
+    "userId": "usr_mu4837frdht1",
+    "createdBy": "admin@zecratary.com",
+    "name": "Eggs",
+    "quantity": "1",
+    "unit": "Unit",
+    "category": "Produce",
+    "expiryDate": "2026-10-10"
+  }
+]

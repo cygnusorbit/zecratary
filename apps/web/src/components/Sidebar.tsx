@@ -185,10 +185,22 @@ export default function Sidebar() {
   const [mounted, setMounted] = useState<boolean>(false);
 
   // SSR-deterministic token & wallet states
-  const [tokenBalance, setTokenBalance] = useState<number>(0);
+  const [tokenBalance, setTokenBalance] = useState<number>(() => {
+    try {
+      const u = getCurrentUser();
+      const val = Number(u?.token_balance ?? u?.tokenBalance ?? u?.tokens ?? 100);
+      return isNaN(val) ? 100 : val;
+    } catch (_) { return 100; }
+  });
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
 
-  const [walletBalance, setWalletBalance] = useState<number>(0);
+  const [walletBalance, setWalletBalance] = useState<number>(() => {
+    try {
+      const u = getCurrentUser();
+      const val = parseFloat(String(u?.wallet_balance ?? u?.walletBalance ?? 0));
+      return isNaN(val) ? 0 : val;
+    } catch (_) { return 0; }
+  });
   const [walletCurrency, setWalletCurrency] = useState<string>('USD');
   const [walletSymbol, setWalletSymbol] = useState<string>('$');
 
