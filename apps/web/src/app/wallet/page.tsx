@@ -243,15 +243,20 @@ function WalletContent() {
 
       if (data.success) {
         if (data.settings) {
+          const loadedAllowed: string[] = Array.isArray(data.settings.allowed_gateways) 
+            ? data.settings.allowed_gateways 
+            : [];
+
           setSettings({
             ...data.settings,
+            allowed_gateways: loadedAllowed,
             min_topup: parseFloat(data.settings.min_topup || 5),
             max_topup: parseFloat(data.settings.max_topup || 1000),
           });
-          if (Array.isArray(data.settings.allowed_gateways) && data.settings.allowed_gateways.length > 0) {
-            setSelectedGateway((prev) =>
-              data.settings.allowed_gateways.includes(prev) ? prev : data.settings.allowed_gateways[0]
-            );
+
+          // Dynamic sync: ensure selectedGateway is currently active in /admin/payment-gateway
+          if (loadedAllowed.length > 0) {
+            setSelectedGateway((prev) => loadedAllowed.includes(prev) ? prev : loadedAllowed[0]);
           }
         }
         if (typeof data.wallet_balance === 'number') {
@@ -302,11 +307,13 @@ function WalletContent() {
 
     window.addEventListener('zecratary_wallet_updated', handleSync);
     window.addEventListener('zecratary_payment_updated', handleSync);
+    window.addEventListener('zecratary_payment_gateway_updated', handleSync);
     window.addEventListener('zecratary_admin_settings_updated', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_wallet_updated', handleSync);
       window.removeEventListener('zecratary_payment_updated', handleSync);
+      window.removeEventListener('zecratary_payment_gateway_updated', handleSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleSync);
     };
   }, [limit, debouncedSearch, page, typeFilter]);
@@ -407,7 +414,7 @@ function WalletContent() {
       return;
     }
 
-    // REQUIREMENT 2: When Using Manual gateway, modal popup to let user fill up the manual form for admin approval
+    // Dynamic verification: open modal when manual gateway is chosen
     if (selectedGateway === 'manual') {
       setShowManualModal(true);
       return;
@@ -570,6 +577,13 @@ function WalletContent() {
       </div>
     );
   }
+
+  // Dynamic available gateways array filtered by /admin/payment-gateway
+  const availableGateways = [
+    { id: 'stripe', label: 'Credit Card (Stripe)', desc: 'Instant Card Settlement', icon: CreditCard },
+    { id: 'paypal', label: 'PayPal', desc: 'Wallet & Account Balance', icon: Coins },
+    { id: 'manual', label: 'Bank Wire / Manual', desc: 'Manual Approval Transfer', icon: Landmark },
+  ].filter((gw) => settings.allowed_gateways.includes(gw.id));
 
   return (
     <div
@@ -773,25 +787,27 @@ function WalletContent() {
             )}
           </div>
 
-          {/* DYNAMIC PAYMENT GATEWAYS (SYNCED FROM /admin/payment-gateway) */}
+          {/* 1. DYNAMIC GATEWAY SYNC WITH /admin/payment-gateway */}
           <div>
             <div className="flex items-center justify-between mb-3">
               <label className="block text-xs font-semibold uppercase opacity-70">
                 {t('selectPaymentGateway', '2. Select Payment Gateway')}
               </label>
               <span className="text-[11px] opacity-60">
-                {t('dynamicGatewaySyncNotice', 'Active channels synced with Admin Gateway')}
+                {t('dynamicGatewaySyncNotice', 'Active channels dynamically matched with /admin/payment-gateway')}
               </span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {[
-                { id: 'stripe', label: 'Credit Card (Stripe)', desc: 'Instant Card Settlement', icon: CreditCard },
-                { id: 'paypal', label: 'PayPal', desc: 'Wallet & Account Balance', icon: Coins },
-                { id: 'manual', label: 'Bank Wire / Manual', desc: 'Manual Approval Transfer', icon: Landmark },
-              ]
-                .filter((gw) => !settings.allowed_gateways || settings.allowed_gateways.includes(gw.id))
-                .map((gw) => {
+            {availableGateways.length === 0 ? (
+              <div 
+                className="p-4 rounded-2xl border text-center text-xs opacity-70"
+                style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}
+              >
+                {t('noGatewaysEnabledNotice', 'No payment gateways are currently enabled in Payment Gateway settings.')}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {availableGateways.map((gw) => {
                   const isSelected = selectedGateway === gw.id;
                   const Icon = gw.icon;
                   return (
@@ -827,7 +843,8 @@ function WalletContent() {
                     </div>
                   );
                 })}
-            </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -880,7 +897,7 @@ function WalletContent() {
           <button
             type="button"
             onClick={handleExecuteTopup}
-            disabled={submitting || activeAmount <= 0}
+            disabled={submitting || activeAmount <= 0 || availableGateways.length === 0}
             className="w-full py-4 rounded-2xl font-bold text-sm text-white flex items-center justify-center gap-2 transition-all shadow-lg cursor-pointer disabled:opacity-50 hover:brightness-110"
             style={{ backgroundColor: 'var(--color-primary, #3b82f6)' }}
           >
@@ -905,7 +922,7 @@ function WalletContent() {
         </div>
       </div>
 
-      {/* REQUIREMENT 2: MANUAL SETTLEMENT MODAL POPUP FOR USER TO FILL UP MANUAL FORM FOR ADMIN APPROVAL */}
+      {/* 2. DYNAMIC MANUAL GATEWAY MODAL MATCHED WITH /admin/payment-gateway */}
       {showManualModal && (
         <div 
           onClick={() => setShowManualModal(false)}
@@ -946,7 +963,7 @@ function WalletContent() {
               </p>
             </div>
 
-            {/* Beneficiary Details Grid from /admin/payment-gateway */}
+            {/* Dynamic Beneficiary Details Grid from /admin/payment-gateway */}
             <div 
               className="p-4 rounded-2xl border space-y-3 font-mono text-[11px]"
               style={{
@@ -964,7 +981,7 @@ function WalletContent() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                 <div>
                   <span className="opacity-60 block text-[10px]">{t('bankName', 'Bank Name')}:</span>
-                  <span className="font-bold">{settings.manual_details?.bankName || 'Direct Settlement Bank'}</span>
+                  <span className="font-bold">{settings.manual_details?.bankName || 'Settlement Bank'}</span>
                 </div>
 
                 <div>
@@ -1027,7 +1044,7 @@ function WalletContent() {
               )}
             </div>
 
-            {/* User Form Submission Inputs */}
+            {/* Form Inputs for Reference Memo and Sender Details */}
             <div className="space-y-3.5 pt-1">
               <div>
                 <label className="block text-xs font-bold uppercase mb-1 opacity-80">
