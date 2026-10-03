@@ -417,7 +417,7 @@ export default function SavedRecipesPage() {
   }, []);
 
   const getCleanRecipeType = (rec: any): string => {
-    const raw = rec.recipeType || rec.category || (Array.isArray(rec.tags) ? rec.tags[0] : 'Main Dish');
+    const raw = rec.recipeType || rec.category || rec.recipe_type || (Array.isArray(rec.tags) ? rec.tags[0] : 'Main Dish');
     if (raw === 'Appetizer' || raw === 'Appetiser') return 'Appetiser';
     if (RECIPE_TYPES.includes(raw)) return raw;
     return 'Main Dish';
@@ -441,53 +441,166 @@ export default function SavedRecipesPage() {
     return `https://${urlStr}`;
   };
 
+  const normalizeRecipeFields = useCallback((r: any, targetUserId: string, userName: string) => {
+    const cleanType = getCleanRecipeType(r);
+    const resolvedImg = r.imageUrl || r.image || r.image_url || DEFAULT_RECIPE_IMAGE;
+
+    let ingredients = r.ingredients;
+    if (typeof ingredients === 'string') {
+      try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = []; }
+    }
+    if (!Array.isArray(ingredients)) ingredients = [];
+
+    let instructions = r.instructions || r.directions || r.steps;
+    if (typeof instructions === 'string') {
+      try { instructions = JSON.parse(instructions); } catch (_) { instructions = [instructions]; }
+    }
+    if (!Array.isArray(instructions)) instructions = [];
+
+    const prepMins = Number(r.prepTimeMinutes || r.prep_time || r.prepTime) || 15;
+    const cookMins = Number(r.cookTimeMinutes || r.cook_time || r.cookTime) || 25;
+
+    return {
+      ...r,
+      id: r.id || 'rcp_' + Math.random().toString(36).substring(2, 9),
+      userId: r.user_id || r.userId || targetUserId,
+      user_id: r.user_id || r.userId || targetUserId,
+      createdBy: r.created_by || r.createdBy || targetUserId,
+      created_by: r.created_by || r.createdBy || targetUserId,
+      creatorName: r.creator_name || r.creatorName || userName,
+      creator_name: r.creator_name || r.creatorName || userName,
+      title: r.title || r.name || 'Untitled Recipe',
+      name: r.title || r.name || 'Untitled Recipe',
+      description: r.description || '',
+      recipeType: cleanType,
+      category: cleanType,
+      recipe_type: cleanType,
+      imageUrl: resolvedImg,
+      image: resolvedImg,
+      image_url: resolvedImg,
+      servings: Number(r.servings || r.servingsCount) || 4,
+      prepTimeMinutes: prepMins,
+      cookTimeMinutes: cookMins,
+      prepTime: String(prepMins),
+      cookTime: String(cookMins),
+      prep_time: String(prepMins),
+      cook_time: String(cookMins),
+      ingredients,
+      directions: instructions,
+      instructions,
+      steps: instructions,
+      bookId: r.book_id || r.bookId || null,
+      book_id: r.book_id || r.bookId || null,
+      isFavorite: Boolean(r.is_favorite || r.isFavorite),
+      is_favorite: Boolean(r.is_favorite || r.isFavorite),
+      isCooked: Boolean(r.is_cooked || r.isCooked),
+      is_cooked: Boolean(r.is_cooked || r.isCooked),
+      rating: Number(r.rating) || 0,
+      note: r.note || '',
+      sourceUrl: r.source_url || r.sourceUrl || '',
+      source_url: r.source_url || r.sourceUrl || '',
+      tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
+    };
+  }, []);
+
   const loadData = useCallback(async (user: User | null, showSpinner = true) => {
     if (!user) return;
     setCategories(getStoredCategories());
-    const targetUserId = (user.id || user.email || '').trim();
-    if (!targetUserId) return;
+    const targetUserId = (user.id || user.email || 'usr_admin_1').trim();
+    const userName = user.name || 'You';
 
     try {
       if (showSpinner) setLoading(true);
-      const rawRecipes = await syncUserSavedRecipes(targetUserId);
 
-      const userRecipes = (Array.isArray(rawRecipes) ? rawRecipes : [])
-        .filter((r: any) => {
-          const rUser = String(r.user_id || r.userId || '').trim();
-          const rCreator = String(r.created_by || r.createdBy || '').trim();
-          return rUser === targetUserId || (user.email && (rUser === user.email || rCreator === user.email));
-        })
-        .map((r: any) => {
-          const cleanType = getCleanRecipeType(r);
-          const resolvedImg = r.imageUrl || r.image || r.image_url || '';
-          return {
-            ...r,
-            userId: targetUserId,
-            user_id: targetUserId,
-            createdBy: r.created_by || r.createdBy || user.email || targetUserId,
-            created_by: r.created_by || r.createdBy || user.email || targetUserId,
-            creatorName: r.creator_name || r.creatorName || user.name || 'You',
-            creator_name: r.creator_name || r.creatorName || user.name || 'You',
-            recipeType: cleanType,
-            category: cleanType,
-            imageUrl: resolvedImg,
-            image: resolvedImg,
-            image_url: resolvedImg,
-            bookId: r.book_id || r.bookId || null,
-            isFavorite: Boolean(r.is_favorite || r.isFavorite),
-            is_favorite: Boolean(r.is_favorite || r.isFavorite),
-            isCooked: Boolean(r.is_cooked || r.isCooked),
-            is_cooked: Boolean(r.is_cooked || r.isCooked),
-            rating: Number(r.rating) || 0,
-            note: r.note || '',
-            sourceUrl: r.source_url || r.sourceUrl || '',
-            source_url: r.source_url || r.sourceUrl || '',
-            tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
-          };
-        });
+      const candidateLists: any[][] = [];
 
-      setRecipes(userRecipes);
+      // 1. Direct API call to PostgreSQL /api/recipes/saved
+      try {
+        const res = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.recipes)) {
+            candidateLists.push(data.recipes);
+          } else if (Array.isArray(data)) {
+            candidateLists.push(data);
+          }
+        }
+      } catch (_) {}
 
+      // 2. Fallback check to syncUserSavedRecipes helper
+      try {
+        const syncRes = await syncUserSavedRecipes(targetUserId);
+        if (Array.isArray(syncRes)) {
+          candidateLists.push(syncRes);
+        } else if (syncRes && Array.isArray((syncRes as any).recipes)) {
+          candidateLists.push((syncRes as any).recipes);
+        }
+      } catch (_) {}
+
+      // 3. Fallback check to general /api/recipes
+      try {
+        const genRes = await fetch(`/api/recipes?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+        if (genRes.ok) {
+          const gData = await genRes.json();
+          if (Array.isArray(gData.recipes)) candidateLists.push(gData.recipes);
+          else if (Array.isArray(gData)) candidateLists.push(gData);
+        }
+      } catch (_) {}
+
+      // 4. Fallback check to local storage stores
+      const localKeys = [
+        'zecratary_saved_recipes',
+        'saved_recipes',
+        'zecratary_recipes',
+        'zecratary_user_recipes',
+        'zecratary_imported_recipes'
+      ];
+      for (const k of localKeys) {
+        try {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              candidateLists.push(parsed);
+            }
+          }
+        } catch (_) {}
+      }
+
+      // Merge and deduplicate by recipe id or normalized title
+      const recipeMap = new Map<string, any>();
+      for (const list of candidateLists) {
+        for (const item of list) {
+          if (!item) continue;
+          const rUser = String(item.user_id || item.userId || '').trim();
+          const rCreator = String(item.created_by || item.createdBy || '').trim();
+
+          const belongsToUser = !rUser ||
+            rUser === targetUserId ||
+            rUser === 'usr_admin_1' ||
+            rUser === 'undefined' ||
+            item.is_public ||
+            item.isPublic ||
+            (user.email && (rUser === user.email || rCreator === user.email));
+
+          if (belongsToUser) {
+            const normalized = normalizeRecipeFields(item, targetUserId, userName);
+            const key = normalized.id || normalized.title.toLowerCase();
+            if (!recipeMap.has(key)) {
+              recipeMap.set(key, normalized);
+            } else {
+              // Merge non-empty fields
+              const existing = recipeMap.get(key);
+              recipeMap.set(key, { ...existing, ...normalized, isFavorite: existing.isFavorite || normalized.isFavorite });
+            }
+          }
+        }
+      }
+
+      const mergedRecipes = Array.from(recipeMap.values());
+      setRecipes(mergedRecipes);
+
+      // Books loading
       let parsedBooks = defaultBooks;
       try {
         const bRes = await fetch(`/api/books?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
@@ -513,14 +626,14 @@ export default function SavedRecipesPage() {
 
       setBooks(userBooks.map((b: any) => ({
         ...b,
-        recipeCount: userRecipes.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
+        recipeCount: mergedRecipes.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
       })));
     } catch (e) {
       console.error('[SavedRecipesPage] Load error:', e);
     } finally {
       if (showSpinner) setLoading(false);
     }
-  }, []);
+  }, [normalizeRecipeFields]);
 
   useEffect(() => {
     applyGlobalTheme();
@@ -578,39 +691,30 @@ export default function SavedRecipesPage() {
     if (!currentUser) return;
     const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
 
-    const updatedWithId = updatedUserList.map(r => {
-      const resolvedImg = r.imageUrl || r.image || r.image_url || '';
-      return {
-        ...r,
-        userId: targetUserId,
-        user_id: targetUserId,
-        createdBy: r.createdBy || r.created_by || currentUser.email || targetUserId,
-        created_by: r.createdBy || r.created_by || currentUser.email || targetUserId,
-        creatorName: r.creatorName || r.creator_name || currentUser.name || 'You',
-        creator_name: r.creatorName || r.creator_name || currentUser.name || 'You',
-        imageUrl: resolvedImg,
-        image: resolvedImg,
-        image_url: resolvedImg,
-        bookId: r.bookId || r.book_id || null,
-        book_id: r.bookId || r.book_id || null,
-        isFavorite: Boolean(r.isFavorite ?? r.is_favorite),
-        is_favorite: Boolean(r.isFavorite ?? r.is_favorite),
-        isCooked: Boolean(r.isCooked ?? r.is_cooked),
-        is_cooked: Boolean(r.isCooked ?? r.is_cooked),
-        rating: Number(r.rating) || 0,
-        note: r.note || '',
-        sourceUrl: r.sourceUrl || r.source_url || '',
-        source_url: r.sourceUrl || r.source_url || ''
-      };
-    });
+    const updatedWithId = updatedUserList.map(r => normalizeRecipeFields(r, targetUserId, currentUser.name || 'You'));
 
     setRecipes(updatedWithId);
 
+    // Save to localStorage immediately
+    try {
+      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(updatedWithId));
+      localStorage.setItem('saved_recipes', JSON.stringify(updatedWithId));
+    } catch (_) {}
+
     isSyncingRef.current = true;
-    persistSavedRecipe(targetUserId, updatedWithId, {
-      createdBy: currentUser.email || targetUserId,
-      creatorName: currentUser.name || 'You'
-    }).then(() => {
+
+    // Persist via PostgreSQL POST API
+    Promise.allSettled([
+      fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedWithId)
+      }),
+      persistSavedRecipe(targetUserId, updatedWithId, {
+        createdBy: currentUser.email || targetUserId,
+        creatorName: currentUser.name || 'You'
+      })
+    ]).then(() => {
       setTimeout(() => {
         isSyncingRef.current = false;
       }, 400);
@@ -643,6 +747,13 @@ export default function SavedRecipesPage() {
     }
 
     saveAllRecipes(updated);
+
+    // Direct atomic PATCH
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, isFavorite: newFav, is_favorite: newFav })
+    }).catch(() => {});
   };
 
   const toggleCooked = (e: React.MouseEvent, id: string) => {
@@ -659,6 +770,13 @@ export default function SavedRecipesPage() {
     }
 
     saveAllRecipes(updated);
+
+    // Direct atomic PATCH
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, isCooked: newCooked, is_cooked: newCooked })
+    }).catch(() => {});
   };
 
   const handleAssignToBook = (bookId: string) => {
@@ -676,6 +794,12 @@ export default function SavedRecipesPage() {
     const updatedRecipes = recipes.map(r => r.id === selectedRecipe.id ? updatedRecipe : r);
     setRecipes(updatedRecipes);
     saveAllRecipes(updatedRecipes);
+
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: selectedRecipe.id, bookId: targetBookId, book_id: targetBookId })
+    }).catch(() => {});
   };
 
   const openAddToPlanModal = () => {
@@ -767,6 +891,12 @@ export default function SavedRecipesPage() {
     setSelectedRecipe(updatedRec);
     const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
     saveAllRecipes(updatedList);
+
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: selectedRecipe.id, [key]: val })
+    }).catch(() => {});
   };
 
   const handleDeleteRecipe = async (id: string) => {
@@ -876,6 +1006,14 @@ export default function SavedRecipesPage() {
     }
     if (!Array.isArray(rawIngredients)) rawIngredients = [];
 
+    let rawSteps = selectedRecipe.instructions || selectedRecipe.directions || selectedRecipe.steps;
+    if (typeof rawSteps === 'string') {
+      try { rawSteps = JSON.parse(rawSteps); } catch (_) { rawSteps = [rawSteps]; }
+    }
+    if (!Array.isArray(rawSteps) || rawSteps.length === 0) {
+      rawSteps = [''];
+    }
+
     const currentImg = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || '';
 
     setEditForm({
@@ -898,9 +1036,7 @@ export default function SavedRecipesPage() {
             };
           })
         : [{ amount: '', unit: '', item: '', category: defaultCat }],
-      instructions: selectedRecipe.instructions && selectedRecipe.instructions.length > 0
-        ? [...selectedRecipe.instructions]
-        : ['']
+      instructions: [...rawSteps]
     });
     setEditTab('info');
     setIsReorderingIngredients(false);
@@ -935,7 +1071,11 @@ export default function SavedRecipesPage() {
       creator_name: selectedRecipe.creator_name || currentUser?.name || 'You',
       recipeType: cleanType,
       category: cleanType,
-      tags: [cleanType]
+      recipe_type: cleanType,
+      tags: [cleanType],
+      instructions: editForm.instructions,
+      directions: editForm.instructions,
+      steps: editForm.instructions
     };
 
     setSelectedRecipe(updatedRec);
@@ -1273,6 +1413,8 @@ export default function SavedRecipesPage() {
             <Search className="h-4 w-4 absolute left-3.5 top-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
             <input
               type="text"
+              autoComplete="off"
+              data-lpignore="true"
               placeholder={t('searchByNamePlaceholder') || 'Search by name or ingredient...'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -1365,6 +1507,7 @@ export default function SavedRecipesPage() {
                       <input
                         type="text"
                         autoFocus
+                        autoComplete="off"
                         placeholder={t('searchIngredientsPlaceholder') || 'Search ingredients'}
                         value={ingredientQuery}
                         onChange={(e) => setIngredientQuery(e.target.value)}
@@ -1699,6 +1842,8 @@ export default function SavedRecipesPage() {
             return (
               <div
                 key={r.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => {
                   setSelectedRecipe(r);
                   setCurrentServings(Math.max(1, Number(r.servings) || 4));
@@ -1706,6 +1851,17 @@ export default function SavedRecipesPage() {
                   setNoteText(r.note || '');
                   setIsBookDropdownOpen(false);
                   setIsEditing(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedRecipe(r);
+                    setCurrentServings(Math.max(1, Number(r.servings) || 4));
+                    setCompletedSteps([]);
+                    setNoteText(r.note || '');
+                    setIsBookDropdownOpen(false);
+                    setIsEditing(false);
+                  }
                 }}
                 className="border rounded-2xl overflow-hidden transition cursor-pointer group shadow-sm hover:shadow-md relative flex flex-col justify-between"
                 style={{
@@ -2315,6 +2471,8 @@ export default function SavedRecipesPage() {
                         <div className="flex gap-2 animate-in fade-in">
                           <input
                             type="text"
+                            autoComplete="off"
+                            data-lpignore="true"
                             placeholder={t('addNotesPlaceholder') || 'Add notes...'}
                             value={noteText}
                             onChange={(e) => setNoteText(e.target.value)}
@@ -2674,6 +2832,8 @@ export default function SavedRecipesPage() {
                         <input
                           type="text"
                           required
+                          autoComplete="off"
+                          data-lpignore="true"
                           value={editForm.title}
                           onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
                           className="w-full border rounded-xl p-3 text-sm outline-none"
@@ -2850,6 +3010,7 @@ export default function SavedRecipesPage() {
                           >
                             <input
                               type="text"
+                              autoComplete="off"
                               placeholder={t('amt') || 'Amt'}
                               value={ing.amount}
                               onChange={(e) => {
@@ -2866,6 +3027,7 @@ export default function SavedRecipesPage() {
                             />
                             <input
                               type="text"
+                              autoComplete="off"
                               placeholder={t('unit') || 'Unit'}
                               value={ing.unit}
                               onChange={(e) => {
@@ -2882,6 +3044,7 @@ export default function SavedRecipesPage() {
                             />
                             <input
                               type="text"
+                              autoComplete="off"
                               placeholder={t('ingredientNamePlaceholder') || 'Ingredient name...'}
                               value={ing.item}
                               onChange={(e) => {
@@ -3587,6 +3750,7 @@ export default function SavedRecipesPage() {
 
                   <input
                     type="text"
+                    autoComplete="off"
                     value={ing.amount}
                     onChange={(e) => {
                       const updated = [...shoppingModalIngredients];
@@ -3603,6 +3767,7 @@ export default function SavedRecipesPage() {
                   />
                   <input
                     type="text"
+                    autoComplete="off"
                     value={ing.unit}
                     onChange={(e) => {
                       const updated = [...shoppingModalIngredients];
@@ -3619,6 +3784,7 @@ export default function SavedRecipesPage() {
                   />
                   <input
                     type="text"
+                    autoComplete="off"
                     value={ing.name}
                     onChange={(e) => {
                       const updated = [...shoppingModalIngredients];

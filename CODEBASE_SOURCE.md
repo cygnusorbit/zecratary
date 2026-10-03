@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.03",
+  "version": "8.1.04",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.03",
+  "version": "8.1.04",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -27586,7 +27586,7 @@ export default function AdminPlansPage() {
       {activeMainTab === 'plans' && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Plan Configuration Form Container (Accessible div per Constraint 9) */}
+            {/* Plan Configuration Form Container */}
             <div 
               tabIndex={0}
               className="lg:col-span-7 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200 outline-none"
@@ -50263,6 +50263,14 @@ export async function POST(req: NextRequest) {
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
+// Module-scoped row parser: accepts unconstrained any to avoid TS2339 'never' narrowing
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
+}
+
 async function ensureSubscriptionPlansSchema() {
   try {
     await query(`
@@ -50315,10 +50323,10 @@ async function ensureSubscriptionPlansSchema() {
 
 async function getExistingColumns(): Promise<Set<string>> {
   try {
-    const res = await query(
+    const res: any = await query(
       `SELECT column_name FROM information_schema.columns WHERE table_name = 'subscription_plans'`
     );
-    const rows = Array.isArray(res) ? res : (res?.rows || []);
+    const rows = parseDbRows(res);
     return new Set(rows.map((r: any) => String(r.column_name).toLowerCase()));
   } catch (_) {
     return new Set();
@@ -50340,9 +50348,9 @@ export async function GET() {
     `).catch(() => {});
 
     const orderBy = cols.has('monthly_price_dollars') ? 'ORDER BY monthly_price_dollars ASC, id ASC' : 'ORDER BY id ASC';
-    const res = await query(`SELECT * FROM subscription_plans ${orderBy}`).catch(() => ({ rows: [] }));
+    const res: any = await query(`SELECT * FROM subscription_plans ${orderBy}`).catch(() => []);
 
-    let plans = Array.isArray(res) ? res : (res?.rows || []);
+    let plans = parseDbRows(res);
 
     if (!plans.some((p: any) => p.slug === 'taster' || p.id === 'preset_taster')) {
       const defaultTasterData: Record<string, any> = {
@@ -50477,14 +50485,14 @@ export async function POST(req: Request) {
       is_default: isDefault
     };
 
-    const existingCheck = await query(
+    const existingCheck: any = await query(
       `SELECT id, slug FROM subscription_plans WHERE id = $1 OR slug = $2 LIMIT 1`,
       [planId, cleanSlug]
-    ).catch(() => ({ rows: [] }));
-    const existingRows = Array.isArray(existingCheck) ? existingCheck : (existingCheck?.rows || []);
+    ).catch(() => []);
+    const existingRows = parseDbRows(existingCheck);
 
     if (existingRows.length > 0) {
-      const targetId = existingRows[0].id || planId;
+      const targetId = existingRows[0]?.id || planId;
       const updateFields = Object.keys(planData)
         .filter(k => k !== 'id' && (cols.has(k) || cols.size === 0));
 
