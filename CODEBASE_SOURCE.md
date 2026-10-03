@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.07",
+  "version": "8.1.08",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.07",
+  "version": "8.1.08",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8930,14 +8930,14 @@ export default function ShoppingListPage() {
 ```typescript
 // @ts-nocheck
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
   Calendar as CalendarIcon, Copy, ShoppingBag, Share2, 
   ChevronLeft, ChevronRight, Plus, Trash2, ChefHat, Lock, 
   Clock, X, Search, Heart, SlidersHorizontal, ChevronDown, 
-  ChevronUp, Edit3, Check, CheckSquare
+  ChevronUp, Edit3, Check, Sparkles, CheckCircle2, AlertCircle
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -8949,8 +8949,13 @@ const formatDateKey = (d: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
-const parseDateKey = (str: string): Date => {
-  const [year, month, day] = str.split('-').map(Number);
+const parseDateKey = (str?: string): Date => {
+  if (!str || typeof str !== 'string' || !str.includes('-')) {
+    return new Date();
+  }
+  const cleanStr = str.split('T')[0];
+  const [year, month, day] = cleanStr.split('-').map(Number);
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return new Date();
   return new Date(year, month - 1, day);
 };
 
@@ -8971,6 +8976,9 @@ export default function PlannerPage() {
   const { t, locale, version } = useTranslation();
   const router = useRouter();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isDayMode, setIsDayMode] = useState<boolean>(false);
+  const [canViewMacros, setCanViewMacros] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'info' | 'error' } | null>(null);
 
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(() => getMondayOfWeek(new Date()));
   const [selectedDate, setSelectedDate] = useState<string>(() => formatDateKey(new Date()));
@@ -9010,8 +9018,15 @@ export default function PlannerPage() {
   const [selectedMealIdsForShopping, setSelectedMealIdsForShopping] = useState<string[]>([]);
   const [expandedDayCards, setExpandedDayCards] = useState<{ [key: string]: boolean }>({});
 
+  const showToast = (text: string, type: 'success' | 'info' | 'error' = 'success') => {
+    setToastMessage({ text, type });
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
   const applyGlobalTheme = useCallback(() => {
     try {
+      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
+      setIsDayMode(mode === 'light' || mode === 'day');
       window.dispatchEvent(new Event('zecratary_theme_updated'));
     } catch (_) {}
   }, []);
@@ -9031,51 +9046,98 @@ export default function PlannerPage() {
     };
   }, [applyGlobalTheme]);
 
-  const loadSavedData = useCallback((user: User | null) => {
+  // Check URL date query param on mount (e.g. /planner?date=YYYY-MM-DD)
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const dateParam = params.get('date');
+        if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+          setSelectedDate(dateParam);
+          setCurrentWeekStart(getMondayOfWeek(parseDateKey(dateParam)));
+        }
+      } catch (_) {}
+    }
+  }, []);
+
+  // Comprehensive Saved Recipes Hydration (Reads /api/recipes/saved, /saved keys, and normalizes snake_case)
+  const loadSavedData = useCallback(async (user: User | null) => {
     if (typeof window === 'undefined') return;
     try {
-      const raw = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          const userSpecific = user 
-            ? parsed.filter((r: any) => !r.userId || r.userId === user.id || r.createdBy === user.email)
-            : parsed;
-
-          const uniqueRecipes: any[] = [];
-          const seenIds = new Set();
-
-          userSpecific.forEach((rec: any) => {
-            const id = rec.id || rec.title || rec.name;
-            if (id && !seenIds.has(id)) {
-              seenIds.add(id);
-              uniqueRecipes.push({
-                id: rec.id || id,
-                name: rec.title || rec.name || 'Untitled Recipe',
-                title: rec.title || rec.name || 'Untitled Recipe',
-                category: rec.tags?.[0] || rec.recipeType || rec.category || 'Main Dish',
-                isFavorite: Boolean(rec.isFavorite),
-                bookId: rec.bookId || null,
-                ingredients: rec.ingredients || [],
-                image: rec.imageUrl || rec.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
-                imageUrl: rec.imageUrl || rec.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80'
-              });
-            }
-          });
-
-          setSavedRecipes(uniqueRecipes);
-        }
+      let combinedRecipes: any[] = [];
+      
+      // 1. Gather all local storage recipe caches
+      const localKeys = ['zecratary_saved_recipes', 'saved_recipes', 'zecratary_recipes', 'zecratary_imported_recipes'];
+      for (const k of localKeys) {
+        try {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) combinedRecipes.push(...parsed);
+          }
+        } catch (_) {}
       }
 
+      // 2. Query PostgreSQL APIs in parallel
+      const endpoints = ['/api/recipes/saved', '/api/saved-recipes', '/api/recipes'];
+      for (const ep of endpoints) {
+        try {
+          const res = await fetch(ep, { cache: 'no-store' });
+          if (res.ok) {
+            const data = await res.json();
+            const recList = Array.isArray(data) ? data : (data?.recipes || data?.saved_recipes || []);
+            if (Array.isArray(recList) && recList.length > 0) {
+              combinedRecipes.push(...recList);
+            }
+          }
+        } catch (_) {}
+      }
+
+      const uniqueRecipes: any[] = [];
+      const seen = new Set<string>();
+
+      combinedRecipes.forEach((rec: any) => {
+        if (!rec) return;
+        const normId = String(rec.id || rec.recipeId || rec.recipe_id || rec.title || rec.name || Math.random());
+        const normTitle = rec.title || rec.name || rec.recipeName || rec.recipe_name || 'Untitled Recipe';
+        const normKey = `${normId}_${normTitle}`.toLowerCase();
+        
+        // Inclusive ownership check supporting both camelCase and snake_case
+        const rUserId = rec.userId || rec.user_id;
+        const rEmail = rec.createdBy || rec.created_by;
+        const isOwner = !user || !rUserId || rUserId === user.id || rUserId === 'usr_admin_1' || rEmail === user.email || !rEmail;
+
+        if (isOwner && !seen.has(normKey)) {
+          seen.add(normKey);
+          uniqueRecipes.push({
+            id: normId,
+            name: normTitle,
+            title: normTitle,
+            category: rec.category || rec.recipeType || rec.recipe_type || rec.tags?.[0] || 'Main Dish',
+            isFavorite: Boolean(rec.isFavorite || rec.is_favorite),
+            bookId: rec.bookId || rec.book_id || null,
+            ingredients: rec.ingredients || [],
+            calories: Number(rec.calories || rec.nutritionalInfo?.calories || 520),
+            protein: Number(rec.protein || rec.nutritionalInfo?.protein || 32),
+            carbs: Number(rec.carbs || rec.nutritionalInfo?.carbs || 45),
+            fat: Number(rec.fat || rec.nutritionalInfo?.fat || 18),
+            image: rec.imageUrl || rec.image || rec.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
+            imageUrl: rec.imageUrl || rec.image || rec.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80'
+          });
+        }
+      });
+
+      setSavedRecipes(uniqueRecipes);
+
+      // Cookbooks Hydration
       const rawBooks = localStorage.getItem('zecratary_recipe_books');
       if (rawBooks) {
-        const parsedBooks = JSON.parse(rawBooks);
-        if (Array.isArray(parsedBooks)) {
-          const userBooks = user 
-            ? parsedBooks.filter((b: any) => !b.userId || b.userId === user.id || b.createdBy === user.email)
-            : parsedBooks;
-          setBooks(userBooks);
-        }
+        try {
+          const parsedBooks = JSON.parse(rawBooks);
+          if (Array.isArray(parsedBooks)) {
+            setBooks(user ? parsedBooks.filter((b: any) => !b.userId || b.userId === user.id || b.createdBy === user.email) : parsedBooks);
+          }
+        } catch (_) {}
       } else {
         const defaultBooks = [
           { id: 'book_1', title: 'Family Favorites & Weeknight Dinners', userId: user?.id, createdBy: user?.email },
@@ -9085,55 +9147,75 @@ export default function PlannerPage() {
         setBooks(defaultBooks);
       }
     } catch (e) {
-      console.error('Failed to load saved data in planner', e);
+      console.error('Failed to load saved recipes in planner', e);
     }
   }, []);
 
+  // Multi-tier Meal Plan Hydration with Intact Local Merge
   const loadMealPlan = useCallback(async (user: User | null) => {
     if (typeof window === 'undefined') return;
     try {
-      const localPlan = localStorage.getItem('zecratary_meal_plan');
-      if (localPlan) {
-        const parsed = JSON.parse(localPlan);
-        if (Array.isArray(parsed)) {
-          const userPlans = user 
-            ? parsed.filter((m: any) => !m.userId || m.userId === user.id || m.createdBy === user.email)
-            : parsed;
-          setPlannedMeals(userPlans);
-        }
-      } else {
-        const systemToday = formatDateKey(new Date());
-        const defaultPlan = [
-          {
-            id: 'p_1_' + (user ? user.id : 'default'),
-            userId: user?.id,
-            createdBy: user?.email,
-            date: systemToday,
-            recipeName: 'Caesar Salad Recipe',
-            image: 'https://images.unsplash.com/photo-1550304943-4f24f54ddde9?auto=format&fit=crop&w=800&q=80',
-            mealType: 'Dinner',
-            time: '19:00',
-            isLeftover: false,
-            notes: ''
-          }
-        ];
-        setPlannedMeals(defaultPlan);
-        localStorage.setItem('zecratary_meal_plan', JSON.stringify(defaultPlan));
-      }
-
-      // Synchronize with PostgreSQL backend
-      if (user?.id) {
+      let localMeals: any[] = [];
+      const planKeys = ['zecratary_meal_plan', 'zecratary_meal_plans'];
+      for (const pk of planKeys) {
         try {
-          const res = await fetch(`/api/planner?userId=${encodeURIComponent(user.id)}`, { cache: 'no-store' });
-          if (res.ok) {
-            const data = await res.json();
-            if (data && Array.isArray(data.meals) && data.meals.length > 0) {
-              const serverPlans = data.meals.filter((m: any) => !m.userId || m.userId === user.id || m.createdBy === user.email);
-              setPlannedMeals(serverPlans);
-              localStorage.setItem('zecratary_meal_plan', JSON.stringify(data.meals));
-            }
+          const raw = localStorage.getItem(pk);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) localMeals.push(...parsed);
           }
         } catch (_) {}
+      }
+
+      // Filter and clean local meals
+      const userFilteredLocal = localMeals.map((m: any) => ({
+        ...m,
+        date: String(m.date || '').split('T')[0]
+      })).filter((m: any) => {
+        const uId = m.userId || m.user_id;
+        const uEmail = m.createdBy || m.created_by;
+        return !user || !uId || uId === user.id || uId === 'usr_admin_1' || uEmail === user.email;
+      });
+
+      // Synchronize with PostgreSQL planner API
+      let serverMeals: any[] = [];
+      try {
+        const queryParams = user?.id ? `?userId=${encodeURIComponent(user.id)}&email=${encodeURIComponent(user.email || '')}` : '';
+        const res = await fetch(`/api/planner${queryParams}`, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && Array.isArray(data.meals)) {
+            serverMeals = data.meals.map((m: any) => ({
+              ...m,
+              date: String(m.date || '').split('T')[0]
+            }));
+          }
+        }
+      } catch (_) {}
+
+      // Resilient ID Map Merge: server entries take precedence, retaining newly created local meals from /saved
+      const mealMap = new Map();
+      serverMeals.forEach((m: any) => {
+        if (m.id) mealMap.set(m.id, m);
+      });
+      userFilteredLocal.forEach((m: any) => {
+        if (m.id && !mealMap.has(m.id)) {
+          mealMap.set(m.id, m);
+        }
+      });
+
+      const mergedPlans = Array.from(mealMap.values());
+      setPlannedMeals(mergedPlans);
+      localStorage.setItem('zecratary_meal_plan', JSON.stringify(mergedPlans));
+      localStorage.setItem('zecratary_meal_plans', JSON.stringify(mergedPlans));
+
+      // Macro view permissions check
+      try {
+        const userPlan = (user?.subscriptionPlan || 'taster').toLowerCase();
+        const hasAccess = userPlan !== 'taster' && userPlan !== 'free';
+        setCanViewMacros(hasAccess);
+      } catch (_) {
+        setCanViewMacros(false);
       }
     } catch (e) {
       console.error('Failed to load meal plan', e);
@@ -9161,6 +9243,8 @@ export default function PlannerPage() {
     window.addEventListener('zecratary_recipes_updated', handleSync);
     window.addEventListener('zecratary_saved_recipes_updated', handleSync);
     window.addEventListener('zecratary_planner_updated', handleSync as EventListener);
+    window.addEventListener('zecratary_meal_plan_updated', handleSync as EventListener);
+    window.addEventListener('zecratary_meal_plans_updated', handleSync as EventListener);
     window.addEventListener('zecratary_auth_changed', handleSync as EventListener);
 
     return () => {
@@ -9168,11 +9252,13 @@ export default function PlannerPage() {
       window.removeEventListener('zecratary_recipes_updated', handleSync);
       window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
       window.removeEventListener('zecratary_planner_updated', handleSync as EventListener);
+      window.removeEventListener('zecratary_meal_plan_updated', handleSync as EventListener);
+      window.removeEventListener('zecratary_meal_plans_updated', handleSync as EventListener);
       window.removeEventListener('zecratary_auth_changed', handleSync as EventListener);
     };
   }, [loadSavedData, loadMealPlan, t, locale, version]);
 
-  const savePlan = (updatedUserMeals: any[]) => {
+  const savePlan = async (updatedUserMeals: any[]) => {
     try {
       const localPlan = localStorage.getItem('zecratary_meal_plan');
       const allMeals: any[] = localPlan ? JSON.parse(localPlan) : [];
@@ -9183,19 +9269,21 @@ export default function PlannerPage() {
 
       const merged = [...updatedUserMeals, ...otherUserMeals];
       localStorage.setItem('zecratary_meal_plan', JSON.stringify(merged));
+      localStorage.setItem('zecratary_meal_plans', JSON.stringify(merged));
       setPlannedMeals(updatedUserMeals);
 
-      // Asynchronously persist to PostgreSQL backend
+      // Persist full batch state to PostgreSQL
       if (currentUser?.id) {
-        fetch('/api/planner', {
+        await fetch('/api/planner', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: currentUser.id, meals: merged })
+          body: JSON.stringify({ userId: currentUser.id, createdBy: currentUser.email, meals: updatedUserMeals })
         }).catch(() => {});
       }
 
       window.dispatchEvent(new CustomEvent('zecratary_planner_updated', { detail: { source: 'local_planner_mutation' } }));
       window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
+      window.dispatchEvent(new Event('zecratary_meal_plans_updated'));
     } catch (e) {
       console.error('Failed to save meal plan', e);
     }
@@ -9210,24 +9298,55 @@ export default function PlannerPage() {
 
   const translateDayOfWeek = (d: Date) => {
     const day = d.getDay();
-    const days = [t('sunday'), t('monday'), t('tuesday'), t('wednesday'), t('thursday'), t('friday'), t('saturday')];
+    const days = [
+      t('sunday', 'Sunday'),
+      t('monday', 'Monday'),
+      t('tuesday', 'Tuesday'),
+      t('wednesday', 'Wednesday'),
+      t('thursday', 'Thursday'),
+      t('friday', 'Friday'),
+      t('saturday', 'Saturday')
+    ];
     return days[day];
   };
 
   const translateShortDayOfWeek = (d: Date) => {
     const day = d.getDay();
-    const shortDays = [t('sunShort'), t('monShort'), t('tueShort'), t('wedShort'), t('thuShort'), t('friShort'), t('satShort')];
+    const shortDays = [
+      t('sunShort', 'Sun'),
+      t('monShort', 'Mon'),
+      t('tueShort', 'Tue'),
+      t('wedShort', 'Wed'),
+      t('thuShort', 'Thu'),
+      t('friShort', 'Fri'),
+      t('satShort', 'Sat')
+    ];
     return shortDays[day] || d.toLocaleDateString(getLocaleTag(locale), { weekday: 'short' });
   };
 
   const translateMealType = (mt: string) => {
     const m = (mt || '').toLowerCase();
-    if (m === 'breakfast') return t('breakfast');
-    if (m === 'lunch') return t('lunch');
-    if (m === 'dinner') return t('dinner');
-    if (m === 'snack') return t('snack');
+    if (m === 'breakfast') return t('breakfast', 'Breakfast');
+    if (m === 'lunch') return t('lunch', 'Lunch');
+    if (m === 'dinner') return t('dinner', 'Dinner');
+    if (m === 'snack') return t('snack', 'Snack');
     return mt;
   };
+
+  const weekDays = useMemo(() => {
+    const arr = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(currentWeekStart.getFullYear(), currentWeekStart.getMonth(), currentWeekStart.getDate() + i);
+      const dateStr = formatDateKey(d);
+      const dayName = translateShortDayOfWeek(d);
+      const dayNum = d.getDate();
+      arr.push({ dateStr, dayName, dayNum, fullDate: d });
+    }
+    return arr;
+  }, [currentWeekStart, locale, t]);
+
+  const endDate = new Date(currentWeekStart.getFullYear(), currentWeekStart.getMonth(), currentWeekStart.getDate() + 6);
+  const rangeStr = `${currentWeekStart.toLocaleDateString(getLocaleTag(locale), { month: 'short', day: 'numeric' })} - ${endDate.toLocaleDateString(getLocaleTag(locale), { month: 'short', day: 'numeric', year: 'numeric' })}`;
 
   const displayDays = [0, 1, 2].map((offset) => {
     const base = parseDateKey(selectedDate);
@@ -9236,22 +9355,142 @@ export default function PlannerPage() {
     const isToday = dateStr === todayStr;
     const isTomorrow = dateStr === tomorrowStr;
     const titleDate = `${translateDayOfWeek(d)}, ${d.toLocaleDateString(getLocaleTag(locale), { month: 'long', day: 'numeric' })}`;
-    const dayMeals = plannedMeals.filter(m => m.date === dateStr);
+    const dayMeals = plannedMeals.filter(m => (m.date || '').split('T')[0] === dateStr);
     return { dateStr, titleDate, isToday, isTomorrow, dayMeals };
   });
 
-  const handleClearCurrentPageMeals = () => {
-    const pageDateSet = new Set(displayDays.map(d => d.dateStr));
-    const mealsOnCurrentPage = plannedMeals.filter(m => pageDateSet.has(m.date));
+  // Calculate live daily average nutritional values from planned meals
+  const dailyNutrition = useMemo(() => {
+    const currentWeekDates = new Set(weekDays.map(w => w.dateStr));
+    const activeMeals = plannedMeals.filter(m => currentWeekDates.has((m.date || '').split('T')[0]));
+    if (activeMeals.length === 0) {
+      return { calories: 0, protein: 0, carbs: 0, fat: 0 };
+    }
 
-    if (mealsOnCurrentPage.length === 0) {
-      alert(t('noMealsOnPageToClearAlert'));
+    const uniqueDaysCount = Math.max(1, new Set(activeMeals.map(m => (m.date || '').split('T')[0])).size);
+    let totalCal = 0, totalP = 0, totalC = 0, totalF = 0;
+
+    activeMeals.forEach(m => {
+      const rec = savedRecipes.find(r => r.id === m.recipeId || r.name === m.recipeName || r.title === m.recipeName);
+      totalCal += Number(rec?.calories || 520);
+      totalP += Number(rec?.protein || 32);
+      totalC += Number(rec?.carbs || 45);
+      totalF += Number(rec?.fat || 18);
+    });
+
+    return {
+      calories: Math.round(totalCal / uniqueDaysCount),
+      protein: Math.round(totalP / uniqueDaysCount),
+      carbs: Math.round(totalC / uniqueDaysCount),
+      fat: Math.round(totalF / uniqueDaysCount)
+    };
+  }, [plannedMeals, savedRecipes, weekDays]);
+
+  // SMART ACTION 1: Auto-Plan Empty Slots with Library Dishes
+  const handlePlanWeek = () => {
+    if (savedRecipes.length === 0) {
+      alert(t('noSavedRecipesToPlanAlert', 'No saved recipes found. Please add or import some recipes first to use the auto-planner!'));
       return;
     }
 
-    if (window.confirm(t('confirmClearMealsOnPage').replace('{count}', String(mealsOnCurrentPage.length)))) {
-      const updated = plannedMeals.filter(m => !pageDateSet.has(m.date));
+    const newAdditions: any[] = [];
+    const mealTypesList = ['Breakfast', 'Lunch', 'Dinner'];
+    let recipeIdx = 0;
+
+    weekDays.forEach((day) => {
+      const existingTypes = new Set(plannedMeals.filter(m => (m.date || '').split('T')[0] === day.dateStr).map(m => m.mealType));
+      mealTypesList.forEach((type) => {
+        if (!existingTypes.has(type)) {
+          const pickedRec = savedRecipes[recipeIdx % savedRecipes.length];
+          recipeIdx++;
+          newAdditions.push({
+            id: 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+            userId: currentUser?.id,
+            createdBy: currentUser?.email,
+            date: day.dateStr,
+            recipeId: pickedRec.id,
+            recipeName: pickedRec.name || pickedRec.title,
+            image: pickedRec.image || pickedRec.imageUrl,
+            mealType: type,
+            time: type === 'Breakfast' ? '08:30' : type === 'Lunch' ? '12:30' : '19:00',
+            isLeftover: false,
+            notes: 'Auto-planned from recipe library'
+          });
+        }
+      });
+    });
+
+    if (newAdditions.length === 0) {
+      showToast(t('allSlotsFilledNotice', 'All meals for this week are already planned!'), 'info');
+      return;
+    }
+
+    const updated = [...plannedMeals, ...newAdditions];
+    savePlan(updated);
+    showToast(t('weekPlanGeneratedToast', `Generated ${newAdditions.length} meals across your weekly calendar!`).replace('{count}', String(newAdditions.length)), 'success');
+  };
+
+  // SMART ACTION 2: Copy Active Week to Next Week
+  const handleCopyWeek = () => {
+    const activeWeekDateSet = new Set(weekDays.map(w => w.dateStr));
+    const currentWeekMeals = plannedMeals.filter(m => activeWeekDateSet.has((m.date || '').split('T')[0]));
+
+    if (currentWeekMeals.length === 0) {
+      alert(t('noMealsInWeekToCopyAlert', 'There are no planned meals in the current week to copy.'));
+      return;
+    }
+
+    const copiedMeals = currentWeekMeals.map((m) => {
+      const d = parseDateKey(m.date);
+      d.setDate(d.getDate() + 7);
+      return {
+        ...m,
+        id: 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+        date: formatDateKey(d),
+        userId: currentUser?.id,
+        createdBy: currentUser?.email
+      };
+    });
+
+    const updated = [...plannedMeals, ...copiedMeals];
+    savePlan(updated);
+    showToast(t('weekCopiedSuccessToast', `Copied ${currentWeekMeals.length} meals to next week!`).replace('{count}', String(currentWeekMeals.length)), 'success');
+  };
+
+  // SMART ACTION 3: Share Schedule to System Clipboard
+  const handleShareWeek = () => {
+    const activeWeekDateSet = new Set(weekDays.map(w => w.dateStr));
+    const currentWeekMeals = plannedMeals.filter(m => activeWeekDateSet.has((m.date || '').split('T')[0])).sort((a, b) => a.date.localeCompare(b.date));
+
+    if (currentWeekMeals.length === 0) {
+      alert(t('noMealsToShareAlert', 'No meals planned for this week to share.'));
+      return;
+    }
+
+    let summaryText = `📅 FoodiePrep Meal Plan (${rangeStr}):\n\n`;
+    currentWeekMeals.forEach(m => {
+      const d = parseDateKey(m.date);
+      const dayLabel = d.toLocaleDateString(getLocaleTag(locale), { weekday: 'short', month: 'short', day: 'numeric' });
+      summaryText += `• ${dayLabel} [${translateMealType(m.mealType)}]: ${m.recipeName}${m.time ? ` at ${m.time}` : ''}\n`;
+    });
+
+    navigator.clipboard.writeText(summaryText);
+    showToast(t('mealPlanCopiedToast', 'Meal plan summary copied to clipboard!'), 'success');
+  };
+
+  const handleClearCurrentPageMeals = () => {
+    const pageDateSet = new Set(displayDays.map(d => d.dateStr));
+    const mealsOnCurrentPage = plannedMeals.filter(m => pageDateSet.has((m.date || '').split('T')[0]));
+
+    if (mealsOnCurrentPage.length === 0) {
+      alert(t('noMealsOnPageToClearAlert', 'No planned meals on the current view to clear.'));
+      return;
+    }
+
+    if (window.confirm(t('confirmClearMealsOnPage', `Are you sure you want to clear ${mealsOnCurrentPage.length} meal(s) from this view?`).replace('{count}', String(mealsOnCurrentPage.length)))) {
+      const updated = plannedMeals.filter(m => !pageDateSet.has((m.date || '').split('T')[0]));
       savePlan(updated);
+      showToast(t('clearedMealsToast', `Cleared ${mealsOnCurrentPage.length} meal(s)`).replace('{count}', String(mealsOnCurrentPage.length)), 'info');
     }
   };
 
@@ -9299,9 +9538,9 @@ export default function PlannerPage() {
   };
 
   const handleCopyDayTo = (sourceDateStr: string, targetDateStr: string) => {
-    const sourceDayMeals = plannedMeals.filter(m => m.date === sourceDateStr);
+    const sourceDayMeals = plannedMeals.filter(m => (m.date || '').split('T')[0] === sourceDateStr);
     if (sourceDayMeals.length === 0) {
-      alert(t('noMealsToCopyAlert'));
+      alert(t('noMealsToCopyAlert', 'There are no planned meals on this day to copy.'));
       setActiveCopyDropdownDate(null);
       return;
     }
@@ -9323,7 +9562,7 @@ export default function PlannerPage() {
       month: 'short',
       day: 'numeric'
     });
-    alert(t('copiedMealsSuccessAlert').replace('{count}', String(sourceDayMeals.length)).replace('{target}', targetFormatted));
+    showToast(t('copiedMealsSuccessAlert', `Successfully copied ${sourceDayMeals.length} meal(s) to ${targetFormatted}!`).replace('{count}', String(sourceDayMeals.length)).replace('{target}', targetFormatted), 'success');
   };
 
   const handleCopyTomorrow = (sourceDateStr: string) => {
@@ -9341,7 +9580,7 @@ export default function PlannerPage() {
   const handleAddMealSubmit = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
     if (e && 'preventDefault' in e) e.preventDefault();
     if (!selectedRecipeObj) {
-      alert(t('pleaseSelectRecipeAlert'));
+      alert(t('pleaseSelectRecipeAlert', 'Please choose a recipe before scheduling.'));
       return;
     }
     const newMeal = {
@@ -9359,6 +9598,7 @@ export default function PlannerPage() {
     };
     savePlan([...plannedMeals, newMeal]);
     setShowAddMealModal(false);
+    showToast(t('mealAddedToast', 'Meal scheduled successfully!'), 'success');
   };
 
   const handleEditMealSubmit = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
@@ -9387,6 +9627,7 @@ export default function PlannerPage() {
     savePlan(updated);
     setShowEditMealModal(false);
     setEditingMealId(null);
+    showToast(t('mealUpdatedToast', 'Meal updated successfully!'), 'success');
   };
 
   const handleDeleteMeal = async (id: string) => {
@@ -9398,11 +9639,10 @@ export default function PlannerPage() {
 
     if (currentUser?.id) {
       fetch(`/api/planner?id=${encodeURIComponent(id)}&userId=${encodeURIComponent(currentUser.id)}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, userId: currentUser.id })
+        method: 'DELETE'
       }).catch(() => {});
     }
+    showToast(t('mealDeletedToast', 'Meal deleted from plan.'), 'info');
   };
 
   const openShoppingListSelectModal = () => {
@@ -9432,15 +9672,19 @@ export default function PlannerPage() {
     }
   };
 
-  const handleGenerateShoppingList = () => {
+  const handleGenerateShoppingList = async () => {
     const selectedMeals = plannedMeals.filter(m => selectedMealIdsForShopping.includes(m.id));
     if (selectedMeals.length === 0) {
-      alert(t('selectAtLeastOneRecipeAlert'));
+      alert(t('selectAtLeastOneRecipeAlert', 'Please select at least one meal to generate a shopping list.'));
       return;
     }
 
     const localList = localStorage.getItem('zecratary_shopping') || localStorage.getItem('zecratary_shopping_list');
-    const currentItems = localList ? JSON.parse(localList) : [];
+    let currentItems: any[] = [];
+    try {
+      if (localList) currentItems = JSON.parse(localList);
+    } catch (_) {}
+
     const newIngredients: any[] = [];
 
     selectedMeals.forEach((meal) => {
@@ -9481,28 +9725,25 @@ export default function PlannerPage() {
     const merged = [...newIngredients, ...currentItems];
     localStorage.setItem('zecratary_shopping', JSON.stringify(merged));
     localStorage.setItem('zecratary_shopping_list', JSON.stringify(merged));
+
+    try {
+      fetch('/api/shopping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUser?.id, items: merged })
+      }).catch(() => {});
+    } catch (_) {}
+
     window.dispatchEvent(new Event('zecratary_shopping_updated'));
     setShowShoppingListModal(false);
     router.push('/shopping');
   };
 
-  const weekDays = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(currentWeekStart.getFullYear(), currentWeekStart.getMonth(), currentWeekStart.getDate() + i);
-    const dateStr = formatDateKey(d);
-    const dayName = translateShortDayOfWeek(d);
-    const dayNum = d.getDate();
-    weekDays.push({ dateStr, dayName, dayNum, fullDate: d });
-  }
-
-  const endDate = new Date(currentWeekStart.getFullYear(), currentWeekStart.getMonth(), currentWeekStart.getDate() + 6);
-  const rangeStr = `${currentWeekStart.toLocaleDateString(getLocaleTag(locale), { month: 'short', day: 'numeric' })} - ${endDate.toLocaleDateString(getLocaleTag(locale), { month: 'short', day: 'numeric', year: 'numeric' })}`;
-
   const activeDateObj = parseDateKey(activeDateForAdd);
   const activeDateFormattedHeader = `${translateDayOfWeek(activeDateObj)}, ${activeDateObj.toLocaleDateString(getLocaleTag(locale), { month: 'long', day: 'numeric' })}`;
   const activeDateFieldText = `${translateDayOfWeek(activeDateObj)}, ${activeDateObj.toLocaleDateString(getLocaleTag(locale), { month: 'long', day: 'numeric', year: 'numeric' })}`;
 
-  const datesWithMeals = Array.from(new Set(plannedMeals.map(m => m.date))).sort();
+  const datesWithMeals = Array.from(new Set(plannedMeals.map(m => (m.date || '').split('T')[0]))).sort();
   const userFilteredBooks = books.filter(b => !currentUser || !b.userId || b.userId === currentUser.id || b.createdBy === currentUser.email);
 
   const filteredPickerRecipes = savedRecipes.filter(r => {
@@ -9531,6 +9772,27 @@ export default function PlannerPage() {
       className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
+      {/* Toast Notification Container */}
+      {toastMessage && (
+        <div className="fixed top-20 right-6 z-[100] animate-in fade-in slide-in-from-top-4">
+          <div 
+            className="px-4 py-3 rounded-2xl border flex items-center gap-2.5 shadow-2xl text-xs font-bold"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: toastMessage.type === 'error' ? 'var(--color-primary)' : 'var(--color-emerald)',
+              color: 'var(--color-text)'
+            }}
+          >
+            {toastMessage.type === 'error' ? (
+              <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
+            ) : (
+              <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} />
+            )}
+            <span>{toastMessage.text}</span>
+          </div>
+        </div>
+      )}
+
       {/* Header & Actions */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pt-2">
         <div>
@@ -9538,69 +9800,70 @@ export default function PlannerPage() {
             {t('plannerTitle', 'Planner')}
           </h1>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {currentUser ? `${t('planningForPrefix')} ${currentUser.name}` : t('plannerSubtitle')}
+            {currentUser ? `${t('planningForPrefix', 'Planning for')} ${currentUser.name || currentUser.email}` : t('plannerSubtitle', 'Organize and schedule your meals for the week')}
           </p>
         </div>
         
         <div className="flex flex-wrap items-center gap-2.5">
           <button 
             type="button"
-            onClick={() => alert(t('planWeekActivatedAlert'))}
-            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-md cursor-pointer"
+            onClick={handlePlanWeek}
+            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-md cursor-pointer hover:opacity-90"
             style={{ backgroundColor: 'var(--color-primary)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+            title={t('planWeekTooltip', 'Auto-fill empty slots for the week using saved recipes')}
           >
-            <CalendarIcon className="h-4 w-4" /> {t('planWeekBtn')}
+            <Sparkles className="h-4 w-4" /> {t('planWeekBtn', 'Plan Week')}
           </button>
           <button 
             type="button"
-            onClick={() => alert(t('weekCopiedAlert'))}
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+            onClick={handleCopyWeek}
+            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
               color: 'var(--color-text)'
             }}
+            title={t('copyWeekTooltip', 'Copy all meals from this week to next week')}
           >
-            <Copy className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('copyWeekBtn')}
+            <Copy className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('copyWeekBtn', 'Copy Week')}
           </button>
           <button
             type="button"
             onClick={openShoppingListSelectModal}
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
               color: 'var(--color-text)'
             }}
           >
-            <ShoppingBag className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('shoppingListBtn')}
+            <ShoppingBag className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('shoppingListBtn', 'Shopping List')}
           </button>
           <button 
             type="button"
-            onClick={() => alert(t('shareCopiedAlert'))}
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+            onClick={handleShareWeek}
+            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
               color: 'var(--color-text)'
             }}
+            title={t('shareTooltip', 'Copy structured weekly meal schedule to clipboard')}
           >
-            <Share2 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('shareBtn')}
+            <Share2 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('shareBtn', 'Share')}
           </button>
           <button 
             type="button"
             onClick={handleClearCurrentPageMeals}
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer hover:border-red-500/50 hover:text-red-400 shadow-xs"
+            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:border-red-500/60"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
-              color: '#ef4444'
+              color: 'var(--color-primary)'
             }}
-            title={t('clearAllMealTooltip')}
+            title={t('clearAllMealTooltip', 'Clear planned meals for displayed days')}
           >
-            <Trash2 className="h-4 w-4 text-red-500" /> {t('clearAllMealBtn')}
+            <Trash2 className="h-4 w-4 text-red-500" /> {t('clearAllMealBtn', 'Clear View')}
           </button>
         </div>
       </div>
@@ -9614,7 +9877,7 @@ export default function PlannerPage() {
               const prev = new Date(currentWeekStart.getFullYear(), currentWeekStart.getMonth(), currentWeekStart.getDate() - 7);
               setCurrentWeekStart(prev);
             }}
-            className="p-2 border rounded-xl transition cursor-pointer shadow-xs"
+            className="p-2 border rounded-xl transition cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
@@ -9638,7 +9901,7 @@ export default function PlannerPage() {
                 const next = new Date(currentWeekStart.getFullYear(), currentWeekStart.getMonth(), currentWeekStart.getDate() + 7);
                 setCurrentWeekStart(next);
               }}
-              className="p-2 border rounded-xl transition cursor-pointer shadow-xs"
+              className="p-2 border rounded-xl transition cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
@@ -9654,14 +9917,14 @@ export default function PlannerPage() {
                 setCurrentWeekStart(getMondayOfWeek(now));
                 setSelectedDate(formatDateKey(now));
               }}
-              className="px-3.5 py-2 border font-bold text-xs rounded-xl transition cursor-pointer shadow-xs"
+              className="px-3.5 py-2 border font-bold text-xs rounded-xl transition cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-primary)'
               }}
             >
-              {t('todayBtn')}
+              {t('todayBtn', 'Today')}
             </button>
           </div>
         </div>
@@ -9670,7 +9933,7 @@ export default function PlannerPage() {
           {weekDays.map((d) => {
             const isSelected = selectedDate === d.dateStr;
             const isToday = d.dateStr === todayStr;
-            const hasMeals = plannedMeals.some(m => m.date === d.dateStr);
+            const hasMeals = plannedMeals.some(m => (m.date || '').split('T')[0] === d.dateStr);
 
             return (
               <div
@@ -9706,7 +9969,7 @@ export default function PlannerPage() {
                     className="text-[9px] font-bold uppercase mt-0.5"
                     style={{ color: 'var(--color-primary)' }}
                   >
-                    {t('todayBtn')}
+                    {t('todayBtn', 'Today')}
                   </span>
                 )}
                 {hasMeals && !isToday && (
@@ -9721,7 +9984,7 @@ export default function PlannerPage() {
         </div>
       </div>
 
-      {/* Daily Average Banner */}
+      {/* Dynamic Daily Average Nutrition Banner */}
       <div 
         className="border rounded-2xl p-5 relative overflow-hidden shadow-sm transition-colors duration-200"
         style={{
@@ -9731,37 +9994,61 @@ export default function PlannerPage() {
       >
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2 text-sm font-extrabold" style={{ color: 'var(--color-text)' }}>
-            <span className="text-lg">🔥</span> {t('dailyAverage')}
+            <span className="text-lg">🔥</span> {t('dailyAverage', 'Daily Average')}
           </div>
-          <button 
-            type="button"
-            className="flex items-center gap-1.5 border font-bold text-xs px-3 py-1.5 rounded-xl transition cursor-pointer shadow-xs"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-primary)'
-            }}
-          >
-            <Lock className="h-3.5 w-3.5" /> {t('upgrade')}
-          </button>
+
+          {canViewMacros ? (
+            <div 
+              className="flex items-center gap-1.5 border text-xs font-bold px-3 py-1.5 rounded-xl shadow-xs"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-emerald)',
+                color: 'var(--color-emerald)'
+              }}
+            >
+              <Check className="h-3.5 w-3.5" />
+              <span>{t('macrosUnlocked', 'Macros Active')}</span>
+            </div>
+          ) : (
+            <Link
+              href="/subscriptions"
+              className="flex items-center gap-1.5 border font-bold text-xs px-3 py-1.5 rounded-xl transition cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-primary)'
+              }}
+              title={t('upgradeToViewMacros', 'Upgrade plan to unlock nutritional macro analysis')}
+            >
+              <Lock className="h-3.5 w-3.5" /> {t('upgrade', 'Upgrade')}
+            </Link>
+          )}
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
           <div>
-            <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('calories')}</span>
-            <span className="text-xl font-black blur-[4px]" style={{ color: 'var(--color-text-secondary)' }}>1,234</span>
+            <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('calories', 'Calories')}</span>
+            <span className={`text-xl font-black ${!canViewMacros ? 'blur-[4px] select-none' : ''}`} style={{ color: 'var(--color-text)' }}>
+              {dailyNutrition.calories ? `${dailyNutrition.calories} kcal` : '—'}
+            </span>
           </div>
           <div>
-            <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('protein')}</span>
-            <span className="text-xl font-black blur-[4px]" style={{ color: 'var(--color-text-secondary)' }}>120g</span>
+            <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('protein', 'Protein')}</span>
+            <span className={`text-xl font-black ${!canViewMacros ? 'blur-[4px] select-none' : ''}`} style={{ color: 'var(--color-text)' }}>
+              {dailyNutrition.protein ? `${dailyNutrition.protein}g` : '—'}
+            </span>
           </div>
           <div>
-            <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('carbs')}</span>
-            <span className="text-xl font-black blur-[4px]" style={{ color: 'var(--color-text-secondary)' }}>150g</span>
+            <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('carbs', 'Carbs')}</span>
+            <span className={`text-xl font-black ${!canViewMacros ? 'blur-[4px] select-none' : ''}`} style={{ color: 'var(--color-text)' }}>
+              {dailyNutrition.carbs ? `${dailyNutrition.carbs}g` : '—'}
+            </span>
           </div>
           <div>
-            <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('fat')}</span>
-            <span className="text-xl font-black blur-[4px]" style={{ color: 'var(--color-text-secondary)' }}>45g</span>
+            <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('fat', 'Fat')}</span>
+            <span className={`text-xl font-black ${!canViewMacros ? 'blur-[4px] select-none' : ''}`} style={{ color: 'var(--color-text)' }}>
+              {dailyNutrition.fat ? `${dailyNutrition.fat}g` : '—'}
+            </span>
           </div>
         </div>
       </div>
@@ -9794,7 +10081,7 @@ export default function PlannerPage() {
                       className="text-white text-[10px] font-black px-3 py-0.5 rounded-full uppercase tracking-wider shadow-sm"
                       style={{ backgroundColor: 'var(--color-primary)' }}
                     >
-                      {t('todayBadge')}
+                      {t('todayBadge', 'Today')}
                     </span>
                   )}
                   {day.isTomorrow && !day.isToday && (
@@ -9806,7 +10093,7 @@ export default function PlannerPage() {
                         color: 'var(--color-primary)'
                       }}
                     >
-                      {t('tomorrowBadge')}
+                      {t('tomorrowBadge', 'Tomorrow')}
                     </span>
                   )}
                 </div>
@@ -9818,14 +10105,14 @@ export default function PlannerPage() {
                       <button
                         type="button"
                         onClick={() => setActiveCopyDropdownDate(isCopyOpen ? null : day.dateStr)}
-                        className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                        className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer hover:border-[var(--color-primary)]"
                         style={{
                           backgroundColor: 'var(--color-card)',
                           borderColor: 'var(--color-border)',
                           color: 'var(--color-text)'
                         }}
                       >
-                        <Copy className="h-4 w-4" style={{ color: 'var(--color-text-secondary)' }} /> {t('copyDayBtn')}
+                        <Copy className="h-4 w-4" style={{ color: 'var(--color-text-secondary)' }} /> {t('copyDayBtn', 'Copy Day')}
                       </button>
 
                       {isCopyOpen && (
@@ -9843,32 +10130,32 @@ export default function PlannerPage() {
                               color: 'var(--color-text)'
                             }}
                           >
-                            <h4 className="font-bold text-xs px-1" style={{ color: 'var(--color-text)' }}>{t('copyDayToTitle')}</h4>
+                            <h4 className="font-bold text-xs px-1" style={{ color: 'var(--color-text)' }}>{t('copyDayToTitle', 'Copy Day Meals To')}</h4>
                             
                             <div className="space-y-1.5">
                               <button
                                 type="button"
                                 onClick={() => handleCopyTomorrow(day.dateStr)}
-                                className="w-full text-left font-bold px-3 py-2 rounded-xl border transition cursor-pointer"
+                                className="w-full text-left font-bold px-3 py-2 rounded-xl border transition cursor-pointer hover:border-[var(--color-primary)]"
                                 style={{
                                   backgroundColor: 'var(--color-inner-dark)',
                                   borderColor: 'var(--color-border)',
                                   color: 'var(--color-text)'
                                 }}
                               >
-                                {t('copyTomorrowOption')}
+                                {t('copyTomorrowOption', 'Tomorrow')}
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleCopyNextWeek(day.dateStr)}
-                                className="w-full text-left font-bold px-3 py-2 rounded-xl border transition cursor-pointer"
+                                className="w-full text-left font-bold px-3 py-2 rounded-xl border transition cursor-pointer hover:border-[var(--color-primary)]"
                                 style={{
                                   backgroundColor: 'var(--color-inner-dark)',
                                   borderColor: 'var(--color-border)',
                                   color: 'var(--color-text)'
                                 }}
                               >
-                                {t('copyNextWeekOption')}
+                                {t('copyNextWeekOption', 'Next Week (+7 Days)')}
                               </button>
                             </div>
 
@@ -9876,7 +10163,7 @@ export default function PlannerPage() {
                               className="pt-2 border-t space-y-1.5 px-1"
                               style={{ borderColor: 'var(--color-border)' }}
                             >
-                              <span className="block text-[11px] font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{t('pickADateLabel')}</span>
+                              <span className="block text-[11px] font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{t('pickADateLabel', 'Or Pick a Custom Date:')}</span>
                               <input
                                 type="date"
                                 value={copyCustomDate}
@@ -9906,14 +10193,14 @@ export default function PlannerPage() {
                   <button
                     type="button"
                     onClick={() => openAddModal(day.dateStr)}
-                    className="border font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                    className="border font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer hover:border-[var(--color-primary)]"
                     style={{
                       backgroundColor: 'var(--color-card)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-text)'
                     }}
                   >
-                    <Plus className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('addMealBtn')}
+                    <Plus className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('addMealBtn', 'Add Meal')}
                   </button>
                 </div>
               </div>
@@ -9931,18 +10218,18 @@ export default function PlannerPage() {
                   >
                     <ChefHat className="h-6 w-6" />
                   </div>
-                  <p className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{t('nothingPlannedYet')}</p>
+                  <p className="text-sm font-semibold" style={{ color: 'var(--color-text-secondary)' }}>{t('nothingPlannedYet', 'Nothing planned for this day yet')}</p>
                   <button
                     type="button"
                     onClick={() => openAddModal(day.dateStr)}
-                    className="inline-flex items-center gap-2 border font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-xs cursor-pointer"
+                    className="inline-flex items-center gap-2 border font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-xs cursor-pointer hover:border-[var(--color-primary)]"
                     style={{
                       backgroundColor: 'var(--color-card)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-primary)'
                     }}
                   >
-                    <Plus className="h-4 w-4" /> {t('addAMealBtn')}
+                    <Plus className="h-4 w-4" /> {t('addAMealBtn', 'Add a Meal')}
                   </button>
                 </div>
               ) : (
@@ -9958,7 +10245,7 @@ export default function PlannerPage() {
                     >
                       <div className="flex items-center gap-3.5 min-w-0">
                         <img 
-                          src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80'} 
+                          src={meal.image || meal.imageUrl || meal.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80'} 
                           alt={meal.recipeName}
                           className="w-14 h-14 rounded-xl object-cover border shrink-0" 
                           style={{ borderColor: 'var(--color-border)' }}
@@ -9966,17 +10253,25 @@ export default function PlannerPage() {
                         <div className="space-y-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <span 
-                              className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide"
+                              className="text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wide border"
                               style={{
                                 backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
                                 color: 'var(--color-text)'
                               }}
                             >
                               {translateMealType(meal.mealType)}
                             </span>
                             {meal.isLeftover && (
-                              <span className="bg-amber-100 border border-amber-300 text-amber-800 text-[9px] font-bold px-1.5 py-0.5 rounded">
-                                {t('leftoverBadge')}
+                              <span 
+                                className="border text-[9px] font-bold px-1.5 py-0.5 rounded"
+                                style={{
+                                  backgroundColor: isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)',
+                                  borderColor: isDayMode ? '#f59e0b' : 'rgba(245, 158, 11, 0.4)',
+                                  color: isDayMode ? '#b45309' : '#fbbf24'
+                                }}
+                              >
+                                {t('leftoverBadge', 'Leftover')}
                               </span>
                             )}
                           </div>
@@ -9991,26 +10286,26 @@ export default function PlannerPage() {
                         <button
                           type="button"
                           onClick={() => openEditModal(meal)}
-                          className="p-2.5 rounded-xl border shadow-xs cursor-pointer transition"
+                          className="p-2.5 rounded-xl border shadow-xs cursor-pointer transition hover:border-[var(--color-primary)]"
                           style={{
                             backgroundColor: 'var(--color-inner-dark)',
                             borderColor: 'var(--color-border)',
                             color: 'var(--color-text)'
                           }}
-                          title={t('editPlannedMealTooltip')}
+                          title={t('editPlannedMealTooltip', 'Edit Planned Meal')}
                         >
                           <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                         </button>
                         <button
                           type="button"
                           onClick={() => handleDeleteMeal(meal.id)}
-                          className="p-2.5 rounded-xl border shadow-xs cursor-pointer transition hover:text-red-500"
+                          className="p-2.5 rounded-xl border shadow-xs cursor-pointer transition hover:border-red-500/50 hover:text-red-500"
                           style={{
                             backgroundColor: 'var(--color-inner-dark)',
                             borderColor: 'var(--color-border)',
                             color: 'var(--color-text-secondary)'
                           }}
-                          title={t('deleteMealTooltip')}
+                          title={t('deleteMealTooltip', 'Delete Meal')}
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -10028,7 +10323,7 @@ export default function PlannerPage() {
       {showShoppingListModal && (
         <div 
           onClick={() => setShowShoppingListModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
@@ -10056,10 +10351,10 @@ export default function PlannerPage() {
                 className="text-xl font-bold tracking-tight"
                 style={{ color: 'var(--color-primary)' }}
               >
-                {t('selectRecipesShoppingTitle')}
+                {t('selectRecipesShoppingTitle', 'Select Recipes for Shopping List')}
               </h2>
               <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('selectRecipesShoppingSub')}
+                {t('selectRecipesShoppingSub', 'Choose which planned meals to compile into your grocery list')}
               </p>
             </div>
 
@@ -10073,11 +10368,11 @@ export default function PlannerPage() {
                     color: 'var(--color-text-secondary)'
                   }}
                 >
-                  {t('noMealsInPlanNotice')}
+                  {t('noMealsInPlanNotice', 'No meals currently scheduled.')}
                 </div>
               ) : (
                 datesWithMeals.map((dateStr) => {
-                  const dayMeals = plannedMeals.filter(m => m.date === dateStr);
+                  const dayMeals = plannedMeals.filter(m => (m.date || '').split('T')[0] === dateStr);
                   const selectedCount = dayMeals.filter(m => selectedMealIdsForShopping.includes(m.id)).length;
                   const isAllDaySelected = selectedCount === dayMeals.length && dayMeals.length > 0;
                   const isPartiallySelected = selectedCount > 0 && selectedCount < dayMeals.length;
@@ -10112,7 +10407,7 @@ export default function PlannerPage() {
                             }}
                           >
                             {isAllDaySelected && <Check className="h-3.5 w-3.5 stroke-[3]" />}
-                            {isPartiallySelected && <div className="w-2 h-2 bg-white rounded-sm" />}
+                            {isPartiallySelected && <div className="w-2 h-2 rounded-sm" style={{ backgroundColor: '#ffffff' }} />}
                           </div>
 
                           <div>
@@ -10123,7 +10418,7 @@ export default function PlannerPage() {
                               {formattedDayTitle}
                             </h3>
                             <span className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-                              {selectedCount}/{dayMeals.length} {t('selectedCountSuffix')}
+                              {selectedCount}/{dayMeals.length} {t('selectedCountSuffix', 'recipes selected')}
                             </span>
                           </div>
                         </div>
@@ -10134,7 +10429,7 @@ export default function PlannerPage() {
                             e.stopPropagation();
                             setExpandedDayCards({ ...expandedDayCards, [dateStr]: !isExpanded });
                           }}
-                          className="p-1 hover:text-white transition cursor-pointer"
+                          className="p-1 transition cursor-pointer"
                           style={{ color: 'var(--color-primary)' }}
                         >
                           {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -10180,7 +10475,7 @@ export default function PlannerPage() {
                                   </div>
 
                                   <img 
-                                    src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80'} 
+                                    src={meal.image || meal.imageUrl || meal.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80'} 
                                     alt={meal.recipeName}
                                     className="w-8 h-8 rounded-lg object-cover border shrink-0"
                                     style={{ borderColor: 'var(--color-border)' }}
@@ -10193,8 +10488,15 @@ export default function PlannerPage() {
                                 </div>
 
                                 {meal.isLeftover && (
-                                  <span className="text-[9px] font-bold text-amber-700 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded">
-                                    {t('leftoverBadge')}
+                                  <span 
+                                    className="text-[9px] font-bold border px-1.5 py-0.5 rounded"
+                                    style={{
+                                      backgroundColor: isDayMode ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)',
+                                      borderColor: isDayMode ? '#f59e0b' : 'rgba(245, 158, 11, 0.4)',
+                                      color: isDayMode ? '#b45309' : '#fbbf24'
+                                    }}
+                                  >
+                                    {t('leftoverBadge', 'Leftover')}
                                   </span>
                                 )}
                               </div>
@@ -10219,28 +10521,26 @@ export default function PlannerPage() {
                   color: 'var(--color-text-secondary)'
                 }}
               >
-                {t('cancel')}
+                {t('cancel', 'Cancel')}
               </button>
               <button
                 type="button"
                 onClick={handleGenerateShoppingList}
-                className="py-3 px-4 text-white font-bold rounded-2xl text-xs transition shadow-lg cursor-pointer"
+                className="py-3 px-4 text-white font-bold rounded-2xl text-xs transition shadow-lg cursor-pointer hover:opacity-90"
                 style={{ backgroundColor: 'var(--color-primary)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
               >
-                {t('generateListBtn')}
+                {t('generateListBtn', 'Generate Shopping List')}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 2. MAIN ADD MEAL MODAL */}
+      {/* 2. ACCESSIBLE MAIN ADD MEAL MODAL */}
       {showAddMealModal && (
         <div 
           onClick={() => setShowAddMealModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
@@ -10268,10 +10568,10 @@ export default function PlannerPage() {
                 className="text-lg font-black tracking-tight"
                 style={{ color: 'var(--color-primary)' }}
               >
-                {t('addMealForDateTitle').replace('{date}', activeDateFormattedHeader)}
+                {t('addMealForDateTitle', `Add Meal for ${activeDateFormattedHeader}`).replace('{date}', activeDateFormattedHeader)}
               </h2>
               <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('addMealModalSub')}
+                {t('addMealModalSub', 'Schedule a recipe for this day')}
               </p>
             </div>
 
@@ -10281,7 +10581,7 @@ export default function PlannerPage() {
                   className="block text-xs font-bold mb-1.5"
                   style={{ color: 'var(--color-primary)' }}
                 >
-                  {t('dateLabel')}
+                  {t('dateLabel', 'Date')}
                 </label>
                 <div 
                   className="w-full border-2 rounded-lg px-3 py-2 text-xs font-semibold"
@@ -10300,7 +10600,7 @@ export default function PlannerPage() {
                   className="block text-xs font-bold mb-1.5"
                   style={{ color: 'var(--color-primary)' }}
                 >
-                  {t('mealTypeLabel')}
+                  {t('mealTypeLabel', 'Meal Type')}
                 </label>
                 <div className="relative">
                   <select
@@ -10313,10 +10613,10 @@ export default function PlannerPage() {
                       color: 'var(--color-text)'
                     }}
                   >
-                    <option value="Breakfast" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('breakfast')}</option>
-                    <option value="Lunch" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('lunch')}</option>
-                    <option value="Dinner" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('dinner')}</option>
-                    <option value="Snack" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('snack')}</option>
+                    <option value="Breakfast" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('breakfast', 'Breakfast')}</option>
+                    <option value="Lunch" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('lunch', 'Lunch')}</option>
+                    <option value="Dinner" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('dinner', 'Dinner')}</option>
+                    <option value="Snack" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('snack', 'Snack')}</option>
                   </select>
                   <ChevronDown className="h-4 w-4 absolute right-3 top-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                 </div>
@@ -10327,7 +10627,7 @@ export default function PlannerPage() {
                   className="block text-xs font-bold mb-1.5"
                   style={{ color: 'var(--color-primary)' }}
                 >
-                  {t('timeLabel')}
+                  {t('timeLabel', 'Time')}
                 </label>
                 <div className="relative flex items-center">
                   <Clock className="h-4 w-4 absolute left-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
@@ -10341,6 +10641,7 @@ export default function PlannerPage() {
                         handleAddMealSubmit();
                       }
                     }}
+                    autoComplete="off"
                     className="w-full border rounded-lg pl-9 pr-9 py-2 text-xs outline-none"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -10361,7 +10662,7 @@ export default function PlannerPage() {
                   className="block text-xs font-bold mb-1.5"
                   style={{ color: 'var(--color-primary)' }}
                 >
-                  {t('recipeLabel')}
+                  {t('recipeLabel', 'Recipe')}
                 </label>
                 {selectedRecipeObj ? (
                   <div 
@@ -10373,7 +10674,7 @@ export default function PlannerPage() {
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
                       <img 
-                        src={selectedRecipeObj.image || selectedRecipeObj.imageUrl} 
+                        src={selectedRecipeObj.image || selectedRecipeObj.imageUrl || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80'} 
                         alt={selectedRecipeObj.name || selectedRecipeObj.title}
                         className="w-8 h-8 rounded-md object-cover border shrink-0" 
                         style={{ borderColor: 'var(--color-border)' }}
@@ -10391,7 +10692,7 @@ export default function PlannerPage() {
                       className="text-[11px] hover:underline font-bold shrink-0 ml-2 cursor-pointer"
                       style={{ color: 'var(--color-primary)' }}
                     >
-                      {t('changeBtn')}
+                      {t('changeBtn', 'Change')}
                     </button>
                   </div>
                 ) : (
@@ -10401,14 +10702,14 @@ export default function PlannerPage() {
                       setPickerTarget('add');
                       setShowRecipePickerModal(true);
                     }}
-                    className="w-full border rounded-lg py-3 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    className="w-full border rounded-lg py-3 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer hover:border-[var(--color-primary)]"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-primary)'
                     }}
                   >
-                    <Plus className="h-4 w-4" /> {t('selectRecipeBtn')}
+                    <Plus className="h-4 w-4" /> {t('selectRecipeBtn', 'Select Recipe')}
                   </button>
                 )}
               </div>
@@ -10425,10 +10726,10 @@ export default function PlannerPage() {
                     className="text-xs font-bold"
                     style={{ color: 'var(--color-primary)' }}
                   >
-                    {t('leftoverLabel')}
+                    {t('leftoverLabel', 'Leftover Meal')}
                   </div>
                   <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('leftoverHelpText')}
+                    {t('leftoverHelpText', 'Mark if this is leftover from a previous meal')}
                   </p>
                 </div>
                 
@@ -10437,9 +10738,12 @@ export default function PlannerPage() {
                   className="w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition shrink-0 ml-3"
                   style={{ backgroundColor: isLeftover ? 'var(--color-primary)' : 'var(--color-border)' }}
                 >
-                  <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition ${
-                    isLeftover ? 'translate-x-5' : 'translate-x-0'
-                  }`} />
+                  <div 
+                    className={`w-4 h-4 rounded-full shadow-md transform transition ${
+                      isLeftover ? 'translate-x-5' : 'translate-x-0'
+                    }`} 
+                    style={{ backgroundColor: '#ffffff' }}
+                  />
                 </div>
               </div>
 
@@ -10448,12 +10752,12 @@ export default function PlannerPage() {
                   className="block text-xs font-bold mb-1.5"
                   style={{ color: 'var(--color-primary)' }}
                 >
-                  {t('notesLabel')}
+                  {t('notesLabel', 'Notes (Optional)')}
                 </label>
                 <textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder={t('notesPlaceholder')}
+                  placeholder={t('notesPlaceholder', 'Add any preparation notes, variations, or reminders...')}
                   rows={3}
                   className="w-full border rounded-lg p-3 text-xs outline-none resize-none"
                   style={{
@@ -10477,17 +10781,15 @@ export default function PlannerPage() {
                     color: 'var(--color-text-secondary)'
                   }}
                 >
-                  {t('cancel')}
+                  {t('cancel', 'Cancel')}
                 </button>
                 <button
                   type="button"
                   onClick={() => handleAddMealSubmit()}
-                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer hover:opacity-90"
                   style={{ backgroundColor: 'var(--color-primary)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                 >
-                  {t('addToCalendarBtn')}
+                  {t('addToCalendarBtn', 'Add to Calendar')}
                 </button>
               </div>
             </div>
@@ -10495,11 +10797,11 @@ export default function PlannerPage() {
         </div>
       )}
 
-      {/* 3. EDIT MEAL MODAL */}
+      {/* 3. ACCESSIBLE EDIT MEAL MODAL */}
       {showEditMealModal && (
         <div 
           onClick={() => setShowEditMealModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
@@ -10527,10 +10829,10 @@ export default function PlannerPage() {
                 className="text-lg font-black tracking-tight flex items-center gap-2"
                 style={{ color: 'var(--color-primary)' }}
               >
-                <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('editPlannedMealTitle')}
+                <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('editPlannedMealTitle', 'Edit Planned Meal')}
               </h2>
               <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('editPlannedMealSub')}
+                {t('editPlannedMealSub', 'Update schedule, recipe, or meal details')}
               </p>
             </div>
 
@@ -10540,7 +10842,7 @@ export default function PlannerPage() {
                   className="block text-xs font-bold mb-1.5"
                   style={{ color: 'var(--color-primary)' }}
                 >
-                  {t('dateLabel')}
+                  {t('dateLabel', 'Date')}
                 </label>
                 <input
                   type="date"
@@ -10552,6 +10854,7 @@ export default function PlannerPage() {
                       handleEditMealSubmit();
                     }
                   }}
+                  autoComplete="off"
                   className="w-full border rounded-lg px-3 py-2 text-xs font-semibold outline-none cursor-pointer"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
@@ -10568,7 +10871,7 @@ export default function PlannerPage() {
                   className="block text-xs font-bold mb-1.5"
                   style={{ color: 'var(--color-primary)' }}
                 >
-                  {t('mealTypeLabel')}
+                  {t('mealTypeLabel', 'Meal Type')}
                 </label>
                 <div className="relative">
                   <select
@@ -10581,10 +10884,10 @@ export default function PlannerPage() {
                       color: 'var(--color-text)'
                     }}
                   >
-                    <option value="Breakfast" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('breakfast')}</option>
-                    <option value="Lunch" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('lunch')}</option>
-                    <option value="Dinner" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('dinner')}</option>
-                    <option value="Snack" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('snack')}</option>
+                    <option value="Breakfast" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('breakfast', 'Breakfast')}</option>
+                    <option value="Lunch" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('lunch', 'Lunch')}</option>
+                    <option value="Dinner" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('dinner', 'Dinner')}</option>
+                    <option value="Snack" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('snack', 'Snack')}</option>
                   </select>
                   <ChevronDown className="h-4 w-4 absolute right-3 top-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                 </div>
@@ -10595,7 +10898,7 @@ export default function PlannerPage() {
                   className="block text-xs font-bold mb-1.5"
                   style={{ color: 'var(--color-primary)' }}
                 >
-                  {t('timeLabel')}
+                  {t('timeLabel', 'Time')}
                 </label>
                 <div className="relative flex items-center">
                   <Clock className="h-4 w-4 absolute left-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
@@ -10609,6 +10912,7 @@ export default function PlannerPage() {
                         handleEditMealSubmit();
                       }
                     }}
+                    autoComplete="off"
                     className="w-full border rounded-lg pl-9 pr-9 py-2 text-xs outline-none"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -10628,7 +10932,7 @@ export default function PlannerPage() {
                   className="block text-xs font-bold mb-1.5"
                   style={{ color: 'var(--color-primary)' }}
                 >
-                  {t('recipeLabel')}
+                  {t('recipeLabel', 'Recipe')}
                 </label>
                 {editRecipeObj ? (
                   <div 
@@ -10640,7 +10944,7 @@ export default function PlannerPage() {
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
                       <img 
-                        src={editRecipeObj.image || editRecipeObj.imageUrl} 
+                        src={editRecipeObj.image || editRecipeObj.imageUrl || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=200&q=80'} 
                         alt={editRecipeObj.name || editRecipeObj.title}
                         className="w-8 h-8 rounded-md object-cover border shrink-0" 
                         style={{ borderColor: 'var(--color-border)' }}
@@ -10658,7 +10962,7 @@ export default function PlannerPage() {
                       className="text-[11px] hover:underline font-bold shrink-0 ml-2 cursor-pointer"
                       style={{ color: 'var(--color-primary)' }}
                     >
-                      {t('changeBtn')}
+                      {t('changeBtn', 'Change')}
                     </button>
                   </div>
                 ) : (
@@ -10668,14 +10972,14 @@ export default function PlannerPage() {
                       setPickerTarget('edit');
                       setShowRecipePickerModal(true);
                     }}
-                    className="w-full border rounded-lg py-3 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    className="w-full border rounded-lg py-3 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer hover:border-[var(--color-primary)]"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-primary)'
                     }}
                   >
-                    <Plus className="h-4 w-4" /> {t('selectRecipeBtn')}
+                    <Plus className="h-4 w-4" /> {t('selectRecipeBtn', 'Select Recipe')}
                   </button>
                 )}
               </div>
@@ -10692,10 +10996,10 @@ export default function PlannerPage() {
                     className="text-xs font-bold"
                     style={{ color: 'var(--color-primary)' }}
                   >
-                    {t('leftoverLabel')}
+                    {t('leftoverLabel', 'Leftover Meal')}
                   </div>
                   <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('leftoverHelpText')}
+                    {t('leftoverHelpText', 'Mark if this is leftover from a previous meal')}
                   </p>
                 </div>
                 
@@ -10704,9 +11008,12 @@ export default function PlannerPage() {
                   className="w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition shrink-0 ml-3"
                   style={{ backgroundColor: editIsLeftover ? 'var(--color-primary)' : 'var(--color-border)' }}
                 >
-                  <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition ${
-                    editIsLeftover ? 'translate-x-5' : 'translate-x-0'
-                  }`} />
+                  <div 
+                    className={`w-4 h-4 rounded-full shadow-md transform transition ${
+                      editIsLeftover ? 'translate-x-5' : 'translate-x-0'
+                    }`} 
+                    style={{ backgroundColor: '#ffffff' }}
+                  />
                 </div>
               </div>
 
@@ -10715,12 +11022,12 @@ export default function PlannerPage() {
                   className="block text-xs font-bold mb-1.5"
                   style={{ color: 'var(--color-primary)' }}
                 >
-                  {t('notesLabel')}
+                  {t('notesLabel', 'Notes (Optional)')}
                 </label>
                 <textarea
                   value={editNotes}
                   onChange={(e) => setEditNotes(e.target.value)}
-                  placeholder={t('notesPlaceholder')}
+                  placeholder={t('notesPlaceholder', 'Add any preparation notes, variations, or reminders...')}
                   rows={3}
                   className="w-full border rounded-lg p-3 text-xs outline-none resize-none"
                   style={{
@@ -10737,14 +11044,14 @@ export default function PlannerPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    if (editingMealId && confirm(t('confirmDeleteMealAlert'))) {
+                    if (editingMealId && confirm(t('confirmDeleteMealAlert', 'Are you sure you want to remove this meal from your plan?'))) {
                       handleDeleteMeal(editingMealId);
                     }
                   }}
-                  className="px-4 py-2.5 rounded-xl border border-red-500/40 text-red-500 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer hover:bg-red-50"
+                  className="px-4 py-2.5 rounded-xl border border-red-500/40 text-red-500 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer hover:bg-red-500/10"
                   style={{ backgroundColor: 'var(--color-inner-dark)' }}
                 >
-                  <Trash2 className="h-4 w-4" /> {t('delete')}
+                  <Trash2 className="h-4 w-4" /> {t('delete', 'Delete')}
                 </button>
 
                 <div className="flex gap-2">
@@ -10758,17 +11065,15 @@ export default function PlannerPage() {
                       color: 'var(--color-text-secondary)'
                     }}
                   >
-                    {t('cancel')}
+                    {t('cancel', 'Cancel')}
                   </button>
                   <button
                     type="button"
                     onClick={() => handleEditMealSubmit()}
-                    className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
+                    className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-primary)' }}
-                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                   >
-                    {t('saveChanges')}
+                    {t('saveChanges', 'Save Changes')}
                   </button>
                 </div>
               </div>
@@ -10810,10 +11115,10 @@ export default function PlannerPage() {
                   className="text-lg font-black tracking-tight"
                   style={{ color: 'var(--color-primary)' }}
                 >
-                  {t('selectRecipeModalTitle')}
+                  {t('selectRecipeModalTitle', 'Select a Recipe')}
                 </h2>
                 <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('pickerSubMealPlan')}
+                  {t('pickerSubMealPlan', 'Pick from your saved recipe books or search')}
                 </p>
               </div>
 
@@ -10823,9 +11128,10 @@ export default function PlannerPage() {
                     <Search className="h-4 w-4 absolute left-3 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
                     <input
                       type="text"
-                      placeholder={t('searchByNamePlaceholder')}
+                      placeholder={t('searchByNamePlaceholder', 'Search by recipe name...')}
                       value={recipeSearch}
                       onChange={(e) => setRecipeSearch(e.target.value)}
+                      autoComplete="off"
                       className="w-full border rounded-xl pl-9 pr-3 py-2 text-xs outline-none"
                       style={{
                         backgroundColor: 'var(--color-inner-dark)',
@@ -10846,7 +11152,7 @@ export default function PlannerPage() {
                         color: 'var(--color-primary)'
                       }}
                     >
-                      <option value="All Books" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('allBooksOption')}</option>
+                      <option value="All Books" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('allBooksOption', 'All Books')}</option>
                       {userFilteredBooks.map((b) => (
                         <option key={b.id} value={b.id} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{b.title}</option>
                       ))}
@@ -10857,24 +11163,24 @@ export default function PlannerPage() {
                   <button
                     type="button"
                     onClick={() => setShowFilterOptions(!showFilterOptions)}
-                    className="border font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                    className="border font-bold text-xs px-3 py-2 rounded-xl flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-primary)'
                     }}
                   >
-                    <SlidersHorizontal className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('filterBtn')}
+                    <SlidersHorizontal className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('filterBtn', 'Filter')}
                   </button>
                 </div>
 
                 {showFilterOptions && (
                   <div className="flex flex-wrap gap-1.5 pt-1 animate-in fade-in">
                     {[
-                      { key: 'All', label: t('allTag') },
-                      { key: 'Favorites', label: t('favoritesTag') },
-                      { key: 'Main Dish', label: t('mainDishTag') },
-                      { key: 'Imported', label: t('importedTag') }
+                      { key: 'All', label: t('allTag', 'All') },
+                      { key: 'Favorites', label: t('favoritesTag', 'Favorites') },
+                      { key: 'Main Dish', label: t('mainDishTag', 'Main Dish') },
+                      { key: 'Imported', label: t('importedTag', 'Imported') }
                     ].map((tag) => (
                       <button
                         key={tag.key}
@@ -10901,7 +11207,7 @@ export default function PlannerPage() {
               <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
                 {filteredPickerRecipes.length === 0 ? (
                   <div className="py-12 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('noRecipesMatchCriteria')}
+                    {t('noRecipesMatchCriteria', 'No recipes match your search criteria.')}
                   </div>
                 ) : (
                   filteredPickerRecipes.map((rec) => {
@@ -10954,14 +11260,14 @@ export default function PlannerPage() {
                             }
                             setShowRecipePickerModal(false);
                           }}
-                          className="px-4 py-1.5 border font-bold text-xs rounded-xl transition shrink-0 ml-2 cursor-pointer shadow-xs"
+                          className="px-4 py-1.5 border font-bold text-xs rounded-xl transition shrink-0 ml-2 cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
                           style={{
                             backgroundColor: 'var(--color-card)',
                             borderColor: 'var(--color-border)',
                             color: 'var(--color-primary)'
                           }}
                         >
-                          {t('selectBtn')}
+                          {t('selectBtn', 'Select')}
                         </button>
                       </div>
                     );
@@ -10974,7 +11280,7 @@ export default function PlannerPage() {
               className="text-center py-2 text-xs font-semibold"
               style={{ color: 'var(--color-emerald)' }}
             >
-              {t('showingRecipesCount').replace('{count}', String(filteredPickerRecipes.length)).replace('{total}', String(savedRecipes.length))}
+              {t('showingRecipesCount', `Showing ${filteredPickerRecipes.length} of ${savedRecipes.length} saved recipes`).replace('{count}', String(filteredPickerRecipes.length)).replace('{total}', String(savedRecipes.length))}
             </div>
           </div>
         </div>
@@ -47802,155 +48108,225 @@ export async function GET(req: NextRequest, context: { params: Promise<{ provide
 ## File: `apps/web/src/app/api/planner/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { Pool } from 'pg';
 
 export const dynamic = 'force-dynamic';
 
-async function ensureTable() {
-  try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS planned_meals (
-        id VARCHAR(255) PRIMARY KEY,
-        user_id VARCHAR(255),
-        created_by VARCHAR(255),
-        date VARCHAR(64) NOT NULL,
-        recipe_id VARCHAR(255),
-        recipe_name VARCHAR(255) NOT NULL,
-        image TEXT,
-        meal_type VARCHAR(64) DEFAULT 'Dinner',
-        time VARCHAR(64) DEFAULT '',
-        is_leftover BOOLEAN DEFAULT FALSE,
-        notes TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
-  } catch (_) {}
+let cachedPool: Pool | null = null;
+function getPool(): Pool | null {
+  if (cachedPool) return cachedPool;
+  const conn = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!conn) return null;
+  const { Pool } = require('pg');
+  const ssl = conn.includes('sslmode=require') || conn.includes('neon.tech') || conn.includes('supabase.co');
+  cachedPool = new Pool({
+    connectionString: conn,
+    ssl: ssl ? { rejectUnauthorized: false } : false
+  });
+  return cachedPool;
+}
+
+async function ensureTable(pool: Pool) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS planned_meals (
+      id VARCHAR(120) PRIMARY KEY,
+      user_id VARCHAR(100),
+      created_by VARCHAR(255),
+      date VARCHAR(50) NOT NULL,
+      recipe_id VARCHAR(100),
+      recipe_name VARCHAR(255) NOT NULL,
+      image TEXT,
+      meal_type VARCHAR(50) DEFAULT 'Dinner',
+      time VARCHAR(20) DEFAULT '',
+      is_leftover BOOLEAN DEFAULT FALSE,
+      notes TEXT DEFAULT '',
+      servings INT DEFAULT 4,
+      prep_time_minutes INT DEFAULT 15,
+      cook_time_minutes INT DEFAULT 25,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_planned_meals_user_date ON planned_meals(user_id, date);
+  `);
 }
 
 export async function GET(req: NextRequest) {
+  const pool = getPool();
+  if (!pool) return NextResponse.json({ success: true, meals: [] });
+
   try {
-    await ensureTable();
+    await ensureTable(pool);
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
+    const email = searchParams.get('email');
 
-    let sql = 'SELECT * FROM planned_meals WHERE 1=1';
+    let query = `
+      SELECT 
+        id, 
+        user_id as "userId", 
+        user_id as "user_id",
+        created_by as "createdBy", 
+        created_by as "created_by",
+        date, 
+        recipe_id as "recipeId", 
+        recipe_id as "recipe_id",
+        recipe_name as "recipeName", 
+        recipe_name as "title",
+        image, 
+        image as "imageUrl",
+        image as "image_url",
+        meal_type as "mealType", 
+        meal_type as "meal_type",
+        time, 
+        is_leftover as "isLeftover", 
+        is_leftover as "is_leftover",
+        notes,
+        servings,
+        prep_time_minutes as "prepTimeMinutes",
+        cook_time_minutes as "cookTimeMinutes"
+      FROM planned_meals
+    `;
     const params: any[] = [];
 
-    if (userId) {
+    if (userId && email) {
+      query += ` WHERE user_id = $1 OR created_by = $2 OR user_id = 'usr_admin_1' OR user_id IS NULL ORDER BY date ASC, time ASC`;
+      params.push(userId, email);
+    } else if (userId) {
+      query += ` WHERE user_id = $1 OR user_id = 'usr_admin_1' OR user_id IS NULL ORDER BY date ASC, time ASC`;
       params.push(userId);
-      sql += ` AND (user_id = $${params.length} OR created_by = $${params.length} OR user_id IS NULL)`;
+    } else {
+      query += ` ORDER BY date ASC, time ASC LIMIT 300`;
     }
 
-    sql += ' ORDER BY date ASC, time ASC, created_at ASC';
-    const rows = await query(sql, params);
-
-    const formatted = rows.map((r: any) => ({
-      id: r.id,
-      userId: r.user_id,
-      createdBy: r.created_by,
-      date: r.date,
-      recipeId: r.recipe_id,
-      recipeName: r.recipe_name,
-      image: r.image,
-      mealType: r.meal_type || 'Dinner',
-      time: r.time || '',
-      isLeftover: Boolean(r.is_leftover),
-      notes: r.notes || '',
-      createdAt: r.created_at,
-      updatedAt: r.updated_at
+    const res = await pool.query(query, params);
+    const normalized = res.rows.map(r => ({
+      ...r,
+      date: (r.date || '').split('T')[0]
     }));
-
-    return NextResponse.json({ success: true, meals: formatted });
+    return NextResponse.json({ success: true, meals: normalized });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message, meals: [] }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
+  const pool = getPool();
+  if (!pool) return NextResponse.json({ success: false, error: 'Database unavailable' }, { status: 500 });
+
   try {
-    await ensureTable();
+    await ensureTable(pool);
     const body = await req.json();
-    const userId = body.userId;
-    const meals = Array.isArray(body.meals) ? body.meals : (body.meal ? [body.meal] : []);
 
-    if (userId && Array.isArray(body.meals)) {
-      const mealIds = meals.map((m: any) => m.id);
-      if (mealIds.length > 0) {
-        await query(
-          'DELETE FROM planned_meals WHERE (user_id = $1 OR created_by = $1) AND NOT (id = ANY($2::text[]))',
-          [userId, mealIds]
-        );
-      } else {
-        await query('DELETE FROM planned_meals WHERE user_id = $1 OR created_by = $1', [userId]);
+    let incomingMeals: any[] = [];
+    let isBatchReplace = false;
+    let targetUserId = body.userId || body.user_id || null;
+    let targetEmail = body.createdBy || body.created_by || null;
+
+    if (Array.isArray(body)) {
+      incomingMeals = body;
+    } else if (Array.isArray(body.meals)) {
+      incomingMeals = body.meals;
+      isBatchReplace = true;
+    } else if (body && typeof body === 'object' && (body.date || body.recipeName || body.title)) {
+      // Single meal item dispatched directly from /saved
+      incomingMeals = [body];
+    } else {
+      return NextResponse.json({ success: false, error: 'Invalid payload structure' }, { status: 400 });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Full batch synchronization from /planner
+      if (isBatchReplace && (targetUserId || targetEmail)) {
+        const mealIds = incomingMeals.map((m: any) => m.id).filter(Boolean);
+        if (mealIds.length > 0) {
+          await client.query(
+            `DELETE FROM planned_meals WHERE (user_id = $1 OR created_by = $2) AND id != ALL($3::varchar[])`,
+            [targetUserId || '', targetEmail || '', mealIds]
+          );
+        } else {
+          await client.query(
+            `DELETE FROM planned_meals WHERE user_id = $1 OR created_by = $2`,
+            [targetUserId || '', targetEmail || '']
+          );
+        }
       }
+
+      for (const meal of incomingMeals) {
+        const id = meal.id || 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+        const rawDate = meal.date || new Date().toISOString().split('T')[0];
+        const date = String(rawDate).split('T')[0];
+        const recipeName = meal.recipeName || meal.title || meal.name || 'Untitled Recipe';
+        const recipeId = meal.recipeId || meal.recipe_id || null;
+        const image = meal.image || meal.imageUrl || meal.image_url || null;
+        const mealType = meal.mealType || meal.meal_type || 'Dinner';
+        const time = meal.time || '';
+        const isLeftover = Boolean(meal.isLeftover || meal.is_leftover);
+        const notes = meal.notes || '';
+        const userId = meal.userId || meal.user_id || targetUserId || null;
+        const createdBy = meal.createdBy || meal.created_by || targetEmail || null;
+        const servings = parseInt(meal.servings) || 4;
+        const prepTime = parseInt(meal.prepTimeMinutes || meal.prep_time) || 15;
+        const cookTime = parseInt(meal.cookTimeMinutes || meal.cook_time) || 25;
+
+        await client.query(
+          `INSERT INTO planned_meals (
+             id, user_id, created_by, date, recipe_id, recipe_name, image, meal_type, time, is_leftover, notes, servings, prep_time_minutes, cook_time_minutes, updated_at
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
+           ON CONFLICT (id) DO UPDATE SET
+             date = EXCLUDED.date,
+             recipe_id = EXCLUDED.recipe_id,
+             recipe_name = EXCLUDED.recipe_name,
+             image = EXCLUDED.image,
+             meal_type = EXCLUDED.meal_type,
+             time = EXCLUDED.time,
+             is_leftover = EXCLUDED.is_leftover,
+             notes = EXCLUDED.notes,
+             servings = EXCLUDED.servings,
+             prep_time_minutes = EXCLUDED.prep_time_minutes,
+             cook_time_minutes = EXCLUDED.cook_time_minutes,
+             updated_at = CURRENT_TIMESTAMP`,
+          [id, userId, createdBy, date, recipeId, recipeName, image, mealType, time, isLeftover, notes, servings, prepTime, cookTime]
+        );
+      }
+
+      await client.query('COMMIT');
+      return NextResponse.json({ success: true, count: incomingMeals.length });
+    } catch (e: any) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
     }
-
-    for (const m of meals) {
-      if (!m || !m.recipeName) continue;
-      const id = String(m.id || 'plan_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
-      const targetUserId = m.userId || userId || null;
-      const createdBy = m.createdBy || userId || null;
-
-      await query(`
-        INSERT INTO planned_meals (
-          id, user_id, created_by, date, recipe_id, recipe_name, image, meal_type, time, is_leftover, notes, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          user_id = COALESCE(EXCLUDED.user_id, planned_meals.user_id),
-          created_by = COALESCE(EXCLUDED.created_by, planned_meals.created_by),
-          date = EXCLUDED.date,
-          recipe_id = EXCLUDED.recipe_id,
-          recipe_name = EXCLUDED.recipe_name,
-          image = EXCLUDED.image,
-          meal_type = EXCLUDED.meal_type,
-          time = EXCLUDED.time,
-          is_leftover = EXCLUDED.is_leftover,
-          notes = EXCLUDED.notes,
-          updated_at = NOW();
-      `, [
-        id,
-        targetUserId,
-        createdBy,
-        m.date,
-        m.recipeId || null,
-        m.recipeName,
-        m.image || null,
-        m.mealType || 'Dinner',
-        m.time || '',
-        Boolean(m.isLeftover),
-        m.notes || ''
-      ]);
-    }
-
-    return NextResponse.json({ success: true, count: meals.length });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function DELETE(req: NextRequest) {
+  const pool = getPool();
+  if (!pool) return NextResponse.json({ success: false, error: 'Database unavailable' }, { status: 500 });
+
   try {
-    await ensureTable();
+    await ensureTable(pool);
     const { searchParams } = new URL(req.url);
-    let id = searchParams.get('id');
-    let userId = searchParams.get('userId');
+    const id = searchParams.get('id');
+    const userId = searchParams.get('userId');
 
-    try {
-      const body = await req.json();
-      if (body) {
-        id = body.id || id;
-        userId = body.userId || userId;
-      }
-    } catch (_) {}
-
-    if (id) {
-      await query('DELETE FROM planned_meals WHERE id = $1', [id]);
-    } else if (userId) {
-      await query('DELETE FROM planned_meals WHERE user_id = $1 OR created_by = $1', [userId]);
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Meal ID is required' }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, message: 'Meal plan record deleted from PostgreSQL.' });
+    if (userId) {
+      await pool.query(`DELETE FROM planned_meals WHERE id = $1 AND (user_id = $2 OR user_id = 'usr_admin_1' OR user_id IS NULL)`, [id, userId]);
+    } else {
+      await pool.query(`DELETE FROM planned_meals WHERE id = $1`, [id]);
+    }
+
+    return NextResponse.json({ success: true, id });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

@@ -7,7 +7,8 @@ import {
   Calendar as CalendarIcon, Copy, ShoppingBag, Share2, 
   ChevronLeft, ChevronRight, Plus, Trash2, ChefHat, Lock, 
   Clock, X, Search, Heart, SlidersHorizontal, ChevronDown, 
-  ChevronUp, Edit3, Check, Sparkles, CheckCircle2, AlertCircle
+  ChevronUp, Edit3, Check, Sparkles, CheckCircle2, AlertCircle,
+  Flame, Activity
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -42,6 +43,18 @@ const getLocaleTag = (locale: string): string => {
   return 'en-US';
 };
 
+// Robust nutritional extractor supporting numbers, strings ("450 kcal", "32g"), and nested JSONB
+const parseNutrientValue = (rawVal: any, fallback: number): number => {
+  if (rawVal === undefined || rawVal === null || rawVal === '') return fallback;
+  if (typeof rawVal === 'number' && !isNaN(rawVal)) return rawVal;
+  const match = String(rawVal).match(/(\d+(?:\.\d+)?)/);
+  if (match) {
+    const parsed = parseFloat(match[1]);
+    return !isNaN(parsed) ? parsed : fallback;
+  }
+  return fallback;
+};
+
 export default function PlannerPage() {
   const { t, locale, version } = useTranslation();
   const router = useRouter();
@@ -62,6 +75,7 @@ export default function PlannerPage() {
   const [selectedRecipeObj, setSelectedRecipeObj] = useState<any | null>(null);
   const [mealType, setMealType] = useState('Dinner');
   const [mealTime, setMealTime] = useState('');
+  const [mealServings, setMealServings] = useState<number>(2);
   const [isLeftover, setIsLeftover] = useState(false);
   const [notes, setNotes] = useState('');
 
@@ -74,6 +88,7 @@ export default function PlannerPage() {
   const [editDate, setEditDate] = useState<string>(() => formatDateKey(new Date()));
   const [editMealType, setEditMealType] = useState('Dinner');
   const [editMealTime, setEditMealTime] = useState('');
+  const [editServings, setEditServings] = useState<number>(2);
   const [editIsLeftover, setEditIsLeftover] = useState(false);
   const [editNotes, setEditNotes] = useState('');
 
@@ -116,27 +131,11 @@ export default function PlannerPage() {
     };
   }, [applyGlobalTheme]);
 
-  // Check URL date query param on mount (e.g. /planner?date=YYYY-MM-DD)
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const dateParam = params.get('date');
-        if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
-          setSelectedDate(dateParam);
-          setCurrentWeekStart(getMondayOfWeek(parseDateKey(dateParam)));
-        }
-      } catch (_) {}
-    }
-  }, []);
-
-  // Comprehensive Saved Recipes Hydration (Reads /api/recipes/saved, /saved keys, and normalizes snake_case)
+  // Comprehensive Recipe Hydration with Nutrition Parsing
   const loadSavedData = useCallback(async (user: User | null) => {
     if (typeof window === 'undefined') return;
     try {
       let combinedRecipes: any[] = [];
-      
-      // 1. Gather all local storage recipe caches
       const localKeys = ['zecratary_saved_recipes', 'saved_recipes', 'zecratary_recipes', 'zecratary_imported_recipes'];
       for (const k of localKeys) {
         try {
@@ -148,7 +147,6 @@ export default function PlannerPage() {
         } catch (_) {}
       }
 
-      // 2. Query PostgreSQL APIs in parallel
       const endpoints = ['/api/recipes/saved', '/api/saved-recipes', '/api/recipes'];
       for (const ep of endpoints) {
         try {
@@ -172,13 +170,21 @@ export default function PlannerPage() {
         const normTitle = rec.title || rec.name || rec.recipeName || rec.recipe_name || 'Untitled Recipe';
         const normKey = `${normId}_${normTitle}`.toLowerCase();
         
-        // Inclusive ownership check supporting both camelCase and snake_case
         const rUserId = rec.userId || rec.user_id;
         const rEmail = rec.createdBy || rec.created_by;
         const isOwner = !user || !rUserId || rUserId === user.id || rUserId === 'usr_admin_1' || rEmail === user.email || !rEmail;
 
         if (isOwner && !seen.has(normKey)) {
           seen.add(normKey);
+
+          // Deep nutritional extraction
+          const nInfo = rec.nutritional_info || rec.nutritionalInfo || rec.nutrition || {};
+          const calories = parseNutrientValue(rec.calories ?? nInfo.calories ?? nInfo.calorieCount, 520);
+          const protein = parseNutrientValue(rec.protein ?? nInfo.protein ?? nInfo.proteinContent, 32);
+          const carbs = parseNutrientValue(rec.carbs ?? nInfo.carbs ?? nInfo.carbohydrateContent, 45);
+          const fat = parseNutrientValue(rec.fat ?? nInfo.fat ?? nInfo.fatContent, 18);
+          const baseServings = parseNutrientValue(rec.servings ?? rec.yield, 2);
+
           uniqueRecipes.push({
             id: normId,
             name: normTitle,
@@ -187,10 +193,11 @@ export default function PlannerPage() {
             isFavorite: Boolean(rec.isFavorite || rec.is_favorite),
             bookId: rec.bookId || rec.book_id || null,
             ingredients: rec.ingredients || [],
-            calories: Number(rec.calories || rec.nutritionalInfo?.calories || 520),
-            protein: Number(rec.protein || rec.nutritionalInfo?.protein || 32),
-            carbs: Number(rec.carbs || rec.nutritionalInfo?.carbs || 45),
-            fat: Number(rec.fat || rec.nutritionalInfo?.fat || 18),
+            servings: baseServings,
+            calories,
+            protein,
+            carbs,
+            fat,
             image: rec.imageUrl || rec.image || rec.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
             imageUrl: rec.imageUrl || rec.image || rec.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80'
           });
@@ -199,7 +206,6 @@ export default function PlannerPage() {
 
       setSavedRecipes(uniqueRecipes);
 
-      // Cookbooks Hydration
       const rawBooks = localStorage.getItem('zecratary_recipe_books');
       if (rawBooks) {
         try {
@@ -209,19 +215,18 @@ export default function PlannerPage() {
           }
         } catch (_) {}
       } else {
-        const defaultBooks = [
+        setBooks([
           { id: 'book_1', title: 'Family Favorites & Weeknight Dinners', userId: user?.id, createdBy: user?.email },
           { id: 'book_2', title: 'Authentic Asian Cuisine', userId: user?.id, createdBy: user?.email },
           { id: 'book_3', title: 'Baking & Desserts', userId: user?.id, createdBy: user?.email }
-        ];
-        setBooks(defaultBooks);
+        ]);
       }
     } catch (e) {
       console.error('Failed to load saved recipes in planner', e);
     }
   }, []);
 
-  // Multi-tier Meal Plan Hydration with Intact Local Merge
+  // Hydrate Planned Meals & Subscription Permissions
   const loadMealPlan = useCallback(async (user: User | null) => {
     if (typeof window === 'undefined') return;
     try {
@@ -237,7 +242,6 @@ export default function PlannerPage() {
         } catch (_) {}
       }
 
-      // Filter and clean local meals
       const userFilteredLocal = localMeals.map((m: any) => ({
         ...m,
         date: String(m.date || '').split('T')[0]
@@ -247,7 +251,6 @@ export default function PlannerPage() {
         return !user || !uId || uId === user.id || uId === 'usr_admin_1' || uEmail === user.email;
       });
 
-      // Synchronize with PostgreSQL planner API
       let serverMeals: any[] = [];
       try {
         const queryParams = user?.id ? `?userId=${encodeURIComponent(user.id)}&email=${encodeURIComponent(user.email || '')}` : '';
@@ -263,29 +266,35 @@ export default function PlannerPage() {
         }
       } catch (_) {}
 
-      // Resilient ID Map Merge: server entries take precedence, retaining newly created local meals from /saved
       const mealMap = new Map();
-      serverMeals.forEach((m: any) => {
-        if (m.id) mealMap.set(m.id, m);
-      });
-      userFilteredLocal.forEach((m: any) => {
-        if (m.id && !mealMap.has(m.id)) {
-          mealMap.set(m.id, m);
-        }
-      });
+      serverMeals.forEach((m: any) => { if (m.id) mealMap.set(m.id, m); });
+      userFilteredLocal.forEach((m: any) => { if (m.id && !mealMap.has(m.id)) mealMap.set(m.id, m); });
 
       const mergedPlans = Array.from(mealMap.values());
       setPlannedMeals(mergedPlans);
       localStorage.setItem('zecratary_meal_plan', JSON.stringify(mergedPlans));
       localStorage.setItem('zecratary_meal_plans', JSON.stringify(mergedPlans));
 
-      // Macro view permissions check
+      // Synchronize macro viewing capability from subscription
       try {
+        const planRes = await fetch('/api/admin/plans', { cache: 'no-store' });
+        if (planRes.ok) {
+          const pData = await planRes.json();
+          const plans = pData.plans || pData;
+          if (Array.isArray(plans)) {
+            const userPlanSlug = (user?.subscriptionPlan || 'taster').toLowerCase();
+            const matchedPlan = plans.find((p: any) => p.slug?.toLowerCase() === userPlanSlug);
+            if (matchedPlan) {
+              setCanViewMacros(Boolean(matchedPlan.can_view_macros || matchedPlan.canViewMacros));
+              return;
+            }
+          }
+        }
         const userPlan = (user?.subscriptionPlan || 'taster').toLowerCase();
-        const hasAccess = userPlan !== 'taster' && userPlan !== 'free';
-        setCanViewMacros(hasAccess);
+        setCanViewMacros(userPlan !== 'taster' && userPlan !== 'free');
       } catch (_) {
-        setCanViewMacros(false);
+        const userPlan = (user?.subscriptionPlan || 'taster').toLowerCase();
+        setCanViewMacros(userPlan !== 'taster' && userPlan !== 'free');
       }
     } catch (e) {
       console.error('Failed to load meal plan', e);
@@ -342,7 +351,6 @@ export default function PlannerPage() {
       localStorage.setItem('zecratary_meal_plans', JSON.stringify(merged));
       setPlannedMeals(updatedUserMeals);
 
-      // Persist full batch state to PostgreSQL
       if (currentUser?.id) {
         await fetch('/api/planner', {
           method: 'POST',
@@ -429,34 +437,48 @@ export default function PlannerPage() {
     return { dateStr, titleDate, isToday, isTomorrow, dayMeals };
   });
 
-  // Calculate live daily average nutritional values from planned meals
+  // ===========================================================================
+  // REAL-TIME DAILY AVERAGE NUTRITIONAL ENGINE
+  // ===========================================================================
   const dailyNutrition = useMemo(() => {
     const currentWeekDates = new Set(weekDays.map(w => w.dateStr));
     const activeMeals = plannedMeals.filter(m => currentWeekDates.has((m.date || '').split('T')[0]));
+    
     if (activeMeals.length === 0) {
-      return { calories: 0, protein: 0, carbs: 0, fat: 0 };
+      return { calories: 0, protein: 0, carbs: 0, fat: 0, activeDays: 0, totalMeals: 0 };
     }
 
-    const uniqueDaysCount = Math.max(1, new Set(activeMeals.map(m => (m.date || '').split('T')[0])).size);
+    const uniqueDays = new Set(activeMeals.map(m => (m.date || '').split('T')[0]));
+    const uniqueDaysCount = Math.max(1, uniqueDays.size);
     let totalCal = 0, totalP = 0, totalC = 0, totalF = 0;
 
     activeMeals.forEach(m => {
       const rec = savedRecipes.find(r => r.id === m.recipeId || r.name === m.recipeName || r.title === m.recipeName);
-      totalCal += Number(rec?.calories || 520);
-      totalP += Number(rec?.protein || 32);
-      totalC += Number(rec?.carbs || 45);
-      totalF += Number(rec?.fat || 18);
+      const scheduledServings = Number(m.servings || 2);
+      const baseServings = Math.max(1, Number(rec?.servings || 2));
+      const scaleRatio = scheduledServings / baseServings;
+
+      const cal = Number(rec?.calories ?? 520) * scaleRatio;
+      const p = Number(rec?.protein ?? 32) * scaleRatio;
+      const c = Number(rec?.carbs ?? 45) * scaleRatio;
+      const f = Number(rec?.fat ?? 18) * scaleRatio;
+
+      totalCal += cal;
+      totalP += p;
+      totalC += c;
+      totalF += f;
     });
 
     return {
       calories: Math.round(totalCal / uniqueDaysCount),
       protein: Math.round(totalP / uniqueDaysCount),
       carbs: Math.round(totalC / uniqueDaysCount),
-      fat: Math.round(totalF / uniqueDaysCount)
+      fat: Math.round(totalF / uniqueDaysCount),
+      activeDays: uniqueDaysCount,
+      totalMeals: activeMeals.length
     };
   }, [plannedMeals, savedRecipes, weekDays]);
 
-  // SMART ACTION 1: Auto-Plan Empty Slots with Library Dishes
   const handlePlanWeek = () => {
     if (savedRecipes.length === 0) {
       alert(t('noSavedRecipesToPlanAlert', 'No saved recipes found. Please add or import some recipes first to use the auto-planner!'));
@@ -483,6 +505,7 @@ export default function PlannerPage() {
             image: pickedRec.image || pickedRec.imageUrl,
             mealType: type,
             time: type === 'Breakfast' ? '08:30' : type === 'Lunch' ? '12:30' : '19:00',
+            servings: 2,
             isLeftover: false,
             notes: 'Auto-planned from recipe library'
           });
@@ -500,7 +523,6 @@ export default function PlannerPage() {
     showToast(t('weekPlanGeneratedToast', `Generated ${newAdditions.length} meals across your weekly calendar!`).replace('{count}', String(newAdditions.length)), 'success');
   };
 
-  // SMART ACTION 2: Copy Active Week to Next Week
   const handleCopyWeek = () => {
     const activeWeekDateSet = new Set(weekDays.map(w => w.dateStr));
     const currentWeekMeals = plannedMeals.filter(m => activeWeekDateSet.has((m.date || '').split('T')[0]));
@@ -527,7 +549,6 @@ export default function PlannerPage() {
     showToast(t('weekCopiedSuccessToast', `Copied ${currentWeekMeals.length} meals to next week!`).replace('{count}', String(currentWeekMeals.length)), 'success');
   };
 
-  // SMART ACTION 3: Share Schedule to System Clipboard
   const handleShareWeek = () => {
     const activeWeekDateSet = new Set(weekDays.map(w => w.dateStr));
     const currentWeekMeals = plannedMeals.filter(m => activeWeekDateSet.has((m.date || '').split('T')[0])).sort((a, b) => a.date.localeCompare(b.date));
@@ -570,6 +591,7 @@ export default function PlannerPage() {
     setSelectedRecipeObj(null);
     setMealType('Dinner');
     setMealTime('');
+    setMealServings(2);
     setIsLeftover(false);
     setNotes('');
     setRecipeSearch('');
@@ -587,6 +609,7 @@ export default function PlannerPage() {
     setEditDate(meal.date || selectedDate);
     setEditMealType(meal.mealType || 'Dinner');
     setEditMealTime(meal.time || '');
+    setEditServings(Number(meal.servings || 2));
     setEditIsLeftover(Boolean(meal.isLeftover));
     setEditNotes(meal.notes || '');
 
@@ -663,6 +686,7 @@ export default function PlannerPage() {
       image: selectedRecipeObj.image || selectedRecipeObj.imageUrl || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
       mealType: mealType,
       time: mealTime,
+      servings: Number(mealServings) || 2,
       isLeftover: isLeftover,
       notes: notes
     };
@@ -685,6 +709,7 @@ export default function PlannerPage() {
           image: editRecipeObj.image || editRecipeObj.imageUrl || m.image,
           mealType: editMealType,
           time: editMealTime,
+          servings: Number(editServings) || 2,
           isLeftover: editIsLeftover,
           notes: editNotes,
           userId: currentUser?.id,
@@ -1054,7 +1079,7 @@ export default function PlannerPage() {
         </div>
       </div>
 
-      {/* Dynamic Daily Average Nutrition Banner */}
+      {/* DYNAMIC DAILY AVERAGE NUTRITION BANNER */}
       <div 
         className="border rounded-2xl p-5 relative overflow-hidden shadow-sm transition-colors duration-200"
         style={{
@@ -1062,27 +1087,33 @@ export default function PlannerPage() {
           borderColor: 'var(--color-border)'
         }}
       >
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-2 text-sm font-extrabold" style={{ color: 'var(--color-text)' }}>
-            <span className="text-lg">🔥</span> {t('dailyAverage', 'Daily Average')}
+            <span className="text-lg">🔥</span> 
+            <span>{t('dailyAverage', 'Daily Average')}</span>
+            {dailyNutrition.totalMeals > 0 && (
+              <span className="text-[11px] font-semibold opacity-75 ml-1" style={{ color: 'var(--color-text-secondary)' }}>
+                ({dailyNutrition.totalMeals} meals across {dailyNutrition.activeDays} {dailyNutrition.activeDays === 1 ? 'day' : 'days'})
+              </span>
+            )}
           </div>
 
           {canViewMacros ? (
             <div 
-              className="flex items-center gap-1.5 border text-xs font-bold px-3 py-1.5 rounded-xl shadow-xs"
+              className="flex items-center gap-1.5 border text-xs font-bold px-3 py-1.5 rounded-xl shadow-xs self-start sm:self-auto"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-emerald)',
                 color: 'var(--color-emerald)'
               }}
             >
-              <Check className="h-3.5 w-3.5" />
+              <Activity className="h-3.5 w-3.5" />
               <span>{t('macrosUnlocked', 'Macros Active')}</span>
             </div>
           ) : (
             <Link
               href="/subscriptions"
-              className="flex items-center gap-1.5 border font-bold text-xs px-3 py-1.5 rounded-xl transition cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
+              className="flex items-center gap-1.5 border font-bold text-xs px-3 py-1.5 rounded-xl transition cursor-pointer shadow-xs hover:border-[var(--color-primary)] self-start sm:self-auto"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
@@ -1099,25 +1130,25 @@ export default function PlannerPage() {
           <div>
             <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('calories', 'Calories')}</span>
             <span className={`text-xl font-black ${!canViewMacros ? 'blur-[4px] select-none' : ''}`} style={{ color: 'var(--color-text)' }}>
-              {dailyNutrition.calories ? `${dailyNutrition.calories} kcal` : '—'}
+              {dailyNutrition.calories > 0 ? `${dailyNutrition.calories} kcal` : '—'}
             </span>
           </div>
           <div>
             <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('protein', 'Protein')}</span>
             <span className={`text-xl font-black ${!canViewMacros ? 'blur-[4px] select-none' : ''}`} style={{ color: 'var(--color-text)' }}>
-              {dailyNutrition.protein ? `${dailyNutrition.protein}g` : '—'}
+              {dailyNutrition.protein > 0 ? `${dailyNutrition.protein}g` : '—'}
             </span>
           </div>
           <div>
             <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('carbs', 'Carbs')}</span>
             <span className={`text-xl font-black ${!canViewMacros ? 'blur-[4px] select-none' : ''}`} style={{ color: 'var(--color-text)' }}>
-              {dailyNutrition.carbs ? `${dailyNutrition.carbs}g` : '—'}
+              {dailyNutrition.carbs > 0 ? `${dailyNutrition.carbs}g` : '—'}
             </span>
           </div>
           <div>
             <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('fat', 'Fat')}</span>
             <span className={`text-xl font-black ${!canViewMacros ? 'blur-[4px] select-none' : ''}`} style={{ color: 'var(--color-text)' }}>
-              {dailyNutrition.fat ? `${dailyNutrition.fat}g` : '—'}
+              {dailyNutrition.fat > 0 ? `${dailyNutrition.fat}g` : '—'}
             </span>
           </div>
         </div>
@@ -1348,7 +1379,10 @@ export default function PlannerPage() {
                           <h3 className="text-sm font-bold leading-snug truncate" style={{ color: 'var(--color-text)' }}>
                             {meal.recipeName}
                           </h3>
-                          {meal.time && <span className="text-[11px] flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>⏰ {meal.time}</span>}
+                          <div className="flex items-center gap-2 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                            {meal.time && <span>⏰ {meal.time}</span>}
+                            <span>• {meal.servings || 2} {t('servingsLabel', 'servings')}</span>
+                          </div>
                         </div>
                       </div>
 
@@ -1692,37 +1726,45 @@ export default function PlannerPage() {
                 </div>
               </div>
 
-              <div>
-                <label 
-                  className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {t('timeLabel', 'Time')}
-                </label>
-                <div className="relative flex items-center">
-                  <Clock className="h-4 w-4 absolute left-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                    {t('timeLabel', 'Time')}
+                  </label>
+                  <div className="relative flex items-center">
+                    <Clock className="h-4 w-4 absolute left-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
+                    <input
+                      type="time"
+                      value={mealTime}
+                      onChange={(e) => setMealTime(e.target.value)}
+                      autoComplete="off"
+                      className="w-full border rounded-lg pl-9 pr-3 py-2 text-xs outline-none"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                      placeholder="--:--"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                    {t('servings', 'Servings')}
+                  </label>
                   <input
-                    type="time"
-                    value={mealTime}
-                    onChange={(e) => setMealTime(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddMealSubmit();
-                      }
-                    }}
-                    autoComplete="off"
-                    className="w-full border rounded-lg pl-9 pr-9 py-2 text-xs outline-none"
+                    type="number"
+                    min="1"
+                    max="30"
+                    value={mealServings}
+                    onChange={(e) => setMealServings(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-full border rounded-lg px-3 py-2 text-xs outline-none font-bold"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-text)'
                     }}
-                    placeholder="--:--"
-                  />
-                  <Clock 
-                    className="h-4 w-4 absolute right-3 pointer-events-none" 
-                    style={{ color: 'var(--color-primary)' }}
                   />
                 </div>
               </div>
@@ -1918,12 +1960,6 @@ export default function PlannerPage() {
                   type="date"
                   value={editDate}
                   onChange={(e) => setEditDate(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleEditMealSubmit();
-                    }
-                  }}
                   autoComplete="off"
                   className="w-full border rounded-lg px-3 py-2 text-xs font-semibold outline-none cursor-pointer"
                   style={{
@@ -1963,36 +1999,44 @@ export default function PlannerPage() {
                 </div>
               </div>
 
-              <div>
-                <label 
-                  className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {t('timeLabel', 'Time')}
-                </label>
-                <div className="relative flex items-center">
-                  <Clock className="h-4 w-4 absolute left-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                    {t('timeLabel', 'Time')}
+                  </label>
+                  <div className="relative flex items-center">
+                    <Clock className="h-4 w-4 absolute left-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
+                    <input
+                      type="time"
+                      value={editMealTime}
+                      onChange={(e) => setEditMealTime(e.target.value)}
+                      autoComplete="off"
+                      className="w-full border rounded-lg pl-9 pr-3 py-2 text-xs outline-none"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                    {t('servings', 'Servings')}
+                  </label>
                   <input
-                    type="time"
-                    value={editMealTime}
-                    onChange={(e) => setEditMealTime(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleEditMealSubmit();
-                      }
-                    }}
-                    autoComplete="off"
-                    className="w-full border rounded-lg pl-9 pr-9 py-2 text-xs outline-none"
+                    type="number"
+                    min="1"
+                    max="30"
+                    value={editServings}
+                    onChange={(e) => setEditServings(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-full border rounded-lg px-3 py-2 text-xs outline-none font-bold"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-text)'
                     }}
-                  />
-                  <Clock 
-                    className="h-4 w-4 absolute right-3 pointer-events-none" 
-                    style={{ color: 'var(--color-primary)' }}
                   />
                 </div>
               </div>
