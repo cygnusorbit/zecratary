@@ -459,34 +459,47 @@ export default function Sidebar() {
       let activeUser = currentUser || user;
       if (!activeUser && typeof window !== 'undefined') {
         try {
-          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user');
+          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser') || localStorage.getItem('zecratary_current_user');
           if (raw) activeUser = JSON.parse(raw);
         } catch (_) {}
         if (!activeUser) activeUser = getCurrentUser();
       }
-      const userEmail = activeUser?.email || 'admin@zecratary.com';
-      const res = await fetch(`/api/wallet?email=${encodeURIComponent(userEmail)}&t=${Date.now()}`, { cache: 'no-store' });
+
+      const userEmail = activeUser?.email || '';
+      const userId = String(activeUser?.id || '');
+
+      const params = new URLSearchParams({
+        email: userEmail,
+        userId: userId,
+        t: String(Date.now())
+      });
+
+      const res = await fetch(`/api/wallet?${params.toString()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
-          if (data.user && typeof data.user.wallet_balance !== 'undefined') {
-            const wBal = parseFloat(data.user.wallet_balance || 0);
-            setWalletBalance(wBal);
-            if (typeof window !== 'undefined') {
-              try {
-                const raw = localStorage.getItem('zecratary_user');
-                if (raw) {
-                  const u = JSON.parse(raw);
-                  u.wallet_balance = wBal;
-                  localStorage.setItem('zecratary_user', JSON.stringify(u));
-                }
-              } catch (_) {}
+          const rawBal = data.wallet_balance ?? data.walletBalance ?? data.balance ?? data.user?.wallet_balance;
+          if (rawBal !== undefined && rawBal !== null) {
+            const wBal = parseFloat(String(rawBal));
+            if (!isNaN(wBal)) {
+              setWalletBalance(wBal);
+              if (typeof window !== 'undefined') {
+                try {
+                  const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
+                  if (raw) {
+                    const u = JSON.parse(raw);
+                    u.wallet_balance = wBal;
+                    u.walletBalance = wBal;
+                    localStorage.setItem('zecratary_user', JSON.stringify(u));
+                  }
+                } catch (_) {}
+              }
             }
           }
-          if (data.settings?.currency) {
-            setWalletCurrency(data.settings.currency);
-            setWalletSymbol(CURRENCY_SYMBOLS[data.settings.currency] || '$');
-          }
+
+          const curr = data.currency || data.settings?.currency || 'USD';
+          setWalletCurrency(curr);
+          setWalletSymbol(CURRENCY_SYMBOLS[curr.toUpperCase()] || data.walletSymbol || '$');
         }
       }
     } catch (_) {}
@@ -589,7 +602,14 @@ export default function Sidebar() {
       const u = getCurrentUser();
       fetchUserTokenAndNotifications(u);
     };
-    const handleWalletSync = () => {
+    const handleWalletSync = (e?: any) => {
+      if (e?.detail) {
+        const b = e.detail.wallet_balance ?? e.detail.walletBalance ?? e.detail.balance;
+        if (b !== undefined && b !== null) {
+          const parsed = parseFloat(String(b));
+          if (!isNaN(parsed)) setWalletBalance(parsed);
+        }
+      }
       const u = getCurrentUser();
       fetchWalletData(u);
     };
@@ -645,6 +665,21 @@ export default function Sidebar() {
     window.addEventListener('zecratary_token_settings_updated', handleTokenSync);
     window.addEventListener('zecratary_tokens_updated', handleTokenSync);
     window.addEventListener('zecratary_wallet_updated', handleWalletSync);
+    window.addEventListener('focus', () => fetchWalletData());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') fetchWalletData();
+    });
+    let balanceChannel: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        balanceChannel = new BroadcastChannel('zecratary_balance_channel');
+        balanceChannel.onmessage = (msg) => {
+          if (msg.data?.wallet_balance !== undefined) {
+            setWalletBalance(parseFloat(String(msg.data.wallet_balance)));
+          }
+        };
+      } catch (_) {}
+    }
     window.addEventListener('zecratary_wallet_settings_updated', handleWalletSync);
     window.addEventListener('zecratary_new_notification', handleNewNotification);
     window.addEventListener('zecratary_notification_settings_updated', handleNotifSettingsUpdated);
@@ -832,7 +867,7 @@ export default function Sidebar() {
             >
               <Wallet className="h-3.5 w-3.5 text-[var(--color-primary)]" />
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
-                {walletSymbol}{mounted ? walletBalance.toFixed(0) : '0'}
+                {walletSymbol}{mounted ? Number(walletBalance || 0).toFixed(2) : '0.00'}
               </span>
             </Link>
             <Link
