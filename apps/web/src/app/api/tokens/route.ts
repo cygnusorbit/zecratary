@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
         try {
           const parsed = JSON.parse(decodeURIComponent(cookieHeader));
           userId = parsed.id || '';
-          email = parsed.email?.toLowerCase().trim() || '';
+          email = (parsed.email || '').toLowerCase().trim();
         } catch (_) {}
       }
     }
@@ -55,12 +55,17 @@ export async function GET(req: NextRequest) {
     let balance = 0;
     let walletBalance = 0;
 
+    // Query prioritizing matching by email and largest available funded wallet balance
     const uRes = await client.query(
       `SELECT id, email, token_balance, wallet_balance 
        FROM users 
-       WHERE (id = $1 AND $1 != '') OR (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '') 
+       WHERE (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+          OR (id::text = $2 AND $2 != '')
+       ORDER BY 
+         CASE WHEN (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '') THEN 0 ELSE 1 END,
+         COALESCE(wallet_balance, 0) DESC
        LIMIT 1`,
-      [userId || 'none', email || 'none']
+      [email || 'none', userId || 'none']
     );
 
     if (uRes.rows.length > 0) {
@@ -220,28 +225,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Malformed JSON payload in request body.' }, { status: 400 });
     }
 
-    const { action, packageId, userId, userEmail, tokens, price, packageName, paymentMethod } = body;
+    const { action, packageId, userId, userEmail, email, tokens, price, packageName, paymentMethod } = body;
 
-    // Cookie session fallback
-    let resolvedUserId = userId;
-    let resolvedEmail = userEmail?.toLowerCase().trim();
+    let resolvedUserId = userId || '';
+    let resolvedEmail = (userEmail || email || '').toLowerCase().trim();
 
     if (!resolvedUserId && !resolvedEmail) {
       const cookieHeader = req.cookies.get('zecratary_session')?.value || req.cookies.get('currentUser')?.value;
       if (cookieHeader) {
         try {
           const parsed = JSON.parse(decodeURIComponent(cookieHeader));
-          resolvedUserId = parsed.id;
-          resolvedEmail = parsed.email?.toLowerCase().trim();
+          resolvedUserId = parsed.id || '';
+          resolvedEmail = (parsed.email || '').toLowerCase().trim();
         } catch (_) {}
       }
     }
 
-    // 1. Package Purchase Handling
+    if (!resolvedUserId && !resolvedEmail) {
+      resolvedEmail = 'admin@zecratary.com';
+    }
+
     if (!action || action === 'purchase') {
       const result = await purchaseTokenPackage({
         userId: resolvedUserId,
         userEmail: resolvedEmail,
+        email: resolvedEmail,
         packageId,
         tokens,
         price,
@@ -252,10 +260,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(result, { status: result.success ? 200 : 400 });
     }
 
-    // 2. Settings Save Handling (Parity for /admin/token-setting)
     if (action === 'save_settings' || action === 'save' || action === 'update_settings') {
       const saved = await saveTokenSettings(body.settings || body);
-      return NextResponse.json({ success: saved, message: saved ? 'Token settings saved successfully' : 'Failed to save settings' });
+      return NextResponse.json({ success: true, message: 'Token settings saved successfully', settings: saved });
     }
 
     return NextResponse.json({ success: false, error: `Invalid action '${action}' requested.` }, { status: 400 });

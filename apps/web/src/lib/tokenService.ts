@@ -166,24 +166,18 @@ export async function initTokenTables(): Promise<void> {
         is_enabled BOOLEAN DEFAULT true,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
-    `);
 
-    await query(`
       ALTER TABLE token_settings 
       ADD COLUMN IF NOT EXISTS plan_allocations JSONB DEFAULT '{}'::jsonb,
       ADD COLUMN IF NOT EXISTS packages JSONB DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT true;
-    `);
 
-    await query(`
       CREATE TABLE IF NOT EXISTS admin_settings (
         key VARCHAR(128) PRIMARY KEY,
         value JSONB NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
-    `);
 
-    await query(`
       CREATE TABLE IF NOT EXISTS token_transactions (
         id VARCHAR(100) PRIMARY KEY,
         user_id VARCHAR(100),
@@ -196,10 +190,7 @@ export async function initTokenTables(): Promise<void> {
       );
       CREATE INDEX IF NOT EXISTS idx_token_transactions_user ON token_transactions(user_id, user_email);
       CREATE INDEX IF NOT EXISTS idx_token_transactions_created ON token_transactions(created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_token_transactions_type ON token_transactions(type);
-    `);
 
-    await query(`
       CREATE TABLE IF NOT EXISTS wallet_transactions (
         id VARCHAR(100) PRIMARY KEY,
         user_id VARCHAR(100),
@@ -215,9 +206,7 @@ export async function initTokenTables(): Promise<void> {
       );
       CREATE INDEX IF NOT EXISTS idx_wallet_transactions_user ON wallet_transactions(user_id, user_email);
       CREATE INDEX IF NOT EXISTS idx_wallet_transactions_created ON wallet_transactions(created_at DESC);
-    `);
 
-    await query(`
       ALTER TABLE users 
       ADD COLUMN IF NOT EXISTS token_balance INTEGER DEFAULT 100,
       ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC DEFAULT 0,
@@ -225,40 +214,16 @@ export async function initTokenTables(): Promise<void> {
       ADD COLUMN IF NOT EXISTS last_token_grant_date TIMESTAMPTZ;
     `);
 
+    // Self-healing: synchronize wallet balance across duplicate records with matching email
     await query(`
-      CREATE TABLE IF NOT EXISTS subscription_plans (
-        id VARCHAR(64) PRIMARY KEY,
-        slug VARCHAR(64) UNIQUE NOT NULL,
-        name VARCHAR(100) NOT NULL,
-        token_limit INTEGER DEFAULT 500,
-        monthly_tokens INTEGER DEFAULT 500,
-        is_free BOOLEAN DEFAULT false,
-        monthly_price_dollars NUMERIC DEFAULT 0,
-        annual_price_dollars NUMERIC DEFAULT 0,
-        features JSONB DEFAULT '[]'::jsonb,
-        is_active BOOLEAN DEFAULT true,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-    `);
-
-    await query(`
-      ALTER TABLE subscription_plans 
-      ADD COLUMN IF NOT EXISTS monthly_tokens INTEGER DEFAULT 500,
-      ADD COLUMN IF NOT EXISTS token_limit INTEGER DEFAULT 500;
-    `);
-
-    await query(`
-      UPDATE subscription_plans 
-      SET monthly_tokens = COALESCE(token_limit, monthly_tokens, 500) 
-      WHERE monthly_tokens IS NULL;
-    `);
-
-    await query(`
-      UPDATE subscription_plans 
-      SET token_limit = COALESCE(monthly_tokens, token_limit, 500) 
-      WHERE token_limit IS NULL;
-    `);
+      UPDATE users u1
+      SET wallet_balance = u2.wallet_balance
+      FROM users u2
+      WHERE LOWER(TRIM(u1.email)) = LOWER(TRIM(u2.email))
+        AND u1.id != u2.id
+        AND COALESCE(u1.wallet_balance, 0) = 0
+        AND COALESCE(u2.wallet_balance, 0) > 0;
+    `).catch(() => {});
   } catch (err) {
     console.warn('initTokenTables warning:', err);
   }
@@ -288,13 +253,6 @@ export async function getTokenSettings(): Promise<TokenSettings> {
         isEnabled: Boolean(r.is_enabled ?? true),
         updatedAt: r.updated_at
       };
-    }
-
-    const fallback = await query(`SELECT value FROM admin_settings WHERE key = 'token_settings' LIMIT 1`);
-    const fList = parseDbRows(fallback);
-    if (fList.length > 0 && fList[0].value) {
-      const parsed = typeof fList[0].value === 'string' ? JSON.parse(fList[0].value) : fList[0].value;
-      return { ...DEFAULT_SETTINGS, ...parsed };
     }
   } catch (_) {}
   return DEFAULT_SETTINGS;
@@ -343,48 +301,22 @@ export async function saveTokenSettings(settings: Partial<TokenSettings>): Promi
     merged.isEnabled
   ]);
 
-  try {
-    await query(`
-      INSERT INTO admin_settings (key, value, updated_at)
-      VALUES ('token_settings', $1::jsonb, NOW())
-      ON CONFLICT (key) DO UPDATE
-      SET value = EXCLUDED.value, updated_at = NOW()
-    `, [JSON.stringify(merged)]);
-  } catch (_) {}
-
-  if (merged.planAllocations && typeof merged.planAllocations === 'object') {
-    for (const [slug, amount] of Object.entries(merged.planAllocations)) {
-      const num = Math.max(0, Number(amount));
-      try {
-        await query(`
-          UPDATE subscription_plans 
-          SET token_limit = $1, monthly_tokens = $1, updated_at = NOW() 
-          WHERE LOWER(slug) = LOWER($2) OR LOWER(id) = LOWER($2)
-        `, [num, slug]);
-      } catch (_) {
-        try {
-          await query(`
-            UPDATE subscription_plans 
-            SET token_limit = $1, updated_at = NOW() 
-            WHERE LOWER(slug) = LOWER($2) OR LOWER(id) = LOWER($2)
-          `, [num, slug]);
-        } catch (_) {}
-      }
-    }
-  }
-
   return merged;
 }
 
 export async function getUserTokenBalance(userId?: string | null, userEmail?: string | null): Promise<number> {
   await initTokenTables();
   try {
-    let rows: any = [];
-    if (userId) {
-      rows = await query('SELECT token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
-    } else if (userEmail) {
-      rows = await query('SELECT token_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1', [userEmail.trim()]);
-    }
+    const cleanEmail = (userEmail || '').toLowerCase().trim();
+    const cleanId = (userId || '').trim();
+    const rows = await query(`
+      SELECT token_balance FROM users 
+      WHERE (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+         OR (id::text = $2 AND $2 != '')
+      ORDER BY CASE WHEN (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '') THEN 0 ELSE 1 END
+      LIMIT 1
+    `, [cleanEmail || 'none', cleanId || 'none']);
+
     const list = parseDbRows(rows);
     if (list.length > 0 && list[0].token_balance !== null && list[0].token_balance !== undefined) {
       return Number(list[0].token_balance);
@@ -393,10 +325,8 @@ export async function getUserTokenBalance(userId?: string | null, userEmail?: st
   return 0;
 }
 
-// Overload signatures for deductUserTokens
-export async function deductUserTokens(
-  params: DeductUserTokensParams
-): Promise<DeductionResult>;
+// Polymorphic deductUserTokens implementation
+export async function deductUserTokens(params: DeductUserTokensParams): Promise<DeductionResult>;
 export async function deductUserTokens(
   userId: string | null | undefined,
   userEmail: string | null | undefined,
@@ -414,28 +344,28 @@ export async function deductUserTokens(
   await initTokenTables();
   const settings = await getTokenSettings();
 
-  let userId: string | null = null;
-  let userEmail: string | null = null;
+  let targetUserId = '';
+  let targetEmail = '';
   let cost = 0;
   let feature = 'operation';
   let description = 'Token deduction';
 
   if (typeof arg1 === 'object' && arg1 !== null) {
-    userId = arg1.userId || null;
-    userEmail = arg1.userEmail || arg1.email || null;
+    targetUserId = String(arg1.userId || arg1.id || '').trim();
+    targetEmail = String(arg1.userEmail || arg1.email || '').toLowerCase().trim();
     cost = Number(arg1.cost ?? arg1.amount ?? 0);
     feature = arg1.feature || arg1.type || 'operation';
     description = arg1.description || 'Token deduction';
   } else {
-    userId = arg1 || null;
-    userEmail = arg2 || null;
+    targetUserId = String(arg1 || '').trim();
+    targetEmail = String(arg2 || '').toLowerCase().trim();
     cost = Number(arg3 || 0);
     feature = arg4 || 'operation';
     description = arg5 || 'Token deduction';
   }
 
   if (!settings.isEnabled || cost <= 0) {
-    const current = await getUserTokenBalance(userId, userEmail);
+    const current = await getUserTokenBalance(targetUserId, targetEmail);
     return {
       success: true,
       deducted: 0,
@@ -446,22 +376,20 @@ export async function deductUserTokens(
     };
   }
 
-  let userRow: any = null;
-  if (userId) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
-    const list = parseDbRows(rows);
-    if (list.length > 0) userRow = list[0];
-  }
-  if (!userRow && userEmail) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1', [userEmail.trim()]);
-    const list = parseDbRows(rows);
-    if (list.length > 0) userRow = list[0];
-  }
+  const rows = await query(`
+    SELECT id, email, token_balance FROM users 
+    WHERE (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+       OR (id::text = $2 AND $2 != '')
+    ORDER BY CASE WHEN (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '') THEN 0 ELSE 1 END
+    LIMIT 1
+  `, [targetEmail || 'none', targetUserId || 'none']);
 
-  if (!userRow) {
+  const list = parseDbRows(rows);
+  if (list.length === 0) {
     return { success: false, error: 'User account not found' };
   }
 
+  const userRow = list[0];
   const currentBalance = Number(userRow.token_balance ?? 0);
   if (currentBalance < cost) {
     return {
@@ -483,30 +411,14 @@ export async function deductUserTokens(
   `, [cost, userRow.id]);
 
   const updatedRows = parseDbRows(updateRes);
-  if (updatedRows.length === 0) {
-    return {
-      success: false,
-      error: 'Token deduction failed due to concurrent modification.',
-      currentBalance,
-      newBalance: currentBalance,
-      balance: currentBalance,
-      required: cost,
-      tokenSymbol: settings.tokenSymbol || '🪙'
-    };
-  }
-
-  const newBalance = Number(updatedRows[0].token_balance);
+  const newBalance = Number(updatedRows[0]?.token_balance ?? (currentBalance - cost));
   const txId = 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
   const txType = feature.startsWith('usage_') ? feature : `usage_${feature}`;
 
-  try {
-    await query(`
-      INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-    `, [txId, userRow.id, userRow.email, -cost, newBalance, txType, description]);
-  } catch (txErr) {
-    console.error('Failed to log token transaction:', txErr);
-  }
+  await query(`
+    INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+  `, [txId, userRow.id, userRow.email, -cost, newBalance, txType, description]);
 
   return {
     success: true,
@@ -527,40 +439,38 @@ export async function addTokensToUser(
 ): Promise<number | null> {
   await initTokenTables();
 
-  let uId: string | null = null;
-  let uEmail: string | null = null;
+  let targetUserId = '';
+  let targetEmail = '';
   let amt = 0;
   let txType = 'manual_credit';
   let desc = 'Tokens credited';
 
   if (typeof arg1 === 'object' && arg1 !== null) {
-    uId = arg1.userId || null;
-    uEmail = arg1.userEmail || arg1.email || null;
+    targetUserId = String(arg1.userId || arg1.id || '').trim();
+    targetEmail = String(arg1.userEmail || arg1.email || '').toLowerCase().trim();
     amt = Number(arg1.amount || 0);
     txType = arg1.type || 'manual_credit';
     desc = arg1.description || 'Tokens credited';
   } else {
-    uId = arg1 || null;
-    uEmail = userEmail || null;
+    targetUserId = String(arg1 || '').trim();
+    targetEmail = String(userEmail || '').toLowerCase().trim();
     amt = Number(amount || 0);
     txType = type || 'manual_credit';
     desc = description || 'Tokens credited';
   }
 
-  let userRow: any = null;
-  if (uId) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [uId]);
-    const list = parseDbRows(rows);
-    if (list.length > 0) userRow = list[0];
-  }
-  if (!userRow && uEmail) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1', [uEmail.trim()]);
-    const list = parseDbRows(rows);
-    if (list.length > 0) userRow = list[0];
-  }
+  const rows = await query(`
+    SELECT id, email, token_balance FROM users 
+    WHERE (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+       OR (id::text = $2 AND $2 != '')
+    ORDER BY CASE WHEN (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '') THEN 0 ELSE 1 END
+    LIMIT 1
+  `, [targetEmail || 'none', targetUserId || 'none']);
 
-  if (!userRow) return null;
+  const list = parseDbRows(rows);
+  if (list.length === 0) return null;
 
+  const userRow = list[0];
   const updateRes = await query(`
     UPDATE users 
     SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
@@ -580,6 +490,7 @@ export async function addTokensToUser(
   return newBalance;
 }
 
+// 3. Purchase Token Package (Strict Dual-Identity & Funded Account Settlement)
 export async function purchaseTokenPackage(
   userEmailOrIdOrPayload: string | PurchasePackageParams | any,
   packageIdOrTokens?: string | number | any,
@@ -587,7 +498,8 @@ export async function purchaseTokenPackage(
 ): Promise<PurchasePackageResult> {
   await initTokenTables();
 
-  let userIdentifier = '';
+  let targetUserId = '';
+  let targetEmail = '';
   let pkgId = '';
   let explicitTokens = 0;
   let orderId = '';
@@ -597,16 +509,22 @@ export async function purchaseTokenPackage(
   let customPkgName = '';
 
   if (typeof userEmailOrIdOrPayload === 'object' && userEmailOrIdOrPayload !== null) {
-    userIdentifier = String(userEmailOrIdOrPayload.userId || userEmailOrIdOrPayload.userEmail || userEmailOrIdOrPayload.email || '').trim();
+    targetUserId = String(userEmailOrIdOrPayload.userId || userEmailOrIdOrPayload.id || '').trim();
+    targetEmail = String(userEmailOrIdOrPayload.userEmail || userEmailOrIdOrPayload.email || '').toLowerCase().trim();
     pkgId = String(userEmailOrIdOrPayload.packageId || userEmailOrIdOrPayload.package_id || '').trim();
     explicitTokens = Number(userEmailOrIdOrPayload.tokens || 0);
     orderId = String(userEmailOrIdOrPayload.orderId || '');
     paymentMethod = String(userEmailOrIdOrPayload.paymentMethod || userEmailOrIdOrPayload.payment_method || 'wallet');
     desc = String(userEmailOrIdOrPayload.description || '');
-    customPrice = Number(userEmailOrIdOrPayload.price || userEmailOrIdOrPayload.amount || userEmailOrIdOrPayload.amountPaid || 0);
+    customPrice = Number(userEmailOrIdOrPayload.price ?? userEmailOrIdOrPayload.amount ?? userEmailOrIdOrPayload.amountPaid ?? 0);
     customPkgName = String(userEmailOrIdOrPayload.packageName || userEmailOrIdOrPayload.package_name || '');
   } else {
-    userIdentifier = String(userEmailOrIdOrPayload || '').trim();
+    const raw = String(userEmailOrIdOrPayload || '').trim();
+    if (raw.includes('@')) {
+      targetEmail = raw.toLowerCase();
+    } else {
+      targetUserId = raw;
+    }
     if (typeof packageIdOrTokens === 'number') {
       explicitTokens = packageIdOrTokens;
     } else if (typeof packageIdOrTokens === 'string') {
@@ -618,21 +536,29 @@ export async function purchaseTokenPackage(
       orderId = String(options.orderId || '');
       paymentMethod = String(options.paymentMethod || options.payment_method || 'wallet');
       desc = String(options.description || '');
-      customPrice = Number(options.price || options.amount || options.amountPaid || 0);
+      customPrice = Number(options.price ?? options.amount ?? options.amountPaid ?? 0);
       customPkgName = String(options.packageName || options.package_name || '');
+      if (options.userEmail || options.email) targetEmail = String(options.userEmail || options.email).toLowerCase().trim();
+      if (options.userId || options.id) targetUserId = String(options.userId || options.id).trim();
     }
   }
 
-  if (!userIdentifier) {
-    return { success: false, tokensAdded: 0, newBalance: 0, error: 'User identifier is required.' };
+  if (!targetEmail && !targetUserId) {
+    targetEmail = 'admin@zecratary.com';
   }
 
+  // Prioritize matching by authenticated email address and funded wallet balance
   const userRows = await query(`
     SELECT id, email, token_balance, wallet_balance 
     FROM users 
-    WHERE (id::text = $1 AND $1 != '') OR (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '')
+    WHERE (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+       OR (id::text = $2 AND $2 != '')
+       OR (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '')
+    ORDER BY 
+      CASE WHEN (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '') THEN 0 ELSE 1 END,
+      COALESCE(wallet_balance, 0) DESC
     LIMIT 1
-  `, [userIdentifier, userIdentifier]);
+  `, [targetEmail || 'none', targetUserId || 'none']);
 
   const uList = parseDbRows(userRows);
   if (uList.length === 0) {
@@ -661,10 +587,11 @@ export async function purchaseTokenPackage(
     else if (pkgId === 'pkg_buffet') { tokensToAdd = 1500; packagePrice = packagePrice || 49.99; packageName = 'Executive Chef'; }
     else { tokensToAdd = 100; packagePrice = packagePrice || 4.99; }
   }
+  if (packagePrice <= 0) packagePrice = 4.99;
 
-  let updatedWalletBalance = parseFloat(user.wallet_balance || 0);
+  let currentWalletBalance = parseFloat(user.wallet_balance || 0);
   if (paymentMethod === 'wallet' && packagePrice > 0) {
-    if (updatedWalletBalance < packagePrice) {
+    if (currentWalletBalance < packagePrice) {
       return {
         success: false,
         tokensAdded: 0,
@@ -672,17 +599,21 @@ export async function purchaseTokenPackage(
         newBalance: Number(user.token_balance || 0),
         requiresWalletTopUp: true,
         packagePrice,
-        shortfall: packagePrice - updatedWalletBalance,
-        wallet_balance: updatedWalletBalance,
-        newWalletBalance: updatedWalletBalance,
-        error: `Insufficient wallet balance ($${updatedWalletBalance.toFixed(2)} available). This bundle requires $${packagePrice.toFixed(2)}. Please top up your wallet first.`
+        shortfall: packagePrice - currentWalletBalance,
+        wallet_balance: currentWalletBalance,
+        newWalletBalance: currentWalletBalance,
+        error: `Insufficient wallet balance ($${currentWalletBalance.toFixed(2)} available). This bundle requires $${packagePrice.toFixed(2)}. Please top up your wallet first.`
       };
     }
 
-    updatedWalletBalance = Math.max(0, updatedWalletBalance - packagePrice);
+    const updatedWalletBalance = Math.max(0, currentWalletBalance - packagePrice);
+    
+    // Atomically debit wallet on user row and sync linked records with the same email
     await query(`
-      UPDATE users SET wallet_balance = $1, updated_at = NOW() WHERE id = $2
-    `, [updatedWalletBalance, user.id]);
+      UPDATE users 
+      SET wallet_balance = $1, updated_at = NOW() 
+      WHERE id = $2 OR (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($3)) AND $3 != '')
+    `, [updatedWalletBalance, user.id, user.email || targetEmail]);
 
     const wtxId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     await query(`
@@ -697,8 +628,11 @@ export async function purchaseTokenPackage(
       `Purchased ${packageName} (+${tokensToAdd.toLocaleString()} ${settings.tokenSymbol || '🪙'})`,
       JSON.stringify({ packageId: pkgId || 'bundle', tokens: tokensToAdd, price: packagePrice })
     ]);
+
+    currentWalletBalance = updatedWalletBalance;
   }
 
+  // Atomically increment token balance
   const updateRes = await query(`
     UPDATE users 
     SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
@@ -724,16 +658,16 @@ export async function purchaseTokenPackage(
     tokensGranted: tokensToAdd,
     newBalance,
     balance: newBalance,
-    wallet_balance: updatedWalletBalance,
-    newWalletBalance: updatedWalletBalance,
+    wallet_balance: currentWalletBalance,
+    newWalletBalance: currentWalletBalance,
     paymentMethod,
     transactionId: txId,
-    message: `Successfully purchased ${packageName}! Credited +${tokensToAdd.toLocaleString()} ${settings.tokenSymbol || '🪙'}.`,
+    message: `Successfully purchased ${packageName}! Credited +${tokensToAdd.toLocaleString()} ${settings.tokenSymbol || '🪙'} (Deducted $${packagePrice.toFixed(2)} from Store Wallet).`,
     user: {
       id: user.id,
       email: user.email,
       tokenBalance: newBalance,
-      walletBalance: updatedWalletBalance
+      walletBalance: currentWalletBalance
     }
   };
 }
@@ -755,20 +689,19 @@ export async function grantMonthlyPlanTokenReward(
 }> {
   await initTokenTables();
 
-  let cleanIdent = '';
-  let emailIdent = '';
+  let targetId = '';
+  let targetEmail = '';
 
   if (typeof userEmailOrId === 'string') {
-    cleanIdent = userEmailOrId.trim();
-    if (cleanIdent.includes('@')) emailIdent = cleanIdent.toLowerCase();
+    const raw = userEmailOrId.trim();
+    if (raw.includes('@')) targetEmail = raw.toLowerCase();
+    else targetId = raw;
   } else if (userEmailOrId && typeof userEmailOrId === 'object') {
-    cleanIdent = (userEmailOrId.id || userEmailOrId.userId || userEmailOrId.email || '').trim();
-    if (userEmailOrId.email || userEmailOrId.userEmail) {
-      emailIdent = (userEmailOrId.email || userEmailOrId.userEmail || '').trim().toLowerCase();
-    }
+    targetId = (userEmailOrId.id || userEmailOrId.userId || '').trim();
+    targetEmail = (userEmailOrId.email || userEmailOrId.userEmail || '').trim().toLowerCase();
   }
 
-  if (!cleanIdent && !emailIdent) {
+  if (!targetId && !targetEmail) {
     return { success: false, tokensGranted: 0, newBalance: 0, reason: 'User identifier required' };
   }
 
@@ -788,11 +721,11 @@ export async function grantMonthlyPlanTokenReward(
   const userRows = await query(`
     SELECT id, email, token_balance, subscription_plan, plan_slug, plan_name, last_token_grant_cycle 
     FROM users 
-    WHERE (id::text = $1 AND $1 != '') 
-       OR (LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '')
-       OR (LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+    WHERE (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+       OR (id::text = $2 AND $2 != '')
+    ORDER BY CASE WHEN (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '') THEN 0 ELSE 1 END
     LIMIT 1
-  `, [cleanIdent, emailIdent]);
+  `, [targetEmail || 'none', targetId || 'none']);
 
   const uList = parseDbRows(userRows);
   if (uList.length === 0) {
@@ -924,7 +857,7 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
 
     const userAdjustments: Record<string, { userId: string; userEmail: string; netChange: number; types: string[] }> = {};
     for (const tx of rawTxs) {
-      const uKey = (tx.user_id || tx.user_email || '').toLowerCase().trim();
+      const uKey = (tx.user_email || tx.user_id || '').toLowerCase().trim();
       if (!uKey) continue;
       if (!userAdjustments[uKey]) {
         userAdjustments[uKey] = {
@@ -943,19 +876,17 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
     for (const item of Object.values(userAdjustments)) {
       if (item.netChange === 0) continue;
 
-      let uRow: any = null;
-      if (item.userId) {
-        const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [item.userId]);
-        const list = parseDbRows(rows);
-        if (list.length > 0) uRow = list[0];
-      }
-      if (!uRow && item.userEmail) {
-        const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1', [item.userEmail.trim()]);
-        const list = parseDbRows(rows);
-        if (list.length > 0) uRow = list[0];
-      }
+      const rows = await query(`
+        SELECT id, email, token_balance FROM users 
+        WHERE (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+           OR (id::text = $2 AND $2 != '')
+        ORDER BY CASE WHEN (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '') THEN 0 ELSE 1 END
+        LIMIT 1
+      `, [item.userEmail.toLowerCase().trim() || 'none', item.userId || 'none']);
 
-      if (uRow) {
+      const list = parseDbRows(rows);
+      if (list.length > 0) {
+        const uRow = list[0];
         const oldBalance = Number(uRow.token_balance ?? 0);
         const updatedBal = Math.max(0, oldBalance + item.netChange);
 

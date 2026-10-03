@@ -1,6 +1,6 @@
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.10",
+  "version": "8.1.12",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -13,11 +13,12 @@
     "db:generate": "turbo run db:generate",
     "db:push": "turbo run db:push",
     "worker:dev": "turbo run worker:dev",
-    "postbuild": "node -e \"const fs=require('fs'),path=require('path');const src=path.join('apps','web','.next');if(fs.existsSync(src)){  ['.next','dist','build'].forEach(d=>{    if(!fs.existsSync(d)){try{fs.symlinkSync(src,d,'junction');}catch(e){fs.cpSync(src,d,{recursive:true});}}  });  const saStatic=path.join(src,'standalone','apps','web','.next','static');  const srcStatic=path.join(src,'static');  if(fs.existsSync(srcStatic)&&!fs.existsSync(saStatic)){    try{fs.mkdirSync(path.dirname(saStatic),{recursive:true});fs.cpSync(srcStatic,saStatic,{recursive:true});}catch(e){}  }  const saPublic=path.join(src,'standalone','apps','web','public');  const srcPublic=path.join('apps','web','public');  if(fs.existsSync(srcPublic)&&!fs.existsSync(saPublic)){    try{fs.mkdirSync(path.dirname(saPublic),{recursive:true});fs.cpSync(srcPublic,saPublic,{recursive:true});}catch(e){}  }  console.log('\u2713 Hostinger deployment artifacts bridged successfully.');}\"",
+    "postbuild": "node -e \"const fs=require('fs'),path=require('path');const src=path.join('apps','web','.next');if(fs.existsSync(src)){  ['.next','dist','build'].forEach(d=>{    if(!fs.existsSync(d)){try{fs.symlinkSync(src,d,'junction');}catch(e){fs.cpSync(src,d,{recursive:true});}}  });  const saStatic=path.join(src,'standalone','apps','web','.next','static');  const srcStatic=path.join(src,'static');  if(fs.existsSync(srcStatic)&&!fs.existsSync(saStatic)){    try{fs.mkdirSync(path.dirname(saStatic),{recursive:true});fs.cpSync(srcStatic,saStatic,{recursive:true});}catch(e){}  }  const saPublic=path.join(src,'standalone','apps','web','public');  const srcPublic=path.join('apps','web','public');  if(fs.existsSync(srcPublic)&&!fs.existsSync(saPublic)){    try{fs.mkdirSync(path.dirname(saPublic),{recursive:true});fs.cpSync(srcPublic,saPublic,{recursive:true});}catch(e){}  }  console.log('✓ Hostinger deployment artifacts bridged successfully.');}\"",
     "start:web": "npm run start --workspace=web"
   },
   "devDependencies": {
     "@types/pg": "^8.11.0",
+    "prisma": "^7.10.0",
     "typescript": "^5.7.3"
   },
   "packageManager": "npm@10.8.2",
@@ -27,6 +28,7 @@
     "next": "^16.3.5",
     "pg": "^8.23.0",
     "stripe": "^22.6.2",
+    "tailwindcss": "4.3.3",
     "turbo": "^2.11.6"
   }
 }

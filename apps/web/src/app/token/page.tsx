@@ -17,10 +17,10 @@ import {
   ArrowDownLeft, 
   Wallet, 
   ShieldCheck, 
-  CreditCard,
-  Layers,
-  Clock,
-  ArrowRight
+  CreditCard, 
+  Layers, 
+  Clock, 
+  ArrowRight 
 } from 'lucide-react';
 import { getCurrentUser, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -53,8 +53,12 @@ export default function TokenPage() {
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
-  const [packages, setPackages] = useState<TokenPackage[]>([]);
-  const [selectedPackageId, setSelectedPackageId] = useState<string>('');
+  const [packages, setPackages] = useState<TokenPackage[]>([
+    { id: 'pkg_starter', name: 'Starter Pantry', tokens: 100, price: 4.99, badge: 'Starter' },
+    { id: 'pkg_pro', name: 'Culinary Master', tokens: 500, price: 19.99, badge: 'Popular', isPopular: true },
+    { id: 'pkg_buffet', name: 'Executive Chef', tokens: 1500, price: 49.99, badge: 'Best Value' }
+  ]);
+  const [selectedPackageId, setSelectedPackageId] = useState<string>('pkg_starter');
 
   // Top Up Actions
   const [purchasingPkgId, setPurchasingPkgId] = useState<string | null>(null);
@@ -107,7 +111,7 @@ export default function TokenPage() {
     if (!isSilent) setLoadingTransactions(true);
 
     try {
-      const currentUser = getCurrentUser();
+      const currentUser = getCurrentUser() || user;
       const params = new URLSearchParams({
         page: currentPage.toString(),
         limit: pageSize.toString(),
@@ -137,7 +141,7 @@ export default function TokenPage() {
           setPackages(data.packages);
           setSelectedPackageId(prev => {
             const exists = data.packages.some((p: TokenPackage) => p.id === prev);
-            return exists ? prev : (data.packages[0]?.id || '');
+            return exists ? prev : (data.packages[0]?.id || 'pkg_starter');
           });
         }
 
@@ -159,7 +163,7 @@ export default function TokenPage() {
       if (!isSilent) setLoadingTransactions(false);
       isFetchingRef.current = false;
     }
-  }, [currentPage, pageSize, typeFilter, searchQuery]);
+  }, [currentPage, pageSize, typeFilter, searchQuery, user]);
 
   useEffect(() => {
     fetchTokenData();
@@ -174,7 +178,7 @@ export default function TokenPage() {
     window.addEventListener('zecratary_wallet_updated', handleSync);
 
     const handleStorage = (e: StorageEvent) => {
-      if (!e.key || e.key.includes('token') || e.key.includes('settings')) {
+      if (!e.key || e.key.includes('token') || e.key.includes('wallet') || e.key.includes('user')) {
         fetchTokenData(true);
       }
     };
@@ -183,16 +187,29 @@ export default function TokenPage() {
     const handleFocus = () => fetchTokenData(true);
     window.addEventListener('focus', handleFocus);
 
+    let balanceChannel: BroadcastChannel | null = null;
+    try {
+      balanceChannel = new BroadcastChannel('zecratary_balance_channel');
+      balanceChannel.onmessage = (event) => {
+        if (event.data?.type === 'BALANCE_UPDATED') {
+          if (typeof event.data.tokenBalance === 'number') setTokenBalance(event.data.tokenBalance);
+          if (typeof event.data.walletBalance === 'number') setWalletBalance(event.data.walletBalance);
+          fetchTokenData(true);
+        }
+      };
+    } catch (_) {}
+
     return () => {
       window.removeEventListener('zecratary_tokens_updated', handleSync);
       window.removeEventListener('zecratary_token_settings_updated', handleSync);
       window.removeEventListener('zecratary_wallet_updated', handleSync);
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('focus', handleFocus);
+      if (balanceChannel) balanceChannel.close();
     };
   }, [fetchTokenData]);
 
-  // 3. Purchase Package Handler (Defensive Deserialization & Settlement)
+  // 3. Purchase Package Handler (Atomic Dual-Ledger Settlement)
   const handlePurchase = async (pkgId: string) => {
     const pkg = packages.find(p => p.id === pkgId);
     if (!pkg) return;
@@ -226,6 +243,7 @@ export default function TokenPage() {
           packageName: pkg.name,
           userId: currentUser?.id || null,
           userEmail: currentUser?.email || null,
+          email: currentUser?.email || null,
           paymentMethod: 'wallet'
         })
       });
@@ -254,12 +272,16 @@ export default function TokenPage() {
 
       setTokenBalance(newBal);
 
+      let nextWalletBal = walletBalance;
       if (typeof data.newWalletBalance === 'number') {
+        nextWalletBal = data.newWalletBalance;
         setWalletBalance(data.newWalletBalance);
       } else if (typeof data.wallet_balance === 'number') {
+        nextWalletBal = data.wallet_balance;
         setWalletBalance(data.wallet_balance);
       } else if (walletBalance !== null) {
-        setWalletBalance(prev => Math.max(0, (prev || 0) - price));
+        nextWalletBal = Math.max(0, walletBalance - price);
+        setWalletBalance(nextWalletBal);
       }
 
       setFeedback({
@@ -274,7 +296,7 @@ export default function TokenPage() {
             const u = JSON.parse(raw);
             u.token_balance = newBal;
             u.tokenBalance = newBal;
-            if (typeof data.newWalletBalance === 'number') u.wallet_balance = data.newWalletBalance;
+            if (nextWalletBal !== null) u.wallet_balance = nextWalletBal;
             localStorage.setItem('zecratary_user', JSON.stringify(u));
           }
         } catch (_) {}
@@ -282,6 +304,16 @@ export default function TokenPage() {
         window.dispatchEvent(new Event('zecratary_tokens_updated'));
         window.dispatchEvent(new Event('zecratary_wallet_updated'));
         window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+
+        try {
+          const channel = new BroadcastChannel('zecratary_balance_channel');
+          channel.postMessage({
+            type: 'BALANCE_UPDATED',
+            tokenBalance: newBal,
+            walletBalance: nextWalletBal
+          });
+          channel.close();
+        } catch (_) {}
       }
 
       fetchTokenData(true);
@@ -383,7 +415,7 @@ export default function TokenPage() {
             </div>
           </div>
 
-          {/* Optional Wallet Balance Pill */}
+          {/* Live Wallet Balance Pill */}
           {walletBalance !== null && (
             <div 
               className="flex items-center gap-2 px-4 py-2 rounded-2xl border bg-[var(--color-inner-dark)] shadow-inner"
@@ -480,97 +512,82 @@ export default function TokenPage() {
 
         {/* Dynamic Packages Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
-          {packages.length === 0 ? (
-            <div className="col-span-full py-12 text-center text-xs opacity-60 space-y-2">
-              <Coins className="h-8 w-8 mx-auto opacity-30 text-amber-500" />
-              <p className="font-bold">{t('noPackagesConfigured', 'No token packages available at the moment.')}</p>
-              {isAdmin && (
-                <Link
-                  href="/admin/token-setting"
-                  className="inline-flex items-center gap-1 text-xs font-bold text-amber-500 hover:underline"
-                >
-                  Configure Bundles in /admin/token-setting →
-                </Link>
-              )}
-            </div>
-          ) : (
-            packages.map((pkg) => {
-              const isSelected = selectedPackageId === pkg.id;
-              const isBuying = purchasingPkgId === pkg.id;
-              const isShort = walletBalance !== null && walletBalance < pkg.price;
+          {packages.map((pkg) => {
+            const isSelected = selectedPackageId === pkg.id;
+            const isBuying = purchasingPkgId === pkg.id;
+            const isShort = walletBalance !== null && walletBalance < pkg.price;
 
-              return (
-                <div
-                  key={pkg.id}
-                  onClick={() => setSelectedPackageId(pkg.id)}
-                  className={`relative flex flex-col justify-between p-5 rounded-3xl border transition-all cursor-pointer ${
-                    isSelected 
-                      ? 'border-[var(--color-primary)] ring-2 ring-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 shadow-md' 
-                      : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/40 bg-[var(--color-inner-dark)] hover:shadow-xs'
-                  }`}
-                >
-                  {pkg.badge && (
-                    <div className="absolute top-4 right-4">
-                      <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-500 border border-amber-500/30 shadow-xs">
-                        {pkg.badge}
-                      </span>
+            return (
+              <div
+                key={pkg.id}
+                onClick={() => setSelectedPackageId(pkg.id)}
+                className={`relative flex flex-col justify-between p-5 rounded-3xl border transition-all cursor-pointer ${
+                  isSelected 
+                    ? 'border-[var(--color-primary)] ring-2 ring-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 shadow-md' 
+                    : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/40 bg-[var(--color-inner-dark)] hover:shadow-xs'
+                }`}
+              >
+                {pkg.badge && (
+                  <div className="absolute top-4 right-4">
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-500 border border-amber-500/30 shadow-xs">
+                      {pkg.badge}
+                    </span>
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <div className="pr-12">
+                    <h3 className="text-sm font-black truncate">{pkg.name}</h3>
+                    <div className="flex items-baseline gap-1 mt-1 font-mono">
+                      <span className="text-2xl font-black text-amber-500">+{pkg.tokens.toLocaleString()}</span>
+                      <span className="text-xs font-bold opacity-75">{tokenSymbol}</span>
                     </div>
-                  )}
-
-                  <div className="space-y-3">
-                    <div className="pr-12">
-                      <h3 className="text-sm font-black truncate">{pkg.name}</h3>
-                      <div className="flex items-baseline gap-1 mt-1 font-mono">
-                        <span className="text-2xl font-black text-amber-500">+{pkg.tokens.toLocaleString()}</span>
-                        <span className="text-xs font-bold opacity-75">{tokenSymbol}</span>
-                      </div>
-                    </div>
-
-                    <p className="text-[11px] opacity-70">
-                      Instantly adds <strong className="font-bold">{pkg.tokens.toLocaleString()}</strong> spendable AI tokens to your live wallet.
-                    </p>
                   </div>
 
-                  <div className="pt-4 mt-4 border-t flex items-center justify-between gap-3" style={{ borderColor: 'var(--color-border)' }}>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] uppercase font-bold opacity-60">Price</span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-base font-black font-mono">${Number(pkg.price).toFixed(2)}</span>
-                        {isShort && (
-                          <span className="text-[10px] font-bold text-amber-500 font-mono">
-                            Short ${(Number(pkg.price) - Number(walletBalance)).toFixed(2)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      disabled={Boolean(purchasingPkgId)}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handlePurchase(pkg.id);
-                      }}
-                      className="py-2 px-4 rounded-xl text-xs font-extrabold text-white flex items-center gap-1.5 shadow-md transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
-                      style={{ backgroundColor: 'var(--color-primary)' }}
-                    >
-                      {isBuying ? (
-                        <>
-                          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                          <span>Processing...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Plus className="h-3.5 w-3.5" />
-                          <span>{t('buyNow', 'Buy Now')}</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
+                  <p className="text-[11px] opacity-70">
+                    Instantly adds <strong className="font-bold">{pkg.tokens.toLocaleString()}</strong> spendable AI tokens to your live wallet.
+                  </p>
                 </div>
-              );
-            })
-          )}
+
+                <div className="pt-4 mt-4 border-t flex items-center justify-between gap-3" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] uppercase font-bold opacity-60">Price</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-base font-black font-mono">${Number(pkg.price).toFixed(2)}</span>
+                      {isShort && (
+                        <span className="text-[10px] font-bold text-amber-500 font-mono">
+                          Short ${(Number(pkg.price) - Number(walletBalance)).toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={Boolean(purchasingPkgId)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePurchase(pkg.id);
+                    }}
+                    className="py-2 px-4 rounded-xl text-xs font-extrabold text-white flex items-center gap-1.5 shadow-md transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    {isBuying ? (
+                      <>
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        <span>Processing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>{t('buyNow', 'Buy Now')}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 

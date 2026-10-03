@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.10",
+  "version": "8.1.12",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.10",
+  "version": "8.1.12",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -5983,8 +5983,13 @@ export default function TokenPage() {
       if (currentUser?.email) params.append('email', currentUser.email);
 
       const res = await fetch(`/api/tokens?${params.toString()}`, { cache: 'no-store' });
-      if (!res.ok) throw new Error('Failed to fetch token records');
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (_) {
+        data = {};
+      }
 
       if (data.success) {
         if (typeof data.balance === 'number') setTokenBalance(data.balance);
@@ -5992,8 +5997,7 @@ export default function TokenPage() {
         if (data.tokenSymbol) setTokenSymbol(data.tokenSymbol);
         if (data.tokenName) setTokenName(data.tokenName);
 
-        // Dynamically sync and match packages configured in /admin/token-setting
-        if (Array.isArray(data.packages)) {
+        if (Array.isArray(data.packages) && data.packages.length > 0) {
           setPackages(data.packages);
           setSelectedPackageId(prev => {
             const exists = data.packages.some((p: TokenPackage) => p.id === prev);
@@ -6002,7 +6006,7 @@ export default function TokenPage() {
         }
 
         setTransactions(data.transactions || []);
-        setTotalCount(data.total || 0);
+        setTotalCount(data.total || data.totalCount || 0);
         setTotalPages(data.totalPages || 1);
 
         if (data.stats) {
@@ -6033,7 +6037,6 @@ export default function TokenPage() {
     window.addEventListener('zecratary_token_settings_updated', handleSync);
     window.addEventListener('zecratary_wallet_updated', handleSync);
 
-    // Cross-tab synchronization via storage event
     const handleStorage = (e: StorageEvent) => {
       if (!e.key || e.key.includes('token') || e.key.includes('settings')) {
         fetchTokenData(true);
@@ -6041,7 +6044,6 @@ export default function TokenPage() {
     };
     window.addEventListener('storage', handleStorage);
 
-    // Window focus refresh
     const handleFocus = () => fetchTokenData(true);
     window.addEventListener('focus', handleFocus);
 
@@ -6054,7 +6056,7 @@ export default function TokenPage() {
     };
   }, [fetchTokenData]);
 
-  // 3. Purchase Package Handler (Atomic PostgreSQL Settlement)
+  // 3. Purchase Package Handler (Defensive Deserialization & Settlement)
   const handlePurchase = async (pkgId: string) => {
     const pkg = packages.find(p => p.id === pkgId);
     if (!pkg) return;
@@ -6062,28 +6064,66 @@ export default function TokenPage() {
     setPurchasingPkgId(pkgId);
     setFeedback(null);
 
+    const price = Number(pkg.price) || 0;
+    if (walletBalance !== null && walletBalance < price) {
+      setFeedback({
+        type: 'error',
+        message: t(
+          'insufficientWalletForTokens',
+          `Insufficient wallet balance ($${walletBalance.toFixed(2)} available). This bundle requires $${price.toFixed(2)}. Please top up your wallet first.`
+        )
+      });
+      setPurchasingPkgId(null);
+      return;
+    }
+
     try {
+      const currentUser = getCurrentUser() || user;
       const res = await fetch('/api/tokens', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'purchase',
-          packageId: pkgId,
-          userId: user?.id || null,
-          userEmail: user?.email || null,
+          packageId: pkg.id,
+          tokens: Number(pkg.tokens),
+          price: Number(pkg.price),
+          packageName: pkg.name,
+          userId: currentUser?.id || null,
+          userEmail: currentUser?.email || null,
           paymentMethod: 'wallet'
         })
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to complete token purchase.');
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (_) {
+        throw new Error(
+          res.ok 
+            ? 'Unexpected response from server.' 
+            : `Server returned HTTP ${res.status}${text ? `: ${text.slice(0, 100)}` : ''}`
+        );
       }
 
-      const newBal = typeof data.newBalance === 'number' ? data.newBalance : (tokenBalance + pkg.tokens);
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Failed to complete token purchase.');
+      }
+
+      const newBal = typeof data.newBalance === 'number' 
+        ? data.newBalance 
+        : typeof data.balance === 'number'
+        ? data.balance
+        : (tokenBalance + pkg.tokens);
+
       setTokenBalance(newBal);
-      if (typeof data.walletBalance === 'number') {
-        setWalletBalance(data.walletBalance);
+
+      if (typeof data.newWalletBalance === 'number') {
+        setWalletBalance(data.newWalletBalance);
+      } else if (typeof data.wallet_balance === 'number') {
+        setWalletBalance(data.wallet_balance);
+      } else if (walletBalance !== null) {
+        setWalletBalance(prev => Math.max(0, (prev || 0) - price));
       }
 
       setFeedback({
@@ -6092,6 +6132,17 @@ export default function TokenPage() {
       });
 
       if (typeof window !== 'undefined') {
+        try {
+          const raw = localStorage.getItem('zecratary_user');
+          if (raw) {
+            const u = JSON.parse(raw);
+            u.token_balance = newBal;
+            u.tokenBalance = newBal;
+            if (typeof data.newWalletBalance === 'number') u.wallet_balance = data.newWalletBalance;
+            localStorage.setItem('zecratary_user', JSON.stringify(u));
+          }
+        } catch (_) {}
+
         window.dispatchEvent(new Event('zecratary_tokens_updated'));
         window.dispatchEvent(new Event('zecratary_wallet_updated'));
         window.dispatchEvent(new Event('zecratary_token_settings_updated'));
@@ -6140,7 +6191,7 @@ export default function TokenPage() {
       case 'manual_debit':
         return 'Admin Adjustment';
       default:
-        return type.replace(/_/g, ' ').replace(/\w/g, l => l.toUpperCase());
+        return type.replace(/_/g, ' ').replace(/ \w/g, l => l.toUpperCase());
     }
   };
 
@@ -6250,7 +6301,7 @@ export default function TokenPage() {
         </div>
       )}
 
-      {/* 2. Top-Up Package Catalog (Dynamic Match with /admin/token-setting) */}
+      {/* 2. Top-Up Package Catalog */}
       <div 
         className="p-6 rounded-3xl border shadow-sm space-y-4"
         style={{
@@ -6322,7 +6373,6 @@ export default function TokenPage() {
                       : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/40 bg-[var(--color-inner-dark)] hover:shadow-xs'
                   }`}
                 >
-                  {/* Badge */}
                   {pkg.badge && (
                     <div className="absolute top-4 right-4">
                       <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-500 border border-amber-500/30 shadow-xs">
@@ -6390,7 +6440,6 @@ export default function TokenPage() {
 
       {/* 3. 4-KPI Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI 1: Spendable Balance */}
         <div 
           className="p-5 rounded-3xl border shadow-sm flex items-center gap-4"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -6406,7 +6455,6 @@ export default function TokenPage() {
           </div>
         </div>
 
-        {/* KPI 2: Total Consumed */}
         <div 
           className="p-5 rounded-3xl border shadow-sm flex items-center gap-4"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -6422,7 +6470,6 @@ export default function TokenPage() {
           </div>
         </div>
 
-        {/* KPI 3: Total Granted / Bought */}
         <div 
           className="p-5 rounded-3xl border shadow-sm flex items-center gap-4"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -6438,7 +6485,6 @@ export default function TokenPage() {
           </div>
         </div>
 
-        {/* KPI 4: Total Events */}
         <div 
           className="p-5 rounded-3xl border shadow-sm flex items-center gap-4"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -47172,6 +47218,12 @@ export default function WalletPage() {
 
 ```
 
+## File: `apps/web/src/app/api/token/route.ts`
+```typescript
+export { GET, POST, OPTIONS, dynamic } from '../tokens/route';
+
+```
+
 ## File: `apps/web/src/app/api/pantry/route.ts`
 ```typescript
 import { NextResponse } from 'next/server';
@@ -60091,154 +60143,279 @@ export async function POST(req: Request) {
 ## File: `apps/web/src/app/api/tokens/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
-import { getTokenSettings, deductUserTokens, addTokensToUser } from '@/lib/tokenService';
+import { 
+  getTokenSettings, 
+  saveTokenSettings,
+  getUserTokenBalance, 
+  syncUserMonthlyTokens,
+  purchaseTokenPackage,
+  getPool,
+  initTokenTables
+} from '@/lib/tokenService';
 
 export const dynamic = 'force-dynamic';
 
-async function resolveUserFromReq(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  let rawUserId = searchParams.get('userId')?.trim() || '';
-  let rawEmail = searchParams.get('email')?.trim().toLowerCase() || '';
+export async function GET(req: NextRequest) {
+  let client: any = null;
+  try {
+    await initTokenTables();
+    const pool = getPool();
+    client = await pool.connect();
 
-  if (rawUserId === 'undefined' || rawUserId === 'null') rawUserId = '';
-  if (rawEmail === 'undefined' || rawEmail === 'null') rawEmail = '';
+    const { searchParams } = new URL(req.url);
+    let userId = searchParams.get('userId')?.trim() || '';
+    let email = searchParams.get('email')?.toLowerCase().trim() || '';
+    const search = searchParams.get('search')?.toLowerCase().trim() || '';
+    const type = searchParams.get('type') || 'all';
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '10', 10)));
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
+    const offset = (page - 1) * limit;
 
-  if (!rawUserId && !rawEmail) {
-    const authCookies = ['zecratary_session', 'currentUser', 'zecratary_user'];
-    for (const cName of authCookies) {
-      const cVal = req.cookies.get(cName)?.value;
-      if (cVal) {
+    // Cookie session fallback
+    if (!userId && !email) {
+      const cookieHeader = req.cookies.get('zecratary_session')?.value || req.cookies.get('currentUser')?.value;
+      if (cookieHeader) {
         try {
-          const parsed = JSON.parse(decodeURIComponent(cVal));
-          if (parsed?.id) rawUserId = String(parsed.id);
-          if (parsed?.email) rawEmail = String(parsed.email).toLowerCase();
-          if (rawUserId || rawEmail) break;
+          const parsed = JSON.parse(decodeURIComponent(cookieHeader));
+          userId = parsed.id || '';
+          email = parsed.email?.toLowerCase().trim() || '';
         } catch (_) {}
       }
     }
-  }
 
-  return { userId: rawUserId, email: rawEmail };
-}
-
-export async function GET(req: NextRequest) {
-  try {
-    const { userId, email } = await resolveUserFromReq(req);
-    const tokenSettings = await getTokenSettings();
-    const { searchParams } = new URL(req.url);
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
-    const limit = Math.max(1, parseInt(searchParams.get('limit') || '10', 10));
-    const offset = (page - 1) * limit;
-
-    let userRow: any = null;
-    let tokenBalance = 0;
-    let walletBalance = 0;
+    if (!userId && !email) {
+      email = 'admin@zecratary.com';
+    }
 
     if (userId || email) {
-      const userRes = await query(
-        `SELECT id, email, name, 
-                COALESCE(token_balance, 0) as token_balance, 
-                COALESCE(wallet_balance, 0) as wallet_balance 
-         FROM users 
-         WHERE ($1 != '' AND id::text = $1) 
-            OR ($2 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($2))) 
-         LIMIT 1`,
-        [userId, email]
-      );
-      if (userRes && userRes.length > 0) {
-        userRow = userRes[0];
-        tokenBalance = Number(userRow.token_balance || 0);
-        walletBalance = parseFloat(userRow.wallet_balance || 0);
-      }
+      try {
+        await syncUserMonthlyTokens(userId, email);
+      } catch (_) {}
+    }
+
+    const settings = await getTokenSettings();
+
+    let resolvedUser: any = null;
+    let balance = 0;
+    let walletBalance = 0;
+
+    const uRes = await client.query(
+      `SELECT id, email, token_balance, wallet_balance 
+       FROM users 
+       WHERE (id = $1 AND $1 != '') OR (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '') 
+       LIMIT 1`,
+      [userId || 'none', email || 'none']
+    );
+
+    if (uRes.rows.length > 0) {
+      resolvedUser = uRes.rows[0];
+      balance = Number(resolvedUser.token_balance ?? 0);
+      walletBalance = parseFloat(resolvedUser.wallet_balance ?? 0);
     } else {
-      // Fallback to active admin/first user if available
-      const firstUserRes = await query(
-        `SELECT id, email, name, 
-                COALESCE(token_balance, 0) as token_balance, 
-                COALESCE(wallet_balance, 0) as wallet_balance 
-         FROM users 
-         ORDER BY created_at ASC LIMIT 1`
-      );
-      if (firstUserRes && firstUserRes.length > 0) {
-        userRow = firstUserRes[0];
-        tokenBalance = Number(userRow.token_balance || 0);
-        walletBalance = parseFloat(userRow.wallet_balance || 0);
+      balance = await getUserTokenBalance(userId, email);
+    }
+
+    const userConditions: string[] = [];
+    const params: any[] = [];
+
+    if (resolvedUser?.id) {
+      params.push(resolvedUser.id);
+      userConditions.push(`tt.user_id = $${params.length}`);
+    }
+    if (resolvedUser?.email) {
+      params.push(resolvedUser.email.toLowerCase().trim());
+      userConditions.push(`LOWER(TRIM(tt.user_email)) = $${params.length}`);
+    }
+    if (userId && (!resolvedUser?.id || resolvedUser.id !== userId)) {
+      params.push(userId);
+      userConditions.push(`tt.user_id = $${params.length}`);
+    }
+    if (email && (!resolvedUser?.email || resolvedUser.email.toLowerCase().trim() !== email)) {
+      params.push(email);
+      userConditions.push(`LOWER(TRIM(tt.user_email)) = $${params.length}`);
+    }
+
+    if (userConditions.length === 0) {
+      params.push(email || 'none');
+      userConditions.push(`LOWER(TRIM(tt.user_email)) = $${params.length}`);
+    }
+
+    const whereClauses: string[] = [`(${userConditions.join(' OR ')})`];
+
+    if (search) {
+      params.push(`%${search}%`);
+      whereClauses.push(`(
+        LOWER(COALESCE(tt.description, '')) LIKE $${params.length} OR 
+        LOWER(COALESCE(tt.type, '')) LIKE $${params.length} OR 
+        LOWER(COALESCE(tt.id, '')) LIKE $${params.length}
+      )`);
+    }
+
+    if (type && type !== 'all') {
+      if (type === 'chef') {
+        params.push('usage_chef');
+        whereClauses.push(`tt.type = $${params.length}`);
+      } else if (type === 'import') {
+        whereClauses.push(`tt.type LIKE 'usage_import%'`);
+      } else if (type === 'purchase' || type === 'package_purchase') {
+        whereClauses.push(`(tt.type = 'package_purchase' OR tt.type = 'plan_purchase')`);
+      } else if (type === 'plan_purchase') {
+        params.push('plan_purchase');
+        whereClauses.push(`tt.type = $${params.length}`);
+      } else if (type === 'grant') {
+        params.push('plan_monthly_grant');
+        whereClauses.push(`tt.type = $${params.length}`);
+      } else {
+        params.push(type);
+        whereClauses.push(`tt.type = $${params.length}`);
       }
     }
 
-    // Fetch token transactions ledger if available
-    let transactions: any[] = [];
-    let totalCount = 0;
-    let stats = { totalDeducted: 0, totalGranted: 0, totalEvents: 0 };
+    const whereSql = `WHERE ${whereClauses.join(' AND ')}`;
 
-    try {
-      const txWhere: string[] = [];
-      const txParams: any[] = [];
-      if (userRow?.id) {
-        txParams.push(String(userRow.id));
-        txWhere.push(`user_id::text = $${txParams.length}`);
-      }
-      if (userRow?.email) {
-        txParams.push(userRow.email.toLowerCase().trim());
-        txWhere.push(`LOWER(TRIM(user_email)) = $${txParams.length}`);
-      }
+    const countRes = await client.query(`SELECT COUNT(*) as count FROM token_transactions tt ${whereSql}`, params);
+    const totalCount = parseInt(countRes.rows[0]?.count || '0', 10);
 
-      if (txWhere.length > 0) {
-        const whereClause = `(${txWhere.join(' OR ')})`;
-        const countRes = await query(`SELECT COUNT(*) as count FROM token_transactions WHERE ${whereClause}`, txParams);
-        totalCount = parseInt(countRes[0]?.count || '0', 10);
+    const dataParams = [...params, limit, offset];
+    const txRes = await client.query(`
+      SELECT 
+        tt.id, 
+        tt.user_id, 
+        tt.user_email, 
+        tt.amount, 
+        tt.balance_after, 
+        tt.type, 
+        tt.description, 
+        tt.created_at,
+        COALESCE(
+          (SELECT u.token_balance FROM users u WHERE u.id = tt.user_id OR LOWER(u.email) = LOWER(tt.user_email) LIMIT 1),
+          tt.balance_after
+        ) AS user_total_tokens
+      FROM token_transactions tt
+      ${whereSql}
+      ORDER BY tt.created_at DESC
+      LIMIT $${params.length + 1} OFFSET $${params.length + 2}
+    `, dataParams);
 
-        const pageParams = [...txParams, limit, offset];
-        transactions = await query(
-          `SELECT * FROM token_transactions WHERE ${whereClause} ORDER BY created_at DESC LIMIT $${pageParams.length - 1} OFFSET $${pageParams.length}`,
-          pageParams
-        );
+    const userBaseWhere = `WHERE ${userConditions.map((c, i) => c.replace(/\$\d+/, `$${i + 1}`)).join(' OR ')}`;
+    const baseParams = params.slice(0, userConditions.length);
 
-        const statsRes = await query(
-          `SELECT 
-             COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_deducted,
-             COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as total_granted,
-             COUNT(*) as total_events
-           FROM token_transactions WHERE ${whereClause}`,
-          txParams
-        );
-        if (statsRes && statsRes.length > 0) {
-          stats = {
-            totalDeducted: Number(statsRes[0]?.total_deducted || 0),
-            totalGranted: Number(statsRes[0]?.total_granted || 0),
-            totalEvents: Number(statsRes[0]?.total_events || totalCount)
-          };
-        }
-      }
-    } catch (_) {}
+    const statsRes = await client.query(`
+      SELECT 
+        COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_deducted,
+        COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as total_granted,
+        COUNT(*) as total_txs
+      FROM token_transactions tt
+      ${userBaseWhere}
+    `, baseParams);
+
+    const statsRow = statsRes.rows[0] || { total_deducted: 0, total_granted: 0, total_txs: 0 };
 
     return NextResponse.json({
       success: true,
-      balance: tokenBalance,
-      tokenBalance: tokenBalance,
-      token_balance: tokenBalance,
-      wallet_balance: walletBalance,
-      walletBalance: walletBalance,
-      tokenSymbol: tokenSettings.tokenSymbol || '🪙',
-      tokenName: tokenSettings.tokenName || 'Foodie Token',
-      isEnabled: tokenSettings.isEnabled !== false,
+      balance,
+      tokenBalance: balance,
+      user_total_tokens: balance,
+      walletBalance,
+      tokenName: settings.tokenName || 'Foodie Token',
+      tokenSymbol: settings.tokenSymbol || '🪙',
       costs: {
-        chef: tokenSettings.chefCost || 1,
-        importUrl: tokenSettings.importUrlCost || 2,
-        importText: tokenSettings.importTextCost || 1,
-        importPhoto: tokenSettings.importPhotoCost || 3
+        chef: settings.chefCost || 1,
+        importUrl: settings.importUrlCost || 1,
+        importText: settings.importTextCost || 1,
+        importPhoto: settings.importPhotoCost || 2
       },
-      packages: tokenSettings.packages || [],
-      user: userRow,
-      transactions,
+      packages: settings.packages || [],
+      isEnabled: settings.isEnabled ?? true,
+      transactions: txRes.rows,
+      total: totalCount,
       totalCount,
-      totalPages: Math.ceil(totalCount / limit) || 1,
-      stats
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(totalCount / limit)),
+      stats: {
+        totalDeducted: Number(statsRow.total_deducted),
+        totalGranted: Number(statsRow.total_granted),
+        totalEvents: Number(statsRow.total_txs)
+      }
     }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({
+      success: false,
+      error: err.message || 'Error loading token data',
+      balance: 0,
+      tokenBalance: 0,
+      walletBalance: 0,
+      packages: [],
+      transactions: []
+    }, { status: 500 });
+  } finally {
+    if (client) client.release();
   }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    await initTokenTables();
+    let body: any = {};
+    try {
+      body = await req.json();
+    } catch (_) {
+      return NextResponse.json({ success: false, error: 'Malformed JSON payload in request body.' }, { status: 400 });
+    }
+
+    const { action, packageId, userId, userEmail, tokens, price, packageName, paymentMethod } = body;
+
+    // Cookie session fallback
+    let resolvedUserId = userId;
+    let resolvedEmail = userEmail?.toLowerCase().trim();
+
+    if (!resolvedUserId && !resolvedEmail) {
+      const cookieHeader = req.cookies.get('zecratary_session')?.value || req.cookies.get('currentUser')?.value;
+      if (cookieHeader) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(cookieHeader));
+          resolvedUserId = parsed.id;
+          resolvedEmail = parsed.email?.toLowerCase().trim();
+        } catch (_) {}
+      }
+    }
+
+    // 1. Package Purchase Handling
+    if (!action || action === 'purchase') {
+      const result = await purchaseTokenPackage({
+        userId: resolvedUserId,
+        userEmail: resolvedEmail,
+        packageId,
+        tokens,
+        price,
+        packageName,
+        paymentMethod: paymentMethod || 'wallet'
+      });
+
+      return NextResponse.json(result, { status: result.success ? 200 : 400 });
+    }
+
+    // 2. Settings Save Handling (Parity for /admin/token-setting)
+    if (action === 'save_settings' || action === 'save' || action === 'update_settings') {
+      const saved = await saveTokenSettings(body.settings || body);
+      return NextResponse.json({ success: saved, message: saved ? 'Token settings saved successfully' : 'Failed to save settings' });
+    }
+
+    return NextResponse.json({ success: false, error: `Invalid action '${action}' requested.` }, { status: 400 });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message || 'Internal server error processing purchase.' }, { status: 500 });
+  }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
 }
 
 ```
@@ -69682,6 +69859,17 @@ export function cn(...inputs: ClassValue[]) {
 ## File: `apps/web/src/lib/tokenService.ts`
 ```typescript
 import { query } from '@/lib/db';
+import { Pool } from 'pg';
+
+let poolInstance: Pool | null = null;
+export function getPool(): Pool {
+  if (!poolInstance) {
+    poolInstance = new Pool({
+      connectionString: process.env.DATABASE_URL,
+    });
+  }
+  return poolInstance;
+}
 
 export interface TokenPackage {
   id: string;
@@ -69693,7 +69881,7 @@ export interface TokenPackage {
 }
 
 export interface TokenSettings {
-  id: string;
+  id?: string;
   tokenName: string;
   tokenSymbol: string;
   chefCost: number;
@@ -69704,6 +69892,19 @@ export interface TokenSettings {
   planAllocations?: { [slug: string]: number };
   isEnabled: boolean;
   updatedAt?: string;
+  [key: string]: any;
+}
+
+export interface DeductUserTokensParams {
+  userId?: string | null;
+  userEmail?: string | null;
+  email?: string | null;
+  cost?: number;
+  amount?: number;
+  feature?: string;
+  type?: string;
+  description?: string;
+  [key: string]: any;
 }
 
 export interface DeductionResult {
@@ -69711,40 +69912,72 @@ export interface DeductionResult {
   error?: string;
   deducted?: number;
   currentBalance?: number;
+  newBalance?: number;
+  balance?: number;
   required?: number;
   tokenSymbol?: string;
+  [key: string]: any;
 }
 
 export interface PurchasePackageParams {
-  packageId: string;
   userId?: string | null;
   userEmail?: string | null;
+  email?: string | null;
+  packageId?: string;
+  package_id?: string;
+  tokens?: number;
+  price?: number;
+  amount?: number;
+  amountPaid?: number;
+  currency?: string;
+  gateway?: string;
   paymentMethod?: string;
+  payment_method?: string;
+  packageName?: string;
+  package_name?: string;
+  orderId?: string;
+  description?: string;
   [key: string]: any;
 }
 
 export interface PurchasePackageResult {
   success: boolean;
-  error?: string;
-  package?: TokenPackage;
+  tokensAdded?: number;
+  tokensToAdd?: number;
   tokensGranted?: number;
   newBalance?: number;
+  balance?: number;
+  wallet_balance?: number;
   newWalletBalance?: number | null;
+  paymentMethod?: string;
+  transactionId?: string;
   message?: string;
+  error?: string;
+  package?: TokenPackage;
+  user?: any;
+  requiresWalletTopUp?: boolean;
+  packagePrice?: number;
+  shortfall?: number;
+  [key: string]: any;
+}
+
+export interface AffectedUserBalance {
+  id: string;
+  email: string;
+  oldBalance: number;
+  newBalance: number;
+  adjustedTokens: number;
 }
 
 export interface DeleteTransactionsResult {
   success: boolean;
   error?: string;
   deletedCount: number;
-  affectedUsers: Array<{
-    id: string;
-    email?: string;
-    newBalance: number;
-  }>;
+  affectedUsers: AffectedUserBalance[];
+  [key: string]: any;
 }
 
-const DEFAULT_SETTINGS: TokenSettings = {
+export const DEFAULT_SETTINGS: TokenSettings = {
   id: 'primary_token_settings',
   tokenName: 'Foodie Token',
   tokenSymbol: '🪙',
@@ -69768,8 +70001,16 @@ const DEFAULT_SETTINGS: TokenSettings = {
   isEnabled: true
 };
 
+export const DEFAULT_TOKEN_SETTINGS = DEFAULT_SETTINGS;
+
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
+}
+
 export async function initTokenTables(): Promise<void> {
-  // 1. Ensure token_settings table exists
   try {
     await query(`
       CREATE TABLE IF NOT EXISTS token_settings (
@@ -69783,58 +70024,67 @@ export async function initTokenTables(): Promise<void> {
         packages JSONB DEFAULT '[]'::jsonb,
         plan_allocations JSONB DEFAULT '{}'::jsonb,
         is_enabled BOOLEAN DEFAULT true,
-        updated_at TIMESTAMP DEFAULT NOW()
+        updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
-  } catch (err) {
-    console.warn('init token_settings warning:', err);
-  }
 
-  // 2. Ensure columns on token_settings exist
-  try {
     await query(`
       ALTER TABLE token_settings 
       ADD COLUMN IF NOT EXISTS plan_allocations JSONB DEFAULT '{}'::jsonb,
       ADD COLUMN IF NOT EXISTS packages JSONB DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT true;
     `);
-  } catch (_) {}
 
-  // 3. Ensure token_transactions ledger exists
-  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        key VARCHAR(128) PRIMARY KEY,
+        value JSONB NOT NULL,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
     await query(`
       CREATE TABLE IF NOT EXISTS token_transactions (
         id VARCHAR(100) PRIMARY KEY,
-        user_id VARCHAR(100) NOT NULL,
+        user_id VARCHAR(100),
         user_email VARCHAR(255),
-        amount INTEGER NOT NULL,
-        balance_after INTEGER NOT NULL,
+        amount NUMERIC NOT NULL DEFAULT 0,
+        balance_after NUMERIC NOT NULL DEFAULT 0,
         type VARCHAR(50) NOT NULL,
         description TEXT,
-        created_at TIMESTAMP DEFAULT NOW()
+        created_at TIMESTAMPTZ DEFAULT NOW()
       );
-    `);
-    await query(`
-      CREATE INDEX IF NOT EXISTS idx_token_transactions_email ON token_transactions(user_email);
+      CREATE INDEX IF NOT EXISTS idx_token_transactions_user ON token_transactions(user_id, user_email);
       CREATE INDEX IF NOT EXISTS idx_token_transactions_created ON token_transactions(created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_token_transactions_type ON token_transactions(type);
     `);
-  } catch (err) {
-    console.warn('init token_transactions warning:', err);
-  }
 
-  // 4. Ensure users table columns exist
-  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS wallet_transactions (
+        id VARCHAR(100) PRIMARY KEY,
+        user_id VARCHAR(100),
+        user_email VARCHAR(255),
+        type VARCHAR(50) DEFAULT 'token_purchase',
+        amount NUMERIC NOT NULL DEFAULT 0,
+        balance_after NUMERIC NOT NULL DEFAULT 0,
+        gateway VARCHAR(50) DEFAULT 'wallet',
+        status VARCHAR(50) DEFAULT 'succeeded',
+        description TEXT,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_wallet_transactions_user ON wallet_transactions(user_id, user_email);
+      CREATE INDEX IF NOT EXISTS idx_wallet_transactions_created ON wallet_transactions(created_at DESC);
+    `);
+
     await query(`
       ALTER TABLE users 
       ADD COLUMN IF NOT EXISTS token_balance INTEGER DEFAULT 100,
       ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS last_token_grant_cycle VARCHAR(50);
+      ADD COLUMN IF NOT EXISTS last_token_grant_cycle VARCHAR(50),
+      ADD COLUMN IF NOT EXISTS last_token_grant_date TIMESTAMPTZ;
     `);
-  } catch (_) {}
 
-  // 5. Ensure subscription_plans exists
-  try {
     await query(`
       CREATE TABLE IF NOT EXISTS subscription_plans (
         id VARCHAR(64) PRIMARY KEY,
@@ -69845,69 +70095,42 @@ export async function initTokenTables(): Promise<void> {
         is_free BOOLEAN DEFAULT false,
         monthly_price_dollars NUMERIC DEFAULT 0,
         annual_price_dollars NUMERIC DEFAULT 0,
-        monthly_badge VARCHAR(50),
-        annual_badge VARCHAR(50),
         features JSONB DEFAULT '[]'::jsonb,
         is_active BOOLEAN DEFAULT true,
-        created_at TIMESTAMP DEFAULT NOW(),
-        updated_at TIMESTAMP DEFAULT NOW()
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
-  } catch (err) {
-    console.warn('init subscription_plans warning:', err);
-  }
 
-  // 6. Ensure both monthly_tokens and token_limit columns exist in subscription_plans
-  try {
     await query(`
       ALTER TABLE subscription_plans 
-      ADD COLUMN IF NOT EXISTS monthly_tokens INTEGER DEFAULT 500;
-    `);
-  } catch (_) {}
-
-  try {
-    await query(`
-      ALTER TABLE subscription_plans 
+      ADD COLUMN IF NOT EXISTS monthly_tokens INTEGER DEFAULT 500,
       ADD COLUMN IF NOT EXISTS token_limit INTEGER DEFAULT 500;
     `);
-  } catch (_) {}
 
-  // 7. Backfill & synchronize token_limit and monthly_tokens
-  try {
     await query(`
       UPDATE subscription_plans 
       SET monthly_tokens = COALESCE(token_limit, monthly_tokens, 500) 
       WHERE monthly_tokens IS NULL;
     `);
+
     await query(`
       UPDATE subscription_plans 
       SET token_limit = COALESCE(monthly_tokens, token_limit, 500) 
       WHERE token_limit IS NULL;
     `);
-  } catch (_) {}
-
-  // 8. Auto-seed foundational plans if subscription_plans table is empty
-  try {
-    const existing = await query('SELECT id FROM subscription_plans LIMIT 1');
-    if (!existing || existing.length === 0) {
-      await query(`
-        INSERT INTO subscription_plans (id, slug, name, token_limit, monthly_tokens, is_free, monthly_price_dollars, annual_price_dollars, features, is_active, created_at, updated_at)
-        VALUES 
-          ('plan_free', 'free', 'Free Starter', 50, 50, true, 0, 0, '["AI Chat (Limited)", "Standard Recipe Generation"]'::jsonb, true, NOW(), NOW()),
-          ('plan_pro', 'pro', 'Foodie Pro', 500, 500, false, 9.99, 99.99, '["500 Tokens/mo", "Unlimited Recipes", "Vision Import OCR"]'::jsonb, true, NOW(), NOW()),
-          ('plan_master', 'master', 'Culinary Master', 1500, 1500, false, 29.99, 299.99, '["1500 Tokens/mo", "Priority AI Queue", "Executive Support"]'::jsonb, true, NOW(), NOW())
-        ON CONFLICT (slug) DO NOTHING;
-      `);
-    }
-  } catch (_) {}
+  } catch (err) {
+    console.warn('initTokenTables warning:', err);
+  }
 }
 
 export async function getTokenSettings(): Promise<TokenSettings> {
   await initTokenTables();
   try {
     const rows = await query('SELECT * FROM token_settings ORDER BY updated_at DESC LIMIT 1');
-    if (rows && rows.length > 0) {
-      const r = rows[0];
+    const list = parseDbRows(rows);
+    if (list.length > 0) {
+      const r = list[0];
       return {
         id: r.id || 'primary_token_settings',
         tokenName: r.token_name || DEFAULT_SETTINGS.tokenName,
@@ -69916,15 +70139,22 @@ export async function getTokenSettings(): Promise<TokenSettings> {
         importUrlCost: Number(r.import_url_cost ?? DEFAULT_SETTINGS.importUrlCost),
         importTextCost: Number(r.import_text_cost ?? DEFAULT_SETTINGS.importTextCost),
         importPhotoCost: Number(r.import_photo_cost ?? DEFAULT_SETTINGS.importPhotoCost),
-        packages: Array.isArray(r.packages) 
-          ? r.packages 
+        packages: Array.isArray(r.packages)
+          ? r.packages
           : (typeof r.packages === 'string' ? JSON.parse(r.packages) : DEFAULT_SETTINGS.packages),
-        planAllocations: r.plan_allocations 
-          ? (typeof r.plan_allocations === 'string' ? JSON.parse(r.plan_allocations) : r.plan_allocations) 
-          : DEFAULT_SETTINGS.planAllocations,
+        planAllocations: r.plan_allocations
+          ? (typeof r.plan_allocations === 'string' ? JSON.parse(r.plan_allocations) : r.plan_allocations)
+          : (DEFAULT_SETTINGS.planAllocations || {}),
         isEnabled: Boolean(r.is_enabled ?? true),
         updatedAt: r.updated_at
       };
+    }
+
+    const fallback = await query(`SELECT value FROM admin_settings WHERE key = 'token_settings' LIMIT 1`);
+    const fList = parseDbRows(fallback);
+    if (fList.length > 0 && fList[0].value) {
+      const parsed = typeof fList[0].value === 'string' ? JSON.parse(fList[0].value) : fList[0].value;
+      return { ...DEFAULT_SETTINGS, ...parsed };
     }
   } catch (_) {}
   return DEFAULT_SETTINGS;
@@ -69933,7 +70163,7 @@ export async function getTokenSettings(): Promise<TokenSettings> {
 export async function saveTokenSettings(settings: Partial<TokenSettings>): Promise<TokenSettings> {
   await initTokenTables();
   const current = await getTokenSettings();
-  
+
   const merged: TokenSettings = {
     ...current,
     ...settings,
@@ -69973,7 +70203,15 @@ export async function saveTokenSettings(settings: Partial<TokenSettings>): Promi
     merged.isEnabled
   ]);
 
-  // Synchronize planAllocations directly to subscription_plans in PostgreSQL
+  try {
+    await query(`
+      INSERT INTO admin_settings (key, value, updated_at)
+      VALUES ('token_settings', $1::jsonb, NOW())
+      ON CONFLICT (key) DO UPDATE
+      SET value = EXCLUDED.value, updated_at = NOW()
+    `, [JSON.stringify(merged)]);
+  } catch (_) {}
+
   if (merged.planAllocations && typeof merged.planAllocations === 'object') {
     for (const [slug, amount] of Object.entries(merged.planAllocations)) {
       const num = Math.max(0, Number(amount));
@@ -70001,62 +70239,99 @@ export async function saveTokenSettings(settings: Partial<TokenSettings>): Promi
 export async function getUserTokenBalance(userId?: string | null, userEmail?: string | null): Promise<number> {
   await initTokenTables();
   try {
-    let rows: any[] = [];
+    let rows: any = [];
     if (userId) {
       rows = await query('SELECT token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
     } else if (userEmail) {
-      rows = await query('SELECT token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
+      rows = await query('SELECT token_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1', [userEmail.trim()]);
     }
-    if (rows.length > 0 && rows[0].token_balance !== null) {
-      return Number(rows[0].token_balance);
+    const list = parseDbRows(rows);
+    if (list.length > 0 && list[0].token_balance !== null && list[0].token_balance !== undefined) {
+      return Number(list[0].token_balance);
     }
   } catch (_) {}
   return 0;
 }
 
-export async function deductUserTokens({
-  userId,
-  userEmail,
-  cost,
-  feature,
-  description
-}: {
-  userId?: string | null;
-  userEmail?: string | null;
-  cost: number;
-  feature: string;
-  description: string;
-}): Promise<DeductionResult> {
+// Overload signatures for deductUserTokens
+export async function deductUserTokens(
+  params: DeductUserTokensParams
+): Promise<DeductionResult>;
+export async function deductUserTokens(
+  userId: string | null | undefined,
+  userEmail: string | null | undefined,
+  amount: number,
+  type: string,
+  description: string
+): Promise<DeductionResult>;
+export async function deductUserTokens(
+  arg1: any,
+  arg2?: any,
+  arg3?: any,
+  arg4?: any,
+  arg5?: any
+): Promise<DeductionResult> {
   await initTokenTables();
   const settings = await getTokenSettings();
 
+  let userId: string | null = null;
+  let userEmail: string | null = null;
+  let cost = 0;
+  let feature = 'operation';
+  let description = 'Token deduction';
+
+  if (typeof arg1 === 'object' && arg1 !== null) {
+    userId = arg1.userId || null;
+    userEmail = arg1.userEmail || arg1.email || null;
+    cost = Number(arg1.cost ?? arg1.amount ?? 0);
+    feature = arg1.feature || arg1.type || 'operation';
+    description = arg1.description || 'Token deduction';
+  } else {
+    userId = arg1 || null;
+    userEmail = arg2 || null;
+    cost = Number(arg3 || 0);
+    feature = arg4 || 'operation';
+    description = arg5 || 'Token deduction';
+  }
+
   if (!settings.isEnabled || cost <= 0) {
     const current = await getUserTokenBalance(userId, userEmail);
-    return { success: true, deducted: 0, currentBalance: current, tokenSymbol: settings.tokenSymbol };
+    return {
+      success: true,
+      deducted: 0,
+      currentBalance: current,
+      newBalance: current,
+      balance: current,
+      tokenSymbol: settings.tokenSymbol || '🪙'
+    };
   }
 
   let userRow: any = null;
   if (userId) {
     const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
-    if (rows.length > 0) userRow = rows[0];
+    const list = parseDbRows(rows);
+    if (list.length > 0) userRow = list[0];
   }
   if (!userRow && userEmail) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
-    if (rows.length > 0) userRow = rows[0];
+    const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1', [userEmail.trim()]);
+    const list = parseDbRows(rows);
+    if (list.length > 0) userRow = list[0];
   }
 
   if (!userRow) {
-    return { success: false, error: 'User not found' };
+    return { success: false, error: 'User account not found' };
   }
 
   const currentBalance = Number(userRow.token_balance ?? 0);
   if (currentBalance < cost) {
     return {
       success: false,
-      error: `Insufficient ${settings.tokenName}. Required: ${cost} ${settings.tokenSymbol}, Balance: ${currentBalance} ${settings.tokenSymbol}`,
+      error: `Insufficient ${settings.tokenName || 'tokens'}. Required: ${cost} ${settings.tokenSymbol || '🪙'}, Balance: ${currentBalance} ${settings.tokenSymbol || '🪙'}`,
       currentBalance,
+      newBalance: currentBalance,
+      balance: currentBalance,
       required: cost,
-      tokenSymbol: settings.tokenSymbol
+      tokenSymbol: settings.tokenSymbol || '🪙'
     };
   }
 
@@ -70067,23 +70342,28 @@ export async function deductUserTokens({
     RETURNING token_balance
   `, [cost, userRow.id]);
 
-  if (updateRes.length === 0) {
+  const updatedRows = parseDbRows(updateRes);
+  if (updatedRows.length === 0) {
     return {
       success: false,
-      error: 'Token deduction failed due to concurrent update.',
+      error: 'Token deduction failed due to concurrent modification.',
       currentBalance,
-      required: cost
+      newBalance: currentBalance,
+      balance: currentBalance,
+      required: cost,
+      tokenSymbol: settings.tokenSymbol || '🪙'
     };
   }
 
-  const newBalance = Number(updateRes[0].token_balance);
+  const newBalance = Number(updatedRows[0].token_balance);
   const txId = 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+  const txType = feature.startsWith('usage_') ? feature : `usage_${feature}`;
 
   try {
     await query(`
       INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-    `, [txId, userRow.id, userRow.email, -cost, newBalance, `usage_${feature}`, description]);
+    `, [txId, userRow.id, userRow.email, -cost, newBalance, txType, description]);
   } catch (txErr) {
     console.error('Failed to log token transaction:', txErr);
   }
@@ -70092,32 +70372,51 @@ export async function deductUserTokens({
     success: true,
     deducted: cost,
     currentBalance: newBalance,
-    tokenSymbol: settings.tokenSymbol
+    newBalance,
+    balance: newBalance,
+    tokenSymbol: settings.tokenSymbol || '🪙'
   };
 }
 
-export async function addTokensToUser({
-  userId,
-  userEmail,
-  amount,
-  type,
-  description
-}: {
-  userId?: string | null;
-  userEmail?: string | null;
-  amount: number;
-  type: string;
-  description: string;
-}): Promise<number | null> {
+export async function addTokensToUser(
+  arg1: any,
+  userEmail?: string | null,
+  amount?: number,
+  type?: string,
+  description?: string
+): Promise<number | null> {
   await initTokenTables();
-  let userRow: any = null;
-  if (userId) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
-    if (rows.length > 0) userRow = rows[0];
+
+  let uId: string | null = null;
+  let uEmail: string | null = null;
+  let amt = 0;
+  let txType = 'manual_credit';
+  let desc = 'Tokens credited';
+
+  if (typeof arg1 === 'object' && arg1 !== null) {
+    uId = arg1.userId || null;
+    uEmail = arg1.userEmail || arg1.email || null;
+    amt = Number(arg1.amount || 0);
+    txType = arg1.type || 'manual_credit';
+    desc = arg1.description || 'Tokens credited';
+  } else {
+    uId = arg1 || null;
+    uEmail = userEmail || null;
+    amt = Number(amount || 0);
+    txType = type || 'manual_credit';
+    desc = description || 'Tokens credited';
   }
-  if (!userRow && userEmail) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
-    if (rows.length > 0) userRow = rows[0];
+
+  let userRow: any = null;
+  if (uId) {
+    const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [uId]);
+    const list = parseDbRows(rows);
+    if (list.length > 0) userRow = list[0];
+  }
+  if (!userRow && uEmail) {
+    const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1', [uEmail.trim()]);
+    const list = parseDbRows(rows);
+    if (list.length > 0) userRow = list[0];
   }
 
   if (!userRow) return null;
@@ -70127,206 +70426,340 @@ export async function addTokensToUser({
     SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
     WHERE id = $2 
     RETURNING token_balance
-  `, [amount, userRow.id]);
+  `, [amt, userRow.id]);
 
-  const newBalance = Number(updateRes[0].token_balance);
+  const updated = parseDbRows(updateRes);
+  const newBalance = Number(updated[0]?.token_balance ?? ((userRow.token_balance || 0) + amt));
   const txId = 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
 
   await query(`
     INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-  `, [txId, userRow.id, userRow.email, amount, newBalance, type, description]);
+  `, [txId, userRow.id, userRow.email, amt, newBalance, txType, desc]);
 
   return newBalance;
 }
 
-export async function purchaseTokenPackage({
-  packageId,
-  userId,
-  userEmail,
-  paymentMethod = 'wallet'
-}: PurchasePackageParams): Promise<PurchasePackageResult> {
+export async function purchaseTokenPackage(
+  userEmailOrIdOrPayload: string | PurchasePackageParams | any,
+  packageIdOrTokens?: string | number | any,
+  options?: any
+): Promise<PurchasePackageResult> {
   await initTokenTables();
+
+  let userIdentifier = '';
+  let pkgId = '';
+  let explicitTokens = 0;
+  let orderId = '';
+  let paymentMethod = 'wallet';
+  let customPrice = 0;
+  let desc = '';
+  let customPkgName = '';
+
+  if (typeof userEmailOrIdOrPayload === 'object' && userEmailOrIdOrPayload !== null) {
+    userIdentifier = String(userEmailOrIdOrPayload.userId || userEmailOrIdOrPayload.userEmail || userEmailOrIdOrPayload.email || '').trim();
+    pkgId = String(userEmailOrIdOrPayload.packageId || userEmailOrIdOrPayload.package_id || '').trim();
+    explicitTokens = Number(userEmailOrIdOrPayload.tokens || 0);
+    orderId = String(userEmailOrIdOrPayload.orderId || '');
+    paymentMethod = String(userEmailOrIdOrPayload.paymentMethod || userEmailOrIdOrPayload.payment_method || 'wallet');
+    desc = String(userEmailOrIdOrPayload.description || '');
+    customPrice = Number(userEmailOrIdOrPayload.price || userEmailOrIdOrPayload.amount || userEmailOrIdOrPayload.amountPaid || 0);
+    customPkgName = String(userEmailOrIdOrPayload.packageName || userEmailOrIdOrPayload.package_name || '');
+  } else {
+    userIdentifier = String(userEmailOrIdOrPayload || '').trim();
+    if (typeof packageIdOrTokens === 'number') {
+      explicitTokens = packageIdOrTokens;
+    } else if (typeof packageIdOrTokens === 'string') {
+      pkgId = packageIdOrTokens.trim();
+      const num = Number(packageIdOrTokens);
+      if (!isNaN(num) && num > 0) explicitTokens = num;
+    }
+    if (options && typeof options === 'object') {
+      orderId = String(options.orderId || '');
+      paymentMethod = String(options.paymentMethod || options.payment_method || 'wallet');
+      desc = String(options.description || '');
+      customPrice = Number(options.price || options.amount || options.amountPaid || 0);
+      customPkgName = String(options.packageName || options.package_name || '');
+    }
+  }
+
+  if (!userIdentifier) {
+    return { success: false, tokensAdded: 0, newBalance: 0, error: 'User identifier is required.' };
+  }
+
+  const userRows = await query(`
+    SELECT id, email, token_balance, wallet_balance 
+    FROM users 
+    WHERE (id::text = $1 AND $1 != '') OR (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '')
+    LIMIT 1
+  `, [userIdentifier, userIdentifier]);
+
+  const uList = parseDbRows(userRows);
+  if (uList.length === 0) {
+    return { success: false, tokensAdded: 0, newBalance: 0, error: 'User account not found.' };
+  }
+
+  const user = uList[0];
   const settings = await getTokenSettings();
 
-  const pkg = settings.packages?.find((p: TokenPackage) => p.id === packageId) ||
-    DEFAULT_SETTINGS.packages.find((p: TokenPackage) => p.id === packageId);
+  let tokensToAdd = explicitTokens;
+  let packageName = customPkgName || 'Token Package';
+  let packagePrice = customPrice;
 
-  if (!pkg) {
-    return { success: false, error: `Token package '${packageId}' was not found.` };
+  if (pkgId && Array.isArray(settings.packages)) {
+    const matched = settings.packages.find((p: any) => p.id === pkgId || p.name?.toLowerCase() === pkgId.toLowerCase());
+    if (matched) {
+      tokensToAdd = Number(matched.tokens || tokensToAdd);
+      packageName = matched.name || packageName;
+      if (packagePrice <= 0) packagePrice = Number(matched.price || 0);
+    }
   }
 
-  let userRow: any = null;
-  if (userId) {
-    const rows = await query('SELECT id, email, token_balance, wallet_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
-    if (rows && rows.length > 0) userRow = rows[0];
-  }
-  if (!userRow && userEmail) {
-    const rows = await query('SELECT id, email, token_balance, wallet_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [userEmail.trim()]);
-    if (rows && rows.length > 0) userRow = rows[0];
+  if (tokensToAdd <= 0) {
+    if (pkgId === 'pkg_starter') { tokensToAdd = 100; packagePrice = packagePrice || 4.99; packageName = 'Starter Pantry'; }
+    else if (pkgId === 'pkg_pro') { tokensToAdd = 500; packagePrice = packagePrice || 19.99; packageName = 'Culinary Master'; }
+    else if (pkgId === 'pkg_buffet') { tokensToAdd = 1500; packagePrice = packagePrice || 49.99; packageName = 'Executive Chef'; }
+    else { tokensToAdd = 100; packagePrice = packagePrice || 4.99; }
   }
 
-  if (!userRow) {
-    return { success: false, error: 'User account not found.' };
-  }
-
-  const price = Number(pkg.price || 0);
-  let updatedWalletBalance: number | null = userRow.wallet_balance !== null && userRow.wallet_balance !== undefined 
-    ? Number(userRow.wallet_balance) 
-    : null;
-
-  if (paymentMethod === 'wallet' && price > 0) {
-    const currentWallet = Number(userRow.wallet_balance ?? 0);
-    if (currentWallet < price) {
+  let updatedWalletBalance = parseFloat(user.wallet_balance || 0);
+  if (paymentMethod === 'wallet' && packagePrice > 0) {
+    if (updatedWalletBalance < packagePrice) {
       return {
         success: false,
-        error: `Insufficient wallet balance ($${currentWallet.toFixed(2)} available, $${price.toFixed(2)} required)`
+        tokensAdded: 0,
+        tokensToAdd: 0,
+        newBalance: Number(user.token_balance || 0),
+        requiresWalletTopUp: true,
+        packagePrice,
+        shortfall: packagePrice - updatedWalletBalance,
+        wallet_balance: updatedWalletBalance,
+        newWalletBalance: updatedWalletBalance,
+        error: `Insufficient wallet balance ($${updatedWalletBalance.toFixed(2)} available). This bundle requires $${packagePrice.toFixed(2)}. Please top up your wallet first.`
       };
     }
 
-    try {
-      const walletRes = await query(`
-        UPDATE users 
-        SET wallet_balance = wallet_balance - $1, updated_at = NOW() 
-        WHERE id = $2 AND wallet_balance >= $1 
-        RETURNING wallet_balance
-      `, [price, userRow.id]);
+    updatedWalletBalance = Math.max(0, updatedWalletBalance - packagePrice);
+    await query(`
+      UPDATE users SET wallet_balance = $1, updated_at = NOW() WHERE id = $2
+    `, [updatedWalletBalance, user.id]);
 
-      if (!walletRes || walletRes.length === 0) {
-        return { success: false, error: 'Could not deduct funds from wallet.' };
-      }
-      updatedWalletBalance = Number(walletRes[0].wallet_balance);
-
-      try {
-        const wTxId = 'wtx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
-        await query(`
-          INSERT INTO wallet_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
-          VALUES ($1, $2, $3, $4, $5, 'token_package_purchase', $6, NOW())
-        `, [wTxId, userRow.id, userRow.email, -price, updatedWalletBalance, `Purchased token package: ${pkg.name} (${pkg.tokens} tokens)`]);
-      } catch (_) {}
-    } catch (wErr: any) {
-      return { success: false, error: wErr.message || 'Wallet transaction failed' };
-    }
+    const wtxId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    await query(`
+      INSERT INTO wallet_transactions (id, user_id, user_email, type, amount, balance_after, gateway, status, description, metadata, created_at)
+      VALUES ($1, $2, $3, 'token_purchase', $4, $5, 'wallet', 'succeeded', $6, $7::jsonb, NOW())
+    `, [
+      wtxId,
+      user.id,
+      user.email,
+      -packagePrice,
+      updatedWalletBalance,
+      `Purchased ${packageName} (+${tokensToAdd.toLocaleString()} ${settings.tokenSymbol || '🪙'})`,
+      JSON.stringify({ packageId: pkgId || 'bundle', tokens: tokensToAdd, price: packagePrice })
+    ]);
   }
 
-  const tokensToGrant = Number(pkg.tokens || 0);
-  const tokenUpdateRes = await query(`
+  const updateRes = await query(`
     UPDATE users 
     SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
     WHERE id = $2 
     RETURNING token_balance
-  `, [tokensToGrant, userRow.id]);
+  `, [tokensToAdd, user.id]);
 
-  const newTokenBalance = Number(tokenUpdateRes[0]?.token_balance ?? ((userRow.token_balance || 0) + tokensToGrant));
+  const updatedToken = parseDbRows(updateRes);
+  const newBalance = Number(updatedToken[0]?.token_balance ?? (Number(user.token_balance || 0) + tokensToAdd));
+
   const txId = 'tx_pkg_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
-  const description = `Purchased Package: ${pkg.name} (+${tokensToGrant.toLocaleString()} ${settings.tokenSymbol})`;
+  const txDesc = desc || `Purchased Package: ${packageName} (+${tokensToAdd.toLocaleString()} ${settings.tokenSymbol || '🪙'})${orderId ? ` [Order: ${orderId}]` : ''}`;
 
   await query(`
     INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
     VALUES ($1, $2, $3, $4, $5, 'package_purchase', $6, NOW())
-  `, [txId, userRow.id, userRow.email, tokensToGrant, newTokenBalance, description]);
+  `, [txId, user.id, user.email, tokensToAdd, newBalance, txDesc]);
 
   return {
     success: true,
-    message: `Successfully purchased ${pkg.name}! Added ${tokensToGrant} tokens.`,
-    package: pkg,
-    tokensGranted: tokensToGrant,
-    newBalance: newTokenBalance,
-    newWalletBalance: updatedWalletBalance
+    tokensAdded: tokensToAdd,
+    tokensToAdd: tokensToAdd,
+    tokensGranted: tokensToAdd,
+    newBalance,
+    balance: newBalance,
+    wallet_balance: updatedWalletBalance,
+    newWalletBalance: updatedWalletBalance,
+    paymentMethod,
+    transactionId: txId,
+    message: `Successfully purchased ${packageName}! Credited +${tokensToAdd.toLocaleString()} ${settings.tokenSymbol || '🪙'}.`,
+    user: {
+      id: user.id,
+      email: user.email,
+      tokenBalance: newBalance,
+      walletBalance: updatedWalletBalance
+    }
   };
+}
+
+export async function grantMonthlyPlanTokenReward(
+  userEmailOrId?: string | { id?: string; email?: string; userId?: string; userEmail?: string } | null,
+  tokensOrOptions?: number | string | { tokenLimit?: number; tokens?: number; planSlug?: string; planName?: string; customTokens?: number; force?: boolean; [key: string]: any } | any,
+  options?: { planSlug?: string; planName?: string; force?: boolean; customTokens?: number; orderId?: string; [key: string]: any } | any
+): Promise<{
+  success: boolean;
+  tokensGranted: number;
+  newBalance: number;
+  reason?: string;
+  cycle?: string;
+  plan?: string;
+  isPaid?: boolean;
+  error?: string;
+  [key: string]: any;
+}> {
+  await initTokenTables();
+
+  let cleanIdent = '';
+  let emailIdent = '';
+
+  if (typeof userEmailOrId === 'string') {
+    cleanIdent = userEmailOrId.trim();
+    if (cleanIdent.includes('@')) emailIdent = cleanIdent.toLowerCase();
+  } else if (userEmailOrId && typeof userEmailOrId === 'object') {
+    cleanIdent = (userEmailOrId.id || userEmailOrId.userId || userEmailOrId.email || '').trim();
+    if (userEmailOrId.email || userEmailOrId.userEmail) {
+      emailIdent = (userEmailOrId.email || userEmailOrId.userEmail || '').trim().toLowerCase();
+    }
+  }
+
+  if (!cleanIdent && !emailIdent) {
+    return { success: false, tokensGranted: 0, newBalance: 0, reason: 'User identifier required' };
+  }
+
+  let opt: any = options || {};
+  let explicitAmount = 0;
+
+  if (typeof tokensOrOptions === 'number') {
+    explicitAmount = tokensOrOptions;
+  } else if (typeof tokensOrOptions === 'string') {
+    const p = parseInt(tokensOrOptions, 10);
+    if (!isNaN(p)) explicitAmount = p;
+  } else if (tokensOrOptions && typeof tokensOrOptions === 'object') {
+    explicitAmount = Number(tokensOrOptions.customTokens ?? tokensOrOptions.tokenLimit ?? tokensOrOptions.tokens ?? 0);
+    opt = { ...tokensOrOptions, ...opt };
+  }
+
+  const userRows = await query(`
+    SELECT id, email, token_balance, subscription_plan, plan_slug, plan_name, last_token_grant_cycle 
+    FROM users 
+    WHERE (id::text = $1 AND $1 != '') 
+       OR (LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '')
+       OR (LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+    LIMIT 1
+  `, [cleanIdent, emailIdent]);
+
+  const uList = parseDbRows(userRows);
+  if (uList.length === 0) {
+    return { success: false, tokensGranted: 0, newBalance: 0, reason: 'User not found in database' };
+  }
+
+  const user = uList[0];
+  const now = new Date();
+  const currentCycle = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+
+  if (user.last_token_grant_cycle === currentCycle && !opt?.force) {
+    return {
+      success: false,
+      tokensGranted: 0,
+      newBalance: Number(user.token_balance || 0),
+      reason: `Monthly tokens already credited for cycle ${currentCycle}`,
+      cycle: currentCycle,
+      isPaid: true
+    };
+  }
+
+  const planSlug = String(opt?.planSlug || user.plan_slug || user.subscription_plan || 'free').toLowerCase().trim();
+  const baseSlug = planSlug.replace(/-(monthly|annual|free)$/i, '');
+
+  let tokensToGrant = explicitAmount;
+  if (tokensToGrant <= 0) {
+    const planRows = await query(`
+      SELECT name, slug, token_limit, monthly_tokens 
+      FROM subscription_plans 
+      WHERE LOWER(slug) = LOWER($1) OR LOWER(id) = LOWER($1) OR LOWER(slug) = LOWER($2)
+      LIMIT 1
+    `, [planSlug, baseSlug]);
+    const pList = parseDbRows(planRows);
+    if (pList.length > 0) {
+      tokensToGrant = Number(pList[0].token_limit ?? pList[0].monthly_tokens ?? 500);
+    } else {
+      const settings = await getTokenSettings();
+      const alloc = settings.planAllocations || {};
+      tokensToGrant = Number(alloc[planSlug] ?? alloc[baseSlug] ?? (planSlug.includes('pro') ? 500 : 50));
+    }
+  }
+
+  if (tokensToGrant <= 0) tokensToGrant = 500;
+
+  const updateRes = await query(`
+    UPDATE users 
+    SET token_balance = COALESCE(token_balance, 0) + $1,
+        last_token_grant_cycle = $2,
+        last_token_grant_date = NOW(),
+        updated_at = NOW()
+    WHERE id = $3
+    RETURNING token_balance
+  `, [tokensToGrant, currentCycle, user.id]);
+
+  const updated = parseDbRows(updateRes);
+  const newBalance = Number(updated[0]?.token_balance ?? (Number(user.token_balance || 0) + tokensToGrant));
+
+  const planDesc = opt?.planName || user.plan_name || planSlug;
+  const txId = 'tx_grant_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+
+  await query(`
+    INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
+    VALUES ($1, $2, $3, $4, $5, 'plan_monthly_grant', $6, NOW())
+  `, [txId, user.id, user.email, tokensToGrant, newBalance, `Monthly plan grant: ${planDesc} (+${tokensToGrant.toLocaleString()})`]);
+
+  return {
+    success: true,
+    tokensGranted: tokensToGrant,
+    newBalance,
+    cycle: currentCycle,
+    plan: planSlug,
+    isPaid: true
+  };
+}
+
+export async function syncUserMonthlyTokens(userId?: string | null, email?: string | null): Promise<any> {
+  const ident = email || userId;
+  if (!ident) return { success: false, reason: 'No identifier provided' };
+  return grantMonthlyPlanTokenReward(ident);
 }
 
 export async function grantPlanTokensOnPurchase(
   userEmailOrId: string,
   planSlug: string,
-  options?: { customTokens?: number; orderId?: string; isAnnual?: boolean; planName?: string }
+  options?: { customTokens?: number; orderId?: string; isAnnual?: boolean; planName?: string; [key: string]: any }
 ): Promise<{ success: boolean; tokensGranted: number; newBalance: number; error?: string }> {
-  try {
-    await initTokenTables();
-    const cleanIdent = String(userEmailOrId || '').trim();
-    if (!cleanIdent) return { success: false, tokensGranted: 0, newBalance: 0, error: 'User identifier required' };
+  const res = await grantMonthlyPlanTokenReward(userEmailOrId, {
+    customTokens: options?.customTokens,
+    orderId: options?.orderId,
+    planSlug,
+    planName: options?.planName,
+    force: true
+  });
+  return {
+    success: res.success,
+    tokensGranted: res.tokensGranted,
+    newBalance: res.newBalance,
+    error: res.reason || res.error
+  };
+}
 
-    const userRows = await query(`
-      SELECT id, email, token_balance, subscription_plan 
-      FROM users 
-      WHERE LOWER(email) = LOWER($1) OR id = $1 
-      LIMIT 1
-    `, [cleanIdent]);
-
-    if (!userRows || userRows.length === 0) {
-      return { success: false, tokensGranted: 0, newBalance: 0, error: 'User not found in database' };
-    }
-
-    const user = userRows[0];
-    const cleanPlanSlug = String(planSlug || user.subscription_plan || 'free').toLowerCase().trim();
-    const baseSlug = cleanPlanSlug.replace(/-(monthly|annual|free)$/i, '');
-
-    let tokensToGrant = options?.customTokens ?? 0;
-    let resolvedPlanName = options?.planName || '';
-
-    if (!tokensToGrant || tokensToGrant <= 0) {
-      try {
-        const planRows = await query(`
-          SELECT * 
-          FROM subscription_plans 
-          WHERE LOWER(slug) = LOWER($1) OR LOWER(id) = LOWER($1) OR LOWER(slug) = LOWER($2)
-          LIMIT 1
-        `, [cleanPlanSlug, baseSlug]);
-
-        if (planRows && planRows.length > 0) {
-          const p = planRows[0];
-          tokensToGrant = Number(p.token_limit ?? p.monthly_tokens ?? 500);
-          if (!resolvedPlanName) resolvedPlanName = p.name || cleanPlanSlug;
-        }
-      } catch (_) {}
-
-      if (!tokensToGrant || tokensToGrant <= 0) {
-        const settings = await getTokenSettings();
-        const alloc = settings.planAllocations || {};
-        tokensToGrant = Number(alloc[cleanPlanSlug] ?? alloc[baseSlug] ?? (cleanPlanSlug.includes('pro') ? 500 : 50));
-      }
-    }
-
-    if (!resolvedPlanName) {
-      resolvedPlanName = cleanPlanSlug.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
-    }
-
-    if (tokensToGrant <= 0) {
-      tokensToGrant = cleanPlanSlug.includes('free') || cleanPlanSlug === 'taster' ? 50 : 500;
-    }
-
-    const settings = await getTokenSettings();
-    const symbol = settings.tokenSymbol || '🪙';
-
-    const updateResult = await query(`
-      UPDATE users
-      SET 
-        token_balance = COALESCE(token_balance, 0) + $1,
-        subscription_plan = $2,
-        updated_at = NOW()
-      WHERE id = $3
-      RETURNING token_balance
-    `, [tokensToGrant, cleanPlanSlug, user.id]);
-
-    const newBalance = Number(updateResult[0]?.token_balance ?? ((user.token_balance || 0) + tokensToGrant));
-    const txId = 'tx_plan_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
-    const description = `Plan Purchase: ${resolvedPlanName} (+${tokensToGrant.toLocaleString()} ${symbol})${options?.orderId ? ` [Order: ${options.orderId}]` : ''}`;
-
-    await query(`
-      INSERT INTO token_transactions 
-      (id, user_id, user_email, amount, balance_after, type, description, created_at)
-      VALUES ($1, $2, $3, $4, $5, 'plan_purchase', $6, NOW())
-    `, [txId, user.id, user.email, tokensToGrant, newBalance, description]);
-
-    return {
-      success: true,
-      tokensGranted: tokensToGrant,
-      newBalance
-    };
-  } catch (err: any) {
-    console.error('grantPlanTokensOnPurchase error:', err);
-    return { success: false, tokensGranted: 0, newBalance: 0, error: err.message };
-  }
+export async function grantUserTokens(
+  userEmailOrId: string,
+  tokens: number = 100,
+  reason: string = 'Admin grant'
+): Promise<any> {
+  return grantMonthlyPlanTokenReward(userEmailOrId, { customTokens: tokens, force: true, reason });
 }
 
 export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Promise<DeleteTransactionsResult> {
@@ -70339,30 +70772,33 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
   try {
     const placeholders = validIds.map((_, i) => `$${i + 1}`).join(',');
     const txRows = await query(`
-      SELECT id, user_id, user_email, amount 
+      SELECT id, user_id, user_email, amount, type, description 
       FROM token_transactions 
       WHERE id IN (${placeholders})
     `, validIds);
 
-    if (!txRows || txRows.length === 0) {
+    const rawTxs = parseDbRows(txRows);
+    if (rawTxs.length === 0) {
       return { success: true, deletedCount: 0, affectedUsers: [] };
     }
 
-    const userAdjustments: Record<string, { userId: string; userEmail: string; netChange: number }> = {};
-    for (const tx of txRows) {
-      const uKey = tx.user_id || tx.user_email;
+    const userAdjustments: Record<string, { userId: string; userEmail: string; netChange: number; types: string[] }> = {};
+    for (const tx of rawTxs) {
+      const uKey = (tx.user_id || tx.user_email || '').toLowerCase().trim();
       if (!uKey) continue;
       if (!userAdjustments[uKey]) {
         userAdjustments[uKey] = {
           userId: tx.user_id,
           userEmail: tx.user_email || '',
-          netChange: 0
+          netChange: 0,
+          types: []
         };
       }
       userAdjustments[uKey].netChange -= Number(tx.amount || 0);
+      userAdjustments[uKey].types.push(tx.type);
     }
 
-    const affectedUsers: Array<{ id: string; email?: string; newBalance: number }> = [];
+    const affectedUsers: AffectedUserBalance[] = [];
 
     for (const item of Object.values(userAdjustments)) {
       if (item.netChange === 0) continue;
@@ -70370,29 +70806,39 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
       let uRow: any = null;
       if (item.userId) {
         const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [item.userId]);
-        if (rows && rows.length > 0) uRow = rows[0];
+        const list = parseDbRows(rows);
+        if (list.length > 0) uRow = list[0];
       }
       if (!uRow && item.userEmail) {
-        const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [item.userEmail.trim()]);
-        if (rows && rows.length > 0) uRow = rows[0];
+        const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1', [item.userEmail.trim()]);
+        const list = parseDbRows(rows);
+        if (list.length > 0) uRow = list[0];
       }
 
       if (uRow) {
-        const currentBal = Number(uRow.token_balance ?? 0);
-        const updatedBal = Math.max(0, currentBal + item.netChange);
+        const oldBalance = Number(uRow.token_balance ?? 0);
+        const updatedBal = Math.max(0, oldBalance + item.netChange);
 
-        const updateRes = await query(`
+        await query(`
           UPDATE users 
           SET token_balance = $1, updated_at = NOW() 
-          WHERE id = $2 
-          RETURNING token_balance
+          WHERE id = $2
         `, [updatedBal, uRow.id]);
 
-        const actualNewBal = updateRes && updateRes.length > 0 ? Number(updateRes[0].token_balance) : updatedBal;
+        if (item.types.includes('plan_monthly_grant')) {
+          await query(`
+            UPDATE users 
+            SET last_token_grant_cycle = NULL, updated_at = NOW() 
+            WHERE id = $1
+          `, [uRow.id]).catch(() => {});
+        }
+
         affectedUsers.push({
           id: uRow.id,
           email: uRow.email,
-          newBalance: actualNewBal
+          oldBalance,
+          newBalance: updatedBal,
+          adjustedTokens: item.netChange
         });
       }
     }
@@ -70404,7 +70850,7 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
 
     return {
       success: true,
-      deletedCount: txRows.length,
+      deletedCount: rawTxs.length,
       affectedUsers
     };
   } catch (err: any) {
@@ -70416,138 +70862,6 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
       affectedUsers: []
     };
   }
-}
-
-/**
- * Grants monthly or plan-associated token rewards to a user upon subscription or cycle renewal.
- * Stored and updated in PostgreSQL users table (token_balance) and token_transactions.
- */
-export async function grantMonthlyPlanTokenReward(
-  userEmailOrId?: string | { id?: string; email?: string; userId?: string; userEmail?: string } | null,
-  tokens?: number | string | { tokenLimit?: number; tokens?: number; planSlug?: string; planName?: string; customTokens?: number } | any,
-  options?: { planSlug?: string; planName?: string; [key: string]: any } | any
-): Promise<{ success: boolean; tokensGranted: number; newBalance: number; plan?: string; error?: string }> {
-  await initTokenTables();
-
-  let cleanIdent = '';
-  let emailIdent = '';
-
-  if (typeof userEmailOrId === 'string') {
-    cleanIdent = userEmailOrId.trim();
-    if (cleanIdent.includes('@')) {
-      emailIdent = cleanIdent.toLowerCase();
-    }
-  } else if (userEmailOrId && typeof userEmailOrId === 'object') {
-    cleanIdent = (userEmailOrId.id || userEmailOrId.userId || userEmailOrId.email || '').trim();
-    if (userEmailOrId.email || userEmailOrId.userEmail) {
-      emailIdent = (userEmailOrId.email || userEmailOrId.userEmail || '').trim().toLowerCase();
-    }
-  }
-
-  if (!cleanIdent && !emailIdent) {
-    return { success: false, tokensGranted: 0, newBalance: 0, error: 'User identifier required' };
-  }
-
-  let rewardTokens = 0;
-  let resolvedOptions = options || {};
-
-  if (typeof tokens === 'number') {
-    rewardTokens = tokens;
-  } else if (typeof tokens === 'string') {
-    const parsed = parseInt(tokens, 10);
-    if (!isNaN(parsed)) rewardTokens = parsed;
-  } else if (tokens && typeof tokens === 'object') {
-    rewardTokens = Number(tokens.tokenLimit ?? tokens.tokens ?? tokens.customTokens ?? 0);
-    resolvedOptions = { ...tokens, ...resolvedOptions };
-  }
-
-  let userRow: any = null;
-  try {
-    const userRows = await query(`
-      SELECT id, email, token_balance, subscription_plan 
-      FROM users 
-      WHERE (id::text = $1 AND $1 != '') 
-         OR (LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '')
-         OR (LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
-      LIMIT 1
-    `, [cleanIdent, emailIdent]);
-    if (userRows && userRows.length > 0) {
-      userRow = userRows[0];
-    }
-  } catch (_) {}
-
-  const planSlug = resolvedOptions?.planSlug || userRow?.subscription_plan || 'free';
-  const planName = resolvedOptions?.planName || planSlug;
-
-  if (rewardTokens <= 0) {
-    if (resolvedOptions?.customTokens && Number(resolvedOptions.customTokens) > 0) {
-      rewardTokens = Number(resolvedOptions.customTokens);
-    } else {
-      try {
-        const pRows = await query(`
-          SELECT * FROM subscription_plans 
-          WHERE LOWER(slug) = LOWER($1) OR LOWER(id) = LOWER($1)
-          LIMIT 1
-        `, [planSlug]);
-        if (pRows && pRows.length > 0) {
-          rewardTokens = Number(pRows[0].token_limit ?? pRows[0].monthly_tokens ?? 500);
-        }
-      } catch (_) {}
-      
-      if (rewardTokens <= 0) {
-        const settings = await getTokenSettings();
-        const alloc = settings.planAllocations || {};
-        rewardTokens = Number(alloc[planSlug] ?? (planSlug.includes('pro') ? 500 : 50));
-      }
-    }
-  }
-
-  if (rewardTokens <= 0) {
-    rewardTokens = 500;
-  }
-
-  try {
-    const targetId = userRow?.id || cleanIdent;
-    const targetEmail = userRow?.email || emailIdent;
-
-    const updateRes = await query(`
-      UPDATE users 
-      SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
-      WHERE id::text = $2::text OR LOWER(TRIM(email)) = LOWER(TRIM($3))
-      RETURNING id, email, token_balance
-    `, [rewardTokens, targetId, targetEmail]);
-
-    const updatedUser = updateRes?.[0];
-    const newBalance = updatedUser ? Number(updatedUser.token_balance) : ((userRow?.token_balance || 0) + rewardTokens);
-
-    const desc = resolvedOptions?.reason || `Monthly Plan Token Reward: ${planName} (+${rewardTokens.toLocaleString()} tokens)`;
-    const txId = 'tx_grant_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 7);
-
-    try {
-      await query(`
-        INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
-        VALUES ($1, $2, $3, $4, $5, 'plan_monthly_grant', $6, NOW())
-      `, [txId, updatedUser?.id || targetId, updatedUser?.email || targetEmail, rewardTokens, newBalance, desc]);
-    } catch (_) {}
-
-    return {
-      success: true,
-      tokensGranted: rewardTokens,
-      newBalance,
-      plan: planSlug
-    };
-  } catch (err: any) {
-    console.error('[grantMonthlyPlanTokenReward Error]:', err);
-    return { success: false, tokensGranted: 0, newBalance: userRow?.token_balance || 0, error: err.message };
-  }
-}
-
-export async function syncUserMonthlyTokens(userEmailOrId: string): Promise<any> {
-  return grantMonthlyPlanTokenReward(userEmailOrId);
-}
-
-export async function grantUserTokens(userEmailOrId: string, tokens: number, reason?: string): Promise<any> {
-  return grantMonthlyPlanTokenReward(userEmailOrId, tokens, { reason });
 }
 
 ```
