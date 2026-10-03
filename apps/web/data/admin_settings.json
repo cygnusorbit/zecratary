@@ -2426,10 +2426,10 @@
       "stripeKeysVerified": false,
       "stripeWebhookVerified": false,
       "stripe": {
-        "enabled": true,
-        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG",
-        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
-        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019"
+        "enabled": false,
+        "publishableKey": "admin@zecratary.com",
+        "secretKey": "admin",
+        "webhookSecret": ""
       },
       "paypal": {
         "enabled": false,
@@ -2439,26 +2439,16 @@
         "environment": "sandbox"
       },
       "manualSettlement": {
-        "enabled": false,
+        "enabled": true,
         "bankName": "OCBC",
-        "accountHolder": "ABC",
-        "accountNumber": "11232312312",
-        "routingNumber": "1212",
-        "swiftBic": "123213",
-        "branchName": "New York",
+        "accountHolder": "Zacratary",
+        "accountNumber": "23123123233",
+        "routingNumber": "",
+        "swiftBic": "23233ASS",
+        "branchName": "",
         "instructions": "Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.",
         "requireReference": true
-      },
-      "activeGateway": "stripe",
-      "id": "ptx_1790962799750_uvtta",
-      "notes": "",
-      "amount": 50,
-      "status": "pending",
-      "plan_name": "Store Wallet Top-Up",
-      "customer_name": "System Administrator",
-      "customer_email": "admin@zecratary.com",
-      "failure_reason": "",
-      "transfer_reference": ""
+      }
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -3809,10 +3799,10 @@
       "stripeKeysVerified": false,
       "stripeWebhookVerified": false,
       "stripe": {
-        "enabled": true,
-        "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG",
-        "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
-        "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019"
+        "enabled": false,
+        "publishableKey": "admin@zecratary.com",
+        "secretKey": "admin",
+        "webhookSecret": ""
       },
       "paypal": {
         "enabled": false,
@@ -3822,26 +3812,16 @@
         "environment": "sandbox"
       },
       "manualSettlement": {
-        "enabled": false,
+        "enabled": true,
         "bankName": "OCBC",
-        "accountHolder": "ABC",
-        "accountNumber": "11232312312",
-        "routingNumber": "1212",
-        "swiftBic": "123213",
-        "branchName": "New York",
+        "accountHolder": "Zacratary",
+        "accountNumber": "23123123233",
+        "routingNumber": "",
+        "swiftBic": "23233ASS",
+        "branchName": "",
         "instructions": "Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.",
         "requireReference": true
-      },
-      "activeGateway": "stripe",
-      "id": "ptx_1790962799750_uvtta",
-      "notes": "",
-      "amount": 50,
-      "status": "pending",
-      "plan_name": "Store Wallet Top-Up",
-      "customer_name": "System Administrator",
-      "customer_email": "admin@zecratary.com",
-      "failure_reason": "",
-      "transfer_reference": ""
+      }
     },
     "siteDescription": "Smart Meal Planning & Recipe Assistant",
     "allowRegistration": true,
@@ -3949,5 +3929,5 @@
     ],
     "recommendedRecipeUrls": []
   },
-  "updatedAt": "2026-10-02T18:01:13.173Z"
+  "updatedAt": "2026-10-03T03:36:36.066Z"
 }

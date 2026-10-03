@@ -143,19 +143,23 @@ function WalletContent() {
   const [totalCount, setTotalCount] = useState(0);
   const [stats, setStats] = useState({ totalDeposited: 0, totalSpent: 0, totalEvents: 0 });
 
+  // -------------------------------------------------------------------------
+  // ALL useMemo HOOKS DECLARED UNCONDITIONALLY AT TOP LEVEL (RULES OF HOOKS)
+  // -------------------------------------------------------------------------
   const activeCurrencySymbol = useMemo(() => {
     return CURRENCY_SYMBOLS[settings.currency?.toUpperCase()] || '$';
   }, [settings.currency]);
 
-  const handleCustomAmountChange = (raw: string) => {
-    const clean = raw.replace(/[^0-9.]/g, '');
-    const parts = clean.split('.');
-    const formatted = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : clean;
-    setCustomAmount(formatted);
-    if (formatted !== '') {
-      setSelectedAmount(0);
-    }
-  };
+  // Dynamic available gateways array dynamically matched with /admin/payment-gateway
+  const availableGateways = useMemo(() => {
+    const list = [
+      { id: 'stripe', label: t('gatewayStripe', 'Credit Card (Stripe)'), desc: t('gatewayStripeDesc', 'Instant Card Settlement'), icon: CreditCard },
+      { id: 'paypal', label: t('gatewayPaypal', 'PayPal'), desc: t('gatewayPaypalDesc', 'Wallet & Account Balance'), icon: Coins },
+      { id: 'manual', label: t('gatewayManual', 'Bank Wire / Manual'), desc: t('gatewayManualDesc', 'Manual Approval Transfer'), icon: Landmark },
+    ];
+    const allowed = Array.isArray(settings.allowed_gateways) ? settings.allowed_gateways : [];
+    return list.filter((gw) => allowed.includes(gw.id));
+  }, [settings.allowed_gateways, t]);
 
   const activeAmount = useMemo(() => {
     const clean = customAmount.trim().replace(/[^0-9.]/g, '');
@@ -180,10 +184,32 @@ function WalletContent() {
     return highestBonus;
   }, [activeAmount, settings.bonus_rules]);
 
+  // Debounce Search Query
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Gateway Selection Auto-Reconciliation Effect
+  useEffect(() => {
+    if (availableGateways.length > 0) {
+      if (!availableGateways.some((gw) => gw.id === selectedGateway)) {
+        setSelectedGateway(availableGateways[0].id);
+      }
+    } else {
+      setSelectedGateway('');
+    }
+  }, [availableGateways, selectedGateway]);
+
+  const handleCustomAmountChange = (raw: string) => {
+    const clean = raw.replace(/[^0-9.]/g, '');
+    const parts = clean.split('.');
+    const formatted = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : clean;
+    setCustomAmount(formatted);
+    if (formatted !== '') {
+      setSelectedAmount(0);
+    }
+  };
 
   const hydrateUser = useCallback(() => {
     initAuthStorage();
@@ -242,25 +268,39 @@ function WalletContent() {
       if (currentSeq !== fetchSeqRef.current) return;
 
       if (data.success) {
-        if (data.settings) {
-          const loadedAllowed: string[] = Array.isArray(data.settings.allowed_gateways) 
-            ? data.settings.allowed_gateways 
-            : [];
+        const loadedAllowed: string[] = Array.isArray(data.settings?.allowed_gateways)
+          ? data.settings.allowed_gateways
+          : Array.isArray(data.allowed_gateways)
+          ? data.allowed_gateways
+          : Array.isArray(data.allowedGateways)
+          ? data.allowedGateways
+          : [];
 
+        if (data.settings) {
           setSettings({
             ...data.settings,
             allowed_gateways: loadedAllowed,
             min_topup: parseFloat(data.settings.min_topup || 5),
             max_topup: parseFloat(data.settings.max_topup || 1000),
           });
-
-          // Dynamic sync: ensure selectedGateway is currently active in /admin/payment-gateway
-          if (loadedAllowed.length > 0) {
-            setSelectedGateway((prev) => loadedAllowed.includes(prev) ? prev : loadedAllowed[0]);
-          }
+        } else {
+          setSettings((prev) => ({
+            ...prev,
+            allowed_gateways: loadedAllowed,
+            currency: data.currency || prev.currency,
+          }));
         }
+
+        if (loadedAllowed.length > 0) {
+          setSelectedGateway((prev) => loadedAllowed.includes(prev) ? prev : loadedAllowed[0]);
+        } else {
+          setSelectedGateway('');
+        }
+
         if (typeof data.wallet_balance === 'number') {
           setBalance(data.wallet_balance);
+        } else if (typeof data.balance === 'number') {
+          setBalance(data.balance);
         }
 
         setTransactions(Array.isArray(data.transactions) ? data.transactions : []);
@@ -309,12 +349,14 @@ function WalletContent() {
     window.addEventListener('zecratary_payment_updated', handleSync);
     window.addEventListener('zecratary_payment_gateway_updated', handleSync);
     window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    window.addEventListener('storage', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_wallet_updated', handleSync);
       window.removeEventListener('zecratary_payment_updated', handleSync);
       window.removeEventListener('zecratary_payment_gateway_updated', handleSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+      window.removeEventListener('storage', handleSync);
     };
   }, [limit, debouncedSearch, page, typeFilter]);
 
@@ -414,13 +456,11 @@ function WalletContent() {
       return;
     }
 
-    // Dynamic verification: open modal when manual gateway is chosen
     if (selectedGateway === 'manual') {
       setShowManualModal(true);
       return;
     }
 
-    // Stripe / PayPal Direct Checkout
     setSubmitting(true);
     setFeedback(null);
     const active = currentUserRef.current || user || getCurrentUser();
@@ -567,6 +607,9 @@ function WalletContent() {
     return pages;
   };
 
+  // -------------------------------------------------------------------------
+  // CONDITIONAL SPINNER RETURN OCCURS STRICTLY AFTER ALL HOOKS
+  // -------------------------------------------------------------------------
   if (!user) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center">
@@ -577,13 +620,6 @@ function WalletContent() {
       </div>
     );
   }
-
-  // Dynamic available gateways array filtered by /admin/payment-gateway
-  const availableGateways = [
-    { id: 'stripe', label: 'Credit Card (Stripe)', desc: 'Instant Card Settlement', icon: CreditCard },
-    { id: 'paypal', label: 'PayPal', desc: 'Wallet & Account Balance', icon: Coins },
-    { id: 'manual', label: 'Bank Wire / Manual', desc: 'Manual Approval Transfer', icon: Landmark },
-  ].filter((gw) => settings.allowed_gateways.includes(gw.id));
 
   return (
     <div
@@ -762,6 +798,8 @@ function WalletContent() {
                 type="text"
                 placeholder="e.g. 5.00"
                 value={customAmount}
+                autoComplete="off"
+                data-lpignore="true"
                 onChange={(e) => handleCustomAmountChange(e.target.value)}
                 onFocus={() => setFocusedField('customAmount')}
                 onBlur={() => {
@@ -787,7 +825,7 @@ function WalletContent() {
             )}
           </div>
 
-          {/* 1. DYNAMIC GATEWAY SYNC WITH /admin/payment-gateway */}
+          {/* DYNAMIC GATEWAY SELECTOR MATCHED WITH /admin/payment-gateway */}
           <div>
             <div className="flex items-center justify-between mb-3">
               <label className="block text-xs font-semibold uppercase opacity-70">
@@ -922,7 +960,7 @@ function WalletContent() {
         </div>
       </div>
 
-      {/* 2. DYNAMIC MANUAL GATEWAY MODAL MATCHED WITH /admin/payment-gateway */}
+      {/* DYNAMIC MANUAL GATEWAY MODAL */}
       {showManualModal && (
         <div 
           onClick={() => setShowManualModal(false)}
@@ -1054,6 +1092,8 @@ function WalletContent() {
                   type="text"
                   placeholder="e.g. WIRE-98214389 / Bank Ref No."
                   value={transferReference}
+                  autoComplete="new-password"
+                  data-lpignore="true"
                   onChange={(e) => setTransferReference(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-xl border text-xs font-mono font-bold outline-none transition"
                   style={{
@@ -1072,6 +1112,7 @@ function WalletContent() {
                   rows={2}
                   placeholder="e.g. Transferred from John Doe Account via Online Banking."
                   value={transferNotes}
+                  data-lpignore="true"
                   onChange={(e) => setTransferNotes(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl border text-xs outline-none transition leading-relaxed"
                   style={{
