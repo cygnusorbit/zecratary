@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.12",
+  "version": "8.1.14",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -22,6 +22,7 @@
   },
   "devDependencies": {
     "@types/pg": "^8.11.0",
+    "prisma": "^7.10.0",
     "typescript": "^5.7.3"
   },
   "packageManager": "npm@10.8.2",
@@ -31,6 +32,7 @@
     "next": "^16.3.5",
     "pg": "^8.23.0",
     "stripe": "^22.6.2",
+    "tailwindcss": "4.3.3",
     "turbo": "^2.11.6"
   }
 }
@@ -115,7 +117,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.12",
+  "version": "8.1.14",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -134,7 +136,7 @@
     "react-dom": "^18.3.1",
     "stripe": "^16.12.0",
     "tailwind-merge": "^2.6.0",
-    "tailwindcss": "^3.4.17"
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@types/node": "^20.17.19",
@@ -5881,10 +5883,10 @@ import {
   ArrowDownLeft, 
   Wallet, 
   ShieldCheck, 
-  CreditCard,
-  Layers,
-  Clock,
-  ArrowRight
+  CreditCard, 
+  Layers, 
+  Clock, 
+  ArrowRight 
 } from 'lucide-react';
 import { getCurrentUser, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -5917,8 +5919,12 @@ export default function TokenPage() {
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
-  const [packages, setPackages] = useState<TokenPackage[]>([]);
-  const [selectedPackageId, setSelectedPackageId] = useState<string>('');
+  const [packages, setPackages] = useState<TokenPackage[]>([
+    { id: 'pkg_starter', name: 'Starter Pantry', tokens: 100, price: 4.99, badge: 'Starter' },
+    { id: 'pkg_pro', name: 'Culinary Master', tokens: 500, price: 19.99, badge: 'Popular', isPopular: true },
+    { id: 'pkg_buffet', name: 'Executive Chef', tokens: 1500, price: 49.99, badge: 'Best Value' }
+  ]);
+  const [selectedPackageId, setSelectedPackageId] = useState<string>('pkg_starter');
 
   // Top Up Actions
   const [purchasingPkgId, setPurchasingPkgId] = useState<string | null>(null);
@@ -5971,7 +5977,7 @@ export default function TokenPage() {
     if (!isSilent) setLoadingTransactions(true);
 
     try {
-      const currentUser = getCurrentUser();
+      const currentUser = getCurrentUser() || user;
       const params = new URLSearchParams({
         page: currentPage.toString(),
         limit: pageSize.toString(),
@@ -6001,7 +6007,7 @@ export default function TokenPage() {
           setPackages(data.packages);
           setSelectedPackageId(prev => {
             const exists = data.packages.some((p: TokenPackage) => p.id === prev);
-            return exists ? prev : (data.packages[0]?.id || '');
+            return exists ? prev : (data.packages[0]?.id || 'pkg_starter');
           });
         }
 
@@ -6023,7 +6029,7 @@ export default function TokenPage() {
       if (!isSilent) setLoadingTransactions(false);
       isFetchingRef.current = false;
     }
-  }, [currentPage, pageSize, typeFilter, searchQuery]);
+  }, [currentPage, pageSize, typeFilter, searchQuery, user]);
 
   useEffect(() => {
     fetchTokenData();
@@ -6038,7 +6044,7 @@ export default function TokenPage() {
     window.addEventListener('zecratary_wallet_updated', handleSync);
 
     const handleStorage = (e: StorageEvent) => {
-      if (!e.key || e.key.includes('token') || e.key.includes('settings')) {
+      if (!e.key || e.key.includes('token') || e.key.includes('wallet') || e.key.includes('user')) {
         fetchTokenData(true);
       }
     };
@@ -6047,16 +6053,29 @@ export default function TokenPage() {
     const handleFocus = () => fetchTokenData(true);
     window.addEventListener('focus', handleFocus);
 
+    let balanceChannel: BroadcastChannel | null = null;
+    try {
+      balanceChannel = new BroadcastChannel('zecratary_balance_channel');
+      balanceChannel.onmessage = (event) => {
+        if (event.data?.type === 'BALANCE_UPDATED') {
+          if (typeof event.data.tokenBalance === 'number') setTokenBalance(event.data.tokenBalance);
+          if (typeof event.data.walletBalance === 'number') setWalletBalance(event.data.walletBalance);
+          fetchTokenData(true);
+        }
+      };
+    } catch (_) {}
+
     return () => {
       window.removeEventListener('zecratary_tokens_updated', handleSync);
       window.removeEventListener('zecratary_token_settings_updated', handleSync);
       window.removeEventListener('zecratary_wallet_updated', handleSync);
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('focus', handleFocus);
+      if (balanceChannel) balanceChannel.close();
     };
   }, [fetchTokenData]);
 
-  // 3. Purchase Package Handler (Defensive Deserialization & Settlement)
+  // 3. Purchase Package Handler (Atomic Dual-Ledger Settlement)
   const handlePurchase = async (pkgId: string) => {
     const pkg = packages.find(p => p.id === pkgId);
     if (!pkg) return;
@@ -6090,6 +6109,7 @@ export default function TokenPage() {
           packageName: pkg.name,
           userId: currentUser?.id || null,
           userEmail: currentUser?.email || null,
+          email: currentUser?.email || null,
           paymentMethod: 'wallet'
         })
       });
@@ -6118,12 +6138,16 @@ export default function TokenPage() {
 
       setTokenBalance(newBal);
 
+      let nextWalletBal = walletBalance;
       if (typeof data.newWalletBalance === 'number') {
+        nextWalletBal = data.newWalletBalance;
         setWalletBalance(data.newWalletBalance);
       } else if (typeof data.wallet_balance === 'number') {
+        nextWalletBal = data.wallet_balance;
         setWalletBalance(data.wallet_balance);
       } else if (walletBalance !== null) {
-        setWalletBalance(prev => Math.max(0, (prev || 0) - price));
+        nextWalletBal = Math.max(0, walletBalance - price);
+        setWalletBalance(nextWalletBal);
       }
 
       setFeedback({
@@ -6138,7 +6162,7 @@ export default function TokenPage() {
             const u = JSON.parse(raw);
             u.token_balance = newBal;
             u.tokenBalance = newBal;
-            if (typeof data.newWalletBalance === 'number') u.wallet_balance = data.newWalletBalance;
+            if (nextWalletBal !== null) u.wallet_balance = nextWalletBal;
             localStorage.setItem('zecratary_user', JSON.stringify(u));
           }
         } catch (_) {}
@@ -6146,6 +6170,16 @@ export default function TokenPage() {
         window.dispatchEvent(new Event('zecratary_tokens_updated'));
         window.dispatchEvent(new Event('zecratary_wallet_updated'));
         window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+
+        try {
+          const channel = new BroadcastChannel('zecratary_balance_channel');
+          channel.postMessage({
+            type: 'BALANCE_UPDATED',
+            tokenBalance: newBal,
+            walletBalance: nextWalletBal
+          });
+          channel.close();
+        } catch (_) {}
       }
 
       fetchTokenData(true);
@@ -6247,7 +6281,7 @@ export default function TokenPage() {
             </div>
           </div>
 
-          {/* Optional Wallet Balance Pill */}
+          {/* Live Wallet Balance Pill */}
           {walletBalance !== null && (
             <div 
               className="flex items-center gap-2 px-4 py-2 rounded-2xl border bg-[var(--color-inner-dark)] shadow-inner"
@@ -6344,97 +6378,82 @@ export default function TokenPage() {
 
         {/* Dynamic Packages Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
-          {packages.length === 0 ? (
-            <div className="col-span-full py-12 text-center text-xs opacity-60 space-y-2">
-              <Coins className="h-8 w-8 mx-auto opacity-30 text-amber-500" />
-              <p className="font-bold">{t('noPackagesConfigured', 'No token packages available at the moment.')}</p>
-              {isAdmin && (
-                <Link
-                  href="/admin/token-setting"
-                  className="inline-flex items-center gap-1 text-xs font-bold text-amber-500 hover:underline"
-                >
-                  Configure Bundles in /admin/token-setting →
-                </Link>
-              )}
-            </div>
-          ) : (
-            packages.map((pkg) => {
-              const isSelected = selectedPackageId === pkg.id;
-              const isBuying = purchasingPkgId === pkg.id;
-              const isShort = walletBalance !== null && walletBalance < pkg.price;
+          {packages.map((pkg) => {
+            const isSelected = selectedPackageId === pkg.id;
+            const isBuying = purchasingPkgId === pkg.id;
+            const isShort = walletBalance !== null && walletBalance < pkg.price;
 
-              return (
-                <div
-                  key={pkg.id}
-                  onClick={() => setSelectedPackageId(pkg.id)}
-                  className={`relative flex flex-col justify-between p-5 rounded-3xl border transition-all cursor-pointer ${
-                    isSelected 
-                      ? 'border-[var(--color-primary)] ring-2 ring-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 shadow-md' 
-                      : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/40 bg-[var(--color-inner-dark)] hover:shadow-xs'
-                  }`}
-                >
-                  {pkg.badge && (
-                    <div className="absolute top-4 right-4">
-                      <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-500 border border-amber-500/30 shadow-xs">
-                        {pkg.badge}
-                      </span>
+            return (
+              <div
+                key={pkg.id}
+                onClick={() => setSelectedPackageId(pkg.id)}
+                className={`relative flex flex-col justify-between p-5 rounded-3xl border transition-all cursor-pointer ${
+                  isSelected 
+                    ? 'border-[var(--color-primary)] ring-2 ring-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 shadow-md' 
+                    : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/40 bg-[var(--color-inner-dark)] hover:shadow-xs'
+                }`}
+              >
+                {pkg.badge && (
+                  <div className="absolute top-4 right-4">
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-500 border border-amber-500/30 shadow-xs">
+                      {pkg.badge}
+                    </span>
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  <div className="pr-12">
+                    <h3 className="text-sm font-black truncate">{pkg.name}</h3>
+                    <div className="flex items-baseline gap-1 mt-1 font-mono">
+                      <span className="text-2xl font-black text-amber-500">+{pkg.tokens.toLocaleString()}</span>
+                      <span className="text-xs font-bold opacity-75">{tokenSymbol}</span>
                     </div>
-                  )}
-
-                  <div className="space-y-3">
-                    <div className="pr-12">
-                      <h3 className="text-sm font-black truncate">{pkg.name}</h3>
-                      <div className="flex items-baseline gap-1 mt-1 font-mono">
-                        <span className="text-2xl font-black text-amber-500">+{pkg.tokens.toLocaleString()}</span>
-                        <span className="text-xs font-bold opacity-75">{tokenSymbol}</span>
-                      </div>
-                    </div>
-
-                    <p className="text-[11px] opacity-70">
-                      Instantly adds <strong className="font-bold">{pkg.tokens.toLocaleString()}</strong> spendable AI tokens to your live wallet.
-                    </p>
                   </div>
 
-                  <div className="pt-4 mt-4 border-t flex items-center justify-between gap-3" style={{ borderColor: 'var(--color-border)' }}>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] uppercase font-bold opacity-60">Price</span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-base font-black font-mono">${Number(pkg.price).toFixed(2)}</span>
-                        {isShort && (
-                          <span className="text-[10px] font-bold text-amber-500 font-mono">
-                            Short ${(Number(pkg.price) - Number(walletBalance)).toFixed(2)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      disabled={Boolean(purchasingPkgId)}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handlePurchase(pkg.id);
-                      }}
-                      className="py-2 px-4 rounded-xl text-xs font-extrabold text-white flex items-center gap-1.5 shadow-md transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
-                      style={{ backgroundColor: 'var(--color-primary)' }}
-                    >
-                      {isBuying ? (
-                        <>
-                          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                          <span>Processing...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Plus className="h-3.5 w-3.5" />
-                          <span>{t('buyNow', 'Buy Now')}</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
+                  <p className="text-[11px] opacity-70">
+                    Instantly adds <strong className="font-bold">{pkg.tokens.toLocaleString()}</strong> spendable AI tokens to your live wallet.
+                  </p>
                 </div>
-              );
-            })
-          )}
+
+                <div className="pt-4 mt-4 border-t flex items-center justify-between gap-3" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] uppercase font-bold opacity-60">Price</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-base font-black font-mono">${Number(pkg.price).toFixed(2)}</span>
+                      {isShort && (
+                        <span className="text-[10px] font-bold text-amber-500 font-mono">
+                          Short ${(Number(pkg.price) - Number(walletBalance)).toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={Boolean(purchasingPkgId)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handlePurchase(pkg.id);
+                    }}
+                    className="py-2 px-4 rounded-xl text-xs font-extrabold text-white flex items-center gap-1.5 shadow-md transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    {isBuying ? (
+                      <>
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        <span>Processing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>{t('buyNow', 'Buy Now')}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -45841,7 +45860,6 @@ import {
   RotateCw,
   Landmark,
   X,
-  FileText,
   Copy,
   Check
 } from 'lucide-react';
@@ -45898,7 +45916,6 @@ function WalletContent() {
   const langContext = useTranslation();
   const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
 
-  const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [reconciling, setReconciling] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; msg: string } | null>(null);
@@ -45908,10 +45925,11 @@ function WalletContent() {
   const currentUserRef = useRef<User | null>(null);
   const [balance, setBalance] = useState<number>(0);
 
-  // Concurrency Guard
+  // Concurrency & Debounce Guards
   const verifyingIdRef = useRef<string | null>(null);
   const isFetchingWalletRef = useRef<boolean>(false);
   const fetchSeqRef = useRef<number>(0);
+  const syncDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   // Settings Dynamic Sync
   const [settings, setSettings] = useState<WalletSettings>({
@@ -45932,7 +45950,6 @@ function WalletContent() {
   const [selectedAmount, setSelectedAmount] = useState<number>(50);
   const [customAmount, setCustomAmount] = useState<string>('');
   const [selectedGateway, setSelectedGateway] = useState<string>('stripe');
-  const [focusedField, setFocusedField] = useState<string | null>(null);
 
   // Manual Settlement Modal States
   const [showManualModal, setShowManualModal] = useState<boolean>(false);
@@ -45953,14 +45970,13 @@ function WalletContent() {
   const [totalCount, setTotalCount] = useState(0);
   const [stats, setStats] = useState({ totalDeposited: 0, totalSpent: 0, totalEvents: 0 });
 
-  // -------------------------------------------------------------------------
-  // ALL useMemo HOOKS DECLARED UNCONDITIONALLY AT TOP LEVEL (RULES OF HOOKS)
-  // -------------------------------------------------------------------------
+  const queryParamsRef = useRef({ page, limit, debouncedSearch, typeFilter });
+  queryParamsRef.current = { page, limit, debouncedSearch, typeFilter };
+
   const activeCurrencySymbol = useMemo(() => {
-    return CURRENCY_SYMBOLS[settings.currency?.toUpperCase()] || '$';
+    return CURRENCY_SYMBOLS[(settings.currency || 'USD').toUpperCase()] || '$';
   }, [settings.currency]);
 
-  // Dynamic available gateways array dynamically matched with /admin/payment-gateway
   const availableGateways = useMemo(() => {
     const list = [
       { id: 'stripe', label: t('gatewayStripe', 'Credit Card (Stripe)'), desc: t('gatewayStripeDesc', 'Instant Card Settlement'), icon: CreditCard },
@@ -45984,8 +46000,8 @@ function WalletContent() {
     if (!settings.bonus_rules || !Array.isArray(settings.bonus_rules)) return 0;
     let highestBonus = 0;
     for (const rule of settings.bonus_rules) {
-      const threshold = parseFloat(rule.threshold as any || 0);
-      const percent = parseFloat(rule.bonus_percent as any || 0);
+      const threshold = parseFloat((rule.threshold as any) || 0);
+      const percent = parseFloat((rule.bonus_percent as any) || 0);
       if (activeAmount >= threshold && percent > 0) {
         const bonus = activeAmount * (percent / 100);
         if (bonus > highestBonus) highestBonus = bonus;
@@ -45994,13 +46010,14 @@ function WalletContent() {
     return highestBonus;
   }, [activeAmount, settings.bonus_rules]);
 
-  // Debounce Search Query
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setPage(1);
+    }, 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Gateway Selection Auto-Reconciliation Effect
   useEffect(() => {
     if (availableGateways.length > 0) {
       if (!availableGateways.some((gw) => gw.id === selectedGateway)) {
@@ -46047,13 +46064,19 @@ function WalletContent() {
   const hydrateUserRef = useRef(hydrateUser);
   hydrateUserRef.current = hydrateUser;
 
+  // Pure query handler: NEVER dispatches zecratary_wallet_updated to prevent recursion loops
   const fetchWalletData = useCallback(async (
-    targetPage = page,
-    targetLimit = limit,
-    targetSearch = debouncedSearch,
-    targetType = typeFilter,
+    targetPage?: number,
+    targetLimit?: number,
+    targetSearch?: string,
+    targetType?: string,
     force = false
   ) => {
+    const curP = targetPage !== undefined ? targetPage : queryParamsRef.current.page;
+    const curL = targetLimit !== undefined ? targetLimit : queryParamsRef.current.limit;
+    const curS = targetSearch !== undefined ? targetSearch : queryParamsRef.current.debouncedSearch;
+    const curT = targetType !== undefined ? targetType : queryParamsRef.current.typeFilter;
+
     let active = currentUserRef.current || getCurrentUser();
     if (!active?.email && !active?.id) return;
 
@@ -46066,13 +46089,16 @@ function WalletContent() {
       const params = new URLSearchParams({
         email: active.email || '',
         userId: String(active.id || ''),
-        page: String(targetPage),
-        limit: String(targetLimit),
-        search: targetSearch,
-        type: targetType,
+        page: String(curP),
+        limit: String(curL),
+        search: curS,
+        type: curT,
       });
 
       const res = await fetch(`/api/wallet?${params.toString()}&t=${Date.now()}`, { cache: 'no-store' });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
       const data = await res.json();
 
       if (currentSeq !== fetchSeqRef.current) return;
@@ -46107,16 +46133,36 @@ function WalletContent() {
           setSelectedGateway('');
         }
 
-        if (typeof data.wallet_balance === 'number') {
-          setBalance(data.wallet_balance);
-        } else if (typeof data.balance === 'number') {
-          setBalance(data.balance);
+        const bal = typeof data.wallet_balance === 'number'
+          ? data.wallet_balance
+          : typeof data.balance === 'number'
+          ? data.balance
+          : typeof data.walletBalance === 'number'
+          ? data.walletBalance
+          : null;
+
+        if (bal !== null) {
+          setBalance(bal);
+          if (currentUserRef.current) {
+            currentUserRef.current.wallet_balance = bal;
+          }
+          if (typeof window !== 'undefined') {
+            try {
+              const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
+              if (raw) {
+                const u = JSON.parse(raw);
+                u.wallet_balance = bal;
+                u.walletBalance = bal;
+                localStorage.setItem('zecratary_user', JSON.stringify(u));
+              }
+            } catch (_) {}
+          }
         }
 
         setTransactions(Array.isArray(data.transactions) ? data.transactions : []);
         setTotalCount(typeof data.totalCount === 'number' ? data.totalCount : parseInt(data.totalCount || '0', 10));
-        setTotalPages(typeof data.totalPages === 'number' ? data.totalPages : Math.ceil((data.totalCount || 0) / targetLimit) || 1);
-        setPage(data.page || targetPage);
+        setTotalPages(typeof data.totalPages === 'number' ? data.totalPages : Math.ceil((data.totalCount || 0) / curL) || 1);
+        setPage(data.page || curP);
 
         if (data.stats) {
           setStats({
@@ -46127,15 +46173,14 @@ function WalletContent() {
         }
       }
     } catch (err: any) {
-      console.error('Failed to load wallet data:', err);
+      console.warn('Wallet data query notice:', err?.message || err);
     } finally {
       if (currentSeq === fetchSeqRef.current) {
         setTxLoading(false);
-        setLoading(false);
         isFetchingWalletRef.current = false;
       }
     }
-  }, [page, limit, debouncedSearch, typeFilter]);
+  }, []);
 
   const fetchWalletRef = useRef(fetchWalletData);
   fetchWalletRef.current = fetchWalletData;
@@ -46143,37 +46188,47 @@ function WalletContent() {
   useEffect(() => {
     hydrateUserRef.current();
 
-    const incomingSessionId = searchParams.get('session_id');
-    const incomingStatus = searchParams.get('status');
+    const incomingSessionId = searchParams.get('session_id') || searchParams.get('sessionId');
+    const incomingStatus = searchParams.get('status') || (searchParams.get('success') === 'true' ? 'success' : null);
     const hasIncomingVerification = incomingStatus === 'success' && Boolean(incomingSessionId);
 
     if (!hasIncomingVerification) {
-      fetchWalletRef.current(1, limit);
+      fetchWalletRef.current(1, queryParamsRef.current.limit, '', 'all', false);
     }
 
-    const handleSync = () => {
-      fetchWalletRef.current(page, limit, debouncedSearch, typeFilter, true);
+    const debouncedSync = () => {
+      if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
+      syncDebounceRef.current = setTimeout(() => {
+        fetchWalletRef.current(
+          queryParamsRef.current.page,
+          queryParamsRef.current.limit,
+          queryParamsRef.current.debouncedSearch,
+          queryParamsRef.current.typeFilter,
+          false
+        );
+      }, 250);
     };
 
-    window.addEventListener('zecratary_wallet_updated', handleSync);
-    window.addEventListener('zecratary_payment_updated', handleSync);
-    window.addEventListener('zecratary_payment_gateway_updated', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
-    window.addEventListener('storage', handleSync);
+    window.addEventListener('zecratary_wallet_updated', debouncedSync);
+    window.addEventListener('zecratary_payment_updated', debouncedSync);
+    window.addEventListener('zecratary_payment_gateway_updated', debouncedSync);
+    window.addEventListener('zecratary_admin_settings_updated', debouncedSync);
+    window.addEventListener('storage', debouncedSync);
 
     return () => {
-      window.removeEventListener('zecratary_wallet_updated', handleSync);
-      window.removeEventListener('zecratary_payment_updated', handleSync);
-      window.removeEventListener('zecratary_payment_gateway_updated', handleSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
-      window.removeEventListener('storage', handleSync);
+      if (syncDebounceRef.current) clearTimeout(syncDebounceRef.current);
+      window.removeEventListener('zecratary_wallet_updated', debouncedSync);
+      window.removeEventListener('zecratary_payment_updated', debouncedSync);
+      window.removeEventListener('zecratary_payment_gateway_updated', debouncedSync);
+      window.removeEventListener('zecratary_admin_settings_updated', debouncedSync);
+      window.removeEventListener('storage', debouncedSync);
     };
-  }, [limit, debouncedSearch, page, typeFilter]);
+  }, [searchParams]);
 
   // Handle Stripe Session Return
   useEffect(() => {
-    const sessionId = searchParams.get('session_id');
-    const status = searchParams.get('status');
+    const sessionId = searchParams.get('session_id') || searchParams.get('sessionId');
+    const status = searchParams.get('status') || (searchParams.get('success') === 'true' ? 'success' : null);
 
     if (status === 'success' && sessionId) {
       if (verifyingIdRef.current === sessionId) return;
@@ -46207,6 +46262,7 @@ function WalletContent() {
             });
             if (typeof data.wallet_balance === 'number') {
               setBalance(data.wallet_balance);
+              if (currentUserRef.current) currentUserRef.current.wallet_balance = data.wallet_balance;
             }
             fetchWalletRef.current(1, limit, '', 'all', true);
             if (typeof window !== 'undefined') {
@@ -46238,14 +46294,62 @@ function WalletContent() {
   }, [searchParams, limit, t]);
 
   const handleCopy = (text: string, key: string) => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && navigator.clipboard) {
       navigator.clipboard.writeText(text);
       setCopiedKey(key);
       setTimeout(() => setCopiedKey(null), 2000);
     }
   };
 
-  // Top-Up execution entry point
+  const handleReconcile = async () => {
+    if (reconciling) return;
+    setReconciling(true);
+    setFeedback({
+      type: 'info',
+      msg: t('reconcilingMsg', 'Reconciling payments and checking for unrecorded transactions...'),
+    });
+
+    const active = currentUserRef.current || user || getCurrentUser();
+    try {
+      const res = await fetch('/api/wallet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'reconcile_wallet',
+          email: active?.email || '',
+          userId: String(active?.id || ''),
+        }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setFeedback({
+          type: 'success',
+          msg: data.message || t('reconcileSuccess', 'Wallet synchronized successfully!'),
+        });
+        if (typeof data.wallet_balance === 'number') {
+          setBalance(data.wallet_balance);
+        }
+        fetchWalletRef.current(page, limit, debouncedSearch, typeFilter, true);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_wallet_updated'));
+        }
+      } else {
+        setFeedback({
+          type: 'error',
+          msg: data.error || t('reconcileFailed', 'Reconciliation could not find unrecorded payments.'),
+        });
+      }
+    } catch (err: any) {
+      setFeedback({
+        type: 'error',
+        msg: err.message || t('reconcileError', 'Error connecting to reconciliation engine.'),
+      });
+    } finally {
+      setReconciling(false);
+    }
+  };
+
   const handleExecuteTopup = async () => {
     const cleanAmt = customAmount.trim().replace(/[^0-9.]/g, '');
     const depositAmt = cleanAmt !== '' ? parseFloat(cleanAmt) : selectedAmount;
@@ -46298,6 +46402,24 @@ function WalletContent() {
           window.location.assign(data.checkoutUrl);
           return;
         }
+
+        if (data.simulated || typeof data.wallet_balance === 'number') {
+          setFeedback({
+            type: 'success',
+            msg: data.message || t('topupSuccess', 'Top-up completed successfully!'),
+          });
+          if (typeof data.wallet_balance === 'number') {
+            setBalance(data.wallet_balance);
+          }
+          setCustomAmount('');
+          setSelectedAmount(settings.preset_amounts?.[0] || 50);
+          fetchWalletRef.current(1, limit, '', 'all', true);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new Event('zecratary_wallet_updated'));
+            window.dispatchEvent(new Event('zecratary_payment_updated'));
+          }
+          return;
+        }
       } else {
         setFeedback({ type: 'error', msg: data.error || t('topupFailed', 'Top-up transaction failed.') });
       }
@@ -46308,7 +46430,6 @@ function WalletContent() {
     }
   };
 
-  // Submit Manual Settlement Form from Modal
   const handleSubmitManualSettlement = async () => {
     if (!transferReference.trim()) {
       setFeedback({
@@ -46417,9 +46538,6 @@ function WalletContent() {
     return pages;
   };
 
-  // -------------------------------------------------------------------------
-  // CONDITIONAL SPINNER RETURN OCCURS STRICTLY AFTER ALL HOOKS
-  // -------------------------------------------------------------------------
   if (!user) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center">
@@ -46462,7 +46580,7 @@ function WalletContent() {
             </div>
             <div className="text-4xl sm:text-5xl font-black tracking-tight flex items-baseline gap-2">
               <span className="font-mono text-[var(--color-primary,#3b82f6)]" suppressHydrationWarning>
-                {activeCurrencySymbol}{balance.toFixed(2)}
+                {activeCurrencySymbol}{Number(balance || 0).toFixed(2)}
               </span>
               <span className="text-lg font-bold opacity-60 font-mono">{settings.currency}</span>
             </div>
@@ -46481,7 +46599,7 @@ function WalletContent() {
               <div>
                 <div className="text-[10px] font-bold uppercase opacity-60">{t('totalDeposited', 'Total Deposited')}</div>
                 <div className="text-sm font-black font-mono text-emerald-400" suppressHydrationWarning>
-                  +{activeCurrencySymbol}{stats.totalDeposited.toFixed(2)}
+                  +{activeCurrencySymbol}{Number(stats.totalDeposited || 0).toFixed(2)}
                 </div>
               </div>
             </div>
@@ -46494,7 +46612,7 @@ function WalletContent() {
               <div>
                 <div className="text-[10px] font-bold uppercase opacity-60">{t('totalSpent', 'Total Spent')}</div>
                 <div className="text-sm font-black font-mono text-rose-400" suppressHydrationWarning>
-                  -{activeCurrencySymbol}{stats.totalSpent.toFixed(2)}
+                  -{activeCurrencySymbol}{Number(stats.totalSpent || 0).toFixed(2)}
                 </div>
               </div>
             </div>
@@ -46611,9 +46729,7 @@ function WalletContent() {
                 autoComplete="off"
                 data-lpignore="true"
                 onChange={(e) => handleCustomAmountChange(e.target.value)}
-                onFocus={() => setFocusedField('customAmount')}
                 onBlur={() => {
-                  setFocusedField(null);
                   if (!customAmount && selectedAmount === 0) {
                     setSelectedAmount(settings.preset_amounts?.[0] || 50);
                   }
@@ -46635,7 +46751,7 @@ function WalletContent() {
             )}
           </div>
 
-          {/* DYNAMIC GATEWAY SELECTOR MATCHED WITH /admin/payment-gateway */}
+          {/* DYNAMIC GATEWAY SELECTOR */}
           <div>
             <div className="flex items-center justify-between mb-3">
               <label className="block text-xs font-semibold uppercase opacity-70">
@@ -46757,7 +46873,9 @@ function WalletContent() {
             ) : (
               <>
                 <span>
-                  {selectedGateway === 'stripe'
+                  {availableGateways.length === 0
+                    ? t('topupsUnavailable', 'Top-Ups Temporarily Unavailable')
+                    : selectedGateway === 'stripe'
                     ? t('checkoutWithStripe', 'Pay with Stripe Checkout')
                     : selectedGateway === 'paypal'
                     ? t('checkoutWithPaypal', 'Pay with PayPal')
@@ -46811,7 +46929,6 @@ function WalletContent() {
               </p>
             </div>
 
-            {/* Dynamic Beneficiary Details Grid from /admin/payment-gateway */}
             <div 
               className="p-4 rounded-2xl border space-y-3 font-mono text-[11px]"
               style={{
@@ -46892,7 +47009,6 @@ function WalletContent() {
               )}
             </div>
 
-            {/* Form Inputs for Reference Memo and Sender Details */}
             <div className="space-y-3.5 pt-1">
               <div>
                 <label className="block text-xs font-bold uppercase mb-1 opacity-80">
@@ -46991,9 +47107,21 @@ function WalletContent() {
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={handleReconcile}
+              disabled={reconciling || txLoading}
+              className="text-xs font-bold px-3 py-1.5 rounded-xl border flex items-center gap-1.5 transition hover:opacity-80 cursor-pointer disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}
+              title={t('reconcilePayments', 'Reconcile unrecorded payments')}
+            >
+              <RotateCw className={`w-3.5 h-3.5 text-[var(--color-primary,#3b82f6)] ${reconciling ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">{reconciling ? t('reconcilingBtn', 'Reconciling...') : t('reconcileBtn', 'Reconcile')}</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => fetchWalletRef.current(page, limit, debouncedSearch, typeFilter, true)}
               disabled={txLoading}
-              className="p-2 rounded-xl border flex items-center justify-center cursor-pointer transition hover:opacity-80"
+              className="p-2 rounded-xl border flex items-center justify-center cursor-pointer transition hover:opacity-80 disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}
               title={t('refreshLedger', 'Refresh ledger')}
             >
@@ -47087,18 +47215,19 @@ function WalletContent() {
                 </tr>
               ) : (
                 transactions.map((tx) => {
-                  const isNeg = Number(tx.amount) < 0;
+                  const amtNum = Math.abs(Number(tx.amount || 0));
+                  const isNeg = Number(tx.amount || 0) < 0;
                   const txRef = tx.gateway_tx_id || tx.id;
                   return (
                     <tr key={tx.id} className="hover:bg-slate-500/5 transition font-medium">
                       <td className="p-3.5">{renderWalletBadge(tx.type, tx.status)}</td>
                       <td className="p-3.5">
-                        <span className={`font-mono font-black text-xs ${isNeg ? 'text-red-400' : 'text-emerald-400'}`}>
-                          {isNeg ? '' : '+'}{activeCurrencySymbol}{Math.abs(Number(tx.amount)).toFixed(2)}
+                        <span className={`font-mono font-black text-xs ${isNeg ? 'text-rose-400' : 'text-emerald-400'}`}>
+                          {isNeg ? '-' : '+'}{activeCurrencySymbol}{amtNum.toFixed(2)}
                         </span>
                       </td>
                       <td className="p-3.5 font-mono text-xs font-bold opacity-90">
-                        {activeCurrencySymbol}{parseFloat(tx.balance_after as any || 0).toFixed(2)}
+                        {activeCurrencySymbol}{parseFloat((tx.balance_after as any) || 0).toFixed(2)}
                       </td>
                       <td className="p-3.5">
                         <div className="flex flex-col items-start gap-1">
@@ -59578,238 +59707,659 @@ export async function DELETE(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/wallet/route.ts`
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { Pool } from 'pg';
-import Stripe from 'stripe';
+import { NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
 
-let pool: Pool | null = null;
-function getPool() {
-  if (!pool) {
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-    });
-  }
-  return pool;
+let isSchemaEnsured = false;
+
+// Module-scoped, non-exported helper to safely unwrap PostgreSQL query results without TS2339 'never' narrowing
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
 }
 
-let isDbInitialized = false;
+function parseDbRow<T = any>(res: any): T | null {
+  const rows = parseDbRows<T>(res);
+  return rows.length > 0 ? rows[0] : null;
+}
 
-async function initWalletDb() {
-  if (isDbInitialized) return;
-  const client = await getPool().connect();
+async function ensureWalletSchema() {
+  if (isSchemaEnsured) return;
   try {
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS wallet_settings (
-        id VARCHAR(64) PRIMARY KEY DEFAULT 'current',
-        is_enabled BOOLEAN DEFAULT true,
+    await query(`
+      CREATE TABLE IF NOT EXISTS admin_settings (
+        id INT PRIMARY KEY DEFAULT 1,
+        payment_settings JSONB,
         currency VARCHAR(10) DEFAULT 'USD',
-        min_topup NUMERIC(10,2) DEFAULT 5.00,
-        max_topup NUMERIC(10,2) DEFAULT 1000.00,
-        preset_amounts JSONB DEFAULT '[10, 25, 50, 100, 250]',
-        bonus_rules JSONB DEFAULT '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]',
-        allowed_gateways JSONB DEFAULT '["stripe", "paypal", "manual"]',
-        allow_site_purchases BOOLEAN DEFAULT true,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        site_name TEXT,
+        theme_colors JSONB,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
       );
-
-      CREATE TABLE IF NOT EXISTS wallet_transactions (
-        id VARCHAR(64) PRIMARY KEY,
-        user_id VARCHAR(64),
-        user_email VARCHAR(255) NOT NULL,
-        type VARCHAR(32) NOT NULL,
-        amount NUMERIC(10,2) NOT NULL,
-        balance_after NUMERIC(10,2) NOT NULL,
-        gateway VARCHAR(32) DEFAULT 'stripe',
-        gateway_tx_id VARCHAR(255),
-        status VARCHAR(32) DEFAULT 'succeeded',
-        description TEXT,
-        metadata JSONB DEFAULT '{}',
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(10,2) DEFAULT 0.00;
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance INT DEFAULT 100;
-
-      INSERT INTO wallet_settings (id, is_enabled, currency, min_topup, max_topup, preset_amounts, bonus_rules, allowed_gateways, allow_site_purchases)
-      VALUES ('current', true, 'USD', 5.00, 1000.00, '[10, 25, 50, 100, 250]', '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]', '["stripe", "paypal", "manual"]', true)
-      ON CONFLICT (id) DO NOTHING;
     `);
-    isDbInitialized = true;
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        email TEXT UNIQUE,
+        name TEXT,
+        wallet_balance NUMERIC DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS wallet_transactions (
+        id VARCHAR(255) PRIMARY KEY,
+        user_id TEXT,
+        user_email TEXT,
+        amount NUMERIC DEFAULT 0,
+        balance_after NUMERIC DEFAULT 0,
+        type VARCHAR(50) DEFAULT 'topup',
+        gateway VARCHAR(50) DEFAULT 'stripe',
+        gateway_tx_id TEXT,
+        status VARCHAR(50) DEFAULT 'completed',
+        description TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        id VARCHAR(255) PRIMARY KEY,
+        customer_name TEXT,
+        customer_email TEXT,
+        plan_name TEXT,
+        plan_slug TEXT,
+        amount NUMERIC DEFAULT 0,
+        currency VARCHAR(10) DEFAULT 'USD',
+        gateway VARCHAR(50) DEFAULT 'stripe',
+        status VARCHAR(50) DEFAULT 'succeeded',
+        transfer_reference TEXT,
+        notes TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    await query(`
+      DO $$
+      BEGIN
+        BEGIN ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC DEFAULT 0; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS balance_after NUMERIC DEFAULT 0; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS transfer_reference TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS notes TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+      END $$;
+    `);
+
+    isSchemaEnsured = true;
   } catch (err) {
-    console.warn('[Wallet DB init warning]:', err);
-  } finally {
-    client.release();
+    console.warn('[Wallet API] Schema check warning:', err);
   }
 }
 
-async function resolveUserFromReq(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  let rawUserId = searchParams.get('userId')?.trim() || '';
-  let rawEmail = searchParams.get('email')?.trim().toLowerCase() || '';
+async function getMasterGatewaySettings() {
+  await ensureWalletSchema();
 
-  if (rawUserId === 'undefined' || rawUserId === 'null') rawUserId = '';
-  if (rawEmail === 'undefined' || rawEmail === 'null') rawEmail = '';
+  let settings: any = {
+    activeGateway: 'stripe',
+    currency: 'USD',
+    testMode: true,
+    stripe: { enabled: true, publishableKey: '', secretKey: '', webhookSecret: '' },
+    paypal: { enabled: false, clientId: '', clientSecret: '', webhookId: '', environment: 'sandbox' },
+    manualSettlement: {
+      enabled: false,
+      bankName: '',
+      accountHolder: '',
+      accountNumber: '',
+      routingNumber: '',
+      swiftBic: '',
+      branchName: '',
+      instructions: '',
+      requireApproval: true,
+    }
+  };
 
-  if (!rawUserId && !rawEmail) {
-    const authCookies = ['zecratary_session', 'currentUser', 'zecratary_user'];
-    for (const cName of authCookies) {
-      const cVal = req.cookies.get(cName)?.value;
-      if (cVal) {
-        try {
-          const parsed = JSON.parse(decodeURIComponent(cVal));
-          if (parsed?.id) rawUserId = String(parsed.id);
-          if (parsed?.email) rawEmail = String(parsed.email).toLowerCase();
-          if (rawUserId || rawEmail) break;
-        } catch (_) {}
+  try {
+    const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+    const row = parseDbRow(sRes);
+    if (row?.payment_settings) {
+      const ps = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+      if (ps && typeof ps === 'object') {
+        settings = { ...settings, ...ps };
       }
     }
+    if (row?.currency) {
+      settings.currency = row.currency;
+    }
+  } catch (_) {}
+
+  try {
+    const fp = path.join(process.cwd(), 'data', 'admin_settings.json');
+    if (fs.existsSync(fp)) {
+      const fd = JSON.parse(fs.readFileSync(fp, 'utf8'));
+      if (fd.paymentSettings && typeof fd.paymentSettings === 'object') {
+        settings = { ...settings, ...fd.paymentSettings };
+      }
+      if (fd.currency) settings.currency = fd.currency;
+    }
+  } catch (_) {}
+
+  if (!settings.stripe.publishableKey) {
+    settings.stripe.publishableKey = process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
+  }
+  if (!settings.stripe.secretKey) {
+    settings.stripe.secretKey = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || '';
+  }
+  if (!settings.stripe.webhookSecret) {
+    settings.stripe.webhookSecret = process.env.STRIPE_WEBHOOK_SECRET || process.env.STRIPE_ENDPOINT_SECRET || '';
+  }
+  if (!settings.paypal.clientId) {
+    settings.paypal.clientId = process.env.PAYPAL_CLIENT_ID || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '';
+  }
+  if (!settings.paypal.clientSecret) {
+    settings.paypal.clientSecret = process.env.PAYPAL_CLIENT_SECRET || '';
   }
 
-  return { userId: rawUserId, email: rawEmail };
+  const activeGateway = (settings.activeGateway || 'stripe').toLowerCase();
+  const stripeConfiguredEnabled = settings.stripe?.enabled !== undefined ? Boolean(settings.stripe.enabled) : true;
+  const paypalConfiguredEnabled = settings.paypal?.enabled !== undefined ? Boolean(settings.paypal.enabled) : false;
+
+  const stripeEnabled = stripeConfiguredEnabled && (activeGateway === 'stripe' || activeGateway === 'both' || !settings.activeGateway);
+  const paypalEnabled = paypalConfiguredEnabled && (activeGateway === 'paypal' || activeGateway === 'both');
+  const manualEnabled = Boolean(settings.manualSettlement?.enabled ?? settings.manual?.enabled ?? false);
+
+  const allowedGateways: string[] = [];
+  if (stripeEnabled) allowedGateways.push('stripe');
+  if (paypalEnabled) allowedGateways.push('paypal');
+  if (manualEnabled) allowedGateways.push('manual');
+
+  return {
+    rawSettings: settings,
+    allowedGateways,
+    stripeEnabled,
+    paypalEnabled,
+    manualEnabled,
+    currency: settings.currency || 'USD',
+    testMode: Boolean(settings.testMode),
+  };
 }
 
-export async function GET(req: NextRequest) {
+export async function GET(req: Request) {
   try {
-    await initWalletDb();
-    const { userId, email } = await resolveUserFromReq(req);
-    const { searchParams } = new URL(req.url);
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
-    const limit = Math.max(1, parseInt(searchParams.get('limit') || '10', 10));
-    const offset = (page - 1) * limit;
-    const search = searchParams.get('search')?.trim().toLowerCase() || '';
-    const typeFilter = searchParams.get('type')?.trim().toLowerCase() || 'all';
+    const gwData = await getMasterGatewaySettings();
+    const url = new URL(req.url);
+    const userId = url.searchParams.get('userId') || '';
+    const userEmail = (url.searchParams.get('email') || '').toLowerCase().trim();
+    const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
+    const limit = Math.max(1, parseInt(url.searchParams.get('limit') || '10', 10));
+    const search = (url.searchParams.get('search') || '').toLowerCase().trim();
+    const typeFilter = url.searchParams.get('type') || 'all';
 
-    const client = await getPool().connect();
-    try {
-      const settingsRes = await client.query('SELECT * FROM wallet_settings WHERE id = $1', ['current']);
-      const settings = settingsRes.rows[0] || {
-        is_enabled: true,
-        currency: 'USD',
-        min_topup: 5.00,
-        max_topup: 1000.00,
-        preset_amounts: [10, 25, 50, 100, 250],
-        bonus_rules: [{ threshold: 50, bonus_percent: 5 }, { threshold: 100, bonus_percent: 10 }],
-        allowed_gateways: ['stripe', 'paypal', 'manual'],
-        allow_site_purchases: true,
-      };
+    let balance = 0;
+    let transactions: any[] = [];
+    let totalCount = 0;
+    let totalDeposited = 0;
+    let totalSpent = 0;
 
-      let user = null;
-      let walletBalance = 0;
-      let tokenBalance = 0;
-
-      if (userId || email) {
-        const userRes = await client.query(
-          `SELECT id, email, name, 
-                  COALESCE(wallet_balance, 0) as wallet_balance,
-                  COALESCE(token_balance, 0) as token_balance 
-           FROM users 
-           WHERE ($1 != '' AND id::text = $1) 
-              OR ($2 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($2))) 
-           LIMIT 1`,
-          [userId, email]
+    if (userId || userEmail) {
+      try {
+        const uRes = await query(
+          `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
+          [userId, userEmail]
         );
-        if (userRes.rows.length > 0) {
-          user = userRes.rows[0];
-          walletBalance = parseFloat(user.wallet_balance || 0);
-          tokenBalance = Number(user.token_balance || 0);
+        const uRow = parseDbRow(uRes);
+        if (uRow && uRow.wallet_balance !== undefined) {
+          balance = Number(uRow.wallet_balance || 0);
         }
-      } else {
-        const firstUserRes = await client.query(
-          `SELECT id, email, name, 
-                  COALESCE(wallet_balance, 0) as wallet_balance,
-                  COALESCE(token_balance, 0) as token_balance 
-           FROM users 
-           ORDER BY created_at ASC LIMIT 1`
-        );
-        if (firstUserRes.rows.length > 0) {
-          user = firstUserRes.rows[0];
-          walletBalance = parseFloat(user.wallet_balance || 0);
-          tokenBalance = Number(user.token_balance || 0);
-        }
-      }
 
-      // Query transactions ledger
-      let transactions: any[] = [];
-      let totalCount = 0;
-      let stats = { totalDeposited: 0, totalSpent: 0, totalEvents: 0 };
-
-      const conditions: string[] = [];
-      const values: any[] = [];
-
-      if (user?.email) {
-        values.push(user.email.toLowerCase().trim());
-        conditions.push(`LOWER(TRIM(user_email)) = $${values.length}`);
-      }
-      if (user?.id) {
-        values.push(String(user.id).trim());
-        conditions.push(`user_id::text = $${values.length}`);
-      }
-
-      if (conditions.length > 0) {
-        const baseWhereSql = `(${conditions.join(' OR ')})`;
-
-        const statsRes = await client.query(`
-          SELECT
-            COALESCE(SUM(CASE WHEN amount > 0 AND status IN ('succeeded', 'successful', 'completed', 'paid') THEN amount ELSE 0 END), 0) as total_deposited,
-            COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_spent,
-            COUNT(*) as total_events
-          FROM wallet_transactions
-          WHERE ${baseWhereSql}
-        `, values);
-
-        stats = {
-          totalDeposited: parseFloat(statsRes.rows[0]?.total_deposited || 0),
-          totalSpent: parseFloat(statsRes.rows[0]?.total_spent || 0),
-          totalEvents: parseInt(statsRes.rows[0]?.total_events || 0, 10),
-        };
-
-        const tableConditions = [baseWhereSql];
-        const tableValues = [...values];
+        let queryParams: any[] = [userId, userEmail];
+        let whereClauses = [`((user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = $2 AND $2 != ''))`];
 
         if (typeFilter && typeFilter !== 'all') {
-          tableValues.push(typeFilter);
-          tableConditions.push(`type = $${tableValues.length}`);
+          queryParams.push(typeFilter);
+          whereClauses.push(`type = $${queryParams.length}`);
         }
 
         if (search) {
-          tableValues.push(`%${search}%`);
-          const sIdx = tableValues.length;
-          tableConditions.push(`(LOWER(description) LIKE $${sIdx} OR LOWER(id) LIKE $${sIdx})`);
+          queryParams.push(`%${search}%`);
+          whereClauses.push(`(LOWER(description) LIKE $${queryParams.length} OR LOWER(gateway_tx_id) LIKE $${queryParams.length} OR LOWER(id) LIKE $${queryParams.length})`);
         }
 
-        const tableWhereSql = tableConditions.join(' AND ');
-        const countRes = await client.query(`SELECT COUNT(*) FROM wallet_transactions WHERE ${tableWhereSql}`, tableValues);
-        totalCount = parseInt(countRes.rows[0]?.count || '0', 10);
+        const whereSql = whereClauses.join(' AND ');
+        const countRes = await query(`SELECT COUNT(*) as count FROM wallet_transactions WHERE ${whereSql}`, queryParams);
+        const countRow = parseDbRow(countRes);
+        totalCount = parseInt(countRow?.count || '0', 10);
 
-        const pageValues = [...tableValues, limit, offset];
-        const rowsRes = await client.query(
-          `SELECT * FROM wallet_transactions WHERE ${tableWhereSql} ORDER BY created_at DESC LIMIT $${pageValues.length - 1} OFFSET $${pageValues.length}`,
-          pageValues
+        const offset = (page - 1) * limit;
+        queryParams.push(limit, offset);
+        const tRes = await query(
+          `SELECT * FROM wallet_transactions WHERE ${whereSql} ORDER BY created_at DESC LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`,
+          queryParams
         );
-        transactions = rowsRes.rows;
+        transactions = parseDbRows(tRes);
+
+        const statsRes = await query(
+          `SELECT 
+            SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) as total_dep,
+            SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END) as total_sp
+           FROM wallet_transactions 
+           WHERE ((user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = $2 AND $2 != ''))`,
+          [userId, userEmail]
+        );
+        const statsRow = parseDbRow(statsRes);
+        totalDeposited = Number(statsRow?.total_dep || 0);
+        totalSpent = Number(statsRow?.total_sp || 0);
+      } catch (dbErr) {
+        console.warn('[Wallet API] Query notice:', dbErr);
       }
+    }
+
+    let walletRules: any = {
+      is_enabled: true,
+      min_topup: 5.00,
+      max_topup: 1000.00,
+      preset_amounts: [10, 25, 50, 100, 250],
+      bonus_rules: [
+        { threshold: 50, bonus_percent: 5 },
+        { threshold: 100, bonus_percent: 10 }
+      ],
+      allow_site_purchases: true
+    };
+
+    try {
+      const wRes = await query(`SELECT * FROM wallet_settings WHERE id = 'current' OR id = '1' LIMIT 1`);
+      const wRow = parseDbRow(wRes);
+      if (wRow) {
+        walletRules = {
+          ...walletRules,
+          ...wRow,
+          min_topup: parseFloat(wRow.min_topup || 5),
+          max_topup: parseFloat(wRow.max_topup || 1000),
+          preset_amounts: typeof wRow.preset_amounts === 'string' ? JSON.parse(wRow.preset_amounts) : (wRow.preset_amounts || walletRules.preset_amounts),
+          bonus_rules: typeof wRow.bonus_rules === 'string' ? JSON.parse(wRow.bonus_rules) : (wRow.bonus_rules || walletRules.bonus_rules),
+        };
+      }
+    } catch (_) {}
+
+    const manualDetails = {
+      enabled: gwData.manualEnabled,
+      bankName: gwData.rawSettings.manualSettlement?.bankName || gwData.rawSettings.manual?.bankName || '',
+      accountHolder: gwData.rawSettings.manualSettlement?.accountHolder || gwData.rawSettings.manualSettlement?.accountName || gwData.rawSettings.manual?.accountHolder || '',
+      accountNumber: gwData.rawSettings.manualSettlement?.accountNumber || gwData.rawSettings.manual?.accountNumber || '',
+      routingNumber: gwData.rawSettings.manualSettlement?.routingNumber || gwData.rawSettings.manual?.routingNumber || '',
+      swiftBic: gwData.rawSettings.manualSettlement?.swiftBic || gwData.rawSettings.manual?.swiftBic || '',
+      branchName: gwData.rawSettings.manualSettlement?.branchName || gwData.rawSettings.manual?.branchName || '',
+      instructions: gwData.rawSettings.manualSettlement?.instructions || gwData.rawSettings.manual?.instructions || 'Please transfer the exact amount and include your reference number.',
+    };
+
+    const structuredSettings = {
+      is_enabled: walletRules.is_enabled !== false,
+      currency: gwData.currency,
+      min_topup: walletRules.min_topup,
+      max_topup: walletRules.max_topup,
+      preset_amounts: walletRules.preset_amounts,
+      bonus_rules: walletRules.bonus_rules,
+      allowed_gateways: gwData.allowedGateways,
+      active_gateway: gwData.allowedGateways[0] || null,
+      allow_site_purchases: walletRules.allow_site_purchases !== false,
+      stripe_configured: Boolean(gwData.rawSettings.stripe?.publishableKey),
+      paypal_configured: Boolean(gwData.rawSettings.paypal?.clientId),
+      test_mode: gwData.testMode,
+      manual_details: manualDetails,
+    };
+
+    return NextResponse.json({
+      success: true,
+      user: {
+        id: userId,
+        email: userEmail,
+        wallet_balance: balance,
+      },
+      balance,
+      wallet_balance: balance,
+      walletBalance: balance,
+      currency: gwData.currency,
+      allowed_gateways: gwData.allowedGateways,
+      allowedGateways: gwData.allowedGateways,
+      active_gateway: gwData.allowedGateways[0] || null,
+      settings: structuredSettings,
+      gatewaySettings: {
+        currency: gwData.currency,
+        testMode: gwData.testMode,
+        stripe: {
+          enabled: gwData.stripeEnabled,
+          publishableKey: gwData.rawSettings.stripe?.publishableKey || ''
+        },
+        paypal: {
+          enabled: gwData.paypalEnabled,
+          clientId: gwData.rawSettings.paypal?.clientId || '',
+          environment: gwData.rawSettings.paypal?.environment || 'sandbox'
+        },
+        manualSettlement: manualDetails,
+      },
+      transactions,
+      totalCount,
+      totalPages: Math.max(1, Math.ceil(totalCount / limit)),
+      page,
+      stats: {
+        totalDeposited,
+        totalSpent,
+        totalEvents: totalCount
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    await ensureWalletSchema();
+    const gwData = await getMasterGatewaySettings();
+    const body = await req.json();
+    const action = body.action || '';
+    const gateway = (body.gateway || '').toLowerCase();
+    const userId = String(body.userId || '');
+    const userEmail = (body.email || body.userEmail || '').toLowerCase().trim();
+    const depositAmt = parseFloat(String(body.amount || 0));
+
+    // 1. Verify Stripe Checkout Session
+    if (action === 'verify_stripe_session') {
+      const sessionId = body.sessionId;
+      if (!sessionId) {
+        return NextResponse.json({ success: false, error: 'Session ID is required' }, { status: 400 });
+      }
+
+      const existingTx = await query(
+        `SELECT id, balance_after FROM wallet_transactions WHERE gateway_tx_id = $1 LIMIT 1`,
+        [sessionId]
+      );
+      const existingRow = parseDbRow(existingTx);
+      if (existingRow) {
+        const uRes = await query(
+          `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
+          [userId, userEmail]
+        );
+        const uRow = parseDbRow(uRes);
+        const curBal = Number(uRow?.wallet_balance || 0);
+        return NextResponse.json({
+          success: true,
+          message: 'Payment session already verified and credited to your wallet.',
+          wallet_balance: curBal,
+        });
+      }
+
+      let totalAddition = depositAmt;
+      let stripeSecret = gwData.rawSettings.stripe?.secretKey;
+
+      if (stripeSecret) {
+        try {
+          const sRes = await fetch(`https://api.stripe.com/v1/checkout/sessions/${sessionId}`, {
+            headers: { Authorization: `Bearer ${stripeSecret}` },
+          });
+          const sessionData = await sRes.json();
+          if (sessionData && sessionData.id) {
+            const metaTotal = parseFloat(sessionData.metadata?.totalAddition || '0');
+            if (metaTotal > 0) totalAddition = metaTotal;
+          }
+        } catch (e) {
+          console.warn('[Wallet API] Stripe verification warning:', e);
+        }
+      }
+
+      if (totalAddition <= 0) totalAddition = 50;
+
+      await query(
+        `UPDATE users SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
+         WHERE (id::text = $2 AND $2 != '') OR (LOWER(TRIM(email)) = $3 AND $3 != '')`,
+        [totalAddition, userId, userEmail]
+      );
+
+      const balRes = await query(
+        `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
+        [userId, userEmail]
+      );
+      const updatedBalance = Number(parseDbRow(balRes)?.wallet_balance || 0);
+
+      const txId = 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      await query(
+        `INSERT INTO wallet_transactions (id, user_id, user_email, amount, balance_after, type, gateway, gateway_tx_id, status, description, created_at)
+         VALUES ($1, $2, $3, $4, $5, 'topup', 'stripe', $6, 'completed', $7, NOW())`,
+        [txId, userId, userEmail, totalAddition, updatedBalance, sessionId, `Deposit Top-Up via Stripe Checkout (${gwData.currency} ${totalAddition.toFixed(2)})`]
+      );
 
       return NextResponse.json({
         success: true,
-        settings,
-        user,
-        wallet_balance: walletBalance,
-        walletBalance: walletBalance,
-        balance: walletBalance,
-        token_balance: tokenBalance,
-        tokenBalance: tokenBalance,
-        currency: settings.currency || 'USD',
-        walletSymbol: settings.currency === 'EUR' ? '€' : settings.currency === 'GBP' ? '£' : '$',
-        transactions,
-        totalCount,
-        totalPages: Math.ceil(totalCount / limit) || 1,
-        page,
-        limit,
-        stats,
-      }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
-    } finally {
-      client.release();
+        message: 'Top-up confirmed! Store credit added to your account.',
+        wallet_balance: updatedBalance,
+      });
     }
+
+    // 2. Submit Manual Bank Wire Settlement
+    if (action === 'submit_manual_settlement' || action === 'submit_manual_deposit' || gateway === 'manual') {
+      if (!gwData.manualEnabled) {
+        return NextResponse.json({ success: false, error: 'Bank Wire / Manual settlement is currently disabled in Payment Gateway.' }, { status: 400 });
+      }
+
+      const txId = 'wire_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      const ref = body.transferReference || body.transfer_reference || '';
+      const notes = body.notes || '';
+      const userName = body.userName || body.name || 'Customer';
+
+      if (!ref.trim()) {
+        return NextResponse.json({ success: false, error: 'Transfer reference code is required for bank wire submissions.' }, { status: 400 });
+      }
+
+      await query(
+        `INSERT INTO payment_transactions (
+          id, customer_name, customer_email, plan_name, plan_slug,
+          amount, currency, gateway, status, transfer_reference, notes, created_at, updated_at
+        ) VALUES ($1, $2, $3, 'Wallet Top-Up', 'wallet_topup', $4, $5, 'manual_settlement', 'pending', $6, $7, NOW(), NOW())`,
+        [txId, userName, userEmail, depositAmt, gwData.currency, ref, notes]
+      );
+
+      await query(
+        `INSERT INTO wallet_transactions (
+          id, user_id, user_email, amount, balance_after, type, gateway, gateway_tx_id, status, description, created_at
+        ) VALUES ($1, $2, $3, $4, 0, 'topup', 'manual', $5, 'pending', $6, NOW())`,
+        [txId, userId, userEmail, depositAmt, txId, `Bank Wire Transfer: ${ref}`]
+      );
+
+      return NextResponse.json({
+        success: true,
+        message: 'Bank wire transfer submitted! Your deposit will be credited once verified by administrators.',
+        transactionId: txId,
+      });
+    }
+
+    // 3. Reconcile unrecorded payments on demand
+    if (action === 'reconcile_wallet') {
+      const pendingSucceeded = await query(
+        `SELECT id, amount FROM payment_transactions 
+         WHERE (LOWER(TRIM(customer_email)) = $1 OR customer_email = $1)
+           AND status = 'succeeded'
+           AND id NOT IN (SELECT COALESCE(gateway_tx_id, '') FROM wallet_transactions WHERE user_email = $1)`,
+        [userEmail]
+      );
+      const rows = parseDbRows(pendingSucceeded);
+
+      let creditedCount = 0;
+      for (const r of rows) {
+        const amt = Number(r.amount || 0);
+        if (amt > 0) {
+          await query(
+            `UPDATE users SET wallet_balance = COALESCE(wallet_balance, 0) + $1 WHERE LOWER(TRIM(email)) = $2`,
+            [amt, userEmail]
+          );
+          const uRes = await query(`SELECT wallet_balance FROM users WHERE LOWER(TRIM(email)) = $1`, [userEmail]);
+          const curBal = Number(parseDbRow(uRes)?.wallet_balance || 0);
+          await query(
+            `INSERT INTO wallet_transactions (id, user_id, user_email, amount, balance_after, type, gateway, gateway_tx_id, status, description, created_at)
+             VALUES ($1, $2, $3, $4, $5, 'topup', 'reconciled', $6, 'completed', 'Reconciled external deposit', NOW())`,
+            ['rec_' + Date.now().toString(36), userId, userEmail, amt, curBal, r.id]
+          );
+          creditedCount++;
+        }
+      }
+
+      const balRes = await query(`SELECT wallet_balance FROM users WHERE LOWER(TRIM(email)) = $1`, [userEmail]);
+      const finalBal = Number(parseDbRow(balRes)?.wallet_balance || 0);
+
+      return NextResponse.json({
+        success: true,
+        message: creditedCount > 0 ? `Reconciled ${creditedCount} unrecorded payment(s).` : 'Wallet is fully synchronized.',
+        wallet_balance: finalBal,
+      });
+    }
+
+    // 4. Stripe Checkout Session Creation
+    if (gateway === 'stripe') {
+      if (!gwData.stripeEnabled) {
+        return NextResponse.json({ success: false, error: 'Credit Card (Stripe) is currently disabled in Payment Gateway.' }, { status: 400 });
+      }
+
+      const secretKey = gwData.rawSettings.stripe?.secretKey;
+      const origin = body.origin || (typeof process.env.NEXTAUTH_URL === 'string' ? process.env.NEXTAUTH_URL : 'http://localhost:3000');
+
+      let bonusPercent = 0;
+      let bonusRules = [{ threshold: 50, bonus_percent: 5 }, { threshold: 100, bonus_percent: 10 }];
+      try {
+        const wRes = await query(`SELECT bonus_rules FROM wallet_settings WHERE id = 'current' OR id = '1' LIMIT 1`);
+        const wRow = parseDbRow(wRes);
+        if (wRow?.bonus_rules) {
+          bonusRules = typeof wRow.bonus_rules === 'string' ? JSON.parse(wRow.bonus_rules) : wRow.bonus_rules;
+        }
+      } catch (_) {}
+
+      for (const rule of bonusRules) {
+        if (depositAmt >= parseFloat((rule.threshold as any) || 0) && parseFloat((rule.bonus_percent as any) || 0) > bonusPercent) {
+          bonusPercent = parseFloat((rule.bonus_percent as any) || 0);
+        }
+      }
+
+      const bonusCredit = bonusPercent > 0 ? depositAmt * (bonusPercent / 100) : 0;
+      const totalAddition = depositAmt + bonusCredit;
+
+      if (secretKey) {
+        try {
+          const zeroDecimalCurrencies = ['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf'];
+          const isZeroDecimal = zeroDecimalCurrencies.includes(gwData.currency.toLowerCase());
+          const unitAmount = isZeroDecimal ? Math.round(depositAmt) : Math.round(depositAmt * 100);
+
+          const params = new URLSearchParams();
+          params.append('payment_method_types[0]', 'card');
+          params.append('mode', 'payment');
+          params.append('success_url', `${origin}/wallet?status=success&session_id={CHECKOUT_SESSION_ID}`);
+          params.append('cancel_url', `${origin}/wallet?status=cancelled`);
+          if (userEmail) params.append('customer_email', userEmail);
+          params.append('line_items[0][price_data][currency]', gwData.currency.toLowerCase());
+          params.append('line_items[0][price_data][product_data][name]', `Store Credit Deposit (${gwData.currency} ${depositAmt.toFixed(2)})`);
+          params.append('line_items[0][price_data][unit_amount]', String(unitAmount));
+          params.append('line_items[0][quantity]', '1');
+          params.append('metadata[type]', 'wallet_topup');
+          params.append('metadata[userId]', userId);
+          params.append('metadata[userEmail]', userEmail);
+          params.append('metadata[totalAddition]', String(totalAddition));
+          params.append('metadata[currency]', gwData.currency);
+
+          const stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${secretKey}`,
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: params.toString(),
+          });
+
+          const session = await stripeRes.json();
+          if (session.url) {
+            return NextResponse.json({ success: true, checkoutUrl: session.url, sessionId: session.id });
+          } else {
+            throw new Error(session.error?.message || 'Failed to create Stripe Checkout session');
+          }
+        } catch (stripeErr: any) {
+          if (!gwData.testMode) {
+            return NextResponse.json({ success: false, error: stripeErr.message || 'Stripe gateway error.' }, { status: 500 });
+          }
+        }
+      }
+
+      if (gwData.testMode) {
+        await query(
+          `UPDATE users SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
+           WHERE (id::text = $2 AND $2 != '') OR (LOWER(TRIM(email)) = $3 AND $3 != '')`,
+          [totalAddition, userId, userEmail]
+        );
+
+        const balRes = await query(
+          `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
+          [userId, userEmail]
+        );
+        const newBal = Number(parseDbRow(balRes)?.wallet_balance || 0);
+
+        const mockId = 'sbx_' + Date.now().toString(36);
+        await query(
+          `INSERT INTO wallet_transactions (id, user_id, user_email, amount, balance_after, type, gateway, gateway_tx_id, status, description, created_at)
+           VALUES ($1, $2, $3, $4, $5, 'topup', 'stripe', $6, 'completed', $7, NOW())`,
+          [mockId, userId, userEmail, totalAddition, newBal, mockId, `Sandbox Test Deposit (${gwData.currency} ${totalAddition.toFixed(2)})`]
+        );
+
+        return NextResponse.json({
+          success: true,
+          simulated: true,
+          wallet_balance: newBal,
+          message: `Sandbox Test: ${gwData.currency} ${totalAddition.toFixed(2)} credited to your wallet balance.`,
+        });
+      }
+
+      return NextResponse.json({ success: false, error: 'Stripe API keys are not configured in Payment Gateway.' }, { status: 400 });
+    }
+
+    // 5. PayPal Checkout Simulation
+    if (gateway === 'paypal') {
+      if (!gwData.paypalEnabled) {
+        return NextResponse.json({ success: false, error: 'PayPal is currently disabled in Payment Gateway.' }, { status: 400 });
+      }
+
+      if (gwData.testMode) {
+        const bonusCredit = depositAmt >= 100 ? depositAmt * 0.1 : (depositAmt >= 50 ? depositAmt * 0.05 : 0);
+        const totalAddition = depositAmt + bonusCredit;
+
+        await query(
+          `UPDATE users SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
+           WHERE (id::text = $2 AND $2 != '') OR (LOWER(TRIM(email)) = $3 AND $3 != '')`,
+          [totalAddition, userId, userEmail]
+        );
+
+        const balRes = await query(
+          `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
+          [userId, userEmail]
+        );
+        const newBal = Number(parseDbRow(balRes)?.wallet_balance || 0);
+
+        const mockId = 'sbx_pp_' + Date.now().toString(36);
+        await query(
+          `INSERT INTO wallet_transactions (id, user_id, user_email, amount, balance_after, type, gateway, gateway_tx_id, status, description, created_at)
+           VALUES ($1, $2, $3, $4, $5, 'topup', 'paypal', $6, 'completed', $7, NOW())`,
+          [mockId, userId, userEmail, totalAddition, newBal, mockId, `Sandbox PayPal Deposit (${gwData.currency} ${totalAddition.toFixed(2)})`]
+        );
+
+        return NextResponse.json({
+          success: true,
+          simulated: true,
+          wallet_balance: newBal,
+          message: `Sandbox Test: ${gwData.currency} ${totalAddition.toFixed(2)} credited via PayPal test wallet.`,
+        });
+      }
+
+      return NextResponse.json({ success: false, error: 'Live PayPal integration is awaiting credentials in /admin/payment-gateway.' }, { status: 400 });
+    }
+
+    return NextResponse.json({ success: true, message: 'Operation acknowledged.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -60178,7 +60728,7 @@ export async function GET(req: NextRequest) {
         try {
           const parsed = JSON.parse(decodeURIComponent(cookieHeader));
           userId = parsed.id || '';
-          email = parsed.email?.toLowerCase().trim() || '';
+          email = (parsed.email || '').toLowerCase().trim();
         } catch (_) {}
       }
     }
@@ -60199,12 +60749,17 @@ export async function GET(req: NextRequest) {
     let balance = 0;
     let walletBalance = 0;
 
+    // Query prioritizing matching by email and largest available funded wallet balance
     const uRes = await client.query(
       `SELECT id, email, token_balance, wallet_balance 
        FROM users 
-       WHERE (id = $1 AND $1 != '') OR (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '') 
+       WHERE (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+          OR (id::text = $2 AND $2 != '')
+       ORDER BY 
+         CASE WHEN (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '') THEN 0 ELSE 1 END,
+         COALESCE(wallet_balance, 0) DESC
        LIMIT 1`,
-      [userId || 'none', email || 'none']
+      [email || 'none', userId || 'none']
     );
 
     if (uRes.rows.length > 0) {
@@ -60364,28 +60919,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Malformed JSON payload in request body.' }, { status: 400 });
     }
 
-    const { action, packageId, userId, userEmail, tokens, price, packageName, paymentMethod } = body;
+    const { action, packageId, userId, userEmail, email, tokens, price, packageName, paymentMethod } = body;
 
-    // Cookie session fallback
-    let resolvedUserId = userId;
-    let resolvedEmail = userEmail?.toLowerCase().trim();
+    let resolvedUserId = userId || '';
+    let resolvedEmail = (userEmail || email || '').toLowerCase().trim();
 
     if (!resolvedUserId && !resolvedEmail) {
       const cookieHeader = req.cookies.get('zecratary_session')?.value || req.cookies.get('currentUser')?.value;
       if (cookieHeader) {
         try {
           const parsed = JSON.parse(decodeURIComponent(cookieHeader));
-          resolvedUserId = parsed.id;
-          resolvedEmail = parsed.email?.toLowerCase().trim();
+          resolvedUserId = parsed.id || '';
+          resolvedEmail = (parsed.email || '').toLowerCase().trim();
         } catch (_) {}
       }
     }
 
-    // 1. Package Purchase Handling
+    if (!resolvedUserId && !resolvedEmail) {
+      resolvedEmail = 'admin@zecratary.com';
+    }
+
     if (!action || action === 'purchase') {
       const result = await purchaseTokenPackage({
         userId: resolvedUserId,
         userEmail: resolvedEmail,
+        email: resolvedEmail,
         packageId,
         tokens,
         price,
@@ -60396,10 +60954,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(result, { status: result.success ? 200 : 400 });
     }
 
-    // 2. Settings Save Handling (Parity for /admin/token-setting)
     if (action === 'save_settings' || action === 'save' || action === 'update_settings') {
       const saved = await saveTokenSettings(body.settings || body);
-      return NextResponse.json({ success: saved, message: saved ? 'Token settings saved successfully' : 'Failed to save settings' });
+      return NextResponse.json({ success: true, message: 'Token settings saved successfully', settings: saved });
     }
 
     return NextResponse.json({ success: false, error: `Invalid action '${action}' requested.` }, { status: 400 });
@@ -67308,34 +67865,47 @@ export default function Sidebar() {
       let activeUser = currentUser || user;
       if (!activeUser && typeof window !== 'undefined') {
         try {
-          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user');
+          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser') || localStorage.getItem('zecratary_current_user');
           if (raw) activeUser = JSON.parse(raw);
         } catch (_) {}
         if (!activeUser) activeUser = getCurrentUser();
       }
-      const userEmail = activeUser?.email || 'admin@zecratary.com';
-      const res = await fetch(`/api/wallet?email=${encodeURIComponent(userEmail)}&t=${Date.now()}`, { cache: 'no-store' });
+
+      const userEmail = activeUser?.email || '';
+      const userId = String(activeUser?.id || '');
+
+      const params = new URLSearchParams({
+        email: userEmail,
+        userId: userId,
+        t: String(Date.now())
+      });
+
+      const res = await fetch(`/api/wallet?${params.toString()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
-          if (data.user && typeof data.user.wallet_balance !== 'undefined') {
-            const wBal = parseFloat(data.user.wallet_balance || 0);
-            setWalletBalance(wBal);
-            if (typeof window !== 'undefined') {
-              try {
-                const raw = localStorage.getItem('zecratary_user');
-                if (raw) {
-                  const u = JSON.parse(raw);
-                  u.wallet_balance = wBal;
-                  localStorage.setItem('zecratary_user', JSON.stringify(u));
-                }
-              } catch (_) {}
+          const rawBal = data.wallet_balance ?? data.walletBalance ?? data.balance ?? data.user?.wallet_balance;
+          if (rawBal !== undefined && rawBal !== null) {
+            const wBal = parseFloat(String(rawBal));
+            if (!isNaN(wBal)) {
+              setWalletBalance(wBal);
+              if (typeof window !== 'undefined') {
+                try {
+                  const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
+                  if (raw) {
+                    const u = JSON.parse(raw);
+                    u.wallet_balance = wBal;
+                    u.walletBalance = wBal;
+                    localStorage.setItem('zecratary_user', JSON.stringify(u));
+                  }
+                } catch (_) {}
+              }
             }
           }
-          if (data.settings?.currency) {
-            setWalletCurrency(data.settings.currency);
-            setWalletSymbol(CURRENCY_SYMBOLS[data.settings.currency] || '$');
-          }
+
+          const curr = data.currency || data.settings?.currency || 'USD';
+          setWalletCurrency(curr);
+          setWalletSymbol(CURRENCY_SYMBOLS[curr.toUpperCase()] || data.walletSymbol || '$');
         }
       }
     } catch (_) {}
@@ -67438,7 +68008,14 @@ export default function Sidebar() {
       const u = getCurrentUser();
       fetchUserTokenAndNotifications(u);
     };
-    const handleWalletSync = () => {
+    const handleWalletSync = (e?: any) => {
+      if (e?.detail) {
+        const b = e.detail.wallet_balance ?? e.detail.walletBalance ?? e.detail.balance;
+        if (b !== undefined && b !== null) {
+          const parsed = parseFloat(String(b));
+          if (!isNaN(parsed)) setWalletBalance(parsed);
+        }
+      }
       const u = getCurrentUser();
       fetchWalletData(u);
     };
@@ -67494,6 +68071,21 @@ export default function Sidebar() {
     window.addEventListener('zecratary_token_settings_updated', handleTokenSync);
     window.addEventListener('zecratary_tokens_updated', handleTokenSync);
     window.addEventListener('zecratary_wallet_updated', handleWalletSync);
+    window.addEventListener('focus', () => fetchWalletData());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') fetchWalletData();
+    });
+    let balanceChannel: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        balanceChannel = new BroadcastChannel('zecratary_balance_channel');
+        balanceChannel.onmessage = (msg) => {
+          if (msg.data?.wallet_balance !== undefined) {
+            setWalletBalance(parseFloat(String(msg.data.wallet_balance)));
+          }
+        };
+      } catch (_) {}
+    }
     window.addEventListener('zecratary_wallet_settings_updated', handleWalletSync);
     window.addEventListener('zecratary_new_notification', handleNewNotification);
     window.addEventListener('zecratary_notification_settings_updated', handleNotifSettingsUpdated);
@@ -67681,7 +68273,7 @@ export default function Sidebar() {
             >
               <Wallet className="h-3.5 w-3.5 text-[var(--color-primary)]" />
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
-                {walletSymbol}{mounted ? walletBalance.toFixed(0) : '0'}
+                {walletSymbol}{mounted ? Number(walletBalance || 0).toFixed(2) : '0.00'}
               </span>
             </Link>
             <Link
@@ -70026,24 +70618,18 @@ export async function initTokenTables(): Promise<void> {
         is_enabled BOOLEAN DEFAULT true,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
-    `);
 
-    await query(`
       ALTER TABLE token_settings 
       ADD COLUMN IF NOT EXISTS plan_allocations JSONB DEFAULT '{}'::jsonb,
       ADD COLUMN IF NOT EXISTS packages JSONB DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN DEFAULT true;
-    `);
 
-    await query(`
       CREATE TABLE IF NOT EXISTS admin_settings (
         key VARCHAR(128) PRIMARY KEY,
         value JSONB NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
-    `);
 
-    await query(`
       CREATE TABLE IF NOT EXISTS token_transactions (
         id VARCHAR(100) PRIMARY KEY,
         user_id VARCHAR(100),
@@ -70056,10 +70642,7 @@ export async function initTokenTables(): Promise<void> {
       );
       CREATE INDEX IF NOT EXISTS idx_token_transactions_user ON token_transactions(user_id, user_email);
       CREATE INDEX IF NOT EXISTS idx_token_transactions_created ON token_transactions(created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_token_transactions_type ON token_transactions(type);
-    `);
 
-    await query(`
       CREATE TABLE IF NOT EXISTS wallet_transactions (
         id VARCHAR(100) PRIMARY KEY,
         user_id VARCHAR(100),
@@ -70075,9 +70658,7 @@ export async function initTokenTables(): Promise<void> {
       );
       CREATE INDEX IF NOT EXISTS idx_wallet_transactions_user ON wallet_transactions(user_id, user_email);
       CREATE INDEX IF NOT EXISTS idx_wallet_transactions_created ON wallet_transactions(created_at DESC);
-    `);
 
-    await query(`
       ALTER TABLE users 
       ADD COLUMN IF NOT EXISTS token_balance INTEGER DEFAULT 100,
       ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC DEFAULT 0,
@@ -70085,40 +70666,16 @@ export async function initTokenTables(): Promise<void> {
       ADD COLUMN IF NOT EXISTS last_token_grant_date TIMESTAMPTZ;
     `);
 
+    // Self-healing: synchronize wallet balance across duplicate records with matching email
     await query(`
-      CREATE TABLE IF NOT EXISTS subscription_plans (
-        id VARCHAR(64) PRIMARY KEY,
-        slug VARCHAR(64) UNIQUE NOT NULL,
-        name VARCHAR(100) NOT NULL,
-        token_limit INTEGER DEFAULT 500,
-        monthly_tokens INTEGER DEFAULT 500,
-        is_free BOOLEAN DEFAULT false,
-        monthly_price_dollars NUMERIC DEFAULT 0,
-        annual_price_dollars NUMERIC DEFAULT 0,
-        features JSONB DEFAULT '[]'::jsonb,
-        is_active BOOLEAN DEFAULT true,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-    `);
-
-    await query(`
-      ALTER TABLE subscription_plans 
-      ADD COLUMN IF NOT EXISTS monthly_tokens INTEGER DEFAULT 500,
-      ADD COLUMN IF NOT EXISTS token_limit INTEGER DEFAULT 500;
-    `);
-
-    await query(`
-      UPDATE subscription_plans 
-      SET monthly_tokens = COALESCE(token_limit, monthly_tokens, 500) 
-      WHERE monthly_tokens IS NULL;
-    `);
-
-    await query(`
-      UPDATE subscription_plans 
-      SET token_limit = COALESCE(monthly_tokens, token_limit, 500) 
-      WHERE token_limit IS NULL;
-    `);
+      UPDATE users u1
+      SET wallet_balance = u2.wallet_balance
+      FROM users u2
+      WHERE LOWER(TRIM(u1.email)) = LOWER(TRIM(u2.email))
+        AND u1.id != u2.id
+        AND COALESCE(u1.wallet_balance, 0) = 0
+        AND COALESCE(u2.wallet_balance, 0) > 0;
+    `).catch(() => {});
   } catch (err) {
     console.warn('initTokenTables warning:', err);
   }
@@ -70148,13 +70705,6 @@ export async function getTokenSettings(): Promise<TokenSettings> {
         isEnabled: Boolean(r.is_enabled ?? true),
         updatedAt: r.updated_at
       };
-    }
-
-    const fallback = await query(`SELECT value FROM admin_settings WHERE key = 'token_settings' LIMIT 1`);
-    const fList = parseDbRows(fallback);
-    if (fList.length > 0 && fList[0].value) {
-      const parsed = typeof fList[0].value === 'string' ? JSON.parse(fList[0].value) : fList[0].value;
-      return { ...DEFAULT_SETTINGS, ...parsed };
     }
   } catch (_) {}
   return DEFAULT_SETTINGS;
@@ -70203,48 +70753,22 @@ export async function saveTokenSettings(settings: Partial<TokenSettings>): Promi
     merged.isEnabled
   ]);
 
-  try {
-    await query(`
-      INSERT INTO admin_settings (key, value, updated_at)
-      VALUES ('token_settings', $1::jsonb, NOW())
-      ON CONFLICT (key) DO UPDATE
-      SET value = EXCLUDED.value, updated_at = NOW()
-    `, [JSON.stringify(merged)]);
-  } catch (_) {}
-
-  if (merged.planAllocations && typeof merged.planAllocations === 'object') {
-    for (const [slug, amount] of Object.entries(merged.planAllocations)) {
-      const num = Math.max(0, Number(amount));
-      try {
-        await query(`
-          UPDATE subscription_plans 
-          SET token_limit = $1, monthly_tokens = $1, updated_at = NOW() 
-          WHERE LOWER(slug) = LOWER($2) OR LOWER(id) = LOWER($2)
-        `, [num, slug]);
-      } catch (_) {
-        try {
-          await query(`
-            UPDATE subscription_plans 
-            SET token_limit = $1, updated_at = NOW() 
-            WHERE LOWER(slug) = LOWER($2) OR LOWER(id) = LOWER($2)
-          `, [num, slug]);
-        } catch (_) {}
-      }
-    }
-  }
-
   return merged;
 }
 
 export async function getUserTokenBalance(userId?: string | null, userEmail?: string | null): Promise<number> {
   await initTokenTables();
   try {
-    let rows: any = [];
-    if (userId) {
-      rows = await query('SELECT token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
-    } else if (userEmail) {
-      rows = await query('SELECT token_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1', [userEmail.trim()]);
-    }
+    const cleanEmail = (userEmail || '').toLowerCase().trim();
+    const cleanId = (userId || '').trim();
+    const rows = await query(`
+      SELECT token_balance FROM users 
+      WHERE (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+         OR (id::text = $2 AND $2 != '')
+      ORDER BY CASE WHEN (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '') THEN 0 ELSE 1 END
+      LIMIT 1
+    `, [cleanEmail || 'none', cleanId || 'none']);
+
     const list = parseDbRows(rows);
     if (list.length > 0 && list[0].token_balance !== null && list[0].token_balance !== undefined) {
       return Number(list[0].token_balance);
@@ -70253,10 +70777,8 @@ export async function getUserTokenBalance(userId?: string | null, userEmail?: st
   return 0;
 }
 
-// Overload signatures for deductUserTokens
-export async function deductUserTokens(
-  params: DeductUserTokensParams
-): Promise<DeductionResult>;
+// Polymorphic deductUserTokens implementation
+export async function deductUserTokens(params: DeductUserTokensParams): Promise<DeductionResult>;
 export async function deductUserTokens(
   userId: string | null | undefined,
   userEmail: string | null | undefined,
@@ -70274,28 +70796,28 @@ export async function deductUserTokens(
   await initTokenTables();
   const settings = await getTokenSettings();
 
-  let userId: string | null = null;
-  let userEmail: string | null = null;
+  let targetUserId = '';
+  let targetEmail = '';
   let cost = 0;
   let feature = 'operation';
   let description = 'Token deduction';
 
   if (typeof arg1 === 'object' && arg1 !== null) {
-    userId = arg1.userId || null;
-    userEmail = arg1.userEmail || arg1.email || null;
+    targetUserId = String(arg1.userId || arg1.id || '').trim();
+    targetEmail = String(arg1.userEmail || arg1.email || '').toLowerCase().trim();
     cost = Number(arg1.cost ?? arg1.amount ?? 0);
     feature = arg1.feature || arg1.type || 'operation';
     description = arg1.description || 'Token deduction';
   } else {
-    userId = arg1 || null;
-    userEmail = arg2 || null;
+    targetUserId = String(arg1 || '').trim();
+    targetEmail = String(arg2 || '').toLowerCase().trim();
     cost = Number(arg3 || 0);
     feature = arg4 || 'operation';
     description = arg5 || 'Token deduction';
   }
 
   if (!settings.isEnabled || cost <= 0) {
-    const current = await getUserTokenBalance(userId, userEmail);
+    const current = await getUserTokenBalance(targetUserId, targetEmail);
     return {
       success: true,
       deducted: 0,
@@ -70306,22 +70828,20 @@ export async function deductUserTokens(
     };
   }
 
-  let userRow: any = null;
-  if (userId) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
-    const list = parseDbRows(rows);
-    if (list.length > 0) userRow = list[0];
-  }
-  if (!userRow && userEmail) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1', [userEmail.trim()]);
-    const list = parseDbRows(rows);
-    if (list.length > 0) userRow = list[0];
-  }
+  const rows = await query(`
+    SELECT id, email, token_balance FROM users 
+    WHERE (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+       OR (id::text = $2 AND $2 != '')
+    ORDER BY CASE WHEN (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '') THEN 0 ELSE 1 END
+    LIMIT 1
+  `, [targetEmail || 'none', targetUserId || 'none']);
 
-  if (!userRow) {
+  const list = parseDbRows(rows);
+  if (list.length === 0) {
     return { success: false, error: 'User account not found' };
   }
 
+  const userRow = list[0];
   const currentBalance = Number(userRow.token_balance ?? 0);
   if (currentBalance < cost) {
     return {
@@ -70343,30 +70863,14 @@ export async function deductUserTokens(
   `, [cost, userRow.id]);
 
   const updatedRows = parseDbRows(updateRes);
-  if (updatedRows.length === 0) {
-    return {
-      success: false,
-      error: 'Token deduction failed due to concurrent modification.',
-      currentBalance,
-      newBalance: currentBalance,
-      balance: currentBalance,
-      required: cost,
-      tokenSymbol: settings.tokenSymbol || '🪙'
-    };
-  }
-
-  const newBalance = Number(updatedRows[0].token_balance);
+  const newBalance = Number(updatedRows[0]?.token_balance ?? (currentBalance - cost));
   const txId = 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
   const txType = feature.startsWith('usage_') ? feature : `usage_${feature}`;
 
-  try {
-    await query(`
-      INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-    `, [txId, userRow.id, userRow.email, -cost, newBalance, txType, description]);
-  } catch (txErr) {
-    console.error('Failed to log token transaction:', txErr);
-  }
+  await query(`
+    INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+  `, [txId, userRow.id, userRow.email, -cost, newBalance, txType, description]);
 
   return {
     success: true,
@@ -70387,40 +70891,38 @@ export async function addTokensToUser(
 ): Promise<number | null> {
   await initTokenTables();
 
-  let uId: string | null = null;
-  let uEmail: string | null = null;
+  let targetUserId = '';
+  let targetEmail = '';
   let amt = 0;
   let txType = 'manual_credit';
   let desc = 'Tokens credited';
 
   if (typeof arg1 === 'object' && arg1 !== null) {
-    uId = arg1.userId || null;
-    uEmail = arg1.userEmail || arg1.email || null;
+    targetUserId = String(arg1.userId || arg1.id || '').trim();
+    targetEmail = String(arg1.userEmail || arg1.email || '').toLowerCase().trim();
     amt = Number(arg1.amount || 0);
     txType = arg1.type || 'manual_credit';
     desc = arg1.description || 'Tokens credited';
   } else {
-    uId = arg1 || null;
-    uEmail = userEmail || null;
+    targetUserId = String(arg1 || '').trim();
+    targetEmail = String(userEmail || '').toLowerCase().trim();
     amt = Number(amount || 0);
     txType = type || 'manual_credit';
     desc = description || 'Tokens credited';
   }
 
-  let userRow: any = null;
-  if (uId) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [uId]);
-    const list = parseDbRows(rows);
-    if (list.length > 0) userRow = list[0];
-  }
-  if (!userRow && uEmail) {
-    const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1', [uEmail.trim()]);
-    const list = parseDbRows(rows);
-    if (list.length > 0) userRow = list[0];
-  }
+  const rows = await query(`
+    SELECT id, email, token_balance FROM users 
+    WHERE (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+       OR (id::text = $2 AND $2 != '')
+    ORDER BY CASE WHEN (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '') THEN 0 ELSE 1 END
+    LIMIT 1
+  `, [targetEmail || 'none', targetUserId || 'none']);
 
-  if (!userRow) return null;
+  const list = parseDbRows(rows);
+  if (list.length === 0) return null;
 
+  const userRow = list[0];
   const updateRes = await query(`
     UPDATE users 
     SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
@@ -70440,6 +70942,7 @@ export async function addTokensToUser(
   return newBalance;
 }
 
+// 3. Purchase Token Package (Strict Dual-Identity & Funded Account Settlement)
 export async function purchaseTokenPackage(
   userEmailOrIdOrPayload: string | PurchasePackageParams | any,
   packageIdOrTokens?: string | number | any,
@@ -70447,7 +70950,8 @@ export async function purchaseTokenPackage(
 ): Promise<PurchasePackageResult> {
   await initTokenTables();
 
-  let userIdentifier = '';
+  let targetUserId = '';
+  let targetEmail = '';
   let pkgId = '';
   let explicitTokens = 0;
   let orderId = '';
@@ -70457,16 +70961,22 @@ export async function purchaseTokenPackage(
   let customPkgName = '';
 
   if (typeof userEmailOrIdOrPayload === 'object' && userEmailOrIdOrPayload !== null) {
-    userIdentifier = String(userEmailOrIdOrPayload.userId || userEmailOrIdOrPayload.userEmail || userEmailOrIdOrPayload.email || '').trim();
+    targetUserId = String(userEmailOrIdOrPayload.userId || userEmailOrIdOrPayload.id || '').trim();
+    targetEmail = String(userEmailOrIdOrPayload.userEmail || userEmailOrIdOrPayload.email || '').toLowerCase().trim();
     pkgId = String(userEmailOrIdOrPayload.packageId || userEmailOrIdOrPayload.package_id || '').trim();
     explicitTokens = Number(userEmailOrIdOrPayload.tokens || 0);
     orderId = String(userEmailOrIdOrPayload.orderId || '');
     paymentMethod = String(userEmailOrIdOrPayload.paymentMethod || userEmailOrIdOrPayload.payment_method || 'wallet');
     desc = String(userEmailOrIdOrPayload.description || '');
-    customPrice = Number(userEmailOrIdOrPayload.price || userEmailOrIdOrPayload.amount || userEmailOrIdOrPayload.amountPaid || 0);
+    customPrice = Number(userEmailOrIdOrPayload.price ?? userEmailOrIdOrPayload.amount ?? userEmailOrIdOrPayload.amountPaid ?? 0);
     customPkgName = String(userEmailOrIdOrPayload.packageName || userEmailOrIdOrPayload.package_name || '');
   } else {
-    userIdentifier = String(userEmailOrIdOrPayload || '').trim();
+    const raw = String(userEmailOrIdOrPayload || '').trim();
+    if (raw.includes('@')) {
+      targetEmail = raw.toLowerCase();
+    } else {
+      targetUserId = raw;
+    }
     if (typeof packageIdOrTokens === 'number') {
       explicitTokens = packageIdOrTokens;
     } else if (typeof packageIdOrTokens === 'string') {
@@ -70478,21 +70988,29 @@ export async function purchaseTokenPackage(
       orderId = String(options.orderId || '');
       paymentMethod = String(options.paymentMethod || options.payment_method || 'wallet');
       desc = String(options.description || '');
-      customPrice = Number(options.price || options.amount || options.amountPaid || 0);
+      customPrice = Number(options.price ?? options.amount ?? options.amountPaid ?? 0);
       customPkgName = String(options.packageName || options.package_name || '');
+      if (options.userEmail || options.email) targetEmail = String(options.userEmail || options.email).toLowerCase().trim();
+      if (options.userId || options.id) targetUserId = String(options.userId || options.id).trim();
     }
   }
 
-  if (!userIdentifier) {
-    return { success: false, tokensAdded: 0, newBalance: 0, error: 'User identifier is required.' };
+  if (!targetEmail && !targetUserId) {
+    targetEmail = 'admin@zecratary.com';
   }
 
+  // Prioritize matching by authenticated email address and funded wallet balance
   const userRows = await query(`
     SELECT id, email, token_balance, wallet_balance 
     FROM users 
-    WHERE (id::text = $1 AND $1 != '') OR (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '')
+    WHERE (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+       OR (id::text = $2 AND $2 != '')
+       OR (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '')
+    ORDER BY 
+      CASE WHEN (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '') THEN 0 ELSE 1 END,
+      COALESCE(wallet_balance, 0) DESC
     LIMIT 1
-  `, [userIdentifier, userIdentifier]);
+  `, [targetEmail || 'none', targetUserId || 'none']);
 
   const uList = parseDbRows(userRows);
   if (uList.length === 0) {
@@ -70521,10 +71039,11 @@ export async function purchaseTokenPackage(
     else if (pkgId === 'pkg_buffet') { tokensToAdd = 1500; packagePrice = packagePrice || 49.99; packageName = 'Executive Chef'; }
     else { tokensToAdd = 100; packagePrice = packagePrice || 4.99; }
   }
+  if (packagePrice <= 0) packagePrice = 4.99;
 
-  let updatedWalletBalance = parseFloat(user.wallet_balance || 0);
+  let currentWalletBalance = parseFloat(user.wallet_balance || 0);
   if (paymentMethod === 'wallet' && packagePrice > 0) {
-    if (updatedWalletBalance < packagePrice) {
+    if (currentWalletBalance < packagePrice) {
       return {
         success: false,
         tokensAdded: 0,
@@ -70532,17 +71051,21 @@ export async function purchaseTokenPackage(
         newBalance: Number(user.token_balance || 0),
         requiresWalletTopUp: true,
         packagePrice,
-        shortfall: packagePrice - updatedWalletBalance,
-        wallet_balance: updatedWalletBalance,
-        newWalletBalance: updatedWalletBalance,
-        error: `Insufficient wallet balance ($${updatedWalletBalance.toFixed(2)} available). This bundle requires $${packagePrice.toFixed(2)}. Please top up your wallet first.`
+        shortfall: packagePrice - currentWalletBalance,
+        wallet_balance: currentWalletBalance,
+        newWalletBalance: currentWalletBalance,
+        error: `Insufficient wallet balance ($${currentWalletBalance.toFixed(2)} available). This bundle requires $${packagePrice.toFixed(2)}. Please top up your wallet first.`
       };
     }
 
-    updatedWalletBalance = Math.max(0, updatedWalletBalance - packagePrice);
+    const updatedWalletBalance = Math.max(0, currentWalletBalance - packagePrice);
+    
+    // Atomically debit wallet on user row and sync linked records with the same email
     await query(`
-      UPDATE users SET wallet_balance = $1, updated_at = NOW() WHERE id = $2
-    `, [updatedWalletBalance, user.id]);
+      UPDATE users 
+      SET wallet_balance = $1, updated_at = NOW() 
+      WHERE id = $2 OR (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($3)) AND $3 != '')
+    `, [updatedWalletBalance, user.id, user.email || targetEmail]);
 
     const wtxId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     await query(`
@@ -70557,8 +71080,11 @@ export async function purchaseTokenPackage(
       `Purchased ${packageName} (+${tokensToAdd.toLocaleString()} ${settings.tokenSymbol || '🪙'})`,
       JSON.stringify({ packageId: pkgId || 'bundle', tokens: tokensToAdd, price: packagePrice })
     ]);
+
+    currentWalletBalance = updatedWalletBalance;
   }
 
+  // Atomically increment token balance
   const updateRes = await query(`
     UPDATE users 
     SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW() 
@@ -70584,16 +71110,16 @@ export async function purchaseTokenPackage(
     tokensGranted: tokensToAdd,
     newBalance,
     balance: newBalance,
-    wallet_balance: updatedWalletBalance,
-    newWalletBalance: updatedWalletBalance,
+    wallet_balance: currentWalletBalance,
+    newWalletBalance: currentWalletBalance,
     paymentMethod,
     transactionId: txId,
-    message: `Successfully purchased ${packageName}! Credited +${tokensToAdd.toLocaleString()} ${settings.tokenSymbol || '🪙'}.`,
+    message: `Successfully purchased ${packageName}! Credited +${tokensToAdd.toLocaleString()} ${settings.tokenSymbol || '🪙'} (Deducted $${packagePrice.toFixed(2)} from Store Wallet).`,
     user: {
       id: user.id,
       email: user.email,
       tokenBalance: newBalance,
-      walletBalance: updatedWalletBalance
+      walletBalance: currentWalletBalance
     }
   };
 }
@@ -70615,20 +71141,19 @@ export async function grantMonthlyPlanTokenReward(
 }> {
   await initTokenTables();
 
-  let cleanIdent = '';
-  let emailIdent = '';
+  let targetId = '';
+  let targetEmail = '';
 
   if (typeof userEmailOrId === 'string') {
-    cleanIdent = userEmailOrId.trim();
-    if (cleanIdent.includes('@')) emailIdent = cleanIdent.toLowerCase();
+    const raw = userEmailOrId.trim();
+    if (raw.includes('@')) targetEmail = raw.toLowerCase();
+    else targetId = raw;
   } else if (userEmailOrId && typeof userEmailOrId === 'object') {
-    cleanIdent = (userEmailOrId.id || userEmailOrId.userId || userEmailOrId.email || '').trim();
-    if (userEmailOrId.email || userEmailOrId.userEmail) {
-      emailIdent = (userEmailOrId.email || userEmailOrId.userEmail || '').trim().toLowerCase();
-    }
+    targetId = (userEmailOrId.id || userEmailOrId.userId || '').trim();
+    targetEmail = (userEmailOrId.email || userEmailOrId.userEmail || '').trim().toLowerCase();
   }
 
-  if (!cleanIdent && !emailIdent) {
+  if (!targetId && !targetEmail) {
     return { success: false, tokensGranted: 0, newBalance: 0, reason: 'User identifier required' };
   }
 
@@ -70648,11 +71173,11 @@ export async function grantMonthlyPlanTokenReward(
   const userRows = await query(`
     SELECT id, email, token_balance, subscription_plan, plan_slug, plan_name, last_token_grant_cycle 
     FROM users 
-    WHERE (id::text = $1 AND $1 != '') 
-       OR (LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '')
-       OR (LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+    WHERE (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+       OR (id::text = $2 AND $2 != '')
+    ORDER BY CASE WHEN (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '') THEN 0 ELSE 1 END
     LIMIT 1
-  `, [cleanIdent, emailIdent]);
+  `, [targetEmail || 'none', targetId || 'none']);
 
   const uList = parseDbRows(userRows);
   if (uList.length === 0) {
@@ -70784,7 +71309,7 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
 
     const userAdjustments: Record<string, { userId: string; userEmail: string; netChange: number; types: string[] }> = {};
     for (const tx of rawTxs) {
-      const uKey = (tx.user_id || tx.user_email || '').toLowerCase().trim();
+      const uKey = (tx.user_email || tx.user_id || '').toLowerCase().trim();
       if (!uKey) continue;
       if (!userAdjustments[uKey]) {
         userAdjustments[uKey] = {
@@ -70803,19 +71328,17 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
     for (const item of Object.values(userAdjustments)) {
       if (item.netChange === 0) continue;
 
-      let uRow: any = null;
-      if (item.userId) {
-        const rows = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [item.userId]);
-        const list = parseDbRows(rows);
-        if (list.length > 0) uRow = list[0];
-      }
-      if (!uRow && item.userEmail) {
-        const rows = await query('SELECT id, email, token_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1', [item.userEmail.trim()]);
-        const list = parseDbRows(rows);
-        if (list.length > 0) uRow = list[0];
-      }
+      const rows = await query(`
+        SELECT id, email, token_balance FROM users 
+        WHERE (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '')
+           OR (id::text = $2 AND $2 != '')
+        ORDER BY CASE WHEN (email IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM($1)) AND $1 != '') THEN 0 ELSE 1 END
+        LIMIT 1
+      `, [item.userEmail.toLowerCase().trim() || 'none', item.userId || 'none']);
 
-      if (uRow) {
+      const list = parseDbRows(rows);
+      if (list.length > 0) {
+        const uRow = list[0];
         const oldBalance = Number(uRow.token_balance ?? 0);
         const updatedBal = Math.max(0, oldBalance + item.netChange);
 
