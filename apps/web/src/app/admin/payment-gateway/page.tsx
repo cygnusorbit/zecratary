@@ -6,8 +6,7 @@ import {
   CreditCard, Shield, CheckCircle2, AlertCircle, Save, 
   RefreshCw, Check, Eye, EyeOff, Globe, Zap, Sliders,
   ShieldCheck, Terminal, ExternalLink, Code2, AlertTriangle,
-  Activity, DownloadCloud, UploadCloud, Sparkles,
-  Landmark, Clock, X, XCircle, Search, Filter, Trash2, Edit3
+  Activity, DownloadCloud, Sparkles, Landmark, Clock, X, XCircle, Search, Trash2, Edit3
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -15,6 +14,16 @@ import {
   fetchServerAdminSettings, 
   persistServerAdminSettings 
 } from '@/lib/adminSync';
+
+export const normalizeBool = (val: any): boolean => {
+  if (typeof val === 'boolean') return val;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'true' || s === '1' || s === 'yes' || s === 'on' || s === 'enabled';
+  }
+  if (typeof val === 'number') return val === 1;
+  return Boolean(val);
+};
 
 interface ManualSettlementConfig {
   enabled: boolean;
@@ -48,6 +57,7 @@ interface GatewayConfig {
     environment: 'sandbox' | 'live';
   };
   manualSettlement: ManualSettlementConfig;
+  manual?: ManualSettlementConfig;
 }
 
 interface PaymentTransaction {
@@ -87,9 +97,7 @@ export default function AdminPaymentGatewayPage() {
   const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
   const version = langContext?.version;
 
-  // Active Tab: 'stripe' | 'paypal' | 'manual'
   const [activeTab, setActiveTab] = useState<'stripe' | 'paypal' | 'manual'>('stripe');
-
   const [loading, setLoading] = useState(false);
   const [syncingEnv, setSyncingEnv] = useState(false);
   const [togglingGateway, setTogglingGateway] = useState<string | null>(null);
@@ -161,6 +169,7 @@ export default function AdminPaymentGatewayPage() {
   const configRef = useRef<GatewayConfig>(config);
   const isFetchingRef = useRef<boolean>(false);
   const isSavingRef = useRef<boolean>(false);
+  const isLocalMutationRef = useRef<boolean>(false);
 
   useEffect(() => {
     configRef.current = config;
@@ -221,28 +230,29 @@ export default function AdminPaymentGatewayPage() {
     }
   };
 
-  // IMMEDIATE TOGGLE GATEWAY HANDLER (STRIPE, PAYPAL, MANUAL SETTLEMENT)
+  // IMMEDIATE TOGGLE GATEWAY HANDLER (ROBUST CONCURRENCY & BOOLEAN NORMALIZATION)
   const handleToggleGateway = async (gatewayKey: 'stripe' | 'paypal' | 'manualSettlement') => {
-    if (isSavingRef.current || togglingGateway) return;
+    if (togglingGateway === gatewayKey) return;
 
     const currentVal = gatewayKey === 'stripe' 
-      ? config.stripe.enabled 
+      ? normalizeBool(configRef.current.stripe?.enabled) 
       : gatewayKey === 'paypal' 
-      ? config.paypal.enabled 
-      : config.manualSettlement.enabled;
+      ? normalizeBool(configRef.current.paypal?.enabled) 
+      : normalizeBool(configRef.current.manualSettlement?.enabled || configRef.current.manual?.enabled);
     const nextVal = !currentVal;
 
     const updatedConfig: GatewayConfig = {
-      ...config,
-      stripe: gatewayKey === 'stripe' ? { ...config.stripe, enabled: nextVal } : config.stripe,
-      paypal: gatewayKey === 'paypal' ? { ...config.paypal, enabled: nextVal } : config.paypal,
-      manualSettlement: gatewayKey === 'manualSettlement' ? { ...config.manualSettlement, enabled: nextVal } : config.manualSettlement,
+      ...configRef.current,
+      stripe: gatewayKey === 'stripe' ? { ...configRef.current.stripe, enabled: nextVal } : configRef.current.stripe,
+      paypal: gatewayKey === 'paypal' ? { ...configRef.current.paypal, enabled: nextVal } : configRef.current.paypal,
+      manualSettlement: gatewayKey === 'manualSettlement' ? { ...configRef.current.manualSettlement, enabled: nextVal } : configRef.current.manualSettlement,
+      manual: gatewayKey === 'manualSettlement' ? { ...configRef.current.manualSettlement, enabled: nextVal } : configRef.current.manualSettlement,
     };
 
     setConfig(updatedConfig);
     configRef.current = updatedConfig;
     setTogglingGateway(gatewayKey);
-    isSavingRef.current = true;
+    isLocalMutationRef.current = true;
 
     const gatewayName = gatewayKey === 'stripe' ? 'Stripe' : gatewayKey === 'paypal' ? 'PayPal' : t('manualSettlementTitle', 'Bank Wire / Manual');
     const statusText = nextVal ? t('enabled', 'Enabled') : t('disabled', 'Disabled');
@@ -267,6 +277,30 @@ export default function AdminPaymentGatewayPage() {
 
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
+        if (data.settings) {
+          const merged: GatewayConfig = {
+            ...configRef.current,
+            ...data.settings,
+            stripe: {
+              ...configRef.current.stripe,
+              ...(data.settings.stripe || {}),
+              enabled: normalizeBool(data.settings.stripe?.enabled ?? nextVal)
+            },
+            paypal: {
+              ...configRef.current.paypal,
+              ...(data.settings.paypal || {}),
+              enabled: normalizeBool(data.settings.paypal?.enabled ?? nextVal)
+            },
+            manualSettlement: {
+              ...configRef.current.manualSettlement,
+              ...(data.settings.manualSettlement || data.settings.manual || {}),
+              enabled: normalizeBool(data.settings.manualSettlement?.enabled ?? data.settings.manual?.enabled ?? nextVal)
+            },
+          };
+          setConfig(merged);
+          configRef.current = merged;
+        }
+
         broadcastSyncEvents();
         setFeedback({
           type: 'success',
@@ -277,10 +311,10 @@ export default function AdminPaymentGatewayPage() {
       }
     } catch (err: any) {
       const revertedConfig: GatewayConfig = {
-        ...config,
-        stripe: gatewayKey === 'stripe' ? { ...config.stripe, enabled: currentVal } : config.stripe,
-        paypal: gatewayKey === 'paypal' ? { ...config.paypal, enabled: currentVal } : config.paypal,
-        manualSettlement: gatewayKey === 'manualSettlement' ? { ...config.manualSettlement, enabled: currentVal } : config.manualSettlement,
+        ...configRef.current,
+        stripe: gatewayKey === 'stripe' ? { ...configRef.current.stripe, enabled: currentVal } : configRef.current.stripe,
+        paypal: gatewayKey === 'paypal' ? { ...configRef.current.paypal, enabled: currentVal } : configRef.current.paypal,
+        manualSettlement: gatewayKey === 'manualSettlement' ? { ...configRef.current.manualSettlement, enabled: currentVal } : configRef.current.manualSettlement,
       };
       setConfig(revertedConfig);
       configRef.current = revertedConfig;
@@ -290,7 +324,9 @@ export default function AdminPaymentGatewayPage() {
       });
     } finally {
       setTogglingGateway(null);
-      setTimeout(() => { isSavingRef.current = false; }, 500);
+      setTimeout(() => { 
+        isLocalMutationRef.current = false; 
+      }, 800);
     }
   };
 
@@ -312,9 +348,21 @@ export default function AdminPaymentGatewayPage() {
         const merged: GatewayConfig = {
           ...configRef.current,
           ...data.settings,
-          stripe: { ...configRef.current.stripe, ...(data.settings.stripe || {}) },
-          paypal: { ...configRef.current.paypal, ...(data.settings.paypal || {}) },
-          manualSettlement: { ...configRef.current.manualSettlement, ...(data.settings.manualSettlement || {}) },
+          stripe: { 
+            ...configRef.current.stripe, 
+            ...(data.settings.stripe || {}),
+            enabled: normalizeBool(data.settings.stripe?.enabled ?? configRef.current.stripe.enabled)
+          },
+          paypal: { 
+            ...configRef.current.paypal, 
+            ...(data.settings.paypal || {}),
+            enabled: normalizeBool(data.settings.paypal?.enabled ?? configRef.current.paypal.enabled)
+          },
+          manualSettlement: { 
+            ...configRef.current.manualSettlement, 
+            ...(data.settings.manualSettlement || data.settings.manual || {}),
+            enabled: normalizeBool(data.settings.manualSettlement?.enabled ?? data.settings.manual?.enabled ?? configRef.current.manualSettlement.enabled)
+          },
         };
         setConfig(merged);
         configRef.current = merged;
@@ -360,7 +408,7 @@ export default function AdminPaymentGatewayPage() {
   }, [syncingEnv, t]);
 
   const fetchData = useCallback(async () => {
-    if (isFetchingRef.current || isSavingRef.current) return;
+    if (isFetchingRef.current || isSavingRef.current || isLocalMutationRef.current) return;
     isFetchingRef.current = true;
     purgeLegacyBrowserAdminStorage();
     try {
@@ -382,7 +430,7 @@ export default function AdminPaymentGatewayPage() {
           } catch (_) {}
         }
 
-        if (serverSettings) {
+        if (serverSettings && !isLocalMutationRef.current) {
           if (typeof serverSettings === 'string') {
             try {
               serverSettings = JSON.parse(serverSettings);
@@ -393,23 +441,25 @@ export default function AdminPaymentGatewayPage() {
               ...configRef.current,
               ...serverSettings,
               currency: serverSettings.currency || configRef.current.currency || 'USD',
-              testMode: serverSettings.testMode !== undefined ? Boolean(serverSettings.testMode) : configRef.current.testMode,
-              stripeKeysVerified: serverSettings.stripeKeysVerified !== undefined ? Boolean(serverSettings.stripeKeysVerified) : configRef.current.stripeKeysVerified,
-              stripeWebhookVerified: serverSettings.stripeWebhookVerified !== undefined ? Boolean(serverSettings.stripeWebhookVerified) : configRef.current.stripeWebhookVerified,
+              testMode: serverSettings.testMode !== undefined ? normalizeBool(serverSettings.testMode) : configRef.current.testMode,
+              stripeKeysVerified: serverSettings.stripeKeysVerified !== undefined ? normalizeBool(serverSettings.stripeKeysVerified) : configRef.current.stripeKeysVerified,
+              stripeWebhookVerified: serverSettings.stripeWebhookVerified !== undefined ? normalizeBool(serverSettings.stripeWebhookVerified) : configRef.current.stripeWebhookVerified,
               stripe: {
                 ...configRef.current.stripe,
                 ...(serverSettings.stripe || {}),
-                enabled: serverSettings.stripe?.enabled !== undefined ? Boolean(serverSettings.stripe.enabled) : configRef.current.stripe.enabled,
+                enabled: serverSettings.stripe?.enabled !== undefined ? normalizeBool(serverSettings.stripe.enabled) : configRef.current.stripe.enabled,
               },
               paypal: {
                 ...configRef.current.paypal,
                 ...(serverSettings.paypal || {}),
-                enabled: serverSettings.paypal?.enabled !== undefined ? Boolean(serverSettings.paypal.enabled) : configRef.current.paypal.enabled,
+                enabled: serverSettings.paypal?.enabled !== undefined ? normalizeBool(serverSettings.paypal.enabled) : configRef.current.paypal.enabled,
               },
               manualSettlement: {
                 ...configRef.current.manualSettlement,
-                ...(serverSettings.manualSettlement || {}),
-                enabled: serverSettings.manualSettlement?.enabled !== undefined ? Boolean(serverSettings.manualSettlement.enabled) : configRef.current.manualSettlement.enabled,
+                ...(serverSettings.manualSettlement || serverSettings.manual || {}),
+                enabled: (serverSettings.manualSettlement?.enabled !== undefined || serverSettings.manual?.enabled !== undefined)
+                  ? normalizeBool(serverSettings.manualSettlement?.enabled ?? serverSettings.manual?.enabled)
+                  : configRef.current.manualSettlement.enabled,
               }
             };
             configRef.current = merged;
@@ -433,10 +483,10 @@ export default function AdminPaymentGatewayPage() {
 
     let debounceTimer: NodeJS.Timeout | null = null;
     const handleDebouncedSync = () => {
-      if (isSavingRef.current) return;
+      if (isSavingRef.current || isLocalMutationRef.current) return;
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        if (!isSavingRef.current) {
+        if (!isSavingRef.current && !isLocalMutationRef.current) {
           fetchDataRef.current();
         }
       }, 350);
@@ -662,7 +712,7 @@ export default function AdminPaymentGatewayPage() {
 
       if (res.ok && data.success) {
         const updated: GatewayConfig = { 
-          ...config,
+          ...config, 
           ...(data.settings || {}),
           stripeKeysVerified: true,
           stripeWebhookVerified: true,
@@ -761,7 +811,7 @@ export default function AdminPaymentGatewayPage() {
       persistServerAdminSettings({
         paymentSettings: updatedConfig,
         currency: updatedConfig.currency
-      }).catch((err) => console.warn('persistServerAdminSettings non-blocking warning:', err));
+      }).catch((err) => console.warn('persistServerAdminSettings warning:', err));
 
       setConfig(updatedConfig);
       configRef.current = updatedConfig;
@@ -817,7 +867,7 @@ export default function AdminPaymentGatewayPage() {
     });
   }, [manualTransactions, manualFilter, searchQuery]);
 
-  // 1. APPROVE ACTION
+  // APPROVE ACTION
   const handleApprovePayment = async (txId: string) => {
     if (!confirm(t('confirmApproveTransfer', 'Are you sure you want to approve this bank wire transfer? This will confirm the funds and activate user entitlements.'))) {
       return;
@@ -855,7 +905,7 @@ export default function AdminPaymentGatewayPage() {
     }
   };
 
-  // 2. REJECT ACTION
+  // REJECT ACTION
   const handleRejectPayment = async (txId: string) => {
     const reason = prompt(t('enterRejectionReason', 'Please provide a reason for rejecting this wire transfer (optional):'), 'Bank wire transfer not received or reference mismatched');
     if (reason === null) return;
@@ -893,7 +943,7 @@ export default function AdminPaymentGatewayPage() {
     }
   };
 
-  // 3. DELETE ACTION
+  // DELETE ACTION
   const handleDeleteTransaction = async (txId: string) => {
     if (!confirm(t('confirmDeleteTx', `Are you sure you want to delete transaction record ${txId}? This cannot be undone.`))) {
       return;
@@ -930,7 +980,7 @@ export default function AdminPaymentGatewayPage() {
     }
   };
 
-  // 4. OPEN EDIT MODAL
+  // OPEN EDIT MODAL
   const handleOpenEdit = (tx: PaymentTransaction) => {
     setEditTx(tx);
     setEditForm({
@@ -945,7 +995,7 @@ export default function AdminPaymentGatewayPage() {
     });
   };
 
-  // 5. SAVE EDIT MODAL
+  // SAVE EDIT MODAL
   const handleSaveEdit = async () => {
     if (!editTx) return;
     setIsSavingEdit(true);
@@ -985,6 +1035,8 @@ export default function AdminPaymentGatewayPage() {
 
   return (
     <div 
+      role="region"
+      aria-label={t('paymentGatewaySettingsTitle', 'Payment Gateway Settings')}
       className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text, #ffffff)' }}
     >
@@ -1052,6 +1104,7 @@ export default function AdminPaymentGatewayPage() {
 
       {feedback && (
         <div
+          role="status"
           className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 border shadow-xs animate-in fade-in"
           style={{
             backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -1066,6 +1119,8 @@ export default function AdminPaymentGatewayPage() {
 
       {/* GATEWAY ENGINE MONITOR SUMMARY BAR */}
       <div
+        role="region"
+        aria-label={t('engineMonitorAria', 'Payment Gateway Engine Status')}
         className="p-3 px-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card, #1e293b)',
@@ -1079,21 +1134,21 @@ export default function AdminPaymentGatewayPage() {
           <div className="flex items-center gap-1.5">
             <span 
               className={`font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs ${
-                config.stripe.enabled ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-zinc-700 text-zinc-500 bg-zinc-800/40'
+                normalizeBool(config.stripe.enabled) ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-zinc-700 text-zinc-500 bg-zinc-800/40'
               }`}
             >
               Stripe
             </span>
             <span 
               className={`font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs ${
-                config.paypal.enabled ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-zinc-700 text-zinc-500 bg-zinc-800/40'
+                normalizeBool(config.paypal.enabled) ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-zinc-700 text-zinc-500 bg-zinc-800/40'
               }`}
             >
               PayPal
             </span>
             <span 
               className={`font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs ${
-                config.manualSettlement.enabled ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-zinc-700 text-zinc-500 bg-zinc-800/40'
+                normalizeBool(config.manualSettlement.enabled) ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-zinc-700 text-zinc-500 bg-zinc-800/40'
               }`}
             >
               Bank Wire
@@ -1126,6 +1181,8 @@ export default function AdminPaymentGatewayPage() {
 
       {/* CURRENCY & ENVIRONMENT TOOLBAR */}
       <div 
+        role="region"
+        aria-label={t('currencySettingsAria', 'Currency and Environment Configuration')}
         className="border p-5 rounded-3xl shadow-sm transition-colors duration-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
         style={{
           backgroundColor: 'var(--color-card, #1e293b)',
@@ -1179,6 +1236,8 @@ export default function AdminPaymentGatewayPage() {
 
       {/* GATEWAY NAVIGATION TABS */}
       <div 
+        role="tablist"
+        aria-label={t('gatewayTabsAria', 'Payment Gateway Channels')}
         className="border p-2 sm:p-2.5 rounded-3xl shadow-sm transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card, #1e293b)',
@@ -1189,6 +1248,8 @@ export default function AdminPaymentGatewayPage() {
           {/* TAB 1: STRIPE */}
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'stripe'}
             onClick={() => setActiveTab('stripe')}
             className={`p-3.5 rounded-2xl border-2 transition cursor-pointer text-left flex items-center justify-between ${
               activeTab === 'stripe' ? 'shadow-md ring-2 ring-blue-500/20' : 'opacity-70 hover:opacity-100'
@@ -1207,12 +1268,12 @@ export default function AdminPaymentGatewayPage() {
                   <span className="font-black text-sm" style={{ color: 'var(--color-text, #ffffff)' }}>Stripe</span>
                   <span 
                     className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                      config.stripe.enabled 
+                      normalizeBool(config.stripe.enabled) 
                         ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
                         : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/30'
                     }`}
                   >
-                    {config.stripe.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                    {normalizeBool(config.stripe.enabled) ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
                   </span>
                 </div>
                 <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
@@ -1229,6 +1290,8 @@ export default function AdminPaymentGatewayPage() {
           {/* TAB 2: PAYPAL */}
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'paypal'}
             onClick={() => setActiveTab('paypal')}
             className={`p-3.5 rounded-2xl border-2 transition cursor-pointer text-left flex items-center justify-between ${
               activeTab === 'paypal' ? 'shadow-md ring-2 ring-blue-500/20' : 'opacity-70 hover:opacity-100'
@@ -1247,12 +1310,12 @@ export default function AdminPaymentGatewayPage() {
                   <span className="font-black text-sm" style={{ color: 'var(--color-text, #ffffff)' }}>PayPal</span>
                   <span 
                     className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                      config.paypal.enabled 
+                      normalizeBool(config.paypal.enabled) 
                         ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
                         : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/30'
                     }`}
                   >
-                    {config.paypal.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                    {normalizeBool(config.paypal.enabled) ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
                   </span>
                 </div>
                 <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
@@ -1265,6 +1328,8 @@ export default function AdminPaymentGatewayPage() {
           {/* TAB 3: MANUAL SETTLEMENT / BANK WIRE */}
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'manual'}
             onClick={() => setActiveTab('manual')}
             className={`p-3.5 rounded-2xl border-2 transition cursor-pointer text-left flex items-center justify-between ${
               activeTab === 'manual' ? 'shadow-md ring-2 ring-blue-500/20' : 'opacity-70 hover:opacity-100'
@@ -1285,12 +1350,12 @@ export default function AdminPaymentGatewayPage() {
                   </span>
                   <span 
                     className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                      config.manualSettlement.enabled 
+                      normalizeBool(config.manualSettlement.enabled) 
                         ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
                         : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/30'
                     }`}
                   >
-                    {config.manualSettlement.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                    {normalizeBool(config.manualSettlement.enabled) ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
                   </span>
                 </div>
                 <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
@@ -1311,6 +1376,8 @@ export default function AdminPaymentGatewayPage() {
       {/* TAB CONTENT 1: STRIPE CONFIGURATION */}
       {activeTab === 'stripe' && (
         <div 
+          role="region"
+          aria-label={t('stripeApiConfig', 'Stripe API Configuration')}
           className="border p-6 rounded-3xl space-y-5 shadow-sm transition-colors duration-200 animate-in fade-in"
           style={{
             backgroundColor: 'var(--color-card, #1e293b)',
@@ -1330,7 +1397,6 @@ export default function AdminPaymentGatewayPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {/* Verification Status Indicator */}
               {config.stripeKeysVerified && config.stripeWebhookVerified ? (
                 <span className="px-2.5 py-1 rounded-full text-[11px] font-bold border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 flex items-center gap-1.5 shadow-xs">
                   <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
@@ -1368,24 +1434,26 @@ export default function AdminPaymentGatewayPage() {
               <div className="flex items-center gap-2 pl-2 border-l" style={{ borderColor: 'var(--color-border, #334155)' }}>
                 <span
                   className="text-xs font-bold select-none"
-                  style={{ color: config.stripe.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
+                  style={{ color: normalizeBool(config.stripe.enabled) ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
                 >
-                  {config.stripe.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                  {normalizeBool(config.stripe.enabled) ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
                 </span>
                 <button
                   type="button"
                   role="switch"
-                  aria-checked={config.stripe.enabled}
+                  aria-label={t('toggleStripeGateway', 'Toggle Stripe Gateway Enabled/Disabled')}
+                  aria-checked={normalizeBool(config.stripe.enabled)}
                   disabled={togglingGateway === 'stripe'}
                   onClick={() => handleToggleGateway('stripe')}
-                  className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none disabled:opacity-50"
+                  className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--color-primary,#3b82f6)] focus:ring-offset-1 disabled:opacity-50"
                   style={{
-                    backgroundColor: config.stripe.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
+                    backgroundColor: normalizeBool(config.stripe.enabled) ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
                   }}
                 >
                   <span
+                    aria-hidden="true"
                     className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-300 ease-in-out ${
-                      config.stripe.enabled ? 'translate-x-5' : 'translate-x-0'
+                      normalizeBool(config.stripe.enabled) ? 'translate-x-5' : 'translate-x-0'
                     }`}
                   />
                 </button>
@@ -1407,11 +1475,20 @@ export default function AdminPaymentGatewayPage() {
               <div className="relative">
                 <input
                   type={visibleFields['stripe_pub'] ? 'text' : 'password'}
+                  id="stripe_pub_field"
+                  name="stripe_pub_field_guard"
                   value={config.stripe.publishableKey}
                   onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, publishableKey: e.target.value } })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                   placeholder={config.testMode ? 'pk_test_51...' : 'pk_live_51...'}
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -1442,11 +1519,20 @@ export default function AdminPaymentGatewayPage() {
               <div className="relative">
                 <input
                   type={visibleFields['stripe_sec'] ? 'text' : 'password'}
+                  id="stripe_sec_field"
+                  name="stripe_sec_field_guard"
                   value={config.stripe.secretKey}
                   onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, secretKey: e.target.value } })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                   placeholder={config.testMode ? 'sk_test_51...' : 'sk_live_51...'}
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -1476,11 +1562,20 @@ export default function AdminPaymentGatewayPage() {
                 <div className="relative flex-1">
                   <input
                     type={visibleFields['stripe_wh'] ? 'text' : 'password'}
+                    id="stripe_wh_field"
+                    name="stripe_wh_field_guard"
                     value={config.stripe.webhookSecret}
                     onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                     placeholder="whsec_..."
                     autoComplete="new-password"
+                    autoCorrect="off"
+                    spellCheck="false"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
                     className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -1550,7 +1645,7 @@ export default function AdminPaymentGatewayPage() {
               </div>
             </div>
 
-            {/* CLI & Webhook Setup Guide at the Bottom */}
+            {/* CLI & Webhook Setup Guide */}
             <div 
               className="mt-4 p-4 rounded-2xl border space-y-3"
               style={{
@@ -1610,6 +1705,8 @@ export default function AdminPaymentGatewayPage() {
       {/* TAB CONTENT 2: PAYPAL CONFIGURATION */}
       {activeTab === 'paypal' && (
         <div 
+          role="region"
+          aria-label={t('paypalApiConfig', 'PayPal API Configuration')}
           className="border p-6 rounded-3xl space-y-5 shadow-sm transition-colors duration-200 animate-in fade-in"
           style={{
             backgroundColor: 'var(--color-card, #1e293b)',
@@ -1630,24 +1727,26 @@ export default function AdminPaymentGatewayPage() {
             <div className="flex items-center gap-3">
               <span
                 className="text-xs font-bold select-none"
-                style={{ color: config.paypal.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
+                style={{ color: normalizeBool(config.paypal.enabled) ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
               >
-                {config.paypal.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                {normalizeBool(config.paypal.enabled) ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
               </span>
               <button
                 type="button"
                 role="switch"
-                aria-checked={config.paypal.enabled}
+                aria-label={t('togglePaypalGateway', 'Toggle PayPal Gateway Enabled/Disabled')}
+                aria-checked={normalizeBool(config.paypal.enabled)}
                 disabled={togglingGateway === 'paypal'}
                 onClick={() => handleToggleGateway('paypal')}
-                className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none disabled:opacity-50"
+                className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--color-primary,#3b82f6)] focus:ring-offset-1 disabled:opacity-50"
                 style={{
-                  backgroundColor: config.paypal.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
+                  backgroundColor: normalizeBool(config.paypal.enabled) ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
                 }}
               >
                 <span
+                  aria-hidden="true"
                   className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-300 ease-in-out ${
-                    config.paypal.enabled ? 'translate-x-5' : 'translate-x-0'
+                    normalizeBool(config.paypal.enabled) ? 'translate-x-5' : 'translate-x-0'
                   }`}
                 />
               </button>
@@ -1661,11 +1760,20 @@ export default function AdminPaymentGatewayPage() {
               </label>
               <input
                 type="text"
+                id="paypal_client_id_field"
+                name="paypal_client_id_guard"
                 value={config.paypal.clientId}
                 onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientId: e.target.value } })}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                 placeholder="PayPal Client ID"
                 autoComplete="new-password"
+                autoCorrect="off"
+                spellCheck="false"
                 data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                role="presentation"
                 className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
                 style={{
                   backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -1681,11 +1789,20 @@ export default function AdminPaymentGatewayPage() {
               </label>
               <input
                 type="password"
+                id="paypal_client_sec_field"
+                name="paypal_client_sec_guard"
                 value={config.paypal.clientSecret}
                 onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientSecret: e.target.value } })}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                 placeholder="PayPal Client Secret"
                 autoComplete="new-password"
+                autoCorrect="off"
+                spellCheck="false"
                 data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                role="presentation"
                 className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
                 style={{
                   backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -1703,6 +1820,8 @@ export default function AdminPaymentGatewayPage() {
         <div className="space-y-6 animate-in fade-in">
           {/* Wire Transfer Settings Card */}
           <div 
+            role="region"
+            aria-label={t('manualSettlementSettingsTitle', 'Bank Wire Settings')}
             className="border p-6 rounded-3xl space-y-5 shadow-sm transition-colors duration-200"
             style={{
               backgroundColor: 'var(--color-card, #1e293b)',
@@ -1725,24 +1844,26 @@ export default function AdminPaymentGatewayPage() {
               <div className="flex items-center gap-3">
                 <span
                   className="text-xs font-bold select-none"
-                  style={{ color: config.manualSettlement.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
+                  style={{ color: normalizeBool(config.manualSettlement.enabled) ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
                 >
-                  {config.manualSettlement.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                  {normalizeBool(config.manualSettlement.enabled) ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
                 </span>
                 <button
                   type="button"
                   role="switch"
-                  aria-checked={config.manualSettlement.enabled}
+                  aria-label={t('toggleManualSettlement', 'Toggle Manual Bank Wire Settlement Enabled/Disabled')}
+                  aria-checked={normalizeBool(config.manualSettlement.enabled)}
                   disabled={togglingGateway === 'manualSettlement'}
                   onClick={() => handleToggleGateway('manualSettlement')}
-                  className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none disabled:opacity-50"
+                  className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--color-primary,#3b82f6)] focus:ring-offset-1 disabled:opacity-50"
                   style={{
-                    backgroundColor: config.manualSettlement.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
+                    backgroundColor: normalizeBool(config.manualSettlement.enabled) ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
                   }}
                 >
                   <span
+                    aria-hidden="true"
                     className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-300 ease-in-out ${
-                      config.manualSettlement.enabled ? 'translate-x-5' : 'translate-x-0'
+                      normalizeBool(config.manualSettlement.enabled) ? 'translate-x-5' : 'translate-x-0'
                     }`}
                   />
                 </button>
@@ -1756,14 +1877,23 @@ export default function AdminPaymentGatewayPage() {
                 </label>
                 <input
                   type="text"
+                  id="bank_name_field"
+                  name="bank_name_guard"
                   value={config.manualSettlement.bankName}
                   onChange={(e) => setConfig({
                     ...config,
                     manualSettlement: { ...config.manualSettlement, bankName: e.target.value }
                   })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                   placeholder="e.g. JPMorgan Chase / Bangkok Bank / HSBC"
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -1779,14 +1909,23 @@ export default function AdminPaymentGatewayPage() {
                 </label>
                 <input
                   type="text"
+                  id="account_holder_field"
+                  name="account_holder_guard"
                   value={config.manualSettlement.accountHolder}
                   onChange={(e) => setConfig({
                     ...config,
                     manualSettlement: { ...config.manualSettlement, accountHolder: e.target.value }
                   })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                   placeholder="e.g. Zecratary Technologies Co., Ltd."
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -1802,14 +1941,23 @@ export default function AdminPaymentGatewayPage() {
                 </label>
                 <input
                   type="text"
+                  id="account_number_field"
+                  name="account_number_guard"
                   value={config.manualSettlement.accountNumber}
                   onChange={(e) => setConfig({
                     ...config,
                     manualSettlement: { ...config.manualSettlement, accountNumber: e.target.value }
                   })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                   placeholder="e.g. 123-4-56789-0 / US12 3456 7890"
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -1825,14 +1973,23 @@ export default function AdminPaymentGatewayPage() {
                 </label>
                 <input
                   type="text"
+                  id="swift_bic_field"
+                  name="swift_bic_guard"
                   value={config.manualSettlement.swiftBic}
                   onChange={(e) => setConfig({
                     ...config,
                     manualSettlement: { ...config.manualSettlement, swiftBic: e.target.value }
                   })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                   placeholder="e.g. CHASUS33XXX"
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -1849,12 +2006,18 @@ export default function AdminPaymentGatewayPage() {
               </label>
               <textarea
                 rows={3}
+                id="transfer_instructions_field"
+                name="transfer_instructions_guard"
                 value={config.manualSettlement.instructions}
                 onChange={(e) => setConfig({
                   ...config,
                   manualSettlement: { ...config.manualSettlement, instructions: e.target.value }
                 })}
                 placeholder="Instructions provided to customer during wire payment checkout..."
+                autoComplete="new-password"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
                 className="payment-input w-full border rounded-xl p-3 text-xs outline-none transition leading-relaxed"
                 style={{
                   backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -1867,6 +2030,8 @@ export default function AdminPaymentGatewayPage() {
 
           {/* ADMIN MANUAL APPROVAL QUEUE */}
           <div 
+            role="region"
+            aria-label={t('manualApprovalQueueTitle', 'Manual Settlement Approval Queue')}
             className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
             style={{
               backgroundColor: 'var(--color-card, #1e293b)',
@@ -1935,9 +2100,15 @@ export default function AdminPaymentGatewayPage() {
               <Search className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-secondary, #94a3b8)' }} />
               <input
                 type="text"
+                id="search_manual_tx"
+                name="search_manual_tx_guard"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t('searchTransactionsPlaceholder', 'Search by Customer Name, Email, Transaction ID, or Wire Reference...')}
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
                 className="payment-input w-full border rounded-xl pl-10 pr-4 py-2.5 text-xs outline-none transition"
                 style={{
                   backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -2049,7 +2220,7 @@ export default function AdminPaymentGatewayPage() {
                           {/* ACTION BUTTONS */}
                           <td className="p-3 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              {/* 1. VIEW BUTTON */}
+                              {/* VIEW BUTTON */}
                               <button
                                 type="button"
                                 onClick={() => setViewTx(tx)}
@@ -2060,7 +2231,7 @@ export default function AdminPaymentGatewayPage() {
                                 <Eye className="h-3.5 w-3.5" />
                               </button>
 
-                              {/* 2. EDIT BUTTON */}
+                              {/* EDIT BUTTON */}
                               <button
                                 type="button"
                                 onClick={() => handleOpenEdit(tx)}
@@ -2071,7 +2242,7 @@ export default function AdminPaymentGatewayPage() {
                                 <Edit3 className="h-3.5 w-3.5" />
                               </button>
 
-                              {/* 3. APPROVE & REJECT ACTIONS */}
+                              {/* APPROVE & REJECT ACTIONS */}
                               {isPending ? (
                                 <>
                                   <button
@@ -2105,7 +2276,7 @@ export default function AdminPaymentGatewayPage() {
                                 </button>
                               )}
 
-                              {/* 4. DELETE BUTTON */}
+                              {/* DELETE BUTTON */}
                               <button
                                 type="button"
                                 onClick={() => handleDeleteTransaction(tx.id)}
@@ -2158,6 +2329,9 @@ export default function AdminPaymentGatewayPage() {
       {/* VIEW DETAILS MODAL */}
       {viewTx && (
         <div 
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="view_modal_title"
           onClick={() => setViewTx(null)}
           className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
         >
@@ -2171,7 +2345,7 @@ export default function AdminPaymentGatewayPage() {
             }}
           >
             <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border, #334155)' }}>
-              <div className="flex items-center gap-2 font-black text-sm">
+              <div id="view_modal_title" className="flex items-center gap-2 font-black text-sm">
                 <Landmark className="h-4 w-4 text-[var(--color-primary,#3b82f6)]" />
                 <span>{t('manualSettlementDetails', 'Manual Settlement Details')}</span>
               </div>
@@ -2263,6 +2437,9 @@ export default function AdminPaymentGatewayPage() {
       {/* EDIT MODAL */}
       {editTx && (
         <div 
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit_modal_title"
           onClick={() => setEditTx(null)}
           className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
         >
@@ -2276,7 +2453,7 @@ export default function AdminPaymentGatewayPage() {
             }}
           >
             <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border, #334155)' }}>
-              <div className="flex items-center gap-2 font-black text-sm">
+              <div id="edit_modal_title" className="flex items-center gap-2 font-black text-sm">
                 <Edit3 className="h-4 w-4 text-[var(--color-primary,#3b82f6)]" />
                 <span>{t('editManualSettlement', 'Edit Manual Settlement')}</span>
               </div>
@@ -2294,10 +2471,19 @@ export default function AdminPaymentGatewayPage() {
                 <label className="block text-[11px] font-bold uppercase mb-1 opacity-70">{t('customerName', 'Customer Name')}</label>
                 <input
                   type="text"
+                  id="edit_customer_name"
+                  name="edit_customer_name_guard"
                   value={editForm.customer_name}
                   onChange={(e) => setEditForm({ ...editForm, customer_name: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(); }}
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none"
                   style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
                 />
@@ -2307,10 +2493,19 @@ export default function AdminPaymentGatewayPage() {
                 <label className="block text-[11px] font-bold uppercase mb-1 opacity-70">{t('customerEmail', 'Customer Email')}</label>
                 <input
                   type="email"
+                  id="edit_customer_email"
+                  name="edit_customer_email_guard"
                   value={editForm.customer_email}
                   onChange={(e) => setEditForm({ ...editForm, customer_email: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(); }}
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono"
                   style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
                 />
@@ -2322,8 +2517,17 @@ export default function AdminPaymentGatewayPage() {
                   <input
                     type="number"
                     step="0.01"
+                    id="edit_customer_amount"
+                    name="edit_customer_amount_guard"
                     value={editForm.amount}
                     onChange={(e) => setEditForm({ ...editForm, amount: parseFloat(e.target.value) || 0 })}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(); }}
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono font-bold"
                     style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
                   />
@@ -2348,11 +2552,20 @@ export default function AdminPaymentGatewayPage() {
                 <label className="block text-[11px] font-bold uppercase mb-1 opacity-70">{t('wireReference', 'Wire Transfer Reference')}</label>
                 <input
                   type="text"
+                  id="edit_wire_ref"
+                  name="edit_wire_ref_guard"
                   value={editForm.transfer_reference}
                   onChange={(e) => setEditForm({ ...editForm, transfer_reference: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(); }}
                   placeholder="e.g. WIRE-89214710"
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
                 />
@@ -2362,8 +2575,14 @@ export default function AdminPaymentGatewayPage() {
                 <label className="block text-[11px] font-bold uppercase mb-1 opacity-70">{t('notes', 'Transfer Notes')}</label>
                 <textarea
                   rows={2}
+                  id="edit_tx_notes"
+                  name="edit_tx_notes_guard"
                   value={editForm.notes}
                   onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                  autoComplete="new-password"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none leading-relaxed"
                   style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
                 />
@@ -2374,9 +2593,18 @@ export default function AdminPaymentGatewayPage() {
                   <label className="block text-[11px] font-bold uppercase mb-1 text-red-400">{t('rejectionReason', 'Rejection Reason')}</label>
                   <input
                     type="text"
+                    id="edit_failure_reason"
+                    name="edit_failure_reason_guard"
                     value={editForm.failure_reason}
                     onChange={(e) => setEditForm({ ...editForm, failure_reason: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(); }}
                     placeholder="e.g. Mismatched reference code"
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none border-red-500/40"
                     style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', color: '#f87171' }}
                   />
@@ -2411,6 +2639,9 @@ export default function AdminPaymentGatewayPage() {
       {/* STRIPE GUIDE MODAL */}
       {showStripeGuideModal && (
         <div 
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="guide_modal_title"
           onClick={() => setShowStripeGuideModal(false)}
           className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
         >
@@ -2432,7 +2663,7 @@ export default function AdminPaymentGatewayPage() {
               <X className="h-4 w-4" />
             </button>
             <div className="space-y-1.5 pr-8">
-              <h2 className="text-xl font-black">{t('stripeConnectModalTitle', 'Connect Stripe & Webhooks')}</h2>
+              <h2 id="guide_modal_title" className="text-xl font-black">{t('stripeConnectModalTitle', 'Connect Stripe & Webhooks')}</h2>
               <p className="text-xs opacity-75">{t('stripeConnectModalSub', 'Follow standard setup for webhook verification.')}</p>
             </div>
 

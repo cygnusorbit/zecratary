@@ -1,3 +1,13 @@
+function normalizeBool(val: any): boolean {
+  if (typeof val === 'boolean') return val;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'true' || s === '1' || s === 'yes' || s === 'on' || s === 'enabled';
+  }
+  if (typeof val === 'number') return val === 1;
+  return Boolean(val);
+}
+
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import Stripe from 'stripe';

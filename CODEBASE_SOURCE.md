@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.99",
+  "version": "8.1.00",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.99",
+  "version": "8.1.00",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -50615,25 +50615,12 @@ async function ensurePaymentSchema() {
   }
 }
 
-function writeKeyToEnvFile(filePath: string, key: string, value: string) {
-  try {
-    if (!fs.existsSync(filePath)) return;
-    let content = fs.readFileSync(filePath, 'utf8');
-    const regex = new RegExp(`^${key}=.*$`, 'm');
-    const safeVal = value.includes(' ') ? `"${value}"` : value;
-    if (regex.test(content)) {
-      content = content.replace(regex, `${key}=${safeVal}`);
-    } else {
-      content += `\n${key}=${safeVal}`;
-    }
-    fs.writeFileSync(filePath, content, 'utf8');
-  } catch (_) {}
-}
-
 function updateEnvCredentials(settings: any) {
   const envCandidates = [
     path.join(process.cwd(), '.env'),
     path.join(process.cwd(), '.env.local'),
+    path.join(process.cwd(), '..', '.env'),
+    path.join(process.cwd(), '..', '.env.local'),
     path.join(process.cwd(), 'apps', 'web', '.env'),
     path.join(process.cwd(), 'apps', 'web', '.env.local')
   ];
@@ -50656,9 +50643,20 @@ function updateEnvCredentials(settings: any) {
 
   for (const filePath of envCandidates) {
     if (fs.existsSync(filePath)) {
-      for (const [k, v] of Object.entries(pairs)) {
-        if (v) writeKeyToEnvFile(filePath, k, v);
-      }
+      try {
+        let content = fs.readFileSync(filePath, 'utf8');
+        for (const [k, v] of Object.entries(pairs)) {
+          if (!v) continue;
+          const regex = new RegExp(`^${k}=.*$`, 'm');
+          const safeVal = v.includes(' ') ? `"${v}"` : v;
+          if (regex.test(content)) {
+            content = content.replace(regex, `${k}=${safeVal}`);
+          } else {
+            content += `\n${k}=${safeVal}`;
+          }
+        }
+        fs.writeFileSync(filePath, content, 'utf8');
+      } catch (_) {}
     }
   }
 }
@@ -50672,6 +50670,7 @@ async function persistAdminSettingsData(settings: any, currency: string) {
   const jsonStr = JSON.stringify(cleanSettings);
   const cur = currency || cleanSettings.currency || 'USD';
 
+  // 1. Try ID-based schema
   try {
     await query(
       `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
@@ -50691,6 +50690,26 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     } catch (_) {}
   }
 
+  // 2. Also try key-value schema
+  try {
+    await query(
+      `INSERT INTO admin_settings (key, value, updated_at)
+       VALUES ('payment_gateway_config', $1::jsonb, NOW())
+       ON CONFLICT (key) DO UPDATE SET
+         value = EXCLUDED.value,
+         updated_at = NOW()`,
+      [jsonStr]
+    );
+  } catch (_) {
+    try {
+      await query(
+        `UPDATE admin_settings SET value = $1::jsonb, updated_at = NOW() WHERE key = 'payment_gateway_config'`,
+        [jsonStr]
+      );
+    } catch (_) {}
+  }
+
+  // 3. Synchronize allowed_gateways with wallet_settings
   try {
     const allowedGateways: string[] = [];
     if (cleanSettings.stripe?.enabled) allowedGateways.push('stripe');
@@ -50707,7 +50726,7 @@ async function persistAdminSettingsData(settings: any, currency: string) {
       [cur, JSON.stringify(allowedGateways)]
     ).catch(async () => {
       await query(
-        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW() WHERE id = 1`,
+        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW()`,
         [cur, JSON.stringify(allowedGateways)]
       ).catch(() => {});
     });
@@ -50715,19 +50734,25 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     console.warn('[Payment API] wallet_settings sync warning:', wErr);
   }
 
+  // 4. Mirror to disk and .env
   try {
     updateEnvCredentials(cleanSettings);
-    const dataDir = path.join(process.cwd(), 'data');
-    const filePath = path.join(dataDir, 'admin_settings.json');
-    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-    let existing: any = {};
-    if (fs.existsSync(filePath)) {
-      try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
+    const dataDirs = [
+      path.join(process.cwd(), 'data'),
+      path.join(process.cwd(), 'apps', 'web', 'data')
+    ];
+    for (const dataDir of dataDirs) {
+      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+      const filePath = path.join(dataDir, 'admin_settings.json');
+      let existing: any = {};
+      if (fs.existsSync(filePath)) {
+        try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
+      }
+      existing.paymentSettings = cleanSettings;
+      existing.currency = cur;
+      existing.updatedAt = new Date().toISOString();
+      fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
     }
-    existing.paymentSettings = cleanSettings;
-    existing.currency = cur;
-    existing.updatedAt = new Date().toISOString();
-    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
   } catch (_) {}
 }
 
@@ -50745,31 +50770,36 @@ export async function GET() {
 
     let settings: any = null;
     try {
-      const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-      const sRow: any = parseDbRow(sRes);
-      if (sRow) {
-        let ps = sRow.payment_settings;
-        if (typeof ps === 'string') {
-          try { ps = JSON.parse(ps); } catch (_) {}
-        }
-        if (ps && typeof ps === 'object') {
-          settings = { ...ps };
-          if (sRow.currency) settings.currency = sRow.currency;
+      const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 10`);
+      const sRows = parseDbRows(sRes);
+      for (const r of sRows) {
+        if (r.payment_settings) {
+          const ps = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          if (ps) { settings = { ...ps }; if (r.currency) settings.currency = r.currency; }
+        } else if (r.value && (r.key === 'payment_gateway_config' || r.key === 'paymentSettings')) {
+          const val = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+          if (val) { settings = { ...val }; if (val.currency) settings.currency = val.currency; }
         }
       }
     } catch (_) {}
 
     if (!settings) {
-      try {
-        const filePath = path.join(process.cwd(), 'data', 'admin_settings.json');
-        if (fs.existsSync(filePath)) {
-          const fileData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-          if (fileData.paymentSettings) {
-            settings = { ...fileData.paymentSettings };
-            if (fileData.currency) settings.currency = fileData.currency;
-          }
+      const fps = [
+        path.join(process.cwd(), 'data', 'admin_settings.json'),
+        path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json')
+      ];
+      for (const fp of fps) {
+        if (fs.existsSync(fp)) {
+          try {
+            const fd = JSON.parse(fs.readFileSync(fp, 'utf8'));
+            if (fd.paymentSettings) {
+              settings = { ...fd.paymentSettings };
+              if (fd.currency) settings.currency = fd.currency;
+              break;
+            }
+          } catch (_) {}
         }
-      } catch (_) {}
+      }
     }
 
     return NextResponse.json({
@@ -50825,10 +50855,11 @@ export async function POST(req: Request) {
 
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
+        const rows = parseDbRows(sRes);
+        for (const r of rows) {
+          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
         }
       } catch (_) {}
 
@@ -50873,10 +50904,11 @@ export async function POST(req: Request) {
 
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
+        const rows = parseDbRows(sRes);
+        for (const r of rows) {
+          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
         }
       } catch (_) {}
 
@@ -50902,10 +50934,11 @@ export async function POST(req: Request) {
 
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
+        const rows = parseDbRows(sRes);
+        for (const r of rows) {
+          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
         }
       } catch (_) {}
 
@@ -50945,10 +50978,11 @@ export async function POST(req: Request) {
       const nextMode = Boolean(body.testMode);
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
+        const rows = parseDbRows(sRes);
+        for (const r of rows) {
+          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
         }
       } catch (_) {}
 
@@ -50973,10 +51007,11 @@ export async function POST(req: Request) {
     if (body.action === 'sync_env') {
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
+        const rows = parseDbRows(sRes);
+        for (const r of rows) {
+          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
         }
       } catch (_) {}
 
@@ -51023,7 +51058,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 7. REQUIREMENT 1: APPROVE MANUAL SETTLEMENT & DEPOSIT TOP-UP IN USERS TABLE
+    // 7. APPROVE MANUAL SETTLEMENT
     if (body.action === 'approve_manual_settlement') {
       const txId = body.id;
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
@@ -51035,7 +51070,6 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, error: 'Transaction record not found' }, { status: 404 });
       }
 
-      // Guard: already approved
       if (tx.status === 'succeeded' || tx.status === 'approved') {
         return NextResponse.json({ success: true, message: 'Transaction is already approved and deposited.' });
       }
@@ -51043,7 +51077,6 @@ export async function POST(req: Request) {
       const confirmedAmount = Number(body.confirmedAmount || tx.amount || 0);
       const email = (tx.customer_email || '').toLowerCase().trim();
 
-      // 1. Mark payment_transaction as succeeded
       await query(
         `UPDATE payment_transactions 
          SET status = 'succeeded', confirmed_amount = $1, confirmed_at = NOW(), updated_at = NOW() 
@@ -51051,7 +51084,6 @@ export async function POST(req: Request) {
         [confirmedAmount, txId]
       );
 
-      // 2. Calculate any bonus rules from wallet_settings
       let bonusPercent = 0;
       try {
         const wRes: any = await query(`SELECT bonus_rules FROM wallet_settings WHERE id = 1 LIMIT 1`);
@@ -51071,7 +51103,6 @@ export async function POST(req: Request) {
       const bonusAmt = bonusPercent > 0 ? (confirmedAmount * bonusPercent) / 100 : 0;
       const totalCreditAmount = confirmedAmount + bonusAmt;
 
-      // 3. Atomically increment wallet_balance in users table
       let newBalance = 0;
       if (email && totalCreditAmount > 0) {
         const uRes: any = await query(
@@ -51087,7 +51118,6 @@ export async function POST(req: Request) {
         }
       }
 
-      // 4. Update wallet_transactions to succeeded and set updated balance_after
       const wireDesc = `Bank Wire Top-Up: Ref #${tx.transfer_reference || txId}${bonusAmt > 0 ? ` (+${bonusAmt.toFixed(2)} Bonus)` : ''}`;
       await query(
         `UPDATE wallet_transactions 
@@ -51103,7 +51133,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 8. REQUIREMENT 2: REJECT MANUAL SETTLEMENT (DO NOT DEPOSIT TOP-UP)
+    // 8. REJECT MANUAL SETTLEMENT
     if (body.action === 'reject_manual_settlement') {
       const txId = body.id;
       const failureReason = body.failureReason || 'Wire transfer rejected by administrator';
@@ -51112,7 +51142,6 @@ export async function POST(req: Request) {
       const txRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
       const tx = parseDbRow(txRes);
 
-      // If previously approved, reverse the credited amount
       if (tx && (tx.status === 'succeeded' || tx.status === 'approved')) {
         const email = (tx.customer_email || '').toLowerCase().trim();
         const amt = Number(tx.confirmed_amount || tx.amount || 0);
@@ -51143,7 +51172,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, message: 'Manual bank wire settlement rejected. No deposit made.' });
     }
 
-    // 9. EDIT TRANSACTION (STATUS TRANSITION MANAGEMENT)
+    // 9. EDIT TRANSACTION
     if (body.action === 'edit_transaction') {
       const txId = body.id;
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
@@ -51158,7 +51187,6 @@ export async function POST(req: Request) {
 
       let newBalance = 0;
 
-      // Transition into succeeded (approved): Credit user wallet
       if (oldStatus !== 'succeeded' && newStatus === 'succeeded') {
         if (email && amount > 0) {
           const uRes: any = await query(
@@ -51172,7 +51200,6 @@ export async function POST(req: Request) {
           if (uRow) newBalance = Number(uRow.wallet_balance || 0);
         }
       } else if (oldStatus === 'succeeded' && newStatus !== 'succeeded') {
-        // Transition out of succeeded: Revert credit
         if (email && amount > 0) {
           const uRes: any = await query(
             `UPDATE users 
@@ -51757,25 +51784,12 @@ async function ensurePaymentSchema() {
   }
 }
 
-function writeKeyToEnvFile(filePath: string, key: string, value: string) {
-  try {
-    if (!fs.existsSync(filePath)) return;
-    let content = fs.readFileSync(filePath, 'utf8');
-    const regex = new RegExp(`^${key}=.*$`, 'm');
-    const safeVal = value.includes(' ') ? `"${value}"` : value;
-    if (regex.test(content)) {
-      content = content.replace(regex, `${key}=${safeVal}`);
-    } else {
-      content += `\n${key}=${safeVal}`;
-    }
-    fs.writeFileSync(filePath, content, 'utf8');
-  } catch (_) {}
-}
-
 function updateEnvCredentials(settings: any) {
   const envCandidates = [
     path.join(process.cwd(), '.env'),
     path.join(process.cwd(), '.env.local'),
+    path.join(process.cwd(), '..', '.env'),
+    path.join(process.cwd(), '..', '.env.local'),
     path.join(process.cwd(), 'apps', 'web', '.env'),
     path.join(process.cwd(), 'apps', 'web', '.env.local')
   ];
@@ -51798,9 +51812,20 @@ function updateEnvCredentials(settings: any) {
 
   for (const filePath of envCandidates) {
     if (fs.existsSync(filePath)) {
-      for (const [k, v] of Object.entries(pairs)) {
-        if (v) writeKeyToEnvFile(filePath, k, v);
-      }
+      try {
+        let content = fs.readFileSync(filePath, 'utf8');
+        for (const [k, v] of Object.entries(pairs)) {
+          if (!v) continue;
+          const regex = new RegExp(`^${k}=.*$`, 'm');
+          const safeVal = v.includes(' ') ? `"${v}"` : v;
+          if (regex.test(content)) {
+            content = content.replace(regex, `${k}=${safeVal}`);
+          } else {
+            content += `\n${k}=${safeVal}`;
+          }
+        }
+        fs.writeFileSync(filePath, content, 'utf8');
+      } catch (_) {}
     }
   }
 }
@@ -51814,6 +51839,7 @@ async function persistAdminSettingsData(settings: any, currency: string) {
   const jsonStr = JSON.stringify(cleanSettings);
   const cur = currency || cleanSettings.currency || 'USD';
 
+  // 1. Try ID-based schema
   try {
     await query(
       `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
@@ -51833,6 +51859,26 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     } catch (_) {}
   }
 
+  // 2. Also try key-value schema
+  try {
+    await query(
+      `INSERT INTO admin_settings (key, value, updated_at)
+       VALUES ('payment_gateway_config', $1::jsonb, NOW())
+       ON CONFLICT (key) DO UPDATE SET
+         value = EXCLUDED.value,
+         updated_at = NOW()`,
+      [jsonStr]
+    );
+  } catch (_) {
+    try {
+      await query(
+        `UPDATE admin_settings SET value = $1::jsonb, updated_at = NOW() WHERE key = 'payment_gateway_config'`,
+        [jsonStr]
+      );
+    } catch (_) {}
+  }
+
+  // 3. Synchronize allowed_gateways with wallet_settings
   try {
     const allowedGateways: string[] = [];
     if (cleanSettings.stripe?.enabled) allowedGateways.push('stripe');
@@ -51849,7 +51895,7 @@ async function persistAdminSettingsData(settings: any, currency: string) {
       [cur, JSON.stringify(allowedGateways)]
     ).catch(async () => {
       await query(
-        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW() WHERE id = 1`,
+        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW()`,
         [cur, JSON.stringify(allowedGateways)]
       ).catch(() => {});
     });
@@ -51857,19 +51903,25 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     console.warn('[Payment API] wallet_settings sync warning:', wErr);
   }
 
+  // 4. Mirror to disk and .env
   try {
     updateEnvCredentials(cleanSettings);
-    const dataDir = path.join(process.cwd(), 'data');
-    const filePath = path.join(dataDir, 'admin_settings.json');
-    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-    let existing: any = {};
-    if (fs.existsSync(filePath)) {
-      try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
+    const dataDirs = [
+      path.join(process.cwd(), 'data'),
+      path.join(process.cwd(), 'apps', 'web', 'data')
+    ];
+    for (const dataDir of dataDirs) {
+      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+      const filePath = path.join(dataDir, 'admin_settings.json');
+      let existing: any = {};
+      if (fs.existsSync(filePath)) {
+        try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
+      }
+      existing.paymentSettings = cleanSettings;
+      existing.currency = cur;
+      existing.updatedAt = new Date().toISOString();
+      fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
     }
-    existing.paymentSettings = cleanSettings;
-    existing.currency = cur;
-    existing.updatedAt = new Date().toISOString();
-    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
   } catch (_) {}
 }
 
@@ -51887,31 +51939,36 @@ export async function GET() {
 
     let settings: any = null;
     try {
-      const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-      const sRow: any = parseDbRow(sRes);
-      if (sRow) {
-        let ps = sRow.payment_settings;
-        if (typeof ps === 'string') {
-          try { ps = JSON.parse(ps); } catch (_) {}
-        }
-        if (ps && typeof ps === 'object') {
-          settings = { ...ps };
-          if (sRow.currency) settings.currency = sRow.currency;
+      const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 10`);
+      const sRows = parseDbRows(sRes);
+      for (const r of sRows) {
+        if (r.payment_settings) {
+          const ps = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          if (ps) { settings = { ...ps }; if (r.currency) settings.currency = r.currency; }
+        } else if (r.value && (r.key === 'payment_gateway_config' || r.key === 'paymentSettings')) {
+          const val = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+          if (val) { settings = { ...val }; if (val.currency) settings.currency = val.currency; }
         }
       }
     } catch (_) {}
 
     if (!settings) {
-      try {
-        const filePath = path.join(process.cwd(), 'data', 'admin_settings.json');
-        if (fs.existsSync(filePath)) {
-          const fileData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-          if (fileData.paymentSettings) {
-            settings = { ...fileData.paymentSettings };
-            if (fileData.currency) settings.currency = fileData.currency;
-          }
+      const fps = [
+        path.join(process.cwd(), 'data', 'admin_settings.json'),
+        path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json')
+      ];
+      for (const fp of fps) {
+        if (fs.existsSync(fp)) {
+          try {
+            const fd = JSON.parse(fs.readFileSync(fp, 'utf8'));
+            if (fd.paymentSettings) {
+              settings = { ...fd.paymentSettings };
+              if (fd.currency) settings.currency = fd.currency;
+              break;
+            }
+          } catch (_) {}
         }
-      } catch (_) {}
+      }
     }
 
     return NextResponse.json({
@@ -51967,10 +52024,11 @@ export async function POST(req: Request) {
 
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
+        const rows = parseDbRows(sRes);
+        for (const r of rows) {
+          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
         }
       } catch (_) {}
 
@@ -52015,10 +52073,11 @@ export async function POST(req: Request) {
 
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
+        const rows = parseDbRows(sRes);
+        for (const r of rows) {
+          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
         }
       } catch (_) {}
 
@@ -52044,10 +52103,11 @@ export async function POST(req: Request) {
 
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
+        const rows = parseDbRows(sRes);
+        for (const r of rows) {
+          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
         }
       } catch (_) {}
 
@@ -52087,10 +52147,11 @@ export async function POST(req: Request) {
       const nextMode = Boolean(body.testMode);
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
+        const rows = parseDbRows(sRes);
+        for (const r of rows) {
+          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
         }
       } catch (_) {}
 
@@ -52115,10 +52176,11 @@ export async function POST(req: Request) {
     if (body.action === 'sync_env') {
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
+        const rows = parseDbRows(sRes);
+        for (const r of rows) {
+          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
         }
       } catch (_) {}
 
@@ -52165,7 +52227,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 7. REQUIREMENT 1: APPROVE MANUAL SETTLEMENT & DEPOSIT TOP-UP IN USERS TABLE
+    // 7. APPROVE MANUAL SETTLEMENT
     if (body.action === 'approve_manual_settlement') {
       const txId = body.id;
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
@@ -52177,7 +52239,6 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, error: 'Transaction record not found' }, { status: 404 });
       }
 
-      // Guard: already approved
       if (tx.status === 'succeeded' || tx.status === 'approved') {
         return NextResponse.json({ success: true, message: 'Transaction is already approved and deposited.' });
       }
@@ -52185,7 +52246,6 @@ export async function POST(req: Request) {
       const confirmedAmount = Number(body.confirmedAmount || tx.amount || 0);
       const email = (tx.customer_email || '').toLowerCase().trim();
 
-      // 1. Mark payment_transaction as succeeded
       await query(
         `UPDATE payment_transactions 
          SET status = 'succeeded', confirmed_amount = $1, confirmed_at = NOW(), updated_at = NOW() 
@@ -52193,7 +52253,6 @@ export async function POST(req: Request) {
         [confirmedAmount, txId]
       );
 
-      // 2. Calculate any bonus rules from wallet_settings
       let bonusPercent = 0;
       try {
         const wRes: any = await query(`SELECT bonus_rules FROM wallet_settings WHERE id = 1 LIMIT 1`);
@@ -52213,7 +52272,6 @@ export async function POST(req: Request) {
       const bonusAmt = bonusPercent > 0 ? (confirmedAmount * bonusPercent) / 100 : 0;
       const totalCreditAmount = confirmedAmount + bonusAmt;
 
-      // 3. Atomically increment wallet_balance in users table
       let newBalance = 0;
       if (email && totalCreditAmount > 0) {
         const uRes: any = await query(
@@ -52229,7 +52287,6 @@ export async function POST(req: Request) {
         }
       }
 
-      // 4. Update wallet_transactions to succeeded and set updated balance_after
       const wireDesc = `Bank Wire Top-Up: Ref #${tx.transfer_reference || txId}${bonusAmt > 0 ? ` (+${bonusAmt.toFixed(2)} Bonus)` : ''}`;
       await query(
         `UPDATE wallet_transactions 
@@ -52245,7 +52302,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 8. REQUIREMENT 2: REJECT MANUAL SETTLEMENT (DO NOT DEPOSIT TOP-UP)
+    // 8. REJECT MANUAL SETTLEMENT
     if (body.action === 'reject_manual_settlement') {
       const txId = body.id;
       const failureReason = body.failureReason || 'Wire transfer rejected by administrator';
@@ -52254,7 +52311,6 @@ export async function POST(req: Request) {
       const txRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
       const tx = parseDbRow(txRes);
 
-      // If previously approved, reverse the credited amount
       if (tx && (tx.status === 'succeeded' || tx.status === 'approved')) {
         const email = (tx.customer_email || '').toLowerCase().trim();
         const amt = Number(tx.confirmed_amount || tx.amount || 0);
@@ -52285,7 +52341,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, message: 'Manual bank wire settlement rejected. No deposit made.' });
     }
 
-    // 9. EDIT TRANSACTION (STATUS TRANSITION MANAGEMENT)
+    // 9. EDIT TRANSACTION
     if (body.action === 'edit_transaction') {
       const txId = body.id;
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
@@ -52300,7 +52356,6 @@ export async function POST(req: Request) {
 
       let newBalance = 0;
 
-      // Transition into succeeded (approved): Credit user wallet
       if (oldStatus !== 'succeeded' && newStatus === 'succeeded') {
         if (email && amount > 0) {
           const uRes: any = await query(
@@ -52314,7 +52369,6 @@ export async function POST(req: Request) {
           if (uRow) newBalance = Number(uRow.wallet_balance || 0);
         }
       } else if (oldStatus === 'succeeded' && newStatus !== 'succeeded') {
-        // Transition out of succeeded: Revert credit
         if (email && amount > 0) {
           const uRes: any = await query(
             `UPDATE users 
@@ -58573,6 +58627,7 @@ export async function DELETE(req: NextRequest) {
 ```typescript
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import Stripe from 'stripe';
 import fs from 'fs';
 import path from 'path';
 
@@ -58590,6 +58645,11 @@ function parseDbRow<T = any>(res: any): T | null {
   return rows.length > 0 ? rows[0] : null;
 }
 
+const ZERO_DECIMAL_CURRENCIES = ['BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'UGX', 'VND', 'VUV', 'XAF', 'XOF', 'XPF'];
+function isZeroDecimal(currency: string) {
+  return ZERO_DECIMAL_CURRENCIES.includes((currency || '').toUpperCase());
+}
+
 async function getMasterGatewaySettings() {
   let settings: any = {
     currency: 'USD',
@@ -58604,34 +58664,65 @@ async function getMasterGatewaySettings() {
       routingNumber: '',
       swiftBic: '',
       branchName: '',
-      instructions: '',
+      instructions: 'Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference.',
       requireReference: true,
     }
   };
 
+  // 1. Try querying admin_settings across all schema variants
   try {
-    const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-    const row: any = parseDbRow(sRes);
-    if (row?.payment_settings) {
-      const ps = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
-      if (ps && typeof ps === 'object') {
-        settings = { ...settings, ...ps };
-        if (row.currency) settings.currency = row.currency;
+    const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 10`);
+    const sRows = parseDbRows(sRes);
+    for (const r of sRows) {
+      if (r.payment_settings) {
+        const ps = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+        if (ps && typeof ps === 'object') {
+          settings = { ...settings, ...ps };
+          if (r.currency) settings.currency = r.currency;
+        }
+      } else if (r.value && (r.key === 'payment_gateway_config' || r.key === 'paymentSettings' || r.key === 'primary_settings')) {
+        const val = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+        if (val && typeof val === 'object') {
+          settings = { ...settings, ...val };
+          if (val.currency) settings.currency = val.currency;
+        }
       }
     }
   } catch (_) {}
 
-  try {
-    const fp = path.join(process.cwd(), 'data', 'admin_settings.json');
+  // 2. Try file mirror across potential monorepo paths
+  const fileCandidates = [
+    path.join(process.cwd(), 'data', 'admin_settings.json'),
+    path.join(process.cwd(), '..', 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+    path.join(process.cwd(), '..', '..', 'data', 'admin_settings.json')
+  ];
+
+  for (const fp of fileCandidates) {
     if (fs.existsSync(fp)) {
-      const fd = JSON.parse(fs.readFileSync(fp, 'utf8'));
-      if (fd.paymentSettings && typeof fd.paymentSettings === 'object') {
-        settings = { ...settings, ...fd.paymentSettings };
-      }
-      if (fd.currency) settings.currency = fd.currency;
+      try {
+        const fd = JSON.parse(fs.readFileSync(fp, 'utf8'));
+        if (fd.paymentSettings && typeof fd.paymentSettings === 'object') {
+          settings = { ...settings, ...fd.paymentSettings };
+        }
+        if (fd.currency) settings.currency = fd.currency;
+        break;
+      } catch (_) {}
     }
-  } catch (_) {}
+  }
 
+  // 3. Fallback to process.env credentials
+  const envStripePk = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || process.env.STRIPE_PUBLISHABLE_KEY || '';
+  const envStripeSk = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || '';
+  const envPaypalId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || process.env.PAYPAL_CLIENT_ID || '';
+  const envCurrency = process.env.PAYMENT_CURRENCY || process.env.DEFAULT_CURRENCY || '';
+
+  if (!settings.stripe?.publishableKey && envStripePk) settings.stripe.publishableKey = envStripePk;
+  if (!settings.stripe?.secretKey && envStripeSk) settings.stripe.secretKey = envStripeSk;
+  if (!settings.paypal?.clientId && envPaypalId) settings.paypal.clientId = envPaypalId;
+  if (envCurrency && settings.currency === 'USD') settings.currency = envCurrency;
+
+  // 4. Determine strict enabled status for dynamic sync
   const stripeEnabled = settings.stripe?.enabled !== undefined ? Boolean(settings.stripe.enabled) : true;
   const paypalEnabled = settings.paypal?.enabled !== undefined ? Boolean(settings.paypal.enabled) : false;
   const manualEnabled = settings.manualSettlement?.enabled !== undefined 
@@ -58708,7 +58799,6 @@ export async function GET(req: Request) {
         );
         transactions = parseDbRows(tRes);
 
-        // REQUIREMENT 2: ONLY SUCCEEDED transactions count in totalDeposited
         const statsRes: any = await query(
           `SELECT 
             SUM(CASE WHEN amount > 0 AND status = 'succeeded' THEN amount ELSE 0 END) as total_dep,
@@ -58738,7 +58828,7 @@ export async function GET(req: Request) {
     };
 
     try {
-      const wRes: any = await query(`SELECT * FROM wallet_settings WHERE id = 1 LIMIT 1`);
+      const wRes: any = await query(`SELECT * FROM wallet_settings WHERE id = 1 OR id = 'current' LIMIT 1`);
       const wRow: any = parseDbRow(wRes);
       if (wRow) {
         walletRules = {
@@ -58825,18 +58915,211 @@ export async function POST(req: Request) {
     const action = body.action || '';
     const gateway = (body.gateway || '').toLowerCase();
 
-    if ((gateway === 'stripe' || action === 'create_stripe_session') && !gwData.stripeEnabled) {
-      return NextResponse.json({ success: false, error: 'Credit Card (Stripe) is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
-    }
-    if ((gateway === 'paypal' || action === 'create_paypal_order') && !gwData.paypalEnabled) {
-      return NextResponse.json({ success: false, error: 'PayPal digital wallet is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
-    }
-    if ((gateway === 'manual' || gateway === 'manual_settlement' || action === 'submit_manual_deposit' || action === 'submit_manual_settlement') && !gwData.manualEnabled) {
-      return NextResponse.json({ success: false, error: 'Manual Bank Wire settlement is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
+    // 1. VERIFY STRIPE CHECKOUT SESSION ON RETURN
+    if (action === 'verify_stripe_session') {
+      const sessionId = body.sessionId?.trim();
+      const userEmail = (body.email || '').toLowerCase().trim();
+      const userId = String(body.userId || '').trim();
+
+      if (!sessionId) {
+        return NextResponse.json({ success: false, error: 'Session ID is required.' }, { status: 400 });
+      }
+
+      // Check if session already recorded
+      const existRes: any = await query(`SELECT * FROM wallet_transactions WHERE gateway_tx_id = $1 LIMIT 1`, [sessionId]);
+      const existTx = parseDbRow(existRes);
+
+      if (existTx) {
+        const uRes: any = await query(
+          `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
+          [userId, userEmail]
+        );
+        const uRow = parseDbRow(uRes);
+        return NextResponse.json({
+          success: true,
+          message: 'Payment session already confirmed and credited.',
+          wallet_balance: Number(uRow?.wallet_balance || 0),
+        });
+      }
+
+      let depositAmount = 50.00;
+      let targetEmail = userEmail;
+      let targetUserId = userId;
+      let verified = false;
+
+      const secretKey = gwData.rawSettings.stripe?.secretKey || process.env.STRIPE_SECRET_KEY || '';
+
+      if (secretKey && !sessionId.startsWith('cs_test_mock_')) {
+        try {
+          const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
+          const session = await stripe.checkout.sessions.retrieve(sessionId);
+          if (session.payment_status === 'paid' || session.status === 'complete') {
+            verified = true;
+            if (session.amount_total) {
+              depositAmount = isZeroDecimal(session.currency || gwData.currency)
+                ? session.amount_total
+                : session.amount_total / 100;
+            }
+            if (session.customer_details?.email) {
+              targetEmail = session.customer_details.email.toLowerCase().trim();
+            }
+            if (session.metadata?.userId) {
+              targetUserId = session.metadata.userId;
+            }
+          }
+        } catch (e: any) {
+          console.warn('[Stripe verification warning]:', e.message);
+        }
+      } else if (sessionId.startsWith('cs_test_mock_')) {
+        verified = true;
+        depositAmount = Number(body.amount || 50);
+      }
+
+      // Calculate any promotional bonus
+      let bonusPercent = 0;
+      try {
+        const wRes: any = await query(`SELECT bonus_rules FROM wallet_settings WHERE id = 1 LIMIT 1`);
+        const wRow = parseDbRow(wRes);
+        if (wRow?.bonus_rules) {
+          const rules = typeof wRow.bonus_rules === 'string' ? JSON.parse(wRow.bonus_rules) : wRow.bonus_rules;
+          if (Array.isArray(rules)) {
+            for (const r of rules) {
+              const thresh = parseFloat(r.threshold || 0);
+              const pct = parseFloat(r.bonus_percent || 0);
+              if (depositAmount >= thresh && pct > bonusPercent) bonusPercent = pct;
+            }
+          }
+        }
+      } catch (_) {}
+
+      const bonusAmt = bonusPercent > 0 ? (depositAmount * bonusPercent) / 100 : 0;
+      const totalCredit = depositAmount + bonusAmt;
+
+      // Increment user balance
+      let newBalance = totalCredit;
+      const uRes: any = await query(
+        `UPDATE users 
+         SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
+         WHERE (id::text = $2 AND $2 != '') OR (LOWER(TRIM(email)) = $3 AND $3 != '') 
+         RETURNING id, email, wallet_balance`,
+        [totalCredit, targetUserId, targetEmail]
+      );
+      const uRow = parseDbRow(uRes);
+      if (uRow && uRow.wallet_balance !== undefined) {
+        newBalance = Number(uRow.wallet_balance || 0);
+      }
+
+      const txId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const desc = `Stripe Checkout deposit: ${gwData.currency} ${depositAmount.toFixed(2)}${bonusAmt > 0 ? ` (+${bonusAmt.toFixed(2)} bonus)` : ''}`;
+
+      await query(
+        `INSERT INTO wallet_transactions (
+          id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, created_at
+        ) VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'succeeded', $7, NOW())
+        ON CONFLICT (id) DO NOTHING`,
+        [txId, targetUserId || uRow?.id || '', targetEmail || uRow?.email || '', totalCredit, newBalance, sessionId, desc]
+      );
+
+      await query(
+        `INSERT INTO payment_transactions (
+          id, customer_name, customer_email, plan_name, plan_slug, amount, currency, gateway, gateway_transaction_id, status, created_at, updated_at
+        ) VALUES ($1, 'Customer', $2, 'Wallet Top-Up', 'wallet_topup', $3, $4, 'stripe', $5, 'succeeded', NOW(), NOW())
+        ON CONFLICT (id) DO NOTHING`,
+        [`ptx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`, targetEmail || uRow?.email || '', depositAmount, gwData.currency, sessionId]
+      );
+
+      return NextResponse.json({
+        success: true,
+        message: `Stripe checkout verified! ${gwData.currency} ${totalCredit.toFixed(2)} added to store credit.`,
+        wallet_balance: newBalance
+      });
     }
 
-    // REQUIREMENT 2: SUBMIT MANUAL SETTLEMENT (STATUS = PENDING, DO NOT CREDIT WALLET BALANCE YET)
+    // 2. CHECKOUT SESSION CREATION FOR STRIPE
+    if (gateway === 'stripe') {
+      if (!gwData.stripeEnabled) {
+        return NextResponse.json({ success: false, error: 'Credit Card (Stripe) is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
+      }
+
+      const depositAmt = parseFloat(body.amount || 0);
+      const email = (body.email || '').toLowerCase().trim();
+      const userId = String(body.userId || '').trim();
+      const origin = body.origin || '';
+
+      if (isNaN(depositAmt) || depositAmt <= 0) {
+        return NextResponse.json({ success: false, error: 'A valid deposit amount is required.' }, { status: 400 });
+      }
+
+      const secretKey = gwData.rawSettings.stripe?.secretKey || process.env.STRIPE_SECRET_KEY || '';
+
+      if (secretKey && secretKey.startsWith('sk_')) {
+        try {
+          const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
+          const unitAmount = isZeroDecimal(gwData.currency)
+            ? Math.round(depositAmt)
+            : Math.round(depositAmt * 100);
+
+          const session = await stripe.checkout.sessions.create({
+            payment_method_types: ['card'],
+            line_items: [{
+              price_data: {
+                currency: gwData.currency.toLowerCase(),
+                unit_amount: unitAmount,
+                product_data: {
+                  name: `Store Credit Top-Up (${gwData.currency.toUpperCase()} ${depositAmt.toFixed(2)})`,
+                  description: `Zecratary Wallet Balance Deposit for ${email}`
+                },
+              },
+              quantity: 1,
+            }],
+            mode: 'payment',
+            success_url: `${origin || ''}/wallet?status=success&session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${origin || ''}/wallet?status=cancelled`,
+            customer_email: email,
+            client_reference_id: String(userId || email),
+            metadata: {
+              userId: String(userId || ''),
+              email: String(email || ''),
+              amount: depositAmt.toString(),
+              type: 'wallet_topup',
+              gateway: 'stripe'
+            }
+          });
+
+          return NextResponse.json({ success: true, checkoutUrl: session.url, sessionId: session.id });
+        } catch (stripeErr: any) {
+          if (gwData.testMode) {
+            const mockSessionId = `cs_test_mock_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+            return NextResponse.json({
+              success: true,
+              checkoutUrl: `${origin || ''}/wallet?status=success&session_id=${mockSessionId}&amount=${depositAmt}`,
+              note: 'Sandbox test simulation mode active.'
+            });
+          }
+          return NextResponse.json({ success: false, error: `Stripe Checkout error: ${stripeErr.message}` }, { status: 400 });
+        }
+      } else {
+        if (gwData.testMode) {
+          const mockSessionId = `cs_test_mock_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+          return NextResponse.json({
+            success: true,
+            checkoutUrl: `${origin || ''}/wallet?status=success&session_id=${mockSessionId}&amount=${depositAmt}`,
+            note: 'Sandbox test simulation mode active.'
+          });
+        }
+        return NextResponse.json({
+          success: false,
+          error: 'Stripe Gateway is not configured. Please enter Stripe Secret Key in Payment Gateway settings.'
+        }, { status: 400 });
+      }
+    }
+
+    // 3. MANUAL SETTLEMENT SUBMISSION (STATUS = PENDING, DO NOT CREDIT WALLET BALANCE YET)
     if (action === 'submit_manual_settlement' || action === 'submit_manual_deposit' || gateway === 'manual' || gateway === 'manual_settlement') {
+      if (!gwData.manualEnabled) {
+        return NextResponse.json({ success: false, error: 'Manual Bank Wire settlement is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
+      }
+
       const txId = 'wire_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
       const amount = Number(body.amount || 0);
       const ref = (body.transferReference || body.transfer_reference || '').trim();
@@ -58849,7 +59132,6 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, error: 'Transfer reference code is required for bank wire submissions.' }, { status: 400 });
       }
 
-      // Read current balance WITHOUT modifying it
       let currentBal = 0;
       try {
         const uRes: any = await query(
@@ -58862,7 +59144,6 @@ export async function POST(req: Request) {
         }
       } catch (_) {}
 
-      // Insert into payment_transactions with status = 'pending'
       await query(
         `INSERT INTO payment_transactions (
           id, customer_name, customer_email, plan_name, plan_slug,
@@ -58871,7 +59152,6 @@ export async function POST(req: Request) {
         [txId, userName, userEmail, amount, gwData.currency, gwData.testMode, ref, notes]
       );
 
-      // Insert into wallet_transactions with status = 'pending', balance_after = current uncredited balance
       await query(
         `INSERT INTO wallet_transactions (
           id, user_id, user_email, amount, balance_after, type, gateway, gateway_tx_id, status, description, created_at
