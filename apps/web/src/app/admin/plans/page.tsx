@@ -955,7 +955,7 @@ export default function AdminPlansPage() {
       {activeMainTab === 'plans' && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Plan Configuration Form Container (Accessible div per Constraint 9) */}
+            {/* Plan Configuration Form Container */}
             <div 
               tabIndex={0}
               className="lg:col-span-7 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200 outline-none"

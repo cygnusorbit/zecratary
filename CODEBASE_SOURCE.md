@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.02",
+  "version": "8.1.03",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.02",
+  "version": "8.1.03",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -26632,16 +26632,15 @@ export default function AdminFrontendSettingsPage() {
 // Generated / Updated by AI Collaborator
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { 
-  ArrowLeft, Plus, Check, Trash2, Edit3, Sparkles, 
-  RefreshCw, CheckCircle2, AlertCircle, Shield, 
-  Coins, Zap, Eye, Save, Layers, ArrowRight,
-  History, Search, Filter, Sliders, X, CheckCircle,
-  Ban, AlertTriangle, ArrowUpRight, User as UserIcon,
-  Calendar, CreditCard, ChevronLeft, ChevronRight,
-  Pencil, DollarSign
+  ArrowLeft, Plus, Check, Trash2, Edit3, 
+  RefreshCw, CheckCircle2, AlertCircle, 
+  Coins, Zap, Eye, Save, Layers, 
+  History, Search, X, CheckCircle,
+  Ban, AlertTriangle, ChevronLeft, ChevronRight,
+  Pencil
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -26661,11 +26660,6 @@ interface PlanConfig {
   descriptionAnnual?: string;
   features: string[];
   tokenLimit: number;
-  aiRecipeLimit?: number;
-  recipeLibraryLimit?: number;
-  socialScrapeLimit?: number;
-  canViewMacros?: boolean;
-  allowedAiModels?: string;
   isFree?: boolean;
   isDefault?: boolean;
 }
@@ -26806,7 +26800,21 @@ const normalizeTransaction = (raw: any, defaultCurrency: string): PaymentTransac
 };
 
 export default function AdminPlansPage() {
-  const { t } = useTranslation();
+  const langContext = useTranslation();
+  const t = useCallback((key: string, fallback?: string): string => {
+    if (typeof langContext === 'function') {
+      try {
+        const val = (langContext as any)(key, fallback);
+        if (val && val !== key) return val;
+      } catch (_) {}
+    } else if (langContext && typeof langContext.t === 'function') {
+      try {
+        const val = langContext.t(key, fallback);
+        if (val && val !== key) return val;
+      } catch (_) {}
+    }
+    return fallback || key;
+  }, [langContext]);
   
   // Navigation Tabs State
   const [activeMainTab, setActiveMainTab] = useState<'plans' | 'transactions'>('plans');
@@ -26820,11 +26828,9 @@ export default function AdminPlansPage() {
 
   const [plans, setPlans] = useState<PlanConfig[]>([]);
   const [previewInterval, setPreviewInterval] = useState<'MONTH' | 'YEAR'>('MONTH');
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
   // Dynamic Token & Currency Identity
   const [tokenSymbol, setTokenSymbol] = useState('🪙');
-  const [tokenName, setTokenName] = useState('Tokens');
   const [currencyCode, setCurrencyCode] = useState('USD');
   const [currencySymbol, setCurrencySymbol] = useState('$');
 
@@ -26892,8 +26898,24 @@ export default function AdminPlansPage() {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
       const root = typeof document !== 'undefined' ? document.documentElement : null;
-      const day = mode === 'light' || mode === 'day' || (root && root.classList.contains('light'));
-      setIsDayMode(Boolean(day));
+      const isDay = mode === 'light' || mode === 'day' || (root && root.classList.contains('light'));
+      if (root) {
+        if (isDay) {
+          root.style.setProperty('--color-bg', '#f8fafc');
+          root.style.setProperty('--color-card', '#ffffff');
+          root.style.setProperty('--color-inner-dark', '#f1f5f9');
+          root.style.setProperty('--color-border', '#e2e8f0');
+          root.style.setProperty('--color-text', '#0f172a');
+          root.style.setProperty('--color-text-secondary', '#64748b');
+        } else {
+          root.style.setProperty('--color-bg', '#070b13');
+          root.style.setProperty('--color-card', '#111726');
+          root.style.setProperty('--color-inner-dark', '#0B101D');
+          root.style.setProperty('--color-border', '#1e293b');
+          root.style.setProperty('--color-text', '#ffffff');
+          root.style.setProperty('--color-text-secondary', '#94a3b8');
+        }
+      }
     } catch (_) {}
   }, []);
 
@@ -26901,13 +26923,11 @@ export default function AdminPlansPage() {
     applySavedTheme();
     window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_updated', applySavedTheme);
     window.addEventListener('storage', applySavedTheme);
 
     return () => {
       window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('storage', applySavedTheme);
     };
   }, [applySavedTheme]);
@@ -26919,10 +26939,7 @@ export default function AdminPlansPage() {
       if (tRes.ok) {
         const tData = await tRes.json();
         const cfg = tData.settings || tData.config || tData;
-        if (cfg) {
-          if (cfg.tokenSymbol || cfg.symbol) setTokenSymbol(cfg.tokenSymbol || cfg.symbol);
-          if (cfg.tokenName || cfg.name) setTokenName(cfg.tokenName || cfg.name);
-        }
+        if (cfg?.tokenSymbol || cfg?.symbol) setTokenSymbol(cfg.tokenSymbol || cfg.symbol);
       }
     } catch (_) {}
 
@@ -26941,13 +26958,6 @@ export default function AdminPlansPage() {
 
   useEffect(() => {
     fetchSettings();
-    window.addEventListener('zecratary_token_settings_updated', fetchSettings);
-    window.addEventListener('zecratary_admin_settings_updated', fetchSettings);
-
-    return () => {
-      window.removeEventListener('zecratary_token_settings_updated', fetchSettings);
-      window.removeEventListener('zecratary_admin_settings_updated', fetchSettings);
-    };
   }, [fetchSettings]);
 
   // Universal Plan Parser
@@ -27002,6 +27012,9 @@ export default function AdminPlansPage() {
     try {
       const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
       const data = await res.json();
+      if (!res.ok || data.success === false) {
+        throw new Error(data.error || 'Failed to fetch plans');
+      }
       const rawList = Array.isArray(data) 
         ? data 
         : (data.configs || data.plans || data.packages || data.subscriptionPlans || data.data || []);
@@ -27016,7 +27029,6 @@ export default function AdminPlansPage() {
     }
   }, []);
 
-  // Fetch Users for Transaction Association
   const fetchUsers = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
@@ -27032,7 +27044,6 @@ export default function AdminPlansPage() {
     } catch (_) {}
   }, [selectedUserId]);
 
-  // Fetch Payment Transactions (Tab 2: Plan Transactions)
   const fetchTransactions = useCallback(async () => {
     setLoadingTransactions(true);
     try {
@@ -27054,25 +27065,8 @@ export default function AdminPlansPage() {
     fetchPlans();
     fetchUsers();
     fetchTransactions();
-
-    const handleSync = () => {
-      fetchPlans();
-      fetchUsers();
-      fetchTransactions();
-    };
-
-    window.addEventListener('zecratary_plans_updated', handleSync);
-    window.addEventListener('zecratary_payment_updated', handleSync);
-    window.addEventListener('zecratary_users_updated', handleSync);
-
-    return () => {
-      window.removeEventListener('zecratary_plans_updated', handleSync);
-      window.removeEventListener('zecratary_payment_updated', handleSync);
-      window.removeEventListener('zecratary_users_updated', handleSync);
-    };
   }, [fetchPlans, fetchUsers, fetchTransactions]);
 
-  // Flattened Available Plans for Payment Operations
   const availablePlanOptions = useMemo<PlanOption[]>(() => {
     const list: PlanOption[] = [];
     plans.forEach((p) => {
@@ -27103,7 +27097,6 @@ export default function AdminPlansPage() {
     return list;
   }, [plans, currencySymbol]);
 
-  // Plan Slug Change Helper
   const handleSlugChange = (val: string) => {
     const clean = val.toLowerCase().replace(/[^a-z0-9_-]/g, '');
     setSlug(clean);
@@ -27154,7 +27147,6 @@ export default function AdminPlansPage() {
     setIsFree(false);
   };
 
-  // Save Plan to PostgreSQL (Tab 1)
   const handleSavePlan = async () => {
     if (!name.trim()) return;
     setSaving(true);
@@ -27200,10 +27192,6 @@ export default function AdminPlansPage() {
       setSuccessMsg(t('planSavedSuccess', 'Subscription Plan & Token Quotas saved and synchronized with PostgreSQL!'));
       resetForm();
       await fetchPlans();
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_plans_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err: any) {
       setErrorMsg(err.message || 'Error occurred while saving');
@@ -27212,14 +27200,13 @@ export default function AdminPlansPage() {
     }
   };
 
-  // Delete Plan from PostgreSQL (Tab 1)
   const handleDeletePlan = async (p: PlanConfig) => {
     if (p.isDefault || p.slug === 'taster' || p.id === 'preset_taster') {
       alert(t('cannotDeleteDefaultPlan', 'The default free plan (Taster) is required by the system and cannot be deleted.'));
       return;
     }
 
-    const confirmMsg = `${t('confirmDeletePlan', 'Are you sure you want to permanently delete plan')} "${p.name}"? ${t('actionCannotBeUndone', 'This action cannot be undone.')}`;
+    const confirmMsg = `${t('confirmDeletePlan', 'Are you sure you want to permanently delete plan')} "${p.name}"?`;
     if (!confirm(confirmMsg)) return;
 
     setDeletingId(p.id);
@@ -27245,11 +27232,6 @@ export default function AdminPlansPage() {
       setPlans((prev) => prev.filter((item) => item.id !== p.id && item.slug !== p.slug));
       if (editingId === p.id || editingId === p.slug) resetForm();
 
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_plans_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
-
       setSuccessMsg(`"${p.name}" ${t('planDeletedSuccess', 'has been permanently deleted from PostgreSQL.')}`);
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err: any) {
@@ -27260,9 +27242,7 @@ export default function AdminPlansPage() {
     }
   };
 
-  // -------------------------------------------------------------
-  // Plan Transactions Logic (Tab 2)
-  // -------------------------------------------------------------
+  // Filtered Transactions
   const filteredTransactions = useMemo(() => {
     const q = txSearchQuery.toLowerCase().trim();
     return transactions.filter((tx) => {
@@ -27296,7 +27276,6 @@ export default function AdminPlansPage() {
     return filteredTransactions.slice(start, start + pageSize);
   }, [filteredTransactions, currentPage, pageSize]);
 
-  // Inline Auto-Renew Toggle
   const handleToggleRecurring = async (tx: PaymentTransaction) => {
     const nextVal = !tx.autoRenew;
     setTogglingTxId(tx.id);
@@ -27320,12 +27299,8 @@ export default function AdminPlansPage() {
       if (!res.ok) throw new Error('Failed to update recurring state');
 
       setTransactions((prev) => prev.map((tItem) => tItem.id === tx.id ? updatedTx : tItem));
-      setSuccessMsg(t('recurringUpdated', `Recurring renewal turned ${nextVal ? 'ON' : 'OFF'} for ${tx.customerName}`));
+      setSuccessMsg(t('recurringUpdated', `Recurring renewal updated for ${tx.customerName}`));
       setTimeout(() => setSuccessMsg(''), 3000);
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-      }
     } catch (err: any) {
       setErrorMsg(err.message || 'Error updating recurring auto-renew status');
       setTimeout(() => setErrorMsg(''), 4000);
@@ -27334,7 +27309,6 @@ export default function AdminPlansPage() {
     }
   };
 
-  // Open Add Transaction Modal
   const handleOpenAddModal = () => {
     setModalError('');
     const today = new Date().toISOString().slice(0, 10);
@@ -27366,7 +27340,6 @@ export default function AdminPlansPage() {
     }
   };
 
-  // Submit Add Transaction (Tab 2)
   const handleSaveAddPayment = async () => {
     setModalSubmitting(true);
     setModalError('');
@@ -27410,13 +27383,9 @@ export default function AdminPlansPage() {
       }
 
       setShowAddModal(false);
-      setSuccessMsg(t('paymentRecordedSuccess', `Payment of ${currencySymbol}${Number(paymentAmount).toFixed(2)} recorded successfully in PostgreSQL!`));
+      setSuccessMsg(t('paymentRecordedSuccess', `Payment recorded successfully in PostgreSQL!`));
       setTimeout(() => setSuccessMsg(''), 4000);
       await fetchTransactions();
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-      }
     } catch (err: any) {
       setModalError(err.message || 'Error recording transaction');
     } finally {
@@ -27424,7 +27393,6 @@ export default function AdminPlansPage() {
     }
   };
 
-  // Open Edit Transaction Modal
   const handleOpenEditModal = (tx: PaymentTransaction) => {
     setEditingTx(tx);
     setEditCustomerName(tx.customerName || '');
@@ -27442,7 +27410,6 @@ export default function AdminPlansPage() {
     setShowEditModal(true);
   };
 
-  // Save Edit Transaction
   const handleSaveEditPayment = async () => {
     if (!editingTx) return;
     setModalSubmitting(true);
@@ -27483,10 +27450,6 @@ export default function AdminPlansPage() {
       setSuccessMsg(t('paymentUpdatedSuccess', 'Transaction successfully updated in PostgreSQL!'));
       setTimeout(() => setSuccessMsg(''), 4000);
       await fetchTransactions();
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-      }
     } catch (err: any) {
       setModalError(err.message || 'Error updating transaction');
     } finally {
@@ -27494,10 +27457,8 @@ export default function AdminPlansPage() {
     }
   };
 
-  // Delete Transaction
   const handleDeleteTransaction = async (tx: PaymentTransaction) => {
-    const confirmMsg = `${t('confirmDeleteTx', 'Are you sure you want to permanently delete transaction')} "${tx.id}"?`;
-    if (!confirm(confirmMsg)) return;
+    if (!confirm(`${t('confirmDeleteTx', 'Are you sure you want to permanently delete transaction')} "${tx.id}"?`)) return;
 
     try {
       const res = await fetch(`/api/admin/payment?id=${encodeURIComponent(tx.id)}`, {
@@ -27509,10 +27470,6 @@ export default function AdminPlansPage() {
       setTransactions((prev) => prev.filter((item) => item.id !== tx.id));
       setSuccessMsg(t('txDeletedSuccess', 'Transaction permanently removed from PostgreSQL.'));
       setTimeout(() => setSuccessMsg(''), 3000);
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-      }
     } catch (err: any) {
       setErrorMsg(err.message || 'Error deleting transaction');
       setTimeout(() => setErrorMsg(''), 4000);
@@ -27625,16 +27582,14 @@ export default function AdminPlansPage() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* TAB 1: SUBSCRIPTION PLANS (ORIGINAL DESIGN PRESERVED)     */}
-      {/* ========================================================= */}
+      {/* TAB 1: SUBSCRIPTION PLANS */}
       {activeMainTab === 'plans' && (
         <div className="space-y-6">
-          {/* Main Grid: Editor & Live Preview */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Plan Configuration Form (Replaced <form> with <div> per constraint 9) */}
+            {/* Plan Configuration Form Container (Accessible div per Constraint 9) */}
             <div 
-              className="lg:col-span-7 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+              tabIndex={0}
+              className="lg:col-span-7 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200 outline-none"
               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
             >
               <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
@@ -27677,7 +27632,6 @@ export default function AdminPlansPage() {
                   </label>
                   <input
                     type="text"
-                    required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. Nutrition Pro"
@@ -27692,7 +27646,6 @@ export default function AdminPlansPage() {
                   </label>
                   <input
                     type="text"
-                    required
                     value={slug}
                     onChange={(e) => handleSlugChange(e.target.value)}
                     placeholder="e.g. nutrition-pro"
@@ -27778,7 +27731,6 @@ export default function AdminPlansPage() {
                   />
                 </div>
 
-                {/* AI Token Allowance on Purchase */}
                 <div className="space-y-1">
                   <label className="block text-xs font-bold flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
                     <span>{t('tokenAllowanceLabel', 'Token Grant on Purchase')}</span>
@@ -27795,10 +27747,6 @@ export default function AdminPlansPage() {
                 </div>
               </div>
 
-              <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('tokenGrantHelp', 'When a user purchases this plan, these tokens are credited to their balance and an audit record appears on /admin/token-setting.')}
-              </p>
-
               <div className="space-y-1">
                 <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('planFeaturesListLabel', 'Plan Features (One per line)')}
@@ -27812,23 +27760,47 @@ export default function AdminPlansPage() {
                 />
               </div>
 
+              {/* Action Bar with "Mark as Free Tier" Slide Button */}
               <div className="flex items-center justify-between pt-2">
-                <label className="flex items-center gap-2 text-xs font-bold cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={isFree}
-                    onChange={(e) => {
-                      const val = e.target.checked;
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={isFree}
+                    onClick={() => {
+                      const val = !isFree;
                       setIsFree(val);
                       if (val) {
                         setMonthlyPrice(0);
                         setAnnualPrice(0);
                       }
                     }}
-                    className="rounded w-4 h-4 cursor-pointer accent-[#10b981]"
-                  />
-                  <span>{t('isFreeTierLabel', 'Mark as Free Tier')}</span>
-                </label>
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      isFree ? 'bg-emerald-500' : 'bg-slate-700'
+                    }`}
+                    title={isFree ? t('freeTierActive', 'Free Tier Active') : t('markAsFreeTier', 'Mark as Free Tier')}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                        isFree ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                  <span
+                    className="text-xs font-bold cursor-pointer select-none transition-colors"
+                    onClick={() => {
+                      const val = !isFree;
+                      setIsFree(val);
+                      if (val) {
+                        setMonthlyPrice(0);
+                        setAnnualPrice(0);
+                      }
+                    }}
+                    style={{ color: isFree ? 'var(--color-emerald, #10b981)' : 'var(--color-text)' }}
+                  >
+                    {t('isFreeTierLabel', 'Mark as Free Tier')}
+                  </span>
+                </div>
 
                 <button
                   type="button"
@@ -27886,7 +27858,6 @@ export default function AdminPlansPage() {
                   </div>
                 </div>
 
-                {/* Mockup Card */}
                 <div 
                   className="p-5 rounded-2xl border space-y-4 relative shadow-inner"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -27912,7 +27883,6 @@ export default function AdminPlansPage() {
                     </span>
                   </div>
 
-                  {/* Price & Token Allowance Display */}
                   <div className="flex items-baseline gap-1">
                     <span className="text-3xl font-black" style={{ color: 'var(--color-text)' }}>
                       {currencySymbol}{previewInterval === 'MONTH' 
@@ -27924,7 +27894,6 @@ export default function AdminPlansPage() {
                     </span>
                   </div>
 
-                  {/* Token Allocation Badge in Card */}
                   <div className="flex items-center gap-2 p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
                     <Coins className="h-4 w-4 text-amber-500 shrink-0" />
                     <div className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
@@ -27935,7 +27904,6 @@ export default function AdminPlansPage() {
                     </div>
                   </div>
 
-                  {/* Features snippet */}
                   <ul className="space-y-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     {featuresText.split(/\r?\n/).slice(0, 4).map((f: string, i: number) => (
                       <li key={i} className="flex items-center gap-2">
@@ -28080,12 +28048,9 @@ export default function AdminPlansPage() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* TAB 2: PLAN TRANSACTIONS (MATCHING /admin/payment HISTORY) */}
-      {/* ========================================================= */}
+      {/* TAB 2: PLAN TRANSACTIONS */}
       {activeMainTab === 'transactions' && (
         <div className="space-y-6">
-          {/* Quick Metrics Bar */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="border rounded-2xl p-4 shadow-sm" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
               <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
@@ -28127,12 +28092,10 @@ export default function AdminPlansPage() {
             </div>
           </div>
 
-          {/* Table Container */}
           <div 
             className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
-            {/* Search and Filters Toolbar */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
               <div className="relative flex-1">
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 opacity-40" />
@@ -28195,7 +28158,6 @@ export default function AdminPlansPage() {
               </div>
             </div>
 
-            {/* Transactions Table */}
             <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
@@ -28288,7 +28250,6 @@ export default function AdminPlansPage() {
                             )}
                           </td>
 
-                          {/* Inline Auto-Renew Toggle */}
                           <td className="p-3.5">
                             <button
                               type="button"
@@ -28297,7 +28258,6 @@ export default function AdminPlansPage() {
                               className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                                 tx.autoRenew ? 'bg-emerald-500' : 'bg-slate-700'
                               }`}
-                              title={tx.autoRenew ? 'Click to disable auto-renewal' : 'Click to enable auto-renewal'}
                             >
                               <span
                                 className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
@@ -28342,7 +28302,6 @@ export default function AdminPlansPage() {
               </table>
             </div>
 
-            {/* Pagination Controls */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs pt-2" style={{ color: 'var(--color-text-secondary)' }}>
               <span>
                 {t('showingCount', 'Showing')} {Math.min(filteredTransactions.length, (currentPage - 1) * pageSize + 1)} - {Math.min(filteredTransactions.length, currentPage * pageSize)} {t('ofTotal', 'of')} {filteredTransactions.length}
@@ -28376,9 +28335,7 @@ export default function AdminPlansPage() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* MODAL: ADD PAYMENT TRANSACTION                           */}
-      {/* ========================================================= */}
+      {/* MODAL: ADD PAYMENT */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div 
@@ -28547,9 +28504,7 @@ export default function AdminPlansPage() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* MODAL: EDIT PAYMENT TRANSACTION                          */}
-      {/* ========================================================= */}
+      {/* MODAL: EDIT PAYMENT */}
       {showEditModal && editingTx && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div 
@@ -50308,24 +50263,73 @@ export async function POST(req: NextRequest) {
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
-export async function GET() {
+async function ensureSubscriptionPlansSchema() {
   try {
-    // 1. Safe, non-blocking migration to add columns if possible without throwing
+    await query(`
+      CREATE TABLE IF NOT EXISTS subscription_plans (
+        id VARCHAR(255) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        slug VARCHAR(255) UNIQUE NOT NULL,
+        plan_group_id VARCHAR(255),
+        monthly_plan_id VARCHAR(255),
+        annual_plan_id VARCHAR(255),
+        monthly_price_dollars NUMERIC(10,2) DEFAULT 0.00,
+        annual_price_dollars NUMERIC(10,2) DEFAULT 0.00,
+        monthly_badge VARCHAR(255) DEFAULT '',
+        annual_badge VARCHAR(255) DEFAULT '',
+        trial_badge VARCHAR(255) DEFAULT '',
+        description_monthly TEXT DEFAULT '',
+        description_annual TEXT DEFAULT '',
+        features TEXT DEFAULT '[]',
+        token_limit NUMERIC DEFAULT 500,
+        is_free BOOLEAN DEFAULT false,
+        is_default BOOLEAN DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `).catch(() => {});
+
     await query(`
       DO $$ 
       BEGIN 
-        BEGIN
-          ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-        EXCEPTION WHEN OTHERS THEN NULL;
-        END;
-        BEGIN
-          ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
-        EXCEPTION WHEN OTHERS THEN NULL;
-        END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS plan_group_id VARCHAR(255); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_plan_id VARCHAR(255); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_plan_id VARCHAR(255); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_price_dollars NUMERIC(10,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_price_dollars NUMERIC(10,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_badge VARCHAR(255) DEFAULT ''; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_badge VARCHAR(255) DEFAULT ''; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS trial_badge VARCHAR(255) DEFAULT ''; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS description_monthly TEXT DEFAULT ''; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS description_annual TEXT DEFAULT ''; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS features TEXT DEFAULT '[]'; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS token_limit NUMERIC DEFAULT 500; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS is_free BOOLEAN DEFAULT false; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT false; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN OTHERS THEN NULL; END;
       END $$;
     `).catch(() => {});
+  } catch (_) {}
+}
 
-    // 2. Clean up any rogue duplicate plans auto-created with -monthly or -annual suffixes
+async function getExistingColumns(): Promise<Set<string>> {
+  try {
+    const res = await query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'subscription_plans'`
+    );
+    const rows = Array.isArray(res) ? res : (res?.rows || []);
+    return new Set(rows.map((r: any) => String(r.column_name).toLowerCase()));
+  } catch (_) {
+    return new Set();
+  }
+}
+
+export async function GET() {
+  try {
+    await ensureSubscriptionPlansSchema();
+    const cols = await getExistingColumns();
+
     await query(`
       DELETE FROM subscription_plans 
       WHERE (slug LIKE '%-monthly' OR slug LIKE '%-annual')
@@ -50335,16 +50339,13 @@ export async function GET() {
         )
     `).catch(() => {});
 
-    // 3. Query plans from subscription_plans table (Order by monthly_price_dollars and id, NEVER created_at)
-    const res = await query(
-      `SELECT * FROM subscription_plans ORDER BY monthly_price_dollars ASC, id ASC`
-    ).catch(() => ({ rows: [] }));
+    const orderBy = cols.has('monthly_price_dollars') ? 'ORDER BY monthly_price_dollars ASC, id ASC' : 'ORDER BY id ASC';
+    const res = await query(`SELECT * FROM subscription_plans ${orderBy}`).catch(() => ({ rows: [] }));
 
-    let plans = Array.isArray(res) ? res : ((res as any)?.rows || []);
+    let plans = Array.isArray(res) ? res : (res?.rows || []);
 
-    // 4. Ensure default free plan (taster) exists
     if (!plans.some((p: any) => p.slug === 'taster' || p.id === 'preset_taster')) {
-      const defaultTaster = {
+      const defaultTasterData: Record<string, any> = {
         id: 'preset_taster',
         name: 'Taster',
         slug: 'taster',
@@ -50372,46 +50373,42 @@ export async function GET() {
         is_default: true
       };
 
-      await query(
-        `INSERT INTO subscription_plans (
-          id, name, slug, plan_group_id, monthly_plan_id, annual_plan_id,
-          monthly_price_dollars, annual_price_dollars, monthly_badge, annual_badge,
-          trial_badge, description_monthly, description_annual, features,
-          token_limit, is_free, is_default
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-        ON CONFLICT (id) DO NOTHING`,
-        [
-          defaultTaster.id, defaultTaster.name, defaultTaster.slug, defaultTaster.plan_group_id,
-          defaultTaster.monthly_plan_id, defaultTaster.annual_plan_id, defaultTaster.monthly_price_dollars,
-          defaultTaster.annual_price_dollars, defaultTaster.monthly_badge, defaultTaster.annual_badge,
-          defaultTaster.trial_badge, defaultTaster.description_monthly, defaultTaster.description_annual,
-          defaultTaster.features, defaultTaster.token_limit, defaultTaster.is_free, defaultTaster.is_default
-        ]
-      ).catch(() => {});
+      const insertKeys = Object.keys(defaultTasterData).filter(k => cols.has(k) || cols.size === 0);
+      if (insertKeys.length > 0) {
+        const colList = insertKeys.join(', ');
+        const valPlaceholders = insertKeys.map((_, i) => `$${i + 1}`).join(', ');
+        const values = insertKeys.map(k => defaultTasterData[k]);
+        await query(
+          `INSERT INTO subscription_plans (${colList}) VALUES (${valPlaceholders}) ON CONFLICT (id) DO NOTHING`,
+          values
+        ).catch(() => {});
+      }
 
-      plans.unshift(defaultTaster);
+      plans.unshift(defaultTasterData);
     }
 
     const configs = plans.map((p: any) => {
       let feats: string[] = [];
       if (Array.isArray(p.features)) {
-        feats = p.features;
+        feats = p.features.map(String).filter(Boolean);
       } else if (typeof p.features === 'string') {
         try {
           const parsed = JSON.parse(p.features);
-          feats = Array.isArray(parsed) ? parsed : [p.features];
+          feats = Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [p.features];
         } catch (_) {
           feats = p.features.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
         }
       }
 
+      const cleanSlug = String(p.slug || p.id || 'plan').toLowerCase().trim();
+
       return {
-        id: p.id || p.slug,
-        name: p.name,
-        slug: p.slug,
-        planGroupId: p.plan_group_id || p.planGroupId || `group_${p.slug}`,
-        monthlyPlanId: p.monthly_plan_id || p.monthlyPlanId || `plan_${p.slug}_monthly`,
-        annualPlanId: p.annual_plan_id || p.annualPlanId || `plan_${p.slug}_annual`,
+        id: String(p.id || cleanSlug),
+        name: String(p.name || cleanSlug),
+        slug: cleanSlug,
+        planGroupId: p.plan_group_id || p.planGroupId || `group_${cleanSlug}`,
+        monthlyPlanId: p.monthly_plan_id || p.monthlyPlanId || `plan_${cleanSlug}_monthly`,
+        annualPlanId: p.annual_plan_id || p.annualPlanId || `plan_${cleanSlug}_annual`,
         monthlyPriceDollars: Number(p.monthly_price_dollars ?? p.monthlyPriceDollars ?? 0),
         annualPriceDollars: Number(p.annual_price_dollars ?? p.annualPriceDollars ?? 0),
         monthlyBadge: p.monthly_badge || p.monthlyBadge || '',
@@ -50420,9 +50417,9 @@ export async function GET() {
         descriptionMonthly: p.description_monthly || p.descriptionMonthly || '',
         descriptionAnnual: p.description_annual || p.descriptionAnnual || '',
         features: feats,
-        tokenLimit: Number(p.token_limit ?? p.tokenLimit ?? 500),
-        isFree: Boolean(p.is_free ?? p.isFree ?? (p.slug === 'taster')),
-        isDefault: Boolean(p.is_default ?? p.isDefault ?? (p.slug === 'taster'))
+        tokenLimit: Number(p.token_limit ?? p.tokenLimit ?? (cleanSlug === 'taster' ? 50000 : 500)),
+        isFree: Boolean(p.is_free ?? p.isFree ?? (cleanSlug === 'taster')),
+        isDefault: Boolean(p.is_default ?? p.isDefault ?? (cleanSlug === 'taster' || p.id === 'preset_taster'))
       };
     });
 
@@ -50434,63 +50431,86 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    await ensureSubscriptionPlansSchema();
+    const cols = await getExistingColumns();
+
     const p = await req.json();
     if (!p.name || !p.slug) {
       return NextResponse.json({ success: false, error: 'Plan name and slug are required' }, { status: 400 });
     }
 
-    const cleanSlug = p.slug.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    const planId = p.id || (cleanSlug ? `plan_${cleanSlug}` : `plan_${Date.now()}`);
+    const rawSlug = String(p.slug).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    const cleanSlug = rawSlug.replace(/-(monthly|annual)$/, '') || rawSlug;
+    const planId = String(p.id || (cleanSlug ? `plan_${cleanSlug}` : `plan_${Date.now()}`)).trim();
     const isFree = Boolean(p.isFree || cleanSlug === 'taster');
+    const isDefault = Boolean(p.isDefault || planId === 'preset_taster' || cleanSlug === 'taster');
 
-    const featuresJson = JSON.stringify(Array.isArray(p.features) ? p.features : []);
+    let featuresJson = '[]';
+    if (Array.isArray(p.features)) {
+      featuresJson = JSON.stringify(p.features.map(String).filter(Boolean));
+    } else if (typeof p.features === 'string') {
+      try {
+        const parsed = JSON.parse(p.features);
+        featuresJson = JSON.stringify(Array.isArray(parsed) ? parsed : [p.features]);
+      } catch (_) {
+        featuresJson = JSON.stringify(p.features.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean));
+      }
+    }
 
-    await query(
-      `INSERT INTO subscription_plans (
-        id, name, slug, plan_group_id, monthly_plan_id, annual_plan_id,
-        monthly_price_dollars, annual_price_dollars, monthly_badge, annual_badge,
-        trial_badge, description_monthly, description_annual, features,
-        token_limit, is_free, is_default
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-      ON CONFLICT (id) DO UPDATE SET
-        name = EXCLUDED.name,
-        slug = EXCLUDED.slug,
-        plan_group_id = EXCLUDED.plan_group_id,
-        monthly_plan_id = EXCLUDED.monthly_plan_id,
-        annual_plan_id = EXCLUDED.annual_plan_id,
-        monthly_price_dollars = EXCLUDED.monthly_price_dollars,
-        annual_price_dollars = EXCLUDED.annual_price_dollars,
-        monthly_badge = EXCLUDED.monthly_badge,
-        annual_badge = EXCLUDED.annual_badge,
-        trial_badge = EXCLUDED.trial_badge,
-        description_monthly = EXCLUDED.description_monthly,
-        description_annual = EXCLUDED.description_annual,
-        features = EXCLUDED.features,
-        token_limit = EXCLUDED.token_limit,
-        is_free = EXCLUDED.is_free,
-        is_default = EXCLUDED.is_default`,
-      [
-        planId,
-        p.name.trim(),
-        cleanSlug,
-        p.planGroupId || `group_${cleanSlug}`,
-        p.monthlyPlanId || `plan_${cleanSlug}_monthly`,
-        p.annualPlanId || `plan_${cleanSlug}_annual`,
-        isFree ? 0 : Number(p.monthlyPriceDollars || 0),
-        isFree ? 0 : Number(p.annualPriceDollars || 0),
-        p.monthlyBadge || '',
-        p.annualBadge || '',
-        p.trialBadge || '',
-        p.descriptionMonthly || '',
-        p.descriptionAnnual || '',
-        featuresJson,
-        Number(p.tokenLimit || 0),
-        isFree,
-        Boolean(p.isDefault || cleanSlug === 'taster')
-      ]
-    );
+    const planData: Record<string, any> = {
+      id: planId,
+      name: String(p.name).trim(),
+      slug: cleanSlug,
+      plan_group_id: String(p.planGroupId || `group_${cleanSlug}`).trim(),
+      monthly_plan_id: String(p.monthlyPlanId || `plan_${cleanSlug}_monthly`).trim(),
+      annual_plan_id: String(p.annualPlanId || `plan_${cleanSlug}_annual`).trim(),
+      monthly_price_dollars: isFree ? 0 : Number(p.monthlyPriceDollars || 0),
+      annual_price_dollars: isFree ? 0 : Number(p.annualPriceDollars || 0),
+      monthly_badge: String(p.monthlyBadge || '').trim(),
+      annual_badge: String(p.annualBadge || '').trim(),
+      trial_badge: String(p.trialBadge || '').trim(),
+      description_monthly: String(p.descriptionMonthly || '').trim(),
+      description_annual: String(p.descriptionAnnual || '').trim(),
+      features: featuresJson,
+      token_limit: Number(p.tokenLimit || (isFree ? 50000 : 500)),
+      is_free: isFree,
+      is_default: isDefault
+    };
 
-    return NextResponse.json({ success: true, message: 'Plan saved successfully' });
+    const existingCheck = await query(
+      `SELECT id, slug FROM subscription_plans WHERE id = $1 OR slug = $2 LIMIT 1`,
+      [planId, cleanSlug]
+    ).catch(() => ({ rows: [] }));
+    const existingRows = Array.isArray(existingCheck) ? existingCheck : (existingCheck?.rows || []);
+
+    if (existingRows.length > 0) {
+      const targetId = existingRows[0].id || planId;
+      const updateFields = Object.keys(planData)
+        .filter(k => k !== 'id' && (cols.has(k) || cols.size === 0));
+
+      const setClauses = updateFields.map((k, i) => `${k} = $${i + 1}`).join(', ');
+      const updateValues = updateFields.map(k => planData[k]);
+      updateValues.push(targetId);
+
+      await query(
+        `UPDATE subscription_plans SET ${setClauses} WHERE id = $${updateValues.length}`,
+        updateValues
+      );
+    } else {
+      const insertFields = Object.keys(planData)
+        .filter(k => cols.has(k) || cols.size === 0);
+
+      const colList = insertFields.join(', ');
+      const valPlaceholders = insertFields.map((_, i) => `$${i + 1}`).join(', ');
+      const insertValues = insertFields.map(k => planData[k]);
+
+      await query(
+        `INSERT INTO subscription_plans (${colList}) VALUES (${valPlaceholders})`,
+        insertValues
+      );
+    }
+
+    return NextResponse.json({ success: true, message: 'Plan saved successfully in PostgreSQL' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -50498,6 +50518,7 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
+    await ensureSubscriptionPlansSchema();
     const url = new URL(req.url);
     const id = url.searchParams.get('id');
     const slug = url.searchParams.get('slug');
@@ -50511,7 +50532,7 @@ export async function DELETE(req: Request) {
     }
 
     if (targetSlug === 'taster' || targetId === 'preset_taster') {
-      return NextResponse.json({ success: false, error: 'Default free plan cannot be deleted' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Default free plan (Taster) cannot be deleted' }, { status: 400 });
     }
 
     await query(
@@ -50519,7 +50540,7 @@ export async function DELETE(req: Request) {
       [targetId || '', targetSlug || '']
     );
 
-    return NextResponse.json({ success: true, message: 'Plan deleted successfully' });
+    return NextResponse.json({ success: true, message: 'Plan deleted successfully from PostgreSQL' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

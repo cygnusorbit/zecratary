@@ -1,6 +1,6 @@
 {
   "name": "web",
-  "version": "8.1.02",
+  "version": "8.1.03",
   "private": true,
   "scripts": {
     "dev": "next dev",
