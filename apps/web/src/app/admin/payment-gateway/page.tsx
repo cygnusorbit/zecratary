@@ -15,7 +15,7 @@ import {
   persistServerAdminSettings 
 } from '@/lib/adminSync';
 
-export const normalizeBool = (val: any): boolean => {
+const normalizeBool = (val: any): boolean => {
   if (typeof val === 'boolean') return val;
   if (typeof val === 'string') {
     const s = val.trim().toLowerCase();
@@ -230,7 +230,7 @@ export default function AdminPaymentGatewayPage() {
     }
   };
 
-  // IMMEDIATE TOGGLE GATEWAY HANDLER (ROBUST CONCURRENCY & BOOLEAN NORMALIZATION)
+  // IMMEDIATE TOGGLE GATEWAY HANDLER WITH OPTIMISTIC CONCURRENCY
   const handleToggleGateway = async (gatewayKey: 'stripe' | 'paypal' | 'manualSettlement') => {
     if (togglingGateway === gatewayKey) return;
 
@@ -1384,7 +1384,6 @@ export default function AdminPaymentGatewayPage() {
             borderColor: 'var(--color-border, #334155)'
           }}
         >
-          {/* Header with Title, Verify Stripe Key Action, and Slide Switch */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border, #334155)' }}>
             <div className="flex items-center gap-2.5">
               <div className="w-3 h-3 rounded-full bg-[#635bff]"></div>
@@ -1409,7 +1408,6 @@ export default function AdminPaymentGatewayPage() {
                 </span>
               )}
 
-              {/* Verify Stripe Key Button */}
               <button
                 type="button"
                 onClick={handleVerifyStripeKey}
@@ -1430,7 +1428,6 @@ export default function AdminPaymentGatewayPage() {
                 )}
               </button>
 
-              {/* Enable / Disable Slide Toggle */}
               <div className="flex items-center gap-2 pl-2 border-l" style={{ borderColor: 'var(--color-border, #334155)' }}>
                 <span
                   className="text-xs font-bold select-none"
@@ -1462,7 +1459,6 @@ export default function AdminPaymentGatewayPage() {
           </div>
 
           <div className="space-y-4">
-            {/* Publishable Key */}
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-xs uppercase font-bold block" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
@@ -1506,7 +1502,6 @@ export default function AdminPaymentGatewayPage() {
               </div>
             </div>
 
-            {/* Secret Key */}
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-xs uppercase font-bold block" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
@@ -1533,7 +1528,7 @@ export default function AdminPaymentGatewayPage() {
                   data-bwignore="true"
                   data-form-type="other"
                   role="presentation"
-                  className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
+                  className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
                     borderColor: 'var(--color-border, #334155)',
@@ -1550,7 +1545,6 @@ export default function AdminPaymentGatewayPage() {
               </div>
             </div>
 
-            {/* Webhook Signing Secret with Inline Verify Button */}
             <div>
               <div className="flex items-center justify-between mb-1">
                 <label className="text-xs uppercase font-bold block" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
@@ -1576,7 +1570,7 @@ export default function AdminPaymentGatewayPage() {
                     data-bwignore="true"
                     data-form-type="other"
                     role="presentation"
-                    className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
+                    className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark, #0f172a)',
                       borderColor: 'var(--color-border, #334155)',
@@ -1615,7 +1609,6 @@ export default function AdminPaymentGatewayPage() {
               </div>
             </div>
 
-            {/* Webhook Endpoint URL Display */}
             <div className="pt-2">
               <label className="text-[11px] uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
                 {t('webhookEndpointUrlLabel', 'Webhook Listener Endpoint URL')}
@@ -1645,7 +1638,6 @@ export default function AdminPaymentGatewayPage() {
               </div>
             </div>
 
-            {/* CLI & Webhook Setup Guide */}
             <div 
               className="mt-4 p-4 rounded-2xl border space-y-3"
               style={{
@@ -1818,7 +1810,6 @@ export default function AdminPaymentGatewayPage() {
       {/* TAB CONTENT 3: MANUAL SETTLEMENT / BANK WIRE */}
       {activeTab === 'manual' && (
         <div className="space-y-6 animate-in fade-in">
-          {/* Wire Transfer Settings Card */}
           <div 
             role="region"
             aria-label={t('manualSettlementSettingsTitle', 'Bank Wire Settings')}
@@ -2220,7 +2211,6 @@ export default function AdminPaymentGatewayPage() {
                           {/* ACTION BUTTONS */}
                           <td className="p-3 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              {/* VIEW BUTTON */}
                               <button
                                 type="button"
                                 onClick={() => setViewTx(tx)}
@@ -2231,7 +2221,6 @@ export default function AdminPaymentGatewayPage() {
                                 <Eye className="h-3.5 w-3.5" />
                               </button>
 
-                              {/* EDIT BUTTON */}
                               <button
                                 type="button"
                                 onClick={() => handleOpenEdit(tx)}
@@ -2242,7 +2231,6 @@ export default function AdminPaymentGatewayPage() {
                                 <Edit3 className="h-3.5 w-3.5" />
                               </button>
 
-                              {/* APPROVE & REJECT ACTIONS */}
                               {isPending ? (
                                 <>
                                   <button
@@ -2276,7 +2264,6 @@ export default function AdminPaymentGatewayPage() {
                                 </button>
                               )}
 
-                              {/* DELETE BUTTON */}
                               <button
                                 type="button"
                                 onClick={() => handleDeleteTransaction(tx.id)}

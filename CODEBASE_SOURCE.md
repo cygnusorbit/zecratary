@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.00",
+  "version": "8.1.01",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.00",
+  "version": "8.1.01",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -31228,8 +31228,7 @@ import {
   CreditCard, Shield, CheckCircle2, AlertCircle, Save, 
   RefreshCw, Check, Eye, EyeOff, Globe, Zap, Sliders,
   ShieldCheck, Terminal, ExternalLink, Code2, AlertTriangle,
-  Activity, DownloadCloud, UploadCloud, Sparkles,
-  Landmark, Clock, X, XCircle, Search, Filter, Trash2, Edit3
+  Activity, DownloadCloud, Sparkles, Landmark, Clock, X, XCircle, Search, Trash2, Edit3
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { 
@@ -31237,6 +31236,16 @@ import {
   fetchServerAdminSettings, 
   persistServerAdminSettings 
 } from '@/lib/adminSync';
+
+export const normalizeBool = (val: any): boolean => {
+  if (typeof val === 'boolean') return val;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'true' || s === '1' || s === 'yes' || s === 'on' || s === 'enabled';
+  }
+  if (typeof val === 'number') return val === 1;
+  return Boolean(val);
+};
 
 interface ManualSettlementConfig {
   enabled: boolean;
@@ -31270,6 +31279,7 @@ interface GatewayConfig {
     environment: 'sandbox' | 'live';
   };
   manualSettlement: ManualSettlementConfig;
+  manual?: ManualSettlementConfig;
 }
 
 interface PaymentTransaction {
@@ -31309,9 +31319,7 @@ export default function AdminPaymentGatewayPage() {
   const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
   const version = langContext?.version;
 
-  // Active Tab: 'stripe' | 'paypal' | 'manual'
   const [activeTab, setActiveTab] = useState<'stripe' | 'paypal' | 'manual'>('stripe');
-
   const [loading, setLoading] = useState(false);
   const [syncingEnv, setSyncingEnv] = useState(false);
   const [togglingGateway, setTogglingGateway] = useState<string | null>(null);
@@ -31383,6 +31391,7 @@ export default function AdminPaymentGatewayPage() {
   const configRef = useRef<GatewayConfig>(config);
   const isFetchingRef = useRef<boolean>(false);
   const isSavingRef = useRef<boolean>(false);
+  const isLocalMutationRef = useRef<boolean>(false);
 
   useEffect(() => {
     configRef.current = config;
@@ -31443,28 +31452,29 @@ export default function AdminPaymentGatewayPage() {
     }
   };
 
-  // IMMEDIATE TOGGLE GATEWAY HANDLER (STRIPE, PAYPAL, MANUAL SETTLEMENT)
+  // IMMEDIATE TOGGLE GATEWAY HANDLER (ROBUST CONCURRENCY & BOOLEAN NORMALIZATION)
   const handleToggleGateway = async (gatewayKey: 'stripe' | 'paypal' | 'manualSettlement') => {
-    if (isSavingRef.current || togglingGateway) return;
+    if (togglingGateway === gatewayKey) return;
 
     const currentVal = gatewayKey === 'stripe' 
-      ? config.stripe.enabled 
+      ? normalizeBool(configRef.current.stripe?.enabled) 
       : gatewayKey === 'paypal' 
-      ? config.paypal.enabled 
-      : config.manualSettlement.enabled;
+      ? normalizeBool(configRef.current.paypal?.enabled) 
+      : normalizeBool(configRef.current.manualSettlement?.enabled || configRef.current.manual?.enabled);
     const nextVal = !currentVal;
 
     const updatedConfig: GatewayConfig = {
-      ...config,
-      stripe: gatewayKey === 'stripe' ? { ...config.stripe, enabled: nextVal } : config.stripe,
-      paypal: gatewayKey === 'paypal' ? { ...config.paypal, enabled: nextVal } : config.paypal,
-      manualSettlement: gatewayKey === 'manualSettlement' ? { ...config.manualSettlement, enabled: nextVal } : config.manualSettlement,
+      ...configRef.current,
+      stripe: gatewayKey === 'stripe' ? { ...configRef.current.stripe, enabled: nextVal } : configRef.current.stripe,
+      paypal: gatewayKey === 'paypal' ? { ...configRef.current.paypal, enabled: nextVal } : configRef.current.paypal,
+      manualSettlement: gatewayKey === 'manualSettlement' ? { ...configRef.current.manualSettlement, enabled: nextVal } : configRef.current.manualSettlement,
+      manual: gatewayKey === 'manualSettlement' ? { ...configRef.current.manualSettlement, enabled: nextVal } : configRef.current.manualSettlement,
     };
 
     setConfig(updatedConfig);
     configRef.current = updatedConfig;
     setTogglingGateway(gatewayKey);
-    isSavingRef.current = true;
+    isLocalMutationRef.current = true;
 
     const gatewayName = gatewayKey === 'stripe' ? 'Stripe' : gatewayKey === 'paypal' ? 'PayPal' : t('manualSettlementTitle', 'Bank Wire / Manual');
     const statusText = nextVal ? t('enabled', 'Enabled') : t('disabled', 'Disabled');
@@ -31489,6 +31499,30 @@ export default function AdminPaymentGatewayPage() {
 
       const data = await res.json().catch(() => ({}));
       if (res.ok && data.success) {
+        if (data.settings) {
+          const merged: GatewayConfig = {
+            ...configRef.current,
+            ...data.settings,
+            stripe: {
+              ...configRef.current.stripe,
+              ...(data.settings.stripe || {}),
+              enabled: normalizeBool(data.settings.stripe?.enabled ?? nextVal)
+            },
+            paypal: {
+              ...configRef.current.paypal,
+              ...(data.settings.paypal || {}),
+              enabled: normalizeBool(data.settings.paypal?.enabled ?? nextVal)
+            },
+            manualSettlement: {
+              ...configRef.current.manualSettlement,
+              ...(data.settings.manualSettlement || data.settings.manual || {}),
+              enabled: normalizeBool(data.settings.manualSettlement?.enabled ?? data.settings.manual?.enabled ?? nextVal)
+            },
+          };
+          setConfig(merged);
+          configRef.current = merged;
+        }
+
         broadcastSyncEvents();
         setFeedback({
           type: 'success',
@@ -31499,10 +31533,10 @@ export default function AdminPaymentGatewayPage() {
       }
     } catch (err: any) {
       const revertedConfig: GatewayConfig = {
-        ...config,
-        stripe: gatewayKey === 'stripe' ? { ...config.stripe, enabled: currentVal } : config.stripe,
-        paypal: gatewayKey === 'paypal' ? { ...config.paypal, enabled: currentVal } : config.paypal,
-        manualSettlement: gatewayKey === 'manualSettlement' ? { ...config.manualSettlement, enabled: currentVal } : config.manualSettlement,
+        ...configRef.current,
+        stripe: gatewayKey === 'stripe' ? { ...configRef.current.stripe, enabled: currentVal } : configRef.current.stripe,
+        paypal: gatewayKey === 'paypal' ? { ...configRef.current.paypal, enabled: currentVal } : configRef.current.paypal,
+        manualSettlement: gatewayKey === 'manualSettlement' ? { ...configRef.current.manualSettlement, enabled: currentVal } : configRef.current.manualSettlement,
       };
       setConfig(revertedConfig);
       configRef.current = revertedConfig;
@@ -31512,7 +31546,9 @@ export default function AdminPaymentGatewayPage() {
       });
     } finally {
       setTogglingGateway(null);
-      setTimeout(() => { isSavingRef.current = false; }, 500);
+      setTimeout(() => { 
+        isLocalMutationRef.current = false; 
+      }, 800);
     }
   };
 
@@ -31534,9 +31570,21 @@ export default function AdminPaymentGatewayPage() {
         const merged: GatewayConfig = {
           ...configRef.current,
           ...data.settings,
-          stripe: { ...configRef.current.stripe, ...(data.settings.stripe || {}) },
-          paypal: { ...configRef.current.paypal, ...(data.settings.paypal || {}) },
-          manualSettlement: { ...configRef.current.manualSettlement, ...(data.settings.manualSettlement || {}) },
+          stripe: { 
+            ...configRef.current.stripe, 
+            ...(data.settings.stripe || {}),
+            enabled: normalizeBool(data.settings.stripe?.enabled ?? configRef.current.stripe.enabled)
+          },
+          paypal: { 
+            ...configRef.current.paypal, 
+            ...(data.settings.paypal || {}),
+            enabled: normalizeBool(data.settings.paypal?.enabled ?? configRef.current.paypal.enabled)
+          },
+          manualSettlement: { 
+            ...configRef.current.manualSettlement, 
+            ...(data.settings.manualSettlement || data.settings.manual || {}),
+            enabled: normalizeBool(data.settings.manualSettlement?.enabled ?? data.settings.manual?.enabled ?? configRef.current.manualSettlement.enabled)
+          },
         };
         setConfig(merged);
         configRef.current = merged;
@@ -31582,7 +31630,7 @@ export default function AdminPaymentGatewayPage() {
   }, [syncingEnv, t]);
 
   const fetchData = useCallback(async () => {
-    if (isFetchingRef.current || isSavingRef.current) return;
+    if (isFetchingRef.current || isSavingRef.current || isLocalMutationRef.current) return;
     isFetchingRef.current = true;
     purgeLegacyBrowserAdminStorage();
     try {
@@ -31604,7 +31652,7 @@ export default function AdminPaymentGatewayPage() {
           } catch (_) {}
         }
 
-        if (serverSettings) {
+        if (serverSettings && !isLocalMutationRef.current) {
           if (typeof serverSettings === 'string') {
             try {
               serverSettings = JSON.parse(serverSettings);
@@ -31615,23 +31663,25 @@ export default function AdminPaymentGatewayPage() {
               ...configRef.current,
               ...serverSettings,
               currency: serverSettings.currency || configRef.current.currency || 'USD',
-              testMode: serverSettings.testMode !== undefined ? Boolean(serverSettings.testMode) : configRef.current.testMode,
-              stripeKeysVerified: serverSettings.stripeKeysVerified !== undefined ? Boolean(serverSettings.stripeKeysVerified) : configRef.current.stripeKeysVerified,
-              stripeWebhookVerified: serverSettings.stripeWebhookVerified !== undefined ? Boolean(serverSettings.stripeWebhookVerified) : configRef.current.stripeWebhookVerified,
+              testMode: serverSettings.testMode !== undefined ? normalizeBool(serverSettings.testMode) : configRef.current.testMode,
+              stripeKeysVerified: serverSettings.stripeKeysVerified !== undefined ? normalizeBool(serverSettings.stripeKeysVerified) : configRef.current.stripeKeysVerified,
+              stripeWebhookVerified: serverSettings.stripeWebhookVerified !== undefined ? normalizeBool(serverSettings.stripeWebhookVerified) : configRef.current.stripeWebhookVerified,
               stripe: {
                 ...configRef.current.stripe,
                 ...(serverSettings.stripe || {}),
-                enabled: serverSettings.stripe?.enabled !== undefined ? Boolean(serverSettings.stripe.enabled) : configRef.current.stripe.enabled,
+                enabled: serverSettings.stripe?.enabled !== undefined ? normalizeBool(serverSettings.stripe.enabled) : configRef.current.stripe.enabled,
               },
               paypal: {
                 ...configRef.current.paypal,
                 ...(serverSettings.paypal || {}),
-                enabled: serverSettings.paypal?.enabled !== undefined ? Boolean(serverSettings.paypal.enabled) : configRef.current.paypal.enabled,
+                enabled: serverSettings.paypal?.enabled !== undefined ? normalizeBool(serverSettings.paypal.enabled) : configRef.current.paypal.enabled,
               },
               manualSettlement: {
                 ...configRef.current.manualSettlement,
-                ...(serverSettings.manualSettlement || {}),
-                enabled: serverSettings.manualSettlement?.enabled !== undefined ? Boolean(serverSettings.manualSettlement.enabled) : configRef.current.manualSettlement.enabled,
+                ...(serverSettings.manualSettlement || serverSettings.manual || {}),
+                enabled: (serverSettings.manualSettlement?.enabled !== undefined || serverSettings.manual?.enabled !== undefined)
+                  ? normalizeBool(serverSettings.manualSettlement?.enabled ?? serverSettings.manual?.enabled)
+                  : configRef.current.manualSettlement.enabled,
               }
             };
             configRef.current = merged;
@@ -31655,10 +31705,10 @@ export default function AdminPaymentGatewayPage() {
 
     let debounceTimer: NodeJS.Timeout | null = null;
     const handleDebouncedSync = () => {
-      if (isSavingRef.current) return;
+      if (isSavingRef.current || isLocalMutationRef.current) return;
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        if (!isSavingRef.current) {
+        if (!isSavingRef.current && !isLocalMutationRef.current) {
           fetchDataRef.current();
         }
       }, 350);
@@ -31884,7 +31934,7 @@ export default function AdminPaymentGatewayPage() {
 
       if (res.ok && data.success) {
         const updated: GatewayConfig = { 
-          ...config,
+          ...config, 
           ...(data.settings || {}),
           stripeKeysVerified: true,
           stripeWebhookVerified: true,
@@ -31983,7 +32033,7 @@ export default function AdminPaymentGatewayPage() {
       persistServerAdminSettings({
         paymentSettings: updatedConfig,
         currency: updatedConfig.currency
-      }).catch((err) => console.warn('persistServerAdminSettings non-blocking warning:', err));
+      }).catch((err) => console.warn('persistServerAdminSettings warning:', err));
 
       setConfig(updatedConfig);
       configRef.current = updatedConfig;
@@ -32039,7 +32089,7 @@ export default function AdminPaymentGatewayPage() {
     });
   }, [manualTransactions, manualFilter, searchQuery]);
 
-  // 1. APPROVE ACTION
+  // APPROVE ACTION
   const handleApprovePayment = async (txId: string) => {
     if (!confirm(t('confirmApproveTransfer', 'Are you sure you want to approve this bank wire transfer? This will confirm the funds and activate user entitlements.'))) {
       return;
@@ -32077,7 +32127,7 @@ export default function AdminPaymentGatewayPage() {
     }
   };
 
-  // 2. REJECT ACTION
+  // REJECT ACTION
   const handleRejectPayment = async (txId: string) => {
     const reason = prompt(t('enterRejectionReason', 'Please provide a reason for rejecting this wire transfer (optional):'), 'Bank wire transfer not received or reference mismatched');
     if (reason === null) return;
@@ -32115,7 +32165,7 @@ export default function AdminPaymentGatewayPage() {
     }
   };
 
-  // 3. DELETE ACTION
+  // DELETE ACTION
   const handleDeleteTransaction = async (txId: string) => {
     if (!confirm(t('confirmDeleteTx', `Are you sure you want to delete transaction record ${txId}? This cannot be undone.`))) {
       return;
@@ -32152,7 +32202,7 @@ export default function AdminPaymentGatewayPage() {
     }
   };
 
-  // 4. OPEN EDIT MODAL
+  // OPEN EDIT MODAL
   const handleOpenEdit = (tx: PaymentTransaction) => {
     setEditTx(tx);
     setEditForm({
@@ -32167,7 +32217,7 @@ export default function AdminPaymentGatewayPage() {
     });
   };
 
-  // 5. SAVE EDIT MODAL
+  // SAVE EDIT MODAL
   const handleSaveEdit = async () => {
     if (!editTx) return;
     setIsSavingEdit(true);
@@ -32207,6 +32257,8 @@ export default function AdminPaymentGatewayPage() {
 
   return (
     <div 
+      role="region"
+      aria-label={t('paymentGatewaySettingsTitle', 'Payment Gateway Settings')}
       className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text, #ffffff)' }}
     >
@@ -32274,6 +32326,7 @@ export default function AdminPaymentGatewayPage() {
 
       {feedback && (
         <div
+          role="status"
           className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 border shadow-xs animate-in fade-in"
           style={{
             backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -32288,6 +32341,8 @@ export default function AdminPaymentGatewayPage() {
 
       {/* GATEWAY ENGINE MONITOR SUMMARY BAR */}
       <div
+        role="region"
+        aria-label={t('engineMonitorAria', 'Payment Gateway Engine Status')}
         className="p-3 px-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card, #1e293b)',
@@ -32301,21 +32356,21 @@ export default function AdminPaymentGatewayPage() {
           <div className="flex items-center gap-1.5">
             <span 
               className={`font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs ${
-                config.stripe.enabled ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-zinc-700 text-zinc-500 bg-zinc-800/40'
+                normalizeBool(config.stripe.enabled) ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-zinc-700 text-zinc-500 bg-zinc-800/40'
               }`}
             >
               Stripe
             </span>
             <span 
               className={`font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs ${
-                config.paypal.enabled ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-zinc-700 text-zinc-500 bg-zinc-800/40'
+                normalizeBool(config.paypal.enabled) ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-zinc-700 text-zinc-500 bg-zinc-800/40'
               }`}
             >
               PayPal
             </span>
             <span 
               className={`font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs ${
-                config.manualSettlement.enabled ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-zinc-700 text-zinc-500 bg-zinc-800/40'
+                normalizeBool(config.manualSettlement.enabled) ? 'border-emerald-500/40 text-emerald-400 bg-emerald-500/10' : 'border-zinc-700 text-zinc-500 bg-zinc-800/40'
               }`}
             >
               Bank Wire
@@ -32348,6 +32403,8 @@ export default function AdminPaymentGatewayPage() {
 
       {/* CURRENCY & ENVIRONMENT TOOLBAR */}
       <div 
+        role="region"
+        aria-label={t('currencySettingsAria', 'Currency and Environment Configuration')}
         className="border p-5 rounded-3xl shadow-sm transition-colors duration-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
         style={{
           backgroundColor: 'var(--color-card, #1e293b)',
@@ -32401,6 +32458,8 @@ export default function AdminPaymentGatewayPage() {
 
       {/* GATEWAY NAVIGATION TABS */}
       <div 
+        role="tablist"
+        aria-label={t('gatewayTabsAria', 'Payment Gateway Channels')}
         className="border p-2 sm:p-2.5 rounded-3xl shadow-sm transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card, #1e293b)',
@@ -32411,6 +32470,8 @@ export default function AdminPaymentGatewayPage() {
           {/* TAB 1: STRIPE */}
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'stripe'}
             onClick={() => setActiveTab('stripe')}
             className={`p-3.5 rounded-2xl border-2 transition cursor-pointer text-left flex items-center justify-between ${
               activeTab === 'stripe' ? 'shadow-md ring-2 ring-blue-500/20' : 'opacity-70 hover:opacity-100'
@@ -32429,12 +32490,12 @@ export default function AdminPaymentGatewayPage() {
                   <span className="font-black text-sm" style={{ color: 'var(--color-text, #ffffff)' }}>Stripe</span>
                   <span 
                     className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                      config.stripe.enabled 
+                      normalizeBool(config.stripe.enabled) 
                         ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
                         : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/30'
                     }`}
                   >
-                    {config.stripe.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                    {normalizeBool(config.stripe.enabled) ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
                   </span>
                 </div>
                 <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
@@ -32451,6 +32512,8 @@ export default function AdminPaymentGatewayPage() {
           {/* TAB 2: PAYPAL */}
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'paypal'}
             onClick={() => setActiveTab('paypal')}
             className={`p-3.5 rounded-2xl border-2 transition cursor-pointer text-left flex items-center justify-between ${
               activeTab === 'paypal' ? 'shadow-md ring-2 ring-blue-500/20' : 'opacity-70 hover:opacity-100'
@@ -32469,12 +32532,12 @@ export default function AdminPaymentGatewayPage() {
                   <span className="font-black text-sm" style={{ color: 'var(--color-text, #ffffff)' }}>PayPal</span>
                   <span 
                     className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                      config.paypal.enabled 
+                      normalizeBool(config.paypal.enabled) 
                         ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
                         : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/30'
                     }`}
                   >
-                    {config.paypal.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                    {normalizeBool(config.paypal.enabled) ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
                   </span>
                 </div>
                 <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
@@ -32487,6 +32550,8 @@ export default function AdminPaymentGatewayPage() {
           {/* TAB 3: MANUAL SETTLEMENT / BANK WIRE */}
           <button
             type="button"
+            role="tab"
+            aria-selected={activeTab === 'manual'}
             onClick={() => setActiveTab('manual')}
             className={`p-3.5 rounded-2xl border-2 transition cursor-pointer text-left flex items-center justify-between ${
               activeTab === 'manual' ? 'shadow-md ring-2 ring-blue-500/20' : 'opacity-70 hover:opacity-100'
@@ -32507,12 +32572,12 @@ export default function AdminPaymentGatewayPage() {
                   </span>
                   <span 
                     className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                      config.manualSettlement.enabled 
+                      normalizeBool(config.manualSettlement.enabled) 
                         ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
                         : 'bg-zinc-500/10 text-zinc-400 border-zinc-500/30'
                     }`}
                   >
-                    {config.manualSettlement.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                    {normalizeBool(config.manualSettlement.enabled) ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
                   </span>
                 </div>
                 <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
@@ -32533,6 +32598,8 @@ export default function AdminPaymentGatewayPage() {
       {/* TAB CONTENT 1: STRIPE CONFIGURATION */}
       {activeTab === 'stripe' && (
         <div 
+          role="region"
+          aria-label={t('stripeApiConfig', 'Stripe API Configuration')}
           className="border p-6 rounded-3xl space-y-5 shadow-sm transition-colors duration-200 animate-in fade-in"
           style={{
             backgroundColor: 'var(--color-card, #1e293b)',
@@ -32552,7 +32619,6 @@ export default function AdminPaymentGatewayPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {/* Verification Status Indicator */}
               {config.stripeKeysVerified && config.stripeWebhookVerified ? (
                 <span className="px-2.5 py-1 rounded-full text-[11px] font-bold border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 flex items-center gap-1.5 shadow-xs">
                   <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
@@ -32590,24 +32656,26 @@ export default function AdminPaymentGatewayPage() {
               <div className="flex items-center gap-2 pl-2 border-l" style={{ borderColor: 'var(--color-border, #334155)' }}>
                 <span
                   className="text-xs font-bold select-none"
-                  style={{ color: config.stripe.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
+                  style={{ color: normalizeBool(config.stripe.enabled) ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
                 >
-                  {config.stripe.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                  {normalizeBool(config.stripe.enabled) ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
                 </span>
                 <button
                   type="button"
                   role="switch"
-                  aria-checked={config.stripe.enabled}
+                  aria-label={t('toggleStripeGateway', 'Toggle Stripe Gateway Enabled/Disabled')}
+                  aria-checked={normalizeBool(config.stripe.enabled)}
                   disabled={togglingGateway === 'stripe'}
                   onClick={() => handleToggleGateway('stripe')}
-                  className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none disabled:opacity-50"
+                  className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--color-primary,#3b82f6)] focus:ring-offset-1 disabled:opacity-50"
                   style={{
-                    backgroundColor: config.stripe.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
+                    backgroundColor: normalizeBool(config.stripe.enabled) ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
                   }}
                 >
                   <span
+                    aria-hidden="true"
                     className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-300 ease-in-out ${
-                      config.stripe.enabled ? 'translate-x-5' : 'translate-x-0'
+                      normalizeBool(config.stripe.enabled) ? 'translate-x-5' : 'translate-x-0'
                     }`}
                   />
                 </button>
@@ -32629,11 +32697,20 @@ export default function AdminPaymentGatewayPage() {
               <div className="relative">
                 <input
                   type={visibleFields['stripe_pub'] ? 'text' : 'password'}
+                  id="stripe_pub_field"
+                  name="stripe_pub_field_guard"
                   value={config.stripe.publishableKey}
                   onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, publishableKey: e.target.value } })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                   placeholder={config.testMode ? 'pk_test_51...' : 'pk_live_51...'}
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -32664,11 +32741,20 @@ export default function AdminPaymentGatewayPage() {
               <div className="relative">
                 <input
                   type={visibleFields['stripe_sec'] ? 'text' : 'password'}
+                  id="stripe_sec_field"
+                  name="stripe_sec_field_guard"
                   value={config.stripe.secretKey}
                   onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, secretKey: e.target.value } })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                   placeholder={config.testMode ? 'sk_test_51...' : 'sk_live_51...'}
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -32698,11 +32784,20 @@ export default function AdminPaymentGatewayPage() {
                 <div className="relative flex-1">
                   <input
                     type={visibleFields['stripe_wh'] ? 'text' : 'password'}
+                    id="stripe_wh_field"
+                    name="stripe_wh_field_guard"
                     value={config.stripe.webhookSecret}
                     onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                     placeholder="whsec_..."
                     autoComplete="new-password"
+                    autoCorrect="off"
+                    spellCheck="false"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
                     className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -32772,7 +32867,7 @@ export default function AdminPaymentGatewayPage() {
               </div>
             </div>
 
-            {/* CLI & Webhook Setup Guide at the Bottom */}
+            {/* CLI & Webhook Setup Guide */}
             <div 
               className="mt-4 p-4 rounded-2xl border space-y-3"
               style={{
@@ -32832,6 +32927,8 @@ export default function AdminPaymentGatewayPage() {
       {/* TAB CONTENT 2: PAYPAL CONFIGURATION */}
       {activeTab === 'paypal' && (
         <div 
+          role="region"
+          aria-label={t('paypalApiConfig', 'PayPal API Configuration')}
           className="border p-6 rounded-3xl space-y-5 shadow-sm transition-colors duration-200 animate-in fade-in"
           style={{
             backgroundColor: 'var(--color-card, #1e293b)',
@@ -32852,24 +32949,26 @@ export default function AdminPaymentGatewayPage() {
             <div className="flex items-center gap-3">
               <span
                 className="text-xs font-bold select-none"
-                style={{ color: config.paypal.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
+                style={{ color: normalizeBool(config.paypal.enabled) ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
               >
-                {config.paypal.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                {normalizeBool(config.paypal.enabled) ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
               </span>
               <button
                 type="button"
                 role="switch"
-                aria-checked={config.paypal.enabled}
+                aria-label={t('togglePaypalGateway', 'Toggle PayPal Gateway Enabled/Disabled')}
+                aria-checked={normalizeBool(config.paypal.enabled)}
                 disabled={togglingGateway === 'paypal'}
                 onClick={() => handleToggleGateway('paypal')}
-                className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none disabled:opacity-50"
+                className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--color-primary,#3b82f6)] focus:ring-offset-1 disabled:opacity-50"
                 style={{
-                  backgroundColor: config.paypal.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
+                  backgroundColor: normalizeBool(config.paypal.enabled) ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
                 }}
               >
                 <span
+                  aria-hidden="true"
                   className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-300 ease-in-out ${
-                    config.paypal.enabled ? 'translate-x-5' : 'translate-x-0'
+                    normalizeBool(config.paypal.enabled) ? 'translate-x-5' : 'translate-x-0'
                   }`}
                 />
               </button>
@@ -32883,11 +32982,20 @@ export default function AdminPaymentGatewayPage() {
               </label>
               <input
                 type="text"
+                id="paypal_client_id_field"
+                name="paypal_client_id_guard"
                 value={config.paypal.clientId}
                 onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientId: e.target.value } })}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                 placeholder="PayPal Client ID"
                 autoComplete="new-password"
+                autoCorrect="off"
+                spellCheck="false"
                 data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                role="presentation"
                 className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
                 style={{
                   backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -32903,11 +33011,20 @@ export default function AdminPaymentGatewayPage() {
               </label>
               <input
                 type="password"
+                id="paypal_client_sec_field"
+                name="paypal_client_sec_guard"
                 value={config.paypal.clientSecret}
                 onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientSecret: e.target.value } })}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                 placeholder="PayPal Client Secret"
                 autoComplete="new-password"
+                autoCorrect="off"
+                spellCheck="false"
                 data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
+                data-form-type="other"
+                role="presentation"
                 className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
                 style={{
                   backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -32925,6 +33042,8 @@ export default function AdminPaymentGatewayPage() {
         <div className="space-y-6 animate-in fade-in">
           {/* Wire Transfer Settings Card */}
           <div 
+            role="region"
+            aria-label={t('manualSettlementSettingsTitle', 'Bank Wire Settings')}
             className="border p-6 rounded-3xl space-y-5 shadow-sm transition-colors duration-200"
             style={{
               backgroundColor: 'var(--color-card, #1e293b)',
@@ -32947,24 +33066,26 @@ export default function AdminPaymentGatewayPage() {
               <div className="flex items-center gap-3">
                 <span
                   className="text-xs font-bold select-none"
-                  style={{ color: config.manualSettlement.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
+                  style={{ color: normalizeBool(config.manualSettlement.enabled) ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
                 >
-                  {config.manualSettlement.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                  {normalizeBool(config.manualSettlement.enabled) ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
                 </span>
                 <button
                   type="button"
                   role="switch"
-                  aria-checked={config.manualSettlement.enabled}
+                  aria-label={t('toggleManualSettlement', 'Toggle Manual Bank Wire Settlement Enabled/Disabled')}
+                  aria-checked={normalizeBool(config.manualSettlement.enabled)}
                   disabled={togglingGateway === 'manualSettlement'}
                   onClick={() => handleToggleGateway('manualSettlement')}
-                  className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none disabled:opacity-50"
+                  className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-[var(--color-primary,#3b82f6)] focus:ring-offset-1 disabled:opacity-50"
                   style={{
-                    backgroundColor: config.manualSettlement.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
+                    backgroundColor: normalizeBool(config.manualSettlement.enabled) ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
                   }}
                 >
                   <span
+                    aria-hidden="true"
                     className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-300 ease-in-out ${
-                      config.manualSettlement.enabled ? 'translate-x-5' : 'translate-x-0'
+                      normalizeBool(config.manualSettlement.enabled) ? 'translate-x-5' : 'translate-x-0'
                     }`}
                   />
                 </button>
@@ -32978,14 +33099,23 @@ export default function AdminPaymentGatewayPage() {
                 </label>
                 <input
                   type="text"
+                  id="bank_name_field"
+                  name="bank_name_guard"
                   value={config.manualSettlement.bankName}
                   onChange={(e) => setConfig({
                     ...config,
                     manualSettlement: { ...config.manualSettlement, bankName: e.target.value }
                   })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                   placeholder="e.g. JPMorgan Chase / Bangkok Bank / HSBC"
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -33001,14 +33131,23 @@ export default function AdminPaymentGatewayPage() {
                 </label>
                 <input
                   type="text"
+                  id="account_holder_field"
+                  name="account_holder_guard"
                   value={config.manualSettlement.accountHolder}
                   onChange={(e) => setConfig({
                     ...config,
                     manualSettlement: { ...config.manualSettlement, accountHolder: e.target.value }
                   })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                   placeholder="e.g. Zecratary Technologies Co., Ltd."
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -33024,14 +33163,23 @@ export default function AdminPaymentGatewayPage() {
                 </label>
                 <input
                   type="text"
+                  id="account_number_field"
+                  name="account_number_guard"
                   value={config.manualSettlement.accountNumber}
                   onChange={(e) => setConfig({
                     ...config,
                     manualSettlement: { ...config.manualSettlement, accountNumber: e.target.value }
                   })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                   placeholder="e.g. 123-4-56789-0 / US12 3456 7890"
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -33047,14 +33195,23 @@ export default function AdminPaymentGatewayPage() {
                 </label>
                 <input
                   type="text"
+                  id="swift_bic_field"
+                  name="swift_bic_guard"
                   value={config.manualSettlement.swiftBic}
                   onChange={(e) => setConfig({
                     ...config,
                     manualSettlement: { ...config.manualSettlement, swiftBic: e.target.value }
                   })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveSettings(); }}
                   placeholder="e.g. CHASUS33XXX"
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -33071,12 +33228,18 @@ export default function AdminPaymentGatewayPage() {
               </label>
               <textarea
                 rows={3}
+                id="transfer_instructions_field"
+                name="transfer_instructions_guard"
                 value={config.manualSettlement.instructions}
                 onChange={(e) => setConfig({
                   ...config,
                   manualSettlement: { ...config.manualSettlement, instructions: e.target.value }
                 })}
                 placeholder="Instructions provided to customer during wire payment checkout..."
+                autoComplete="new-password"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
                 className="payment-input w-full border rounded-xl p-3 text-xs outline-none transition leading-relaxed"
                 style={{
                   backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -33089,6 +33252,8 @@ export default function AdminPaymentGatewayPage() {
 
           {/* ADMIN MANUAL APPROVAL QUEUE */}
           <div 
+            role="region"
+            aria-label={t('manualApprovalQueueTitle', 'Manual Settlement Approval Queue')}
             className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
             style={{
               backgroundColor: 'var(--color-card, #1e293b)',
@@ -33157,9 +33322,15 @@ export default function AdminPaymentGatewayPage() {
               <Search className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-secondary, #94a3b8)' }} />
               <input
                 type="text"
+                id="search_manual_tx"
+                name="search_manual_tx_guard"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t('searchTransactionsPlaceholder', 'Search by Customer Name, Email, Transaction ID, or Wire Reference...')}
+                autoComplete="off"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
                 className="payment-input w-full border rounded-xl pl-10 pr-4 py-2.5 text-xs outline-none transition"
                 style={{
                   backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -33271,7 +33442,7 @@ export default function AdminPaymentGatewayPage() {
                           {/* ACTION BUTTONS */}
                           <td className="p-3 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              {/* 1. VIEW BUTTON */}
+                              {/* VIEW BUTTON */}
                               <button
                                 type="button"
                                 onClick={() => setViewTx(tx)}
@@ -33282,7 +33453,7 @@ export default function AdminPaymentGatewayPage() {
                                 <Eye className="h-3.5 w-3.5" />
                               </button>
 
-                              {/* 2. EDIT BUTTON */}
+                              {/* EDIT BUTTON */}
                               <button
                                 type="button"
                                 onClick={() => handleOpenEdit(tx)}
@@ -33293,7 +33464,7 @@ export default function AdminPaymentGatewayPage() {
                                 <Edit3 className="h-3.5 w-3.5" />
                               </button>
 
-                              {/* 3. APPROVE & REJECT ACTIONS */}
+                              {/* APPROVE & REJECT ACTIONS */}
                               {isPending ? (
                                 <>
                                   <button
@@ -33327,7 +33498,7 @@ export default function AdminPaymentGatewayPage() {
                                 </button>
                               )}
 
-                              {/* 4. DELETE BUTTON */}
+                              {/* DELETE BUTTON */}
                               <button
                                 type="button"
                                 onClick={() => handleDeleteTransaction(tx.id)}
@@ -33380,6 +33551,9 @@ export default function AdminPaymentGatewayPage() {
       {/* VIEW DETAILS MODAL */}
       {viewTx && (
         <div 
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="view_modal_title"
           onClick={() => setViewTx(null)}
           className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
         >
@@ -33393,7 +33567,7 @@ export default function AdminPaymentGatewayPage() {
             }}
           >
             <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border, #334155)' }}>
-              <div className="flex items-center gap-2 font-black text-sm">
+              <div id="view_modal_title" className="flex items-center gap-2 font-black text-sm">
                 <Landmark className="h-4 w-4 text-[var(--color-primary,#3b82f6)]" />
                 <span>{t('manualSettlementDetails', 'Manual Settlement Details')}</span>
               </div>
@@ -33485,6 +33659,9 @@ export default function AdminPaymentGatewayPage() {
       {/* EDIT MODAL */}
       {editTx && (
         <div 
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit_modal_title"
           onClick={() => setEditTx(null)}
           className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
         >
@@ -33498,7 +33675,7 @@ export default function AdminPaymentGatewayPage() {
             }}
           >
             <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border, #334155)' }}>
-              <div className="flex items-center gap-2 font-black text-sm">
+              <div id="edit_modal_title" className="flex items-center gap-2 font-black text-sm">
                 <Edit3 className="h-4 w-4 text-[var(--color-primary,#3b82f6)]" />
                 <span>{t('editManualSettlement', 'Edit Manual Settlement')}</span>
               </div>
@@ -33516,10 +33693,19 @@ export default function AdminPaymentGatewayPage() {
                 <label className="block text-[11px] font-bold uppercase mb-1 opacity-70">{t('customerName', 'Customer Name')}</label>
                 <input
                   type="text"
+                  id="edit_customer_name"
+                  name="edit_customer_name_guard"
                   value={editForm.customer_name}
                   onChange={(e) => setEditForm({ ...editForm, customer_name: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(); }}
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none"
                   style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
                 />
@@ -33529,10 +33715,19 @@ export default function AdminPaymentGatewayPage() {
                 <label className="block text-[11px] font-bold uppercase mb-1 opacity-70">{t('customerEmail', 'Customer Email')}</label>
                 <input
                   type="email"
+                  id="edit_customer_email"
+                  name="edit_customer_email_guard"
                   value={editForm.customer_email}
                   onChange={(e) => setEditForm({ ...editForm, customer_email: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(); }}
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono"
                   style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
                 />
@@ -33544,8 +33739,17 @@ export default function AdminPaymentGatewayPage() {
                   <input
                     type="number"
                     step="0.01"
+                    id="edit_customer_amount"
+                    name="edit_customer_amount_guard"
                     value={editForm.amount}
                     onChange={(e) => setEditForm({ ...editForm, amount: parseFloat(e.target.value) || 0 })}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(); }}
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono font-bold"
                     style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
                   />
@@ -33570,11 +33774,20 @@ export default function AdminPaymentGatewayPage() {
                 <label className="block text-[11px] font-bold uppercase mb-1 opacity-70">{t('wireReference', 'Wire Transfer Reference')}</label>
                 <input
                   type="text"
+                  id="edit_wire_ref"
+                  name="edit_wire_ref_guard"
                   value={editForm.transfer_reference}
                   onChange={(e) => setEditForm({ ...editForm, transfer_reference: e.target.value })}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(); }}
                   placeholder="e.g. WIRE-89214710"
                   autoComplete="new-password"
+                  autoCorrect="off"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  role="presentation"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
                 />
@@ -33584,8 +33797,14 @@ export default function AdminPaymentGatewayPage() {
                 <label className="block text-[11px] font-bold uppercase mb-1 opacity-70">{t('notes', 'Transfer Notes')}</label>
                 <textarea
                   rows={2}
+                  id="edit_tx_notes"
+                  name="edit_tx_notes_guard"
                   value={editForm.notes}
                   onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                  autoComplete="new-password"
+                  data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none leading-relaxed"
                   style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
                 />
@@ -33596,9 +33815,18 @@ export default function AdminPaymentGatewayPage() {
                   <label className="block text-[11px] font-bold uppercase mb-1 text-red-400">{t('rejectionReason', 'Rejection Reason')}</label>
                   <input
                     type="text"
+                    id="edit_failure_reason"
+                    name="edit_failure_reason_guard"
                     value={editForm.failure_reason}
                     onChange={(e) => setEditForm({ ...editForm, failure_reason: e.target.value })}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleSaveEdit(); }}
                     placeholder="e.g. Mismatched reference code"
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
                     className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none border-red-500/40"
                     style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', color: '#f87171' }}
                   />
@@ -33633,6 +33861,9 @@ export default function AdminPaymentGatewayPage() {
       {/* STRIPE GUIDE MODAL */}
       {showStripeGuideModal && (
         <div 
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="guide_modal_title"
           onClick={() => setShowStripeGuideModal(false)}
           className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
         >
@@ -33654,7 +33885,7 @@ export default function AdminPaymentGatewayPage() {
               <X className="h-4 w-4" />
             </button>
             <div className="space-y-1.5 pr-8">
-              <h2 className="text-xl font-black">{t('stripeConnectModalTitle', 'Connect Stripe & Webhooks')}</h2>
+              <h2 id="guide_modal_title" className="text-xl font-black">{t('stripeConnectModalTitle', 'Connect Stripe & Webhooks')}</h2>
               <p className="text-xs opacity-75">{t('stripeConnectModalSub', 'Follow standard setup for webhook verification.')}</p>
             </div>
 
@@ -50512,22 +50743,17 @@ export async function POST(req: NextRequest) {
 ```typescript
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-export const dynamic = 'force-dynamic';
-
-function parseDbRows<T = any>(res: any): T[] {
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
-  return [];
-}
-
-function parseDbRow<T = any>(res: any): T | null {
-  const rows = parseDbRows<T>(res);
-  return rows.length > 0 ? rows[0] : null;
+function normalizeBool(val: any): boolean {
+  if (typeof val === 'boolean') return val;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'true' || s === '1' || s === 'yes' || s === 'on' || s === 'enabled';
+  }
+  if (typeof val === 'number') return val === 1;
+  return Boolean(val);
 }
 
 async function ensurePaymentSchema() {
@@ -50557,7 +50783,9 @@ async function ensurePaymentSchema() {
         expiry_date TIMESTAMPTZ,
         gateway_transaction_id TEXT
       );
+    `);
 
+    await query(`
       CREATE TABLE IF NOT EXISTS admin_settings (
         id INT PRIMARY KEY DEFAULT 1,
         payment_settings JSONB,
@@ -50566,7 +50794,9 @@ async function ensurePaymentSchema() {
         theme_colors JSONB,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+    `);
 
+    await query(`
       CREATE TABLE IF NOT EXISTS wallet_settings (
         id INT PRIMARY KEY DEFAULT 1,
         currency VARCHAR(10) DEFAULT 'USD',
@@ -50576,22 +50806,6 @@ async function ensurePaymentSchema() {
         max_deposit NUMERIC DEFAULT 1000,
         bonus_tiers JSONB,
         ledger_columns JSONB,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS wallet_transactions (
-        id VARCHAR(255) PRIMARY KEY,
-        user_id VARCHAR(100),
-        user_email VARCHAR(255),
-        type VARCHAR(50) DEFAULT 'topup',
-        amount NUMERIC(12,2) DEFAULT 0.00,
-        balance_after NUMERIC(12,2) DEFAULT 0.00,
-        gateway VARCHAR(50) DEFAULT 'manual',
-        gateway_tx_id VARCHAR(255),
-        status VARCHAR(50) DEFAULT 'pending',
-        description TEXT,
-        metadata JSONB DEFAULT '{}'::jsonb,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
@@ -50604,60 +50818,14 @@ async function ensurePaymentSchema() {
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_amount NUMERIC; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_reason TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS plan_slug TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS gateway_tx_id VARCHAR(255); EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS balance_after NUMERIC(12,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(12,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS payment_settings JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS allowed_gateways JSONB DEFAULT '["stripe"]'; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
       END $$;
     `);
   } catch (e) {
     console.warn('[Payment API] Schema check warning:', e);
-  }
-}
-
-function updateEnvCredentials(settings: any) {
-  const envCandidates = [
-    path.join(process.cwd(), '.env'),
-    path.join(process.cwd(), '.env.local'),
-    path.join(process.cwd(), '..', '.env'),
-    path.join(process.cwd(), '..', '.env.local'),
-    path.join(process.cwd(), 'apps', 'web', '.env'),
-    path.join(process.cwd(), 'apps', 'web', '.env.local')
-  ];
-
-  const pairs: Record<string, string> = {
-    STRIPE_PUBLISHABLE_KEY: settings.stripe?.publishableKey || '',
-    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: settings.stripe?.publishableKey || '',
-    STRIPE_SECRET_KEY: settings.stripe?.secretKey || '',
-    STRIPE_WEBHOOK_SECRET: settings.stripe?.webhookSecret || '',
-    PAYPAL_CLIENT_ID: settings.paypal?.clientId || '',
-    NEXT_PUBLIC_PAYPAL_CLIENT_ID: settings.paypal?.clientId || '',
-    PAYPAL_CLIENT_SECRET: settings.paypal?.clientSecret || '',
-    PAYPAL_WEBHOOK_ID: settings.paypal?.webhookId || '',
-    PAYMENT_CURRENCY: settings.currency || 'USD',
-  };
-
-  for (const [k, v] of Object.entries(pairs)) {
-    if (v) process.env[k] = v;
-  }
-
-  for (const filePath of envCandidates) {
-    if (fs.existsSync(filePath)) {
-      try {
-        let content = fs.readFileSync(filePath, 'utf8');
-        for (const [k, v] of Object.entries(pairs)) {
-          if (!v) continue;
-          const regex = new RegExp(`^${k}=.*$`, 'm');
-          const safeVal = v.includes(' ') ? `"${v}"` : v;
-          if (regex.test(content)) {
-            content = content.replace(regex, `${k}=${safeVal}`);
-          } else {
-            content += `\n${k}=${safeVal}`;
-          }
-        }
-        fs.writeFileSync(filePath, content, 'utf8');
-      } catch (_) {}
-    }
   }
 }
 
@@ -50670,7 +50838,7 @@ async function persistAdminSettingsData(settings: any, currency: string) {
   const jsonStr = JSON.stringify(cleanSettings);
   const cur = currency || cleanSettings.currency || 'USD';
 
-  // 1. Try ID-based schema
+  // 1. Persist in admin_settings
   try {
     await query(
       `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
@@ -50690,31 +50858,12 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     } catch (_) {}
   }
 
-  // 2. Also try key-value schema
-  try {
-    await query(
-      `INSERT INTO admin_settings (key, value, updated_at)
-       VALUES ('payment_gateway_config', $1::jsonb, NOW())
-       ON CONFLICT (key) DO UPDATE SET
-         value = EXCLUDED.value,
-         updated_at = NOW()`,
-      [jsonStr]
-    );
-  } catch (_) {
-    try {
-      await query(
-        `UPDATE admin_settings SET value = $1::jsonb, updated_at = NOW() WHERE key = 'payment_gateway_config'`,
-        [jsonStr]
-      );
-    } catch (_) {}
-  }
-
-  // 3. Synchronize allowed_gateways with wallet_settings
+  // 2. Synchronize allowed_gateways with wallet_settings
   try {
     const allowedGateways: string[] = [];
-    if (cleanSettings.stripe?.enabled) allowedGateways.push('stripe');
-    if (cleanSettings.paypal?.enabled) allowedGateways.push('paypal');
-    if (cleanSettings.manualSettlement?.enabled || cleanSettings.manual?.enabled) allowedGateways.push('manual');
+    if (normalizeBool(cleanSettings.stripe?.enabled)) allowedGateways.push('stripe');
+    if (normalizeBool(cleanSettings.paypal?.enabled)) allowedGateways.push('paypal');
+    if (normalizeBool(cleanSettings.manualSettlement?.enabled || cleanSettings.manual?.enabled)) allowedGateways.push('manual');
 
     await query(
       `INSERT INTO wallet_settings (id, currency, allowed_gateways, updated_at)
@@ -50726,7 +50875,7 @@ async function persistAdminSettingsData(settings: any, currency: string) {
       [cur, JSON.stringify(allowedGateways)]
     ).catch(async () => {
       await query(
-        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW()`,
+        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW() WHERE id = 1`,
         [cur, JSON.stringify(allowedGateways)]
       ).catch(() => {});
     });
@@ -50734,72 +50883,67 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     console.warn('[Payment API] wallet_settings sync warning:', wErr);
   }
 
-  // 4. Mirror to disk and .env
+  // 3. Mirror to filesystem for resilience
   try {
-    updateEnvCredentials(cleanSettings);
-    const dataDirs = [
-      path.join(process.cwd(), 'data'),
-      path.join(process.cwd(), 'apps', 'web', 'data')
-    ];
-    for (const dataDir of dataDirs) {
-      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-      const filePath = path.join(dataDir, 'admin_settings.json');
-      let existing: any = {};
-      if (fs.existsSync(filePath)) {
-        try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
-      }
-      existing.paymentSettings = cleanSettings;
-      existing.currency = cur;
-      existing.updatedAt = new Date().toISOString();
-      fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
+    const dataDir = path.join(process.cwd(), 'data');
+    const filePath = path.join(dataDir, 'admin_settings.json');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
     }
-  } catch (_) {}
+    let existing: any = {};
+    if (fs.existsSync(filePath)) {
+      try {
+        existing = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      } catch (_) {}
+    }
+    existing.paymentSettings = cleanSettings;
+    existing.currency = cur;
+    existing.updatedAt = new Date().toISOString();
+    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
+  } catch (fileErr) {
+    console.warn('[Payment API] File mirror error:', fileErr);
+  }
 }
 
 export async function GET() {
   try {
     await ensurePaymentSchema();
 
-    let txRes: any = await query(
+    let txRes = await query(
       `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
     ).catch(async () => {
-      return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => []);
+      return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => ({ rows: [] }));
     });
 
-    const transactions = parseDbRows(txRes);
+    const transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
 
     let settings: any = null;
     try {
-      const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 10`);
-      const sRows = parseDbRows(sRes);
-      for (const r of sRows) {
-        if (r.payment_settings) {
-          const ps = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
-          if (ps) { settings = { ...ps }; if (r.currency) settings.currency = r.currency; }
-        } else if (r.value && (r.key === 'payment_gateway_config' || r.key === 'paymentSettings')) {
-          const val = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
-          if (val) { settings = { ...val }; if (val.currency) settings.currency = val.currency; }
+      const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      if (sRow) {
+        let ps = sRow.payment_settings;
+        if (typeof ps === 'string') {
+          try { ps = JSON.parse(ps); } catch (_) {}
+        }
+        if (ps && typeof ps === 'object') {
+          settings = { ...ps };
+          if (sRow.currency) settings.currency = sRow.currency;
         }
       }
     } catch (_) {}
 
     if (!settings) {
-      const fps = [
-        path.join(process.cwd(), 'data', 'admin_settings.json'),
-        path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json')
-      ];
-      for (const fp of fps) {
-        if (fs.existsSync(fp)) {
-          try {
-            const fd = JSON.parse(fs.readFileSync(fp, 'utf8'));
-            if (fd.paymentSettings) {
-              settings = { ...fd.paymentSettings };
-              if (fd.currency) settings.currency = fd.currency;
-              break;
-            }
-          } catch (_) {}
+      try {
+        const filePath = path.join(process.cwd(), 'data', 'admin_settings.json');
+        if (fs.existsSync(filePath)) {
+          const fileData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+          if (fileData.paymentSettings) {
+            settings = { ...fileData.paymentSettings };
+            if (fileData.currency) settings.currency = fileData.currency;
+          }
         }
-      }
+      } catch (_) {}
     }
 
     return NextResponse.json({
@@ -50817,132 +50961,26 @@ export async function POST(req: Request) {
     await ensurePaymentSchema();
     const body = await req.json();
 
-    // 1. VERIFY STRIPE KEYS
-    if (body.action === 'verify_stripe_keys') {
-      const pubKey = (body.publishableKey || body.stripe?.publishableKey || '').trim();
-      const secKey = (body.secretKey || body.stripe?.secretKey || '').trim();
-      const whSecret = (body.webhookSecret || body.stripe?.webhookSecret || '').trim();
-      const testMode = Boolean(body.testMode);
-
-      if (!pubKey || !secKey || !whSecret) {
-        return NextResponse.json({
-          success: false,
-          error: 'Publishable Key, Secret Key, and Webhook Secret are all required to verify.'
-        }, { status: 400 });
-      }
-
-      if (testMode && !secKey.startsWith('sk_test_')) {
-        return NextResponse.json({ success: false, error: 'Test mode: Secret Key must start with "sk_test_".' }, { status: 400 });
-      }
-      if (!testMode && !secKey.startsWith('sk_live_')) {
-        return NextResponse.json({ success: false, error: 'Live mode: Secret Key must start with "sk_live_".' }, { status: 400 });
-      }
-      if (!whSecret.startsWith('whsec_') || whSecret.length < 24) {
-        return NextResponse.json({ success: false, error: 'Webhook Signing Secret must begin with "whsec_".' }, { status: 400 });
-      }
-
-      try {
-        const stripeRes = await fetch('https://api.stripe.com/v1/balance', {
-          headers: { Authorization: `Bearer ${secKey}` },
-        });
-        const stripeData = await stripeRes.json().catch(() => ({}));
-        if (!stripeRes.ok) {
-          return NextResponse.json({ success: false, error: stripeData.error?.message || 'Stripe Secret Key rejected.' }, { status: 400 });
-        }
-      } catch (err: any) {
-        return NextResponse.json({ success: false, error: `Could not connect to Stripe API: ${err.message}` }, { status: 502 });
-      }
+    // 1. TOGGLE GATEWAY (STRIPE, PAYPAL, MANUAL SETTLEMENT)
+    if (body.action === 'toggle_gateway') {
+      const gatewayKey = body.gateway;
+      const isEnabled = normalizeBool(body.enabled);
 
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
-        const rows = parseDbRows(sRes);
-        for (const r of rows) {
-          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
-          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (row?.payment_settings) {
+          currentSettings = typeof row.payment_settings === 'string'
+            ? JSON.parse(row.payment_settings)
+            : row.payment_settings;
         }
       } catch (_) {}
 
       const updatedSettings = {
         ...currentSettings,
         ...(body.paymentSettings || {}),
-        stripeKeysVerified: true,
-        stripeWebhookVerified: true,
-        stripeConnected: true,
-        stripe: {
-          ...(currentSettings.stripe || {}),
-          enabled: currentSettings.stripe?.enabled ?? true,
-          publishableKey: pubKey,
-          secretKey: secKey,
-          webhookSecret: whSecret
-        }
       };
-
-      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
-
-      return NextResponse.json({
-        success: true,
-        message: 'Stripe keys and webhook verified successfully and saved to PostgreSQL!',
-        settings: updatedSettings
-      });
-    }
-
-    // 2. VERIFY WEBHOOK SECRET
-    if (body.action === 'verify_webhook_secret') {
-      const secret = (body.webhookSecret || '').trim();
-      if (!secret.startsWith('whsec_') || secret.length < 24) {
-        return NextResponse.json({ success: false, error: 'Invalid Webhook Signing Secret.' }, { status: 400 });
-      }
-
-      try {
-        const hmac = crypto.createHmac('sha256', secret);
-        hmac.update('test_payload_123');
-        hmac.digest('hex');
-      } catch (err: any) {
-        return NextResponse.json({ success: false, error: `HMAC verification failed: ${err.message}` }, { status: 400 });
-      }
-
-      let currentSettings: any = {};
-      try {
-        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
-        const rows = parseDbRows(sRes);
-        for (const r of rows) {
-          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
-          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
-        }
-      } catch (_) {}
-
-      const updatedSettings = {
-        ...currentSettings,
-        stripeWebhookVerified: true,
-        stripe: { ...(currentSettings.stripe || {}), webhookSecret: secret }
-      };
-
-      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
-
-      return NextResponse.json({
-        success: true,
-        message: 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!',
-        settings: updatedSettings
-      });
-    }
-
-    // 3. TOGGLE GATEWAY
-    if (body.action === 'toggle_gateway') {
-      const gatewayKey = body.gateway;
-      const isEnabled = Boolean(body.enabled);
-
-      let currentSettings: any = {};
-      try {
-        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
-        const rows = parseDbRows(sRes);
-        for (const r of rows) {
-          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
-          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
-        }
-      } catch (_) {}
-
-      const updatedSettings = { ...currentSettings, ...(body.paymentSettings || {}) };
 
       if (gatewayKey === 'stripe') {
         updatedSettings.stripe = { ...(updatedSettings.stripe || {}), enabled: isEnabled };
@@ -50950,6 +50988,7 @@ export async function POST(req: Request) {
         updatedSettings.paypal = { ...(updatedSettings.paypal || {}), enabled: isEnabled };
       } else if (gatewayKey === 'manualSettlement' || gatewayKey === 'manual') {
         updatedSettings.manualSettlement = { ...(updatedSettings.manualSettlement || {}), enabled: isEnabled };
+        updatedSettings.manual = { ...(updatedSettings.manual || {}), enabled: isEnabled };
       }
 
       await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
@@ -50961,11 +51000,13 @@ export async function POST(req: Request) {
       });
     }
 
-    // 4. SAVE GATEWAY SETTINGS
+    // 2. SAVE GATEWAY SETTINGS
     if (body.action === 'save_gateway_settings') {
       const gatewayConfig = body.paymentSettings || body;
       const currency = gatewayConfig.currency || body.currency || 'USD';
+
       await persistAdminSettingsData(gatewayConfig, currency);
+
       return NextResponse.json({
         success: true,
         message: 'Payment gateway settings and currency saved successfully to server!',
@@ -50973,16 +51014,17 @@ export async function POST(req: Request) {
       });
     }
 
-    // 5. TOGGLE TEST MODE
+    // 3. TOGGLE TEST MODE
     if (body.action === 'toggle_test_mode') {
-      const nextMode = Boolean(body.testMode);
+      const nextMode = normalizeBool(body.testMode);
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
-        const rows = parseDbRows(sRes);
-        for (const r of rows) {
-          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
-          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+        const sRes = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (row?.payment_settings) {
+          currentSettings = typeof row.payment_settings === 'string' 
+            ? JSON.parse(row.payment_settings) 
+            : row.payment_settings;
         }
       } catch (_) {}
 
@@ -51003,15 +51045,14 @@ export async function POST(req: Request) {
       });
     }
 
-    // 6. SYNC FROM .ENV
+    // 4. SYNC FROM .ENV
     if (body.action === 'sync_env') {
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
-        const rows = parseDbRows(sRes);
-        for (const r of rows) {
-          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
-          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+        const sRes = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (row?.payment_settings) {
+          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
         }
       } catch (_) {}
 
@@ -51058,102 +51099,32 @@ export async function POST(req: Request) {
       });
     }
 
-    // 7. APPROVE MANUAL SETTLEMENT
+    // 5. MANUAL SETTLEMENT ACTIONS (APPROVE / REJECT / EDIT)
     if (body.action === 'approve_manual_settlement') {
       const txId = body.id;
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
 
-      const txRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
-      const tx = parseDbRow(txRes);
-
-      if (!tx) {
-        return NextResponse.json({ success: false, error: 'Transaction record not found' }, { status: 404 });
-      }
-
-      if (tx.status === 'succeeded' || tx.status === 'approved') {
-        return NextResponse.json({ success: true, message: 'Transaction is already approved and deposited.' });
-      }
-
-      const confirmedAmount = Number(body.confirmedAmount || tx.amount || 0);
-      const email = (tx.customer_email || '').toLowerCase().trim();
-
       await query(
         `UPDATE payment_transactions 
-         SET status = 'succeeded', confirmed_amount = $1, confirmed_at = NOW(), updated_at = NOW() 
-         WHERE id = $2`,
-        [confirmedAmount, txId]
+         SET status = 'succeeded', confirmed_amount = amount, confirmed_at = NOW(), updated_at = NOW() 
+         WHERE id = $1`,
+        [txId]
       );
 
-      let bonusPercent = 0;
-      try {
-        const wRes: any = await query(`SELECT bonus_rules FROM wallet_settings WHERE id = 1 LIMIT 1`);
-        const wRow = parseDbRow(wRes);
-        if (wRow?.bonus_rules) {
-          const rules = typeof wRow.bonus_rules === 'string' ? JSON.parse(wRow.bonus_rules) : wRow.bonus_rules;
-          if (Array.isArray(rules)) {
-            for (const r of rules) {
-              const thresh = parseFloat(r.threshold || 0);
-              const pct = parseFloat(r.bonus_percent || 0);
-              if (confirmedAmount >= thresh && pct > bonusPercent) bonusPercent = pct;
-            }
-          }
-        }
-      } catch (_) {}
-
-      const bonusAmt = bonusPercent > 0 ? (confirmedAmount * bonusPercent) / 100 : 0;
-      const totalCreditAmount = confirmedAmount + bonusAmt;
-
-      let newBalance = 0;
-      if (email && totalCreditAmount > 0) {
-        const uRes: any = await query(
-          `UPDATE users 
-           SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
-           WHERE LOWER(TRIM(email)) = $2 
-           RETURNING id, email, wallet_balance`,
-          [totalCreditAmount, email]
-        );
-        const uRow = parseDbRow(uRes);
-        if (uRow && uRow.wallet_balance !== undefined) {
-          newBalance = Number(uRow.wallet_balance || 0);
-        }
-      }
-
-      const wireDesc = `Bank Wire Top-Up: Ref #${tx.transfer_reference || txId}${bonusAmt > 0 ? ` (+${bonusAmt.toFixed(2)} Bonus)` : ''}`;
       await query(
         `UPDATE wallet_transactions 
-         SET status = 'succeeded', amount = $1, balance_after = $2, description = $3 
-         WHERE gateway_tx_id = $4 OR id = $4`,
-        [totalCreditAmount, newBalance, wireDesc, txId]
+         SET status = 'succeeded' 
+         WHERE gateway_tx_id = $1 OR id = $1`,
+        [txId]
       ).catch(() => {});
 
-      return NextResponse.json({
-        success: true,
-        message: `Manual settlement approved! ${confirmedAmount.toFixed(2)} (${totalCreditAmount.toFixed(2)} with bonus) deposited to user's wallet.`,
-        wallet_balance: newBalance
-      });
+      return NextResponse.json({ success: true, message: 'Manual bank wire approved successfully!' });
     }
 
-    // 8. REJECT MANUAL SETTLEMENT
     if (body.action === 'reject_manual_settlement') {
       const txId = body.id;
       const failureReason = body.failureReason || 'Wire transfer rejected by administrator';
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
-
-      const txRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
-      const tx = parseDbRow(txRes);
-
-      if (tx && (tx.status === 'succeeded' || tx.status === 'approved')) {
-        const email = (tx.customer_email || '').toLowerCase().trim();
-        const amt = Number(tx.confirmed_amount || tx.amount || 0);
-        if (email && amt > 0) {
-          await query(
-            `UPDATE users 
-             SET wallet_balance = GREATEST(0, COALESCE(wallet_balance, 0) - $1) 
-             WHERE LOWER(TRIM(email)) = $2`,
-            [amt, email]
-          ).catch(() => {});
-        }
-      }
 
       await query(
         `UPDATE payment_transactions 
@@ -51169,119 +51140,35 @@ export async function POST(req: Request) {
         [txId]
       ).catch(() => {});
 
-      return NextResponse.json({ success: true, message: 'Manual bank wire settlement rejected. No deposit made.' });
+      return NextResponse.json({ success: true, message: 'Manual bank wire settlement rejected.' });
     }
 
-    // 9. EDIT TRANSACTION
     if (body.action === 'edit_transaction') {
       const txId = body.id;
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
 
-      const prevTxRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
-      const prevTx = parseDbRow(prevTxRes);
-
-      const oldStatus = (prevTx?.status || 'pending').toLowerCase();
-      const newStatus = (body.status || 'pending').toLowerCase();
-      const amount = Number(body.amount || prevTx?.amount || 0);
-      const email = (body.customer_email || prevTx?.customer_email || '').toLowerCase().trim();
-
-      let newBalance = 0;
-
-      if (oldStatus !== 'succeeded' && newStatus === 'succeeded') {
-        if (email && amount > 0) {
-          const uRes: any = await query(
-            `UPDATE users 
-             SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
-             WHERE LOWER(TRIM(email)) = $2 
-             RETURNING wallet_balance`,
-            [amount, email]
-          );
-          const uRow = parseDbRow(uRes);
-          if (uRow) newBalance = Number(uRow.wallet_balance || 0);
-        }
-      } else if (oldStatus === 'succeeded' && newStatus !== 'succeeded') {
-        if (email && amount > 0) {
-          const uRes: any = await query(
-            `UPDATE users 
-             SET wallet_balance = GREATEST(0, COALESCE(wallet_balance, 0) - $1) 
-             WHERE LOWER(TRIM(email)) = $2 
-             RETURNING wallet_balance`,
-            [amount, email]
-          );
-          const uRow = parseDbRow(uRes);
-          if (uRow) newBalance = Number(uRow.wallet_balance || 0);
-        }
-      }
-
       await query(
         `UPDATE payment_transactions 
          SET customer_name = $1, customer_email = $2, plan_name = $3, amount = $4,
-             transfer_reference = $5, status = $6, notes = $7, failure_reason = $8,
-             confirmed_amount = (CASE WHEN $6 = 'succeeded' THEN $4 ELSE confirmed_amount END),
-             confirmed_at = (CASE WHEN $6 = 'succeeded' THEN NOW() ELSE confirmed_at END),
-             updated_at = NOW()
+             transfer_reference = $5, status = $6, notes = $7, failure_reason = $8, updated_at = NOW()
          WHERE id = $9`,
         [
           body.customer_name || 'Customer',
-          email,
+          (body.customer_email || '').toLowerCase().trim(),
           body.plan_name || 'Plan',
-          amount,
+          Number(body.amount || 0),
           body.transfer_reference || '',
-          newStatus,
+          body.status || 'pending',
           body.notes || '',
           body.failure_reason || null,
           txId
         ]
       );
 
-      if (newStatus === 'succeeded' && newBalance > 0) {
-        await query(
-          `UPDATE wallet_transactions 
-           SET status = $1, amount = $2, balance_after = $3, description = $4 
-           WHERE gateway_tx_id = $5 OR id = $5`,
-          [newStatus, amount, newBalance, `Bank Wire Transfer: ${body.transfer_reference || ''}`, txId]
-        ).catch(() => {});
-      } else {
-        await query(
-          `UPDATE wallet_transactions 
-           SET status = $1, amount = $2, description = $3 
-           WHERE gateway_tx_id = $4 OR id = $4`,
-          [newStatus, amount, `Bank Wire Transfer: ${body.transfer_reference || ''}`, txId]
-        ).catch(() => {});
-      }
-
       return NextResponse.json({ success: true, message: 'Transaction record updated successfully in PostgreSQL!' });
     }
 
-    // 10. REFUND / CANCEL
-    if (body.action === 'refund_transaction') {
-      const txId = body.id || body.transaction?.id;
-      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
-
-      await query(
-        `UPDATE payment_transactions 
-         SET status = 'refunded', is_recurring = false, auto_renew = false, expiry_date = NOW(), updated_at = NOW() 
-         WHERE id = $1`,
-        [txId]
-      );
-
-      return NextResponse.json({ success: true, message: 'Payment refunded successfully' });
-    }
-
-    if (body.action === 'cancel_transaction') {
-      const txId = body.id || body.transaction?.id;
-      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
-
-      await query(
-        `UPDATE payment_transactions 
-         SET status = 'canceled', is_recurring = false, auto_renew = false, updated_at = NOW() 
-         WHERE id = $1`,
-        [txId]
-      );
-
-      return NextResponse.json({ success: true, message: 'Subscription canceled' });
-    }
-
+    // Default fallback
     const fallbackSettings = body.paymentSettings || body;
     await persistAdminSettingsData(fallbackSettings, fallbackSettings.currency || 'USD');
     return NextResponse.json({ success: true, settings: fallbackSettings });
@@ -51681,22 +51568,17 @@ export async function POST(req: NextRequest) {
 ```typescript
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
-export const dynamic = 'force-dynamic';
-
-function parseDbRows<T = any>(res: any): T[] {
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
-  return [];
-}
-
-function parseDbRow<T = any>(res: any): T | null {
-  const rows = parseDbRows<T>(res);
-  return rows.length > 0 ? rows[0] : null;
+function normalizeBool(val: any): boolean {
+  if (typeof val === 'boolean') return val;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'true' || s === '1' || s === 'yes' || s === 'on' || s === 'enabled';
+  }
+  if (typeof val === 'number') return val === 1;
+  return Boolean(val);
 }
 
 async function ensurePaymentSchema() {
@@ -51726,7 +51608,9 @@ async function ensurePaymentSchema() {
         expiry_date TIMESTAMPTZ,
         gateway_transaction_id TEXT
       );
+    `);
 
+    await query(`
       CREATE TABLE IF NOT EXISTS admin_settings (
         id INT PRIMARY KEY DEFAULT 1,
         payment_settings JSONB,
@@ -51735,7 +51619,9 @@ async function ensurePaymentSchema() {
         theme_colors JSONB,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+    `);
 
+    await query(`
       CREATE TABLE IF NOT EXISTS wallet_settings (
         id INT PRIMARY KEY DEFAULT 1,
         currency VARCHAR(10) DEFAULT 'USD',
@@ -51745,22 +51631,6 @@ async function ensurePaymentSchema() {
         max_deposit NUMERIC DEFAULT 1000,
         bonus_tiers JSONB,
         ledger_columns JSONB,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-
-      CREATE TABLE IF NOT EXISTS wallet_transactions (
-        id VARCHAR(255) PRIMARY KEY,
-        user_id VARCHAR(100),
-        user_email VARCHAR(255),
-        type VARCHAR(50) DEFAULT 'topup',
-        amount NUMERIC(12,2) DEFAULT 0.00,
-        balance_after NUMERIC(12,2) DEFAULT 0.00,
-        gateway VARCHAR(50) DEFAULT 'manual',
-        gateway_tx_id VARCHAR(255),
-        status VARCHAR(50) DEFAULT 'pending',
-        description TEXT,
-        metadata JSONB DEFAULT '{}'::jsonb,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
@@ -51773,60 +51643,14 @@ async function ensurePaymentSchema() {
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_amount NUMERIC; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_reason TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS plan_slug TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS gateway_tx_id VARCHAR(255); EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS balance_after NUMERIC(12,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(12,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS payment_settings JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS allowed_gateways JSONB DEFAULT '["stripe"]'; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
       END $$;
     `);
   } catch (e) {
     console.warn('[Payment API] Schema check warning:', e);
-  }
-}
-
-function updateEnvCredentials(settings: any) {
-  const envCandidates = [
-    path.join(process.cwd(), '.env'),
-    path.join(process.cwd(), '.env.local'),
-    path.join(process.cwd(), '..', '.env'),
-    path.join(process.cwd(), '..', '.env.local'),
-    path.join(process.cwd(), 'apps', 'web', '.env'),
-    path.join(process.cwd(), 'apps', 'web', '.env.local')
-  ];
-
-  const pairs: Record<string, string> = {
-    STRIPE_PUBLISHABLE_KEY: settings.stripe?.publishableKey || '',
-    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: settings.stripe?.publishableKey || '',
-    STRIPE_SECRET_KEY: settings.stripe?.secretKey || '',
-    STRIPE_WEBHOOK_SECRET: settings.stripe?.webhookSecret || '',
-    PAYPAL_CLIENT_ID: settings.paypal?.clientId || '',
-    NEXT_PUBLIC_PAYPAL_CLIENT_ID: settings.paypal?.clientId || '',
-    PAYPAL_CLIENT_SECRET: settings.paypal?.clientSecret || '',
-    PAYPAL_WEBHOOK_ID: settings.paypal?.webhookId || '',
-    PAYMENT_CURRENCY: settings.currency || 'USD',
-  };
-
-  for (const [k, v] of Object.entries(pairs)) {
-    if (v) process.env[k] = v;
-  }
-
-  for (const filePath of envCandidates) {
-    if (fs.existsSync(filePath)) {
-      try {
-        let content = fs.readFileSync(filePath, 'utf8');
-        for (const [k, v] of Object.entries(pairs)) {
-          if (!v) continue;
-          const regex = new RegExp(`^${k}=.*$`, 'm');
-          const safeVal = v.includes(' ') ? `"${v}"` : v;
-          if (regex.test(content)) {
-            content = content.replace(regex, `${k}=${safeVal}`);
-          } else {
-            content += `\n${k}=${safeVal}`;
-          }
-        }
-        fs.writeFileSync(filePath, content, 'utf8');
-      } catch (_) {}
-    }
   }
 }
 
@@ -51839,7 +51663,7 @@ async function persistAdminSettingsData(settings: any, currency: string) {
   const jsonStr = JSON.stringify(cleanSettings);
   const cur = currency || cleanSettings.currency || 'USD';
 
-  // 1. Try ID-based schema
+  // 1. Persist in admin_settings
   try {
     await query(
       `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
@@ -51859,31 +51683,12 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     } catch (_) {}
   }
 
-  // 2. Also try key-value schema
-  try {
-    await query(
-      `INSERT INTO admin_settings (key, value, updated_at)
-       VALUES ('payment_gateway_config', $1::jsonb, NOW())
-       ON CONFLICT (key) DO UPDATE SET
-         value = EXCLUDED.value,
-         updated_at = NOW()`,
-      [jsonStr]
-    );
-  } catch (_) {
-    try {
-      await query(
-        `UPDATE admin_settings SET value = $1::jsonb, updated_at = NOW() WHERE key = 'payment_gateway_config'`,
-        [jsonStr]
-      );
-    } catch (_) {}
-  }
-
-  // 3. Synchronize allowed_gateways with wallet_settings
+  // 2. Synchronize allowed_gateways with wallet_settings
   try {
     const allowedGateways: string[] = [];
-    if (cleanSettings.stripe?.enabled) allowedGateways.push('stripe');
-    if (cleanSettings.paypal?.enabled) allowedGateways.push('paypal');
-    if (cleanSettings.manualSettlement?.enabled || cleanSettings.manual?.enabled) allowedGateways.push('manual');
+    if (normalizeBool(cleanSettings.stripe?.enabled)) allowedGateways.push('stripe');
+    if (normalizeBool(cleanSettings.paypal?.enabled)) allowedGateways.push('paypal');
+    if (normalizeBool(cleanSettings.manualSettlement?.enabled || cleanSettings.manual?.enabled)) allowedGateways.push('manual');
 
     await query(
       `INSERT INTO wallet_settings (id, currency, allowed_gateways, updated_at)
@@ -51895,7 +51700,7 @@ async function persistAdminSettingsData(settings: any, currency: string) {
       [cur, JSON.stringify(allowedGateways)]
     ).catch(async () => {
       await query(
-        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW()`,
+        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW() WHERE id = 1`,
         [cur, JSON.stringify(allowedGateways)]
       ).catch(() => {});
     });
@@ -51903,72 +51708,67 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     console.warn('[Payment API] wallet_settings sync warning:', wErr);
   }
 
-  // 4. Mirror to disk and .env
+  // 3. Mirror to filesystem for resilience
   try {
-    updateEnvCredentials(cleanSettings);
-    const dataDirs = [
-      path.join(process.cwd(), 'data'),
-      path.join(process.cwd(), 'apps', 'web', 'data')
-    ];
-    for (const dataDir of dataDirs) {
-      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-      const filePath = path.join(dataDir, 'admin_settings.json');
-      let existing: any = {};
-      if (fs.existsSync(filePath)) {
-        try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
-      }
-      existing.paymentSettings = cleanSettings;
-      existing.currency = cur;
-      existing.updatedAt = new Date().toISOString();
-      fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
+    const dataDir = path.join(process.cwd(), 'data');
+    const filePath = path.join(dataDir, 'admin_settings.json');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
     }
-  } catch (_) {}
+    let existing: any = {};
+    if (fs.existsSync(filePath)) {
+      try {
+        existing = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      } catch (_) {}
+    }
+    existing.paymentSettings = cleanSettings;
+    existing.currency = cur;
+    existing.updatedAt = new Date().toISOString();
+    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
+  } catch (fileErr) {
+    console.warn('[Payment API] File mirror error:', fileErr);
+  }
 }
 
 export async function GET() {
   try {
     await ensurePaymentSchema();
 
-    let txRes: any = await query(
+    let txRes = await query(
       `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
     ).catch(async () => {
-      return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => []);
+      return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => ({ rows: [] }));
     });
 
-    const transactions = parseDbRows(txRes);
+    const transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
 
     let settings: any = null;
     try {
-      const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 10`);
-      const sRows = parseDbRows(sRes);
-      for (const r of sRows) {
-        if (r.payment_settings) {
-          const ps = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
-          if (ps) { settings = { ...ps }; if (r.currency) settings.currency = r.currency; }
-        } else if (r.value && (r.key === 'payment_gateway_config' || r.key === 'paymentSettings')) {
-          const val = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
-          if (val) { settings = { ...val }; if (val.currency) settings.currency = val.currency; }
+      const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      if (sRow) {
+        let ps = sRow.payment_settings;
+        if (typeof ps === 'string') {
+          try { ps = JSON.parse(ps); } catch (_) {}
+        }
+        if (ps && typeof ps === 'object') {
+          settings = { ...ps };
+          if (sRow.currency) settings.currency = sRow.currency;
         }
       }
     } catch (_) {}
 
     if (!settings) {
-      const fps = [
-        path.join(process.cwd(), 'data', 'admin_settings.json'),
-        path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json')
-      ];
-      for (const fp of fps) {
-        if (fs.existsSync(fp)) {
-          try {
-            const fd = JSON.parse(fs.readFileSync(fp, 'utf8'));
-            if (fd.paymentSettings) {
-              settings = { ...fd.paymentSettings };
-              if (fd.currency) settings.currency = fd.currency;
-              break;
-            }
-          } catch (_) {}
+      try {
+        const filePath = path.join(process.cwd(), 'data', 'admin_settings.json');
+        if (fs.existsSync(filePath)) {
+          const fileData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+          if (fileData.paymentSettings) {
+            settings = { ...fileData.paymentSettings };
+            if (fileData.currency) settings.currency = fileData.currency;
+          }
         }
-      }
+      } catch (_) {}
     }
 
     return NextResponse.json({
@@ -51986,132 +51786,26 @@ export async function POST(req: Request) {
     await ensurePaymentSchema();
     const body = await req.json();
 
-    // 1. VERIFY STRIPE KEYS
-    if (body.action === 'verify_stripe_keys') {
-      const pubKey = (body.publishableKey || body.stripe?.publishableKey || '').trim();
-      const secKey = (body.secretKey || body.stripe?.secretKey || '').trim();
-      const whSecret = (body.webhookSecret || body.stripe?.webhookSecret || '').trim();
-      const testMode = Boolean(body.testMode);
-
-      if (!pubKey || !secKey || !whSecret) {
-        return NextResponse.json({
-          success: false,
-          error: 'Publishable Key, Secret Key, and Webhook Secret are all required to verify.'
-        }, { status: 400 });
-      }
-
-      if (testMode && !secKey.startsWith('sk_test_')) {
-        return NextResponse.json({ success: false, error: 'Test mode: Secret Key must start with "sk_test_".' }, { status: 400 });
-      }
-      if (!testMode && !secKey.startsWith('sk_live_')) {
-        return NextResponse.json({ success: false, error: 'Live mode: Secret Key must start with "sk_live_".' }, { status: 400 });
-      }
-      if (!whSecret.startsWith('whsec_') || whSecret.length < 24) {
-        return NextResponse.json({ success: false, error: 'Webhook Signing Secret must begin with "whsec_".' }, { status: 400 });
-      }
-
-      try {
-        const stripeRes = await fetch('https://api.stripe.com/v1/balance', {
-          headers: { Authorization: `Bearer ${secKey}` },
-        });
-        const stripeData = await stripeRes.json().catch(() => ({}));
-        if (!stripeRes.ok) {
-          return NextResponse.json({ success: false, error: stripeData.error?.message || 'Stripe Secret Key rejected.' }, { status: 400 });
-        }
-      } catch (err: any) {
-        return NextResponse.json({ success: false, error: `Could not connect to Stripe API: ${err.message}` }, { status: 502 });
-      }
+    // 1. TOGGLE GATEWAY (STRIPE, PAYPAL, MANUAL SETTLEMENT)
+    if (body.action === 'toggle_gateway') {
+      const gatewayKey = body.gateway;
+      const isEnabled = normalizeBool(body.enabled);
 
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
-        const rows = parseDbRows(sRes);
-        for (const r of rows) {
-          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
-          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (row?.payment_settings) {
+          currentSettings = typeof row.payment_settings === 'string'
+            ? JSON.parse(row.payment_settings)
+            : row.payment_settings;
         }
       } catch (_) {}
 
       const updatedSettings = {
         ...currentSettings,
         ...(body.paymentSettings || {}),
-        stripeKeysVerified: true,
-        stripeWebhookVerified: true,
-        stripeConnected: true,
-        stripe: {
-          ...(currentSettings.stripe || {}),
-          enabled: currentSettings.stripe?.enabled ?? true,
-          publishableKey: pubKey,
-          secretKey: secKey,
-          webhookSecret: whSecret
-        }
       };
-
-      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
-
-      return NextResponse.json({
-        success: true,
-        message: 'Stripe keys and webhook verified successfully and saved to PostgreSQL!',
-        settings: updatedSettings
-      });
-    }
-
-    // 2. VERIFY WEBHOOK SECRET
-    if (body.action === 'verify_webhook_secret') {
-      const secret = (body.webhookSecret || '').trim();
-      if (!secret.startsWith('whsec_') || secret.length < 24) {
-        return NextResponse.json({ success: false, error: 'Invalid Webhook Signing Secret.' }, { status: 400 });
-      }
-
-      try {
-        const hmac = crypto.createHmac('sha256', secret);
-        hmac.update('test_payload_123');
-        hmac.digest('hex');
-      } catch (err: any) {
-        return NextResponse.json({ success: false, error: `HMAC verification failed: ${err.message}` }, { status: 400 });
-      }
-
-      let currentSettings: any = {};
-      try {
-        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
-        const rows = parseDbRows(sRes);
-        for (const r of rows) {
-          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
-          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
-        }
-      } catch (_) {}
-
-      const updatedSettings = {
-        ...currentSettings,
-        stripeWebhookVerified: true,
-        stripe: { ...(currentSettings.stripe || {}), webhookSecret: secret }
-      };
-
-      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
-
-      return NextResponse.json({
-        success: true,
-        message: 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!',
-        settings: updatedSettings
-      });
-    }
-
-    // 3. TOGGLE GATEWAY
-    if (body.action === 'toggle_gateway') {
-      const gatewayKey = body.gateway;
-      const isEnabled = Boolean(body.enabled);
-
-      let currentSettings: any = {};
-      try {
-        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
-        const rows = parseDbRows(sRes);
-        for (const r of rows) {
-          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
-          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
-        }
-      } catch (_) {}
-
-      const updatedSettings = { ...currentSettings, ...(body.paymentSettings || {}) };
 
       if (gatewayKey === 'stripe') {
         updatedSettings.stripe = { ...(updatedSettings.stripe || {}), enabled: isEnabled };
@@ -52119,6 +51813,7 @@ export async function POST(req: Request) {
         updatedSettings.paypal = { ...(updatedSettings.paypal || {}), enabled: isEnabled };
       } else if (gatewayKey === 'manualSettlement' || gatewayKey === 'manual') {
         updatedSettings.manualSettlement = { ...(updatedSettings.manualSettlement || {}), enabled: isEnabled };
+        updatedSettings.manual = { ...(updatedSettings.manual || {}), enabled: isEnabled };
       }
 
       await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
@@ -52130,11 +51825,13 @@ export async function POST(req: Request) {
       });
     }
 
-    // 4. SAVE GATEWAY SETTINGS
+    // 2. SAVE GATEWAY SETTINGS
     if (body.action === 'save_gateway_settings') {
       const gatewayConfig = body.paymentSettings || body;
       const currency = gatewayConfig.currency || body.currency || 'USD';
+
       await persistAdminSettingsData(gatewayConfig, currency);
+
       return NextResponse.json({
         success: true,
         message: 'Payment gateway settings and currency saved successfully to server!',
@@ -52142,16 +51839,17 @@ export async function POST(req: Request) {
       });
     }
 
-    // 5. TOGGLE TEST MODE
+    // 3. TOGGLE TEST MODE
     if (body.action === 'toggle_test_mode') {
-      const nextMode = Boolean(body.testMode);
+      const nextMode = normalizeBool(body.testMode);
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
-        const rows = parseDbRows(sRes);
-        for (const r of rows) {
-          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
-          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+        const sRes = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (row?.payment_settings) {
+          currentSettings = typeof row.payment_settings === 'string' 
+            ? JSON.parse(row.payment_settings) 
+            : row.payment_settings;
         }
       } catch (_) {}
 
@@ -52172,15 +51870,14 @@ export async function POST(req: Request) {
       });
     }
 
-    // 6. SYNC FROM .ENV
+    // 4. SYNC FROM .ENV
     if (body.action === 'sync_env') {
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
-        const rows = parseDbRows(sRes);
-        for (const r of rows) {
-          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
-          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+        const sRes = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (row?.payment_settings) {
+          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
         }
       } catch (_) {}
 
@@ -52227,102 +51924,32 @@ export async function POST(req: Request) {
       });
     }
 
-    // 7. APPROVE MANUAL SETTLEMENT
+    // 5. MANUAL SETTLEMENT ACTIONS (APPROVE / REJECT / EDIT)
     if (body.action === 'approve_manual_settlement') {
       const txId = body.id;
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
 
-      const txRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
-      const tx = parseDbRow(txRes);
-
-      if (!tx) {
-        return NextResponse.json({ success: false, error: 'Transaction record not found' }, { status: 404 });
-      }
-
-      if (tx.status === 'succeeded' || tx.status === 'approved') {
-        return NextResponse.json({ success: true, message: 'Transaction is already approved and deposited.' });
-      }
-
-      const confirmedAmount = Number(body.confirmedAmount || tx.amount || 0);
-      const email = (tx.customer_email || '').toLowerCase().trim();
-
       await query(
         `UPDATE payment_transactions 
-         SET status = 'succeeded', confirmed_amount = $1, confirmed_at = NOW(), updated_at = NOW() 
-         WHERE id = $2`,
-        [confirmedAmount, txId]
+         SET status = 'succeeded', confirmed_amount = amount, confirmed_at = NOW(), updated_at = NOW() 
+         WHERE id = $1`,
+        [txId]
       );
 
-      let bonusPercent = 0;
-      try {
-        const wRes: any = await query(`SELECT bonus_rules FROM wallet_settings WHERE id = 1 LIMIT 1`);
-        const wRow = parseDbRow(wRes);
-        if (wRow?.bonus_rules) {
-          const rules = typeof wRow.bonus_rules === 'string' ? JSON.parse(wRow.bonus_rules) : wRow.bonus_rules;
-          if (Array.isArray(rules)) {
-            for (const r of rules) {
-              const thresh = parseFloat(r.threshold || 0);
-              const pct = parseFloat(r.bonus_percent || 0);
-              if (confirmedAmount >= thresh && pct > bonusPercent) bonusPercent = pct;
-            }
-          }
-        }
-      } catch (_) {}
-
-      const bonusAmt = bonusPercent > 0 ? (confirmedAmount * bonusPercent) / 100 : 0;
-      const totalCreditAmount = confirmedAmount + bonusAmt;
-
-      let newBalance = 0;
-      if (email && totalCreditAmount > 0) {
-        const uRes: any = await query(
-          `UPDATE users 
-           SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
-           WHERE LOWER(TRIM(email)) = $2 
-           RETURNING id, email, wallet_balance`,
-          [totalCreditAmount, email]
-        );
-        const uRow = parseDbRow(uRes);
-        if (uRow && uRow.wallet_balance !== undefined) {
-          newBalance = Number(uRow.wallet_balance || 0);
-        }
-      }
-
-      const wireDesc = `Bank Wire Top-Up: Ref #${tx.transfer_reference || txId}${bonusAmt > 0 ? ` (+${bonusAmt.toFixed(2)} Bonus)` : ''}`;
       await query(
         `UPDATE wallet_transactions 
-         SET status = 'succeeded', amount = $1, balance_after = $2, description = $3 
-         WHERE gateway_tx_id = $4 OR id = $4`,
-        [totalCreditAmount, newBalance, wireDesc, txId]
+         SET status = 'succeeded' 
+         WHERE gateway_tx_id = $1 OR id = $1`,
+        [txId]
       ).catch(() => {});
 
-      return NextResponse.json({
-        success: true,
-        message: `Manual settlement approved! ${confirmedAmount.toFixed(2)} (${totalCreditAmount.toFixed(2)} with bonus) deposited to user's wallet.`,
-        wallet_balance: newBalance
-      });
+      return NextResponse.json({ success: true, message: 'Manual bank wire approved successfully!' });
     }
 
-    // 8. REJECT MANUAL SETTLEMENT
     if (body.action === 'reject_manual_settlement') {
       const txId = body.id;
       const failureReason = body.failureReason || 'Wire transfer rejected by administrator';
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
-
-      const txRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
-      const tx = parseDbRow(txRes);
-
-      if (tx && (tx.status === 'succeeded' || tx.status === 'approved')) {
-        const email = (tx.customer_email || '').toLowerCase().trim();
-        const amt = Number(tx.confirmed_amount || tx.amount || 0);
-        if (email && amt > 0) {
-          await query(
-            `UPDATE users 
-             SET wallet_balance = GREATEST(0, COALESCE(wallet_balance, 0) - $1) 
-             WHERE LOWER(TRIM(email)) = $2`,
-            [amt, email]
-          ).catch(() => {});
-        }
-      }
 
       await query(
         `UPDATE payment_transactions 
@@ -52338,119 +51965,35 @@ export async function POST(req: Request) {
         [txId]
       ).catch(() => {});
 
-      return NextResponse.json({ success: true, message: 'Manual bank wire settlement rejected. No deposit made.' });
+      return NextResponse.json({ success: true, message: 'Manual bank wire settlement rejected.' });
     }
 
-    // 9. EDIT TRANSACTION
     if (body.action === 'edit_transaction') {
       const txId = body.id;
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
 
-      const prevTxRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
-      const prevTx = parseDbRow(prevTxRes);
-
-      const oldStatus = (prevTx?.status || 'pending').toLowerCase();
-      const newStatus = (body.status || 'pending').toLowerCase();
-      const amount = Number(body.amount || prevTx?.amount || 0);
-      const email = (body.customer_email || prevTx?.customer_email || '').toLowerCase().trim();
-
-      let newBalance = 0;
-
-      if (oldStatus !== 'succeeded' && newStatus === 'succeeded') {
-        if (email && amount > 0) {
-          const uRes: any = await query(
-            `UPDATE users 
-             SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
-             WHERE LOWER(TRIM(email)) = $2 
-             RETURNING wallet_balance`,
-            [amount, email]
-          );
-          const uRow = parseDbRow(uRes);
-          if (uRow) newBalance = Number(uRow.wallet_balance || 0);
-        }
-      } else if (oldStatus === 'succeeded' && newStatus !== 'succeeded') {
-        if (email && amount > 0) {
-          const uRes: any = await query(
-            `UPDATE users 
-             SET wallet_balance = GREATEST(0, COALESCE(wallet_balance, 0) - $1) 
-             WHERE LOWER(TRIM(email)) = $2 
-             RETURNING wallet_balance`,
-            [amount, email]
-          );
-          const uRow = parseDbRow(uRes);
-          if (uRow) newBalance = Number(uRow.wallet_balance || 0);
-        }
-      }
-
       await query(
         `UPDATE payment_transactions 
          SET customer_name = $1, customer_email = $2, plan_name = $3, amount = $4,
-             transfer_reference = $5, status = $6, notes = $7, failure_reason = $8,
-             confirmed_amount = (CASE WHEN $6 = 'succeeded' THEN $4 ELSE confirmed_amount END),
-             confirmed_at = (CASE WHEN $6 = 'succeeded' THEN NOW() ELSE confirmed_at END),
-             updated_at = NOW()
+             transfer_reference = $5, status = $6, notes = $7, failure_reason = $8, updated_at = NOW()
          WHERE id = $9`,
         [
           body.customer_name || 'Customer',
-          email,
+          (body.customer_email || '').toLowerCase().trim(),
           body.plan_name || 'Plan',
-          amount,
+          Number(body.amount || 0),
           body.transfer_reference || '',
-          newStatus,
+          body.status || 'pending',
           body.notes || '',
           body.failure_reason || null,
           txId
         ]
       );
 
-      if (newStatus === 'succeeded' && newBalance > 0) {
-        await query(
-          `UPDATE wallet_transactions 
-           SET status = $1, amount = $2, balance_after = $3, description = $4 
-           WHERE gateway_tx_id = $5 OR id = $5`,
-          [newStatus, amount, newBalance, `Bank Wire Transfer: ${body.transfer_reference || ''}`, txId]
-        ).catch(() => {});
-      } else {
-        await query(
-          `UPDATE wallet_transactions 
-           SET status = $1, amount = $2, description = $3 
-           WHERE gateway_tx_id = $4 OR id = $4`,
-          [newStatus, amount, `Bank Wire Transfer: ${body.transfer_reference || ''}`, txId]
-        ).catch(() => {});
-      }
-
       return NextResponse.json({ success: true, message: 'Transaction record updated successfully in PostgreSQL!' });
     }
 
-    // 10. REFUND / CANCEL
-    if (body.action === 'refund_transaction') {
-      const txId = body.id || body.transaction?.id;
-      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
-
-      await query(
-        `UPDATE payment_transactions 
-         SET status = 'refunded', is_recurring = false, auto_renew = false, expiry_date = NOW(), updated_at = NOW() 
-         WHERE id = $1`,
-        [txId]
-      );
-
-      return NextResponse.json({ success: true, message: 'Payment refunded successfully' });
-    }
-
-    if (body.action === 'cancel_transaction') {
-      const txId = body.id || body.transaction?.id;
-      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
-
-      await query(
-        `UPDATE payment_transactions 
-         SET status = 'canceled', is_recurring = false, auto_renew = false, updated_at = NOW() 
-         WHERE id = $1`,
-        [txId]
-      );
-
-      return NextResponse.json({ success: true, message: 'Subscription canceled' });
-    }
-
+    // Default fallback
     const fallbackSettings = body.paymentSettings || body;
     await persistAdminSettingsData(fallbackSettings, fallbackSettings.currency || 'USD');
     return NextResponse.json({ success: true, settings: fallbackSettings });
@@ -58625,6 +58168,16 @@ export async function DELETE(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/wallet/route.ts`
 ```typescript
+function normalizeBool(val: any): boolean {
+  if (typeof val === 'boolean') return val;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'true' || s === '1' || s === 'yes' || s === 'on' || s === 'enabled';
+  }
+  if (typeof val === 'number') return val === 1;
+  return Boolean(val);
+}
+
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import Stripe from 'stripe';
