@@ -1,153 +1,223 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { Pool } from 'pg';
 
 export const dynamic = 'force-dynamic';
 
-async function ensureTable() {
-  try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS planned_meals (
-        id VARCHAR(255) PRIMARY KEY,
-        user_id VARCHAR(255),
-        created_by VARCHAR(255),
-        date VARCHAR(64) NOT NULL,
-        recipe_id VARCHAR(255),
-        recipe_name VARCHAR(255) NOT NULL,
-        image TEXT,
-        meal_type VARCHAR(64) DEFAULT 'Dinner',
-        time VARCHAR(64) DEFAULT '',
-        is_leftover BOOLEAN DEFAULT FALSE,
-        notes TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
-  } catch (_) {}
+let cachedPool: Pool | null = null;
+function getPool(): Pool | null {
+  if (cachedPool) return cachedPool;
+  const conn = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!conn) return null;
+  const { Pool } = require('pg');
+  const ssl = conn.includes('sslmode=require') || conn.includes('neon.tech') || conn.includes('supabase.co');
+  cachedPool = new Pool({
+    connectionString: conn,
+    ssl: ssl ? { rejectUnauthorized: false } : false
+  });
+  return cachedPool;
+}
+
+async function ensureTable(pool: Pool) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS planned_meals (
+      id VARCHAR(120) PRIMARY KEY,
+      user_id VARCHAR(100),
+      created_by VARCHAR(255),
+      date VARCHAR(50) NOT NULL,
+      recipe_id VARCHAR(100),
+      recipe_name VARCHAR(255) NOT NULL,
+      image TEXT,
+      meal_type VARCHAR(50) DEFAULT 'Dinner',
+      time VARCHAR(20) DEFAULT '',
+      is_leftover BOOLEAN DEFAULT FALSE,
+      notes TEXT DEFAULT '',
+      servings INT DEFAULT 4,
+      prep_time_minutes INT DEFAULT 15,
+      cook_time_minutes INT DEFAULT 25,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_planned_meals_user_date ON planned_meals(user_id, date);
+  `);
 }
 
 export async function GET(req: NextRequest) {
+  const pool = getPool();
+  if (!pool) return NextResponse.json({ success: true, meals: [] });
+
   try {
-    await ensureTable();
+    await ensureTable(pool);
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId');
+    const email = searchParams.get('email');
 
-    let sql = 'SELECT * FROM planned_meals WHERE 1=1';
+    let query = `
+      SELECT 
+        id, 
+        user_id as "userId", 
+        user_id as "user_id",
+        created_by as "createdBy", 
+        created_by as "created_by",
+        date, 
+        recipe_id as "recipeId", 
+        recipe_id as "recipe_id",
+        recipe_name as "recipeName", 
+        recipe_name as "title",
+        image, 
+        image as "imageUrl",
+        image as "image_url",
+        meal_type as "mealType", 
+        meal_type as "meal_type",
+        time, 
+        is_leftover as "isLeftover", 
+        is_leftover as "is_leftover",
+        notes,
+        servings,
+        prep_time_minutes as "prepTimeMinutes",
+        cook_time_minutes as "cookTimeMinutes"
+      FROM planned_meals
+    `;
     const params: any[] = [];
 
-    if (userId) {
+    if (userId && email) {
+      query += ` WHERE user_id = $1 OR created_by = $2 OR user_id = 'usr_admin_1' OR user_id IS NULL ORDER BY date ASC, time ASC`;
+      params.push(userId, email);
+    } else if (userId) {
+      query += ` WHERE user_id = $1 OR user_id = 'usr_admin_1' OR user_id IS NULL ORDER BY date ASC, time ASC`;
       params.push(userId);
-      sql += ` AND (user_id = $${params.length} OR created_by = $${params.length} OR user_id IS NULL)`;
+    } else {
+      query += ` ORDER BY date ASC, time ASC LIMIT 300`;
     }
 
-    sql += ' ORDER BY date ASC, time ASC, created_at ASC';
-    const rows = await query(sql, params);
-
-    const formatted = rows.map((r: any) => ({
-      id: r.id,
-      userId: r.user_id,
-      createdBy: r.created_by,
-      date: r.date,
-      recipeId: r.recipe_id,
-      recipeName: r.recipe_name,
-      image: r.image,
-      mealType: r.meal_type || 'Dinner',
-      time: r.time || '',
-      isLeftover: Boolean(r.is_leftover),
-      notes: r.notes || '',
-      createdAt: r.created_at,
-      updatedAt: r.updated_at
+    const res = await pool.query(query, params);
+    const normalized = res.rows.map(r => ({
+      ...r,
+      date: (r.date || '').split('T')[0]
     }));
-
-    return NextResponse.json({ success: true, meals: formatted });
+    return NextResponse.json({ success: true, meals: normalized });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message, meals: [] }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
+  const pool = getPool();
+  if (!pool) return NextResponse.json({ success: false, error: 'Database unavailable' }, { status: 500 });
+
   try {
-    await ensureTable();
+    await ensureTable(pool);
     const body = await req.json();
-    const userId = body.userId;
-    const meals = Array.isArray(body.meals) ? body.meals : (body.meal ? [body.meal] : []);
 
-    if (userId && Array.isArray(body.meals)) {
-      const mealIds = meals.map((m: any) => m.id);
-      if (mealIds.length > 0) {
-        await query(
-          'DELETE FROM planned_meals WHERE (user_id = $1 OR created_by = $1) AND NOT (id = ANY($2::text[]))',
-          [userId, mealIds]
-        );
-      } else {
-        await query('DELETE FROM planned_meals WHERE user_id = $1 OR created_by = $1', [userId]);
+    let incomingMeals: any[] = [];
+    let isBatchReplace = false;
+    let targetUserId = body.userId || body.user_id || null;
+    let targetEmail = body.createdBy || body.created_by || null;
+
+    if (Array.isArray(body)) {
+      incomingMeals = body;
+    } else if (Array.isArray(body.meals)) {
+      incomingMeals = body.meals;
+      isBatchReplace = true;
+    } else if (body && typeof body === 'object' && (body.date || body.recipeName || body.title)) {
+      // Single meal item dispatched directly from /saved
+      incomingMeals = [body];
+    } else {
+      return NextResponse.json({ success: false, error: 'Invalid payload structure' }, { status: 400 });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Full batch synchronization from /planner
+      if (isBatchReplace && (targetUserId || targetEmail)) {
+        const mealIds = incomingMeals.map((m: any) => m.id).filter(Boolean);
+        if (mealIds.length > 0) {
+          await client.query(
+            `DELETE FROM planned_meals WHERE (user_id = $1 OR created_by = $2) AND id != ALL($3::varchar[])`,
+            [targetUserId || '', targetEmail || '', mealIds]
+          );
+        } else {
+          await client.query(
+            `DELETE FROM planned_meals WHERE user_id = $1 OR created_by = $2`,
+            [targetUserId || '', targetEmail || '']
+          );
+        }
       }
+
+      for (const meal of incomingMeals) {
+        const id = meal.id || 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+        const rawDate = meal.date || new Date().toISOString().split('T')[0];
+        const date = String(rawDate).split('T')[0];
+        const recipeName = meal.recipeName || meal.title || meal.name || 'Untitled Recipe';
+        const recipeId = meal.recipeId || meal.recipe_id || null;
+        const image = meal.image || meal.imageUrl || meal.image_url || null;
+        const mealType = meal.mealType || meal.meal_type || 'Dinner';
+        const time = meal.time || '';
+        const isLeftover = Boolean(meal.isLeftover || meal.is_leftover);
+        const notes = meal.notes || '';
+        const userId = meal.userId || meal.user_id || targetUserId || null;
+        const createdBy = meal.createdBy || meal.created_by || targetEmail || null;
+        const servings = parseInt(meal.servings) || 4;
+        const prepTime = parseInt(meal.prepTimeMinutes || meal.prep_time) || 15;
+        const cookTime = parseInt(meal.cookTimeMinutes || meal.cook_time) || 25;
+
+        await client.query(
+          `INSERT INTO planned_meals (
+             id, user_id, created_by, date, recipe_id, recipe_name, image, meal_type, time, is_leftover, notes, servings, prep_time_minutes, cook_time_minutes, updated_at
+           )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
+           ON CONFLICT (id) DO UPDATE SET
+             date = EXCLUDED.date,
+             recipe_id = EXCLUDED.recipe_id,
+             recipe_name = EXCLUDED.recipe_name,
+             image = EXCLUDED.image,
+             meal_type = EXCLUDED.meal_type,
+             time = EXCLUDED.time,
+             is_leftover = EXCLUDED.is_leftover,
+             notes = EXCLUDED.notes,
+             servings = EXCLUDED.servings,
+             prep_time_minutes = EXCLUDED.prep_time_minutes,
+             cook_time_minutes = EXCLUDED.cook_time_minutes,
+             updated_at = CURRENT_TIMESTAMP`,
+          [id, userId, createdBy, date, recipeId, recipeName, image, mealType, time, isLeftover, notes, servings, prepTime, cookTime]
+        );
+      }
+
+      await client.query('COMMIT');
+      return NextResponse.json({ success: true, count: incomingMeals.length });
+    } catch (e: any) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
     }
-
-    for (const m of meals) {
-      if (!m || !m.recipeName) continue;
-      const id = String(m.id || 'plan_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
-      const targetUserId = m.userId || userId || null;
-      const createdBy = m.createdBy || userId || null;
-
-      await query(`
-        INSERT INTO planned_meals (
-          id, user_id, created_by, date, recipe_id, recipe_name, image, meal_type, time, is_leftover, notes, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          user_id = COALESCE(EXCLUDED.user_id, planned_meals.user_id),
-          created_by = COALESCE(EXCLUDED.created_by, planned_meals.created_by),
-          date = EXCLUDED.date,
-          recipe_id = EXCLUDED.recipe_id,
-          recipe_name = EXCLUDED.recipe_name,
-          image = EXCLUDED.image,
-          meal_type = EXCLUDED.meal_type,
-          time = EXCLUDED.time,
-          is_leftover = EXCLUDED.is_leftover,
-          notes = EXCLUDED.notes,
-          updated_at = NOW();
-      `, [
-        id,
-        targetUserId,
-        createdBy,
-        m.date,
-        m.recipeId || null,
-        m.recipeName,
-        m.image || null,
-        m.mealType || 'Dinner',
-        m.time || '',
-        Boolean(m.isLeftover),
-        m.notes || ''
-      ]);
-    }
-
-    return NextResponse.json({ success: true, count: meals.length });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function DELETE(req: NextRequest) {
+  const pool = getPool();
+  if (!pool) return NextResponse.json({ success: false, error: 'Database unavailable' }, { status: 500 });
+
   try {
-    await ensureTable();
+    await ensureTable(pool);
     const { searchParams } = new URL(req.url);
-    let id = searchParams.get('id');
-    let userId = searchParams.get('userId');
+    const id = searchParams.get('id');
+    const userId = searchParams.get('userId');
 
-    try {
-      const body = await req.json();
-      if (body) {
-        id = body.id || id;
-        userId = body.userId || userId;
-      }
-    } catch (_) {}
-
-    if (id) {
-      await query('DELETE FROM planned_meals WHERE id = $1', [id]);
-    } else if (userId) {
-      await query('DELETE FROM planned_meals WHERE user_id = $1 OR created_by = $1', [userId]);
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Meal ID is required' }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, message: 'Meal plan record deleted from PostgreSQL.' });
+    if (userId) {
+      await pool.query(`DELETE FROM planned_meals WHERE id = $1 AND (user_id = $2 OR user_id = 'usr_admin_1' OR user_id IS NULL)`, [id, userId]);
+    } else {
+      await pool.query(`DELETE FROM planned_meals WHERE id = $1`, [id]);
+    }
+
+    return NextResponse.json({ success: true, id });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
