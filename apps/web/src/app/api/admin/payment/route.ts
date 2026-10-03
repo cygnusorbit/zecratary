@@ -103,25 +103,12 @@ async function ensurePaymentSchema() {
   }
 }
 
-function writeKeyToEnvFile(filePath: string, key: string, value: string) {
-  try {
-    if (!fs.existsSync(filePath)) return;
-    let content = fs.readFileSync(filePath, 'utf8');
-    const regex = new RegExp(`^${key}=.*$`, 'm');
-    const safeVal = value.includes(' ') ? `"${value}"` : value;
-    if (regex.test(content)) {
-      content = content.replace(regex, `${key}=${safeVal}`);
-    } else {
-      content += `\n${key}=${safeVal}`;
-    }
-    fs.writeFileSync(filePath, content, 'utf8');
-  } catch (_) {}
-}
-
 function updateEnvCredentials(settings: any) {
   const envCandidates = [
     path.join(process.cwd(), '.env'),
     path.join(process.cwd(), '.env.local'),
+    path.join(process.cwd(), '..', '.env'),
+    path.join(process.cwd(), '..', '.env.local'),
     path.join(process.cwd(), 'apps', 'web', '.env'),
     path.join(process.cwd(), 'apps', 'web', '.env.local')
   ];
@@ -144,9 +131,20 @@ function updateEnvCredentials(settings: any) {
 
   for (const filePath of envCandidates) {
     if (fs.existsSync(filePath)) {
-      for (const [k, v] of Object.entries(pairs)) {
-        if (v) writeKeyToEnvFile(filePath, k, v);
-      }
+      try {
+        let content = fs.readFileSync(filePath, 'utf8');
+        for (const [k, v] of Object.entries(pairs)) {
+          if (!v) continue;
+          const regex = new RegExp(`^${k}=.*$`, 'm');
+          const safeVal = v.includes(' ') ? `"${v}"` : v;
+          if (regex.test(content)) {
+            content = content.replace(regex, `${k}=${safeVal}`);
+          } else {
+            content += `\n${k}=${safeVal}`;
+          }
+        }
+        fs.writeFileSync(filePath, content, 'utf8');
+      } catch (_) {}
     }
   }
 }
@@ -160,6 +158,7 @@ async function persistAdminSettingsData(settings: any, currency: string) {
   const jsonStr = JSON.stringify(cleanSettings);
   const cur = currency || cleanSettings.currency || 'USD';
 
+  // 1. Try ID-based schema
   try {
     await query(
       `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
@@ -179,6 +178,26 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     } catch (_) {}
   }
 
+  // 2. Also try key-value schema
+  try {
+    await query(
+      `INSERT INTO admin_settings (key, value, updated_at)
+       VALUES ('payment_gateway_config', $1::jsonb, NOW())
+       ON CONFLICT (key) DO UPDATE SET
+         value = EXCLUDED.value,
+         updated_at = NOW()`,
+      [jsonStr]
+    );
+  } catch (_) {
+    try {
+      await query(
+        `UPDATE admin_settings SET value = $1::jsonb, updated_at = NOW() WHERE key = 'payment_gateway_config'`,
+        [jsonStr]
+      );
+    } catch (_) {}
+  }
+
+  // 3. Synchronize allowed_gateways with wallet_settings
   try {
     const allowedGateways: string[] = [];
     if (cleanSettings.stripe?.enabled) allowedGateways.push('stripe');
@@ -195,7 +214,7 @@ async function persistAdminSettingsData(settings: any, currency: string) {
       [cur, JSON.stringify(allowedGateways)]
     ).catch(async () => {
       await query(
-        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW() WHERE id = 1`,
+        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW()`,
         [cur, JSON.stringify(allowedGateways)]
       ).catch(() => {});
     });
@@ -203,19 +222,25 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     console.warn('[Payment API] wallet_settings sync warning:', wErr);
   }
 
+  // 4. Mirror to disk and .env
   try {
     updateEnvCredentials(cleanSettings);
-    const dataDir = path.join(process.cwd(), 'data');
-    const filePath = path.join(dataDir, 'admin_settings.json');
-    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-    let existing: any = {};
-    if (fs.existsSync(filePath)) {
-      try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
+    const dataDirs = [
+      path.join(process.cwd(), 'data'),
+      path.join(process.cwd(), 'apps', 'web', 'data')
+    ];
+    for (const dataDir of dataDirs) {
+      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+      const filePath = path.join(dataDir, 'admin_settings.json');
+      let existing: any = {};
+      if (fs.existsSync(filePath)) {
+        try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
+      }
+      existing.paymentSettings = cleanSettings;
+      existing.currency = cur;
+      existing.updatedAt = new Date().toISOString();
+      fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
     }
-    existing.paymentSettings = cleanSettings;
-    existing.currency = cur;
-    existing.updatedAt = new Date().toISOString();
-    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
   } catch (_) {}
 }
 
@@ -233,31 +258,36 @@ export async function GET() {
 
     let settings: any = null;
     try {
-      const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-      const sRow: any = parseDbRow(sRes);
-      if (sRow) {
-        let ps = sRow.payment_settings;
-        if (typeof ps === 'string') {
-          try { ps = JSON.parse(ps); } catch (_) {}
-        }
-        if (ps && typeof ps === 'object') {
-          settings = { ...ps };
-          if (sRow.currency) settings.currency = sRow.currency;
+      const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 10`);
+      const sRows = parseDbRows(sRes);
+      for (const r of sRows) {
+        if (r.payment_settings) {
+          const ps = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          if (ps) { settings = { ...ps }; if (r.currency) settings.currency = r.currency; }
+        } else if (r.value && (r.key === 'payment_gateway_config' || r.key === 'paymentSettings')) {
+          const val = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+          if (val) { settings = { ...val }; if (val.currency) settings.currency = val.currency; }
         }
       }
     } catch (_) {}
 
     if (!settings) {
-      try {
-        const filePath = path.join(process.cwd(), 'data', 'admin_settings.json');
-        if (fs.existsSync(filePath)) {
-          const fileData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-          if (fileData.paymentSettings) {
-            settings = { ...fileData.paymentSettings };
-            if (fileData.currency) settings.currency = fileData.currency;
-          }
+      const fps = [
+        path.join(process.cwd(), 'data', 'admin_settings.json'),
+        path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json')
+      ];
+      for (const fp of fps) {
+        if (fs.existsSync(fp)) {
+          try {
+            const fd = JSON.parse(fs.readFileSync(fp, 'utf8'));
+            if (fd.paymentSettings) {
+              settings = { ...fd.paymentSettings };
+              if (fd.currency) settings.currency = fd.currency;
+              break;
+            }
+          } catch (_) {}
         }
-      } catch (_) {}
+      }
     }
 
     return NextResponse.json({
@@ -313,10 +343,11 @@ export async function POST(req: Request) {
 
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
+        const rows = parseDbRows(sRes);
+        for (const r of rows) {
+          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
         }
       } catch (_) {}
 
@@ -361,10 +392,11 @@ export async function POST(req: Request) {
 
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
+        const rows = parseDbRows(sRes);
+        for (const r of rows) {
+          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
         }
       } catch (_) {}
 
@@ -390,10 +422,11 @@ export async function POST(req: Request) {
 
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
+        const rows = parseDbRows(sRes);
+        for (const r of rows) {
+          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
         }
       } catch (_) {}
 
@@ -433,10 +466,11 @@ export async function POST(req: Request) {
       const nextMode = Boolean(body.testMode);
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
+        const rows = parseDbRows(sRes);
+        for (const r of rows) {
+          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
         }
       } catch (_) {}
 
@@ -461,10 +495,11 @@ export async function POST(req: Request) {
     if (body.action === 'sync_env') {
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        const sRes: any = await query(`SELECT * FROM admin_settings LIMIT 5`);
+        const rows = parseDbRows(sRes);
+        for (const r of rows) {
+          if (r.payment_settings) currentSettings = typeof r.payment_settings === 'string' ? JSON.parse(r.payment_settings) : r.payment_settings;
+          else if (r.value) currentSettings = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
         }
       } catch (_) {}
 
@@ -511,7 +546,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 7. REQUIREMENT 1: APPROVE MANUAL SETTLEMENT & DEPOSIT TOP-UP IN USERS TABLE
+    // 7. APPROVE MANUAL SETTLEMENT
     if (body.action === 'approve_manual_settlement') {
       const txId = body.id;
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
@@ -523,7 +558,6 @@ export async function POST(req: Request) {
         return NextResponse.json({ success: false, error: 'Transaction record not found' }, { status: 404 });
       }
 
-      // Guard: already approved
       if (tx.status === 'succeeded' || tx.status === 'approved') {
         return NextResponse.json({ success: true, message: 'Transaction is already approved and deposited.' });
       }
@@ -531,7 +565,6 @@ export async function POST(req: Request) {
       const confirmedAmount = Number(body.confirmedAmount || tx.amount || 0);
       const email = (tx.customer_email || '').toLowerCase().trim();
 
-      // 1. Mark payment_transaction as succeeded
       await query(
         `UPDATE payment_transactions 
          SET status = 'succeeded', confirmed_amount = $1, confirmed_at = NOW(), updated_at = NOW() 
@@ -539,7 +572,6 @@ export async function POST(req: Request) {
         [confirmedAmount, txId]
       );
 
-      // 2. Calculate any bonus rules from wallet_settings
       let bonusPercent = 0;
       try {
         const wRes: any = await query(`SELECT bonus_rules FROM wallet_settings WHERE id = 1 LIMIT 1`);
@@ -559,7 +591,6 @@ export async function POST(req: Request) {
       const bonusAmt = bonusPercent > 0 ? (confirmedAmount * bonusPercent) / 100 : 0;
       const totalCreditAmount = confirmedAmount + bonusAmt;
 
-      // 3. Atomically increment wallet_balance in users table
       let newBalance = 0;
       if (email && totalCreditAmount > 0) {
         const uRes: any = await query(
@@ -575,7 +606,6 @@ export async function POST(req: Request) {
         }
       }
 
-      // 4. Update wallet_transactions to succeeded and set updated balance_after
       const wireDesc = `Bank Wire Top-Up: Ref #${tx.transfer_reference || txId}${bonusAmt > 0 ? ` (+${bonusAmt.toFixed(2)} Bonus)` : ''}`;
       await query(
         `UPDATE wallet_transactions 
@@ -591,7 +621,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 8. REQUIREMENT 2: REJECT MANUAL SETTLEMENT (DO NOT DEPOSIT TOP-UP)
+    // 8. REJECT MANUAL SETTLEMENT
     if (body.action === 'reject_manual_settlement') {
       const txId = body.id;
       const failureReason = body.failureReason || 'Wire transfer rejected by administrator';
@@ -600,7 +630,6 @@ export async function POST(req: Request) {
       const txRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
       const tx = parseDbRow(txRes);
 
-      // If previously approved, reverse the credited amount
       if (tx && (tx.status === 'succeeded' || tx.status === 'approved')) {
         const email = (tx.customer_email || '').toLowerCase().trim();
         const amt = Number(tx.confirmed_amount || tx.amount || 0);
@@ -631,7 +660,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, message: 'Manual bank wire settlement rejected. No deposit made.' });
     }
 
-    // 9. EDIT TRANSACTION (STATUS TRANSITION MANAGEMENT)
+    // 9. EDIT TRANSACTION
     if (body.action === 'edit_transaction') {
       const txId = body.id;
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
@@ -646,7 +675,6 @@ export async function POST(req: Request) {
 
       let newBalance = 0;
 
-      // Transition into succeeded (approved): Credit user wallet
       if (oldStatus !== 'succeeded' && newStatus === 'succeeded') {
         if (email && amount > 0) {
           const uRes: any = await query(
@@ -660,7 +688,6 @@ export async function POST(req: Request) {
           if (uRow) newBalance = Number(uRow.wallet_balance || 0);
         }
       } else if (oldStatus === 'succeeded' && newStatus !== 'succeeded') {
-        // Transition out of succeeded: Revert credit
         if (email && amount > 0) {
           const uRes: any = await query(
             `UPDATE users 

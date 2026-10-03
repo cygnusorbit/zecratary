@@ -61,7 +61,7 @@
       "tokenReimburseFrequency": "monthly"
     }
   ],
-  "updatedAt": "2026-09-18T12:28:40.609Z",
+  "updatedAt": "2026-10-03T05:23:52.799Z",
   "chefAiSettings": {
     "model": "gemini-3.5-flash-lite",
     "apiKey": "AQ.Ab8RN6IhH6iaU_4chRKwnTIyKxG4bBTJURnex1GtD9nPAttcOQ",
@@ -156,5 +156,46 @@
     "Soup",
     "Side Dish",
     "Baking"
-  ]
+  ],
+  "paymentSettings": {
+    "id": "ptx_1790962799750_uvtta",
+    "notes": "",
+    "amount": 50,
+    "paypal": {
+      "enabled": false,
+      "clientId": "",
+      "clientSecret": "",
+      "webhookId": "",
+      "environment": "sandbox"
+    },
+    "status": "pending",
+    "stripe": {
+      "enabled": true,
+      "publishableKey": "pk_test_51UJEgrCcmLZF49WGZiAF30eLSt4Sxpyv3G9nl2rxqEkrOwaoDVFuVRHvkniacq7Fh2xOZooi3IctzwDtGIXneyNb00wfpLn6xG",
+      "secretKey": "sk_test_51UJEgrCcmLZF49WGIS4IucDaZiaEweJSIpDvksgk3aMB0riI98YVSjzhLwJQFjnR07FiGoN8wNrzQAgymdYZErod00oG8EYYDp",
+      "webhookSecret": "whsec_f3f6748cc981d7bb11d7ef47c61c000cd34adb7d8178896bd2dd391695a94019"
+    },
+    "currency": "USD",
+    "testMode": true,
+    "plan_name": "Store Wallet Top-Up",
+    "activeGateway": "stripe",
+    "customer_name": "System Administrator",
+    "customer_email": "admin@zecratary.com",
+    "failure_reason": "",
+    "stripeConnected": false,
+    "manualSettlement": {
+      "enabled": true,
+      "bankName": "OCBC",
+      "accountHolder": "ABC",
+      "accountNumber": "11232312312",
+      "routingNumber": "1212",
+      "swiftBic": "123213",
+      "branchName": "New York",
+      "instructions": "Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.",
+      "requireReference": true
+    },
+    "stripeKeysVerified": false,
+    "transfer_reference": "",
+    "stripeWebhookVerified": false
+  }
 }

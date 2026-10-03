@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.98",
+  "version": "8.0.99",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.98",
+  "version": "8.0.99",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -50557,9 +50557,7 @@ async function ensurePaymentSchema() {
         expiry_date TIMESTAMPTZ,
         gateway_transaction_id TEXT
       );
-    `);
 
-    await query(`
       CREATE TABLE IF NOT EXISTS admin_settings (
         id INT PRIMARY KEY DEFAULT 1,
         payment_settings JSONB,
@@ -50568,9 +50566,7 @@ async function ensurePaymentSchema() {
         theme_colors JSONB,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
-    `);
 
-    await query(`
       CREATE TABLE IF NOT EXISTS wallet_settings (
         id INT PRIMARY KEY DEFAULT 1,
         currency VARCHAR(10) DEFAULT 'USD',
@@ -50580,6 +50576,22 @@ async function ensurePaymentSchema() {
         max_deposit NUMERIC DEFAULT 1000,
         bonus_tiers JSONB,
         ledger_columns JSONB,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS wallet_transactions (
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(100),
+        user_email VARCHAR(255),
+        type VARCHAR(50) DEFAULT 'topup',
+        amount NUMERIC(12,2) DEFAULT 0.00,
+        balance_after NUMERIC(12,2) DEFAULT 0.00,
+        gateway VARCHAR(50) DEFAULT 'manual',
+        gateway_tx_id VARCHAR(255),
+        status VARCHAR(50) DEFAULT 'pending',
+        description TEXT,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
@@ -50592,10 +50604,10 @@ async function ensurePaymentSchema() {
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_amount NUMERIC; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_reason TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS payment_settings JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS allowed_gateways JSONB DEFAULT '["stripe"]'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS plan_slug TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS gateway_tx_id VARCHAR(255); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS balance_after NUMERIC(12,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(12,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN NULL; END;
       END $$;
     `);
   } catch (e) {
@@ -50660,7 +50672,6 @@ async function persistAdminSettingsData(settings: any, currency: string) {
   const jsonStr = JSON.stringify(cleanSettings);
   const cur = currency || cleanSettings.currency || 'USD';
 
-  // 1. Persist in PostgreSQL admin_settings
   try {
     await query(
       `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
@@ -50680,7 +50691,6 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     } catch (_) {}
   }
 
-  // 2. Synchronize allowed_gateways with wallet_settings
   try {
     const allowedGateways: string[] = [];
     if (cleanSettings.stripe?.enabled) allowedGateways.push('stripe');
@@ -50705,7 +50715,6 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     console.warn('[Payment API] wallet_settings sync warning:', wErr);
   }
 
-  // 3. Mirror to .env and disk
   try {
     updateEnvCredentials(cleanSettings);
     const dataDir = path.join(process.cwd(), 'data');
@@ -50778,7 +50787,7 @@ export async function POST(req: Request) {
     await ensurePaymentSchema();
     const body = await req.json();
 
-    // 1. VERIFY STRIPE KEYS (3-WAY VERIFICATION)
+    // 1. VERIFY STRIPE KEYS
     if (body.action === 'verify_stripe_keys') {
       const pubKey = (body.publishableKey || body.stripe?.publishableKey || '').trim();
       const secKey = (body.secretKey || body.stripe?.secretKey || '').trim();
@@ -50793,22 +50802,13 @@ export async function POST(req: Request) {
       }
 
       if (testMode && !secKey.startsWith('sk_test_')) {
-        return NextResponse.json({
-          success: false,
-          error: 'Test mode is enabled: Secret Key must start with "sk_test_".'
-        }, { status: 400 });
+        return NextResponse.json({ success: false, error: 'Test mode: Secret Key must start with "sk_test_".' }, { status: 400 });
       }
       if (!testMode && !secKey.startsWith('sk_live_')) {
-        return NextResponse.json({
-          success: false,
-          error: 'Live mode is enabled: Secret Key must start with "sk_live_".'
-        }, { status: 400 });
+        return NextResponse.json({ success: false, error: 'Live mode: Secret Key must start with "sk_live_".' }, { status: 400 });
       }
       if (!whSecret.startsWith('whsec_') || whSecret.length < 24) {
-        return NextResponse.json({
-          success: false,
-          error: 'Webhook Signing Secret must begin with "whsec_" and be at least 24 characters long.'
-        }, { status: 400 });
+        return NextResponse.json({ success: false, error: 'Webhook Signing Secret must begin with "whsec_".' }, { status: 400 });
       }
 
       try {
@@ -50817,44 +50817,10 @@ export async function POST(req: Request) {
         });
         const stripeData = await stripeRes.json().catch(() => ({}));
         if (!stripeRes.ok) {
-          return NextResponse.json({
-            success: false,
-            error: stripeData.error?.message || 'Stripe Secret Key rejected by Stripe API.'
-          }, { status: 400 });
+          return NextResponse.json({ success: false, error: stripeData.error?.message || 'Stripe Secret Key rejected.' }, { status: 400 });
         }
       } catch (err: any) {
-        return NextResponse.json({
-          success: false,
-          error: `Could not connect to Stripe API: ${err.message}`
-        }, { status: 502 });
-      }
-
-      try {
-        const pubRes = await fetch('https://api.stripe.com/v1/tokens', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${pubKey}`,
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          body: ''
-        });
-        if (pubRes.status === 401) {
-          return NextResponse.json({
-            success: false,
-            error: 'Publishable Key is invalid or rejected by Stripe API.'
-          }, { status: 400 });
-        }
-      } catch (_) {}
-
-      try {
-        const testHmac = crypto.createHmac('sha256', whSecret);
-        testHmac.update('zecratary_signature_test');
-        testHmac.digest('hex');
-      } catch (hErr: any) {
-        return NextResponse.json({
-          success: false,
-          error: `Webhook Signing Secret failed cryptographic HMAC check: ${hErr.message}`
-        }, { status: 400 });
+        return NextResponse.json({ success: false, error: `Could not connect to Stripe API: ${err.message}` }, { status: 502 });
       }
 
       let currentSettings: any = {};
@@ -50890,14 +50856,11 @@ export async function POST(req: Request) {
       });
     }
 
-    // 2. VERIFY WEBHOOK SECRET (INLINE)
+    // 2. VERIFY WEBHOOK SECRET
     if (body.action === 'verify_webhook_secret') {
       const secret = (body.webhookSecret || '').trim();
       if (!secret.startsWith('whsec_') || secret.length < 24) {
-        return NextResponse.json({
-          success: false,
-          error: 'Invalid Webhook Signing Secret. Must start with "whsec_" and have standard length.'
-        }, { status: 400 });
+        return NextResponse.json({ success: false, error: 'Invalid Webhook Signing Secret.' }, { status: 400 });
       }
 
       try {
@@ -50920,10 +50883,7 @@ export async function POST(req: Request) {
       const updatedSettings = {
         ...currentSettings,
         stripeWebhookVerified: true,
-        stripe: {
-          ...(currentSettings.stripe || {}),
-          webhookSecret: secret
-        }
+        stripe: { ...(currentSettings.stripe || {}), webhookSecret: secret }
       };
 
       await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
@@ -50935,7 +50895,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 3. TOGGLE GATEWAY (STRIPE, PAYPAL, MANUAL SETTLEMENT)
+    // 3. TOGGLE GATEWAY
     if (body.action === 'toggle_gateway') {
       const gatewayKey = body.gateway;
       const isEnabled = Boolean(body.enabled);
@@ -50945,16 +50905,11 @@ export async function POST(req: Request) {
         const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
         const row: any = parseDbRow(sRes);
         if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string'
-            ? JSON.parse(row.payment_settings)
-            : row.payment_settings;
+          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
         }
       } catch (_) {}
 
-      const updatedSettings = {
-        ...currentSettings,
-        ...(body.paymentSettings || {}),
-      };
+      const updatedSettings = { ...currentSettings, ...(body.paymentSettings || {}) };
 
       if (gatewayKey === 'stripe') {
         updatedSettings.stripe = { ...(updatedSettings.stripe || {}), enabled: isEnabled };
@@ -50977,9 +50932,7 @@ export async function POST(req: Request) {
     if (body.action === 'save_gateway_settings') {
       const gatewayConfig = body.paymentSettings || body;
       const currency = gatewayConfig.currency || body.currency || 'USD';
-
       await persistAdminSettingsData(gatewayConfig, currency);
-
       return NextResponse.json({
         success: true,
         message: 'Payment gateway settings and currency saved successfully to server!',
@@ -50995,9 +50948,7 @@ export async function POST(req: Request) {
         const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
         const row: any = parseDbRow(sRes);
         if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' 
-            ? JSON.parse(row.payment_settings) 
-            : row.payment_settings;
+          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
         }
       } catch (_) {}
 
@@ -51072,42 +51023,108 @@ export async function POST(req: Request) {
       });
     }
 
-    // 7. UPDATE .ENV EXPLICITLY
-    if (body.action === 'update_env') {
-      const cfg = body.paymentSettings || body;
-      updateEnvCredentials(cfg);
-      return NextResponse.json({
-        success: true,
-        message: 'Credentials updated and saved to server .env files!'
-      });
-    }
-
-    // 8. MANUAL SETTLEMENT ACTIONS
+    // 7. REQUIREMENT 1: APPROVE MANUAL SETTLEMENT & DEPOSIT TOP-UP IN USERS TABLE
     if (body.action === 'approve_manual_settlement') {
       const txId = body.id;
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
 
+      const txRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
+      const tx = parseDbRow(txRes);
+
+      if (!tx) {
+        return NextResponse.json({ success: false, error: 'Transaction record not found' }, { status: 404 });
+      }
+
+      // Guard: already approved
+      if (tx.status === 'succeeded' || tx.status === 'approved') {
+        return NextResponse.json({ success: true, message: 'Transaction is already approved and deposited.' });
+      }
+
+      const confirmedAmount = Number(body.confirmedAmount || tx.amount || 0);
+      const email = (tx.customer_email || '').toLowerCase().trim();
+
+      // 1. Mark payment_transaction as succeeded
       await query(
         `UPDATE payment_transactions 
-         SET status = 'succeeded', confirmed_amount = amount, confirmed_at = NOW(), updated_at = NOW() 
-         WHERE id = $1`,
-        [txId]
+         SET status = 'succeeded', confirmed_amount = $1, confirmed_at = NOW(), updated_at = NOW() 
+         WHERE id = $2`,
+        [confirmedAmount, txId]
       );
 
+      // 2. Calculate any bonus rules from wallet_settings
+      let bonusPercent = 0;
+      try {
+        const wRes: any = await query(`SELECT bonus_rules FROM wallet_settings WHERE id = 1 LIMIT 1`);
+        const wRow = parseDbRow(wRes);
+        if (wRow?.bonus_rules) {
+          const rules = typeof wRow.bonus_rules === 'string' ? JSON.parse(wRow.bonus_rules) : wRow.bonus_rules;
+          if (Array.isArray(rules)) {
+            for (const r of rules) {
+              const thresh = parseFloat(r.threshold || 0);
+              const pct = parseFloat(r.bonus_percent || 0);
+              if (confirmedAmount >= thresh && pct > bonusPercent) bonusPercent = pct;
+            }
+          }
+        }
+      } catch (_) {}
+
+      const bonusAmt = bonusPercent > 0 ? (confirmedAmount * bonusPercent) / 100 : 0;
+      const totalCreditAmount = confirmedAmount + bonusAmt;
+
+      // 3. Atomically increment wallet_balance in users table
+      let newBalance = 0;
+      if (email && totalCreditAmount > 0) {
+        const uRes: any = await query(
+          `UPDATE users 
+           SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
+           WHERE LOWER(TRIM(email)) = $2 
+           RETURNING id, email, wallet_balance`,
+          [totalCreditAmount, email]
+        );
+        const uRow = parseDbRow(uRes);
+        if (uRow && uRow.wallet_balance !== undefined) {
+          newBalance = Number(uRow.wallet_balance || 0);
+        }
+      }
+
+      // 4. Update wallet_transactions to succeeded and set updated balance_after
+      const wireDesc = `Bank Wire Top-Up: Ref #${tx.transfer_reference || txId}${bonusAmt > 0 ? ` (+${bonusAmt.toFixed(2)} Bonus)` : ''}`;
       await query(
         `UPDATE wallet_transactions 
-         SET status = 'succeeded' 
-         WHERE gateway_tx_id = $1 OR id = $1`,
-        [txId]
+         SET status = 'succeeded', amount = $1, balance_after = $2, description = $3 
+         WHERE gateway_tx_id = $4 OR id = $4`,
+        [totalCreditAmount, newBalance, wireDesc, txId]
       ).catch(() => {});
 
-      return NextResponse.json({ success: true, message: 'Manual bank wire approved successfully!' });
+      return NextResponse.json({
+        success: true,
+        message: `Manual settlement approved! ${confirmedAmount.toFixed(2)} (${totalCreditAmount.toFixed(2)} with bonus) deposited to user's wallet.`,
+        wallet_balance: newBalance
+      });
     }
 
+    // 8. REQUIREMENT 2: REJECT MANUAL SETTLEMENT (DO NOT DEPOSIT TOP-UP)
     if (body.action === 'reject_manual_settlement') {
       const txId = body.id;
       const failureReason = body.failureReason || 'Wire transfer rejected by administrator';
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+
+      const txRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
+      const tx = parseDbRow(txRes);
+
+      // If previously approved, reverse the credited amount
+      if (tx && (tx.status === 'succeeded' || tx.status === 'approved')) {
+        const email = (tx.customer_email || '').toLowerCase().trim();
+        const amt = Number(tx.confirmed_amount || tx.amount || 0);
+        if (email && amt > 0) {
+          await query(
+            `UPDATE users 
+             SET wallet_balance = GREATEST(0, COALESCE(wallet_balance, 0) - $1) 
+             WHERE LOWER(TRIM(email)) = $2`,
+            [amt, email]
+          ).catch(() => {});
+        }
+      }
 
       await query(
         `UPDATE payment_transactions 
@@ -51123,35 +51140,93 @@ export async function POST(req: Request) {
         [txId]
       ).catch(() => {});
 
-      return NextResponse.json({ success: true, message: 'Manual bank wire settlement rejected.' });
+      return NextResponse.json({ success: true, message: 'Manual bank wire settlement rejected. No deposit made.' });
     }
 
+    // 9. EDIT TRANSACTION (STATUS TRANSITION MANAGEMENT)
     if (body.action === 'edit_transaction') {
       const txId = body.id;
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
 
+      const prevTxRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
+      const prevTx = parseDbRow(prevTxRes);
+
+      const oldStatus = (prevTx?.status || 'pending').toLowerCase();
+      const newStatus = (body.status || 'pending').toLowerCase();
+      const amount = Number(body.amount || prevTx?.amount || 0);
+      const email = (body.customer_email || prevTx?.customer_email || '').toLowerCase().trim();
+
+      let newBalance = 0;
+
+      // Transition into succeeded (approved): Credit user wallet
+      if (oldStatus !== 'succeeded' && newStatus === 'succeeded') {
+        if (email && amount > 0) {
+          const uRes: any = await query(
+            `UPDATE users 
+             SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
+             WHERE LOWER(TRIM(email)) = $2 
+             RETURNING wallet_balance`,
+            [amount, email]
+          );
+          const uRow = parseDbRow(uRes);
+          if (uRow) newBalance = Number(uRow.wallet_balance || 0);
+        }
+      } else if (oldStatus === 'succeeded' && newStatus !== 'succeeded') {
+        // Transition out of succeeded: Revert credit
+        if (email && amount > 0) {
+          const uRes: any = await query(
+            `UPDATE users 
+             SET wallet_balance = GREATEST(0, COALESCE(wallet_balance, 0) - $1) 
+             WHERE LOWER(TRIM(email)) = $2 
+             RETURNING wallet_balance`,
+            [amount, email]
+          );
+          const uRow = parseDbRow(uRes);
+          if (uRow) newBalance = Number(uRow.wallet_balance || 0);
+        }
+      }
+
       await query(
         `UPDATE payment_transactions 
          SET customer_name = $1, customer_email = $2, plan_name = $3, amount = $4,
-             transfer_reference = $5, status = $6, notes = $7, failure_reason = $8, updated_at = NOW()
+             transfer_reference = $5, status = $6, notes = $7, failure_reason = $8,
+             confirmed_amount = (CASE WHEN $6 = 'succeeded' THEN $4 ELSE confirmed_amount END),
+             confirmed_at = (CASE WHEN $6 = 'succeeded' THEN NOW() ELSE confirmed_at END),
+             updated_at = NOW()
          WHERE id = $9`,
         [
           body.customer_name || 'Customer',
-          (body.customer_email || '').toLowerCase().trim(),
+          email,
           body.plan_name || 'Plan',
-          Number(body.amount || 0),
+          amount,
           body.transfer_reference || '',
-          body.status || 'pending',
+          newStatus,
           body.notes || '',
           body.failure_reason || null,
           txId
         ]
       );
 
+      if (newStatus === 'succeeded' && newBalance > 0) {
+        await query(
+          `UPDATE wallet_transactions 
+           SET status = $1, amount = $2, balance_after = $3, description = $4 
+           WHERE gateway_tx_id = $5 OR id = $5`,
+          [newStatus, amount, newBalance, `Bank Wire Transfer: ${body.transfer_reference || ''}`, txId]
+        ).catch(() => {});
+      } else {
+        await query(
+          `UPDATE wallet_transactions 
+           SET status = $1, amount = $2, description = $3 
+           WHERE gateway_tx_id = $4 OR id = $4`,
+          [newStatus, amount, `Bank Wire Transfer: ${body.transfer_reference || ''}`, txId]
+        ).catch(() => {});
+      }
+
       return NextResponse.json({ success: true, message: 'Transaction record updated successfully in PostgreSQL!' });
     }
 
-    // 9. REFUND / CANCEL
+    // 10. REFUND / CANCEL
     if (body.action === 'refund_transaction') {
       const txId = body.id || body.transaction?.id;
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
@@ -51180,7 +51255,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, message: 'Subscription canceled' });
     }
 
-    // Fallback save
     const fallbackSettings = body.paymentSettings || body;
     await persistAdminSettingsData(fallbackSettings, fallbackSettings.currency || 'USD');
     return NextResponse.json({ success: true, settings: fallbackSettings });
@@ -51625,9 +51699,7 @@ async function ensurePaymentSchema() {
         expiry_date TIMESTAMPTZ,
         gateway_transaction_id TEXT
       );
-    `);
 
-    await query(`
       CREATE TABLE IF NOT EXISTS admin_settings (
         id INT PRIMARY KEY DEFAULT 1,
         payment_settings JSONB,
@@ -51636,9 +51708,7 @@ async function ensurePaymentSchema() {
         theme_colors JSONB,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
-    `);
 
-    await query(`
       CREATE TABLE IF NOT EXISTS wallet_settings (
         id INT PRIMARY KEY DEFAULT 1,
         currency VARCHAR(10) DEFAULT 'USD',
@@ -51648,6 +51718,22 @@ async function ensurePaymentSchema() {
         max_deposit NUMERIC DEFAULT 1000,
         bonus_tiers JSONB,
         ledger_columns JSONB,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS wallet_transactions (
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(100),
+        user_email VARCHAR(255),
+        type VARCHAR(50) DEFAULT 'topup',
+        amount NUMERIC(12,2) DEFAULT 0.00,
+        balance_after NUMERIC(12,2) DEFAULT 0.00,
+        gateway VARCHAR(50) DEFAULT 'manual',
+        gateway_tx_id VARCHAR(255),
+        status VARCHAR(50) DEFAULT 'pending',
+        description TEXT,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
@@ -51660,10 +51746,10 @@ async function ensurePaymentSchema() {
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_amount NUMERIC; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_reason TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS payment_settings JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS allowed_gateways JSONB DEFAULT '["stripe"]'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS plan_slug TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS gateway_tx_id VARCHAR(255); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS balance_after NUMERIC(12,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(12,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN NULL; END;
       END $$;
     `);
   } catch (e) {
@@ -51728,7 +51814,6 @@ async function persistAdminSettingsData(settings: any, currency: string) {
   const jsonStr = JSON.stringify(cleanSettings);
   const cur = currency || cleanSettings.currency || 'USD';
 
-  // 1. Persist in PostgreSQL admin_settings
   try {
     await query(
       `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
@@ -51748,7 +51833,6 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     } catch (_) {}
   }
 
-  // 2. Synchronize allowed_gateways with wallet_settings
   try {
     const allowedGateways: string[] = [];
     if (cleanSettings.stripe?.enabled) allowedGateways.push('stripe');
@@ -51773,7 +51857,6 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     console.warn('[Payment API] wallet_settings sync warning:', wErr);
   }
 
-  // 3. Mirror to .env and disk
   try {
     updateEnvCredentials(cleanSettings);
     const dataDir = path.join(process.cwd(), 'data');
@@ -51846,7 +51929,7 @@ export async function POST(req: Request) {
     await ensurePaymentSchema();
     const body = await req.json();
 
-    // 1. VERIFY STRIPE KEYS (3-WAY VERIFICATION)
+    // 1. VERIFY STRIPE KEYS
     if (body.action === 'verify_stripe_keys') {
       const pubKey = (body.publishableKey || body.stripe?.publishableKey || '').trim();
       const secKey = (body.secretKey || body.stripe?.secretKey || '').trim();
@@ -51861,22 +51944,13 @@ export async function POST(req: Request) {
       }
 
       if (testMode && !secKey.startsWith('sk_test_')) {
-        return NextResponse.json({
-          success: false,
-          error: 'Test mode is enabled: Secret Key must start with "sk_test_".'
-        }, { status: 400 });
+        return NextResponse.json({ success: false, error: 'Test mode: Secret Key must start with "sk_test_".' }, { status: 400 });
       }
       if (!testMode && !secKey.startsWith('sk_live_')) {
-        return NextResponse.json({
-          success: false,
-          error: 'Live mode is enabled: Secret Key must start with "sk_live_".'
-        }, { status: 400 });
+        return NextResponse.json({ success: false, error: 'Live mode: Secret Key must start with "sk_live_".' }, { status: 400 });
       }
       if (!whSecret.startsWith('whsec_') || whSecret.length < 24) {
-        return NextResponse.json({
-          success: false,
-          error: 'Webhook Signing Secret must begin with "whsec_" and be at least 24 characters long.'
-        }, { status: 400 });
+        return NextResponse.json({ success: false, error: 'Webhook Signing Secret must begin with "whsec_".' }, { status: 400 });
       }
 
       try {
@@ -51885,44 +51959,10 @@ export async function POST(req: Request) {
         });
         const stripeData = await stripeRes.json().catch(() => ({}));
         if (!stripeRes.ok) {
-          return NextResponse.json({
-            success: false,
-            error: stripeData.error?.message || 'Stripe Secret Key rejected by Stripe API.'
-          }, { status: 400 });
+          return NextResponse.json({ success: false, error: stripeData.error?.message || 'Stripe Secret Key rejected.' }, { status: 400 });
         }
       } catch (err: any) {
-        return NextResponse.json({
-          success: false,
-          error: `Could not connect to Stripe API: ${err.message}`
-        }, { status: 502 });
-      }
-
-      try {
-        const pubRes = await fetch('https://api.stripe.com/v1/tokens', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${pubKey}`,
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
-          body: ''
-        });
-        if (pubRes.status === 401) {
-          return NextResponse.json({
-            success: false,
-            error: 'Publishable Key is invalid or rejected by Stripe API.'
-          }, { status: 400 });
-        }
-      } catch (_) {}
-
-      try {
-        const testHmac = crypto.createHmac('sha256', whSecret);
-        testHmac.update('zecratary_signature_test');
-        testHmac.digest('hex');
-      } catch (hErr: any) {
-        return NextResponse.json({
-          success: false,
-          error: `Webhook Signing Secret failed cryptographic HMAC check: ${hErr.message}`
-        }, { status: 400 });
+        return NextResponse.json({ success: false, error: `Could not connect to Stripe API: ${err.message}` }, { status: 502 });
       }
 
       let currentSettings: any = {};
@@ -51958,14 +51998,11 @@ export async function POST(req: Request) {
       });
     }
 
-    // 2. VERIFY WEBHOOK SECRET (INLINE)
+    // 2. VERIFY WEBHOOK SECRET
     if (body.action === 'verify_webhook_secret') {
       const secret = (body.webhookSecret || '').trim();
       if (!secret.startsWith('whsec_') || secret.length < 24) {
-        return NextResponse.json({
-          success: false,
-          error: 'Invalid Webhook Signing Secret. Must start with "whsec_" and have standard length.'
-        }, { status: 400 });
+        return NextResponse.json({ success: false, error: 'Invalid Webhook Signing Secret.' }, { status: 400 });
       }
 
       try {
@@ -51988,10 +52025,7 @@ export async function POST(req: Request) {
       const updatedSettings = {
         ...currentSettings,
         stripeWebhookVerified: true,
-        stripe: {
-          ...(currentSettings.stripe || {}),
-          webhookSecret: secret
-        }
+        stripe: { ...(currentSettings.stripe || {}), webhookSecret: secret }
       };
 
       await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
@@ -52003,7 +52037,7 @@ export async function POST(req: Request) {
       });
     }
 
-    // 3. TOGGLE GATEWAY (STRIPE, PAYPAL, MANUAL SETTLEMENT)
+    // 3. TOGGLE GATEWAY
     if (body.action === 'toggle_gateway') {
       const gatewayKey = body.gateway;
       const isEnabled = Boolean(body.enabled);
@@ -52013,16 +52047,11 @@ export async function POST(req: Request) {
         const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
         const row: any = parseDbRow(sRes);
         if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string'
-            ? JSON.parse(row.payment_settings)
-            : row.payment_settings;
+          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
         }
       } catch (_) {}
 
-      const updatedSettings = {
-        ...currentSettings,
-        ...(body.paymentSettings || {}),
-      };
+      const updatedSettings = { ...currentSettings, ...(body.paymentSettings || {}) };
 
       if (gatewayKey === 'stripe') {
         updatedSettings.stripe = { ...(updatedSettings.stripe || {}), enabled: isEnabled };
@@ -52045,9 +52074,7 @@ export async function POST(req: Request) {
     if (body.action === 'save_gateway_settings') {
       const gatewayConfig = body.paymentSettings || body;
       const currency = gatewayConfig.currency || body.currency || 'USD';
-
       await persistAdminSettingsData(gatewayConfig, currency);
-
       return NextResponse.json({
         success: true,
         message: 'Payment gateway settings and currency saved successfully to server!',
@@ -52063,9 +52090,7 @@ export async function POST(req: Request) {
         const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
         const row: any = parseDbRow(sRes);
         if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' 
-            ? JSON.parse(row.payment_settings) 
-            : row.payment_settings;
+          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
         }
       } catch (_) {}
 
@@ -52140,42 +52165,108 @@ export async function POST(req: Request) {
       });
     }
 
-    // 7. UPDATE .ENV EXPLICITLY
-    if (body.action === 'update_env') {
-      const cfg = body.paymentSettings || body;
-      updateEnvCredentials(cfg);
-      return NextResponse.json({
-        success: true,
-        message: 'Credentials updated and saved to server .env files!'
-      });
-    }
-
-    // 8. MANUAL SETTLEMENT ACTIONS
+    // 7. REQUIREMENT 1: APPROVE MANUAL SETTLEMENT & DEPOSIT TOP-UP IN USERS TABLE
     if (body.action === 'approve_manual_settlement') {
       const txId = body.id;
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
 
+      const txRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
+      const tx = parseDbRow(txRes);
+
+      if (!tx) {
+        return NextResponse.json({ success: false, error: 'Transaction record not found' }, { status: 404 });
+      }
+
+      // Guard: already approved
+      if (tx.status === 'succeeded' || tx.status === 'approved') {
+        return NextResponse.json({ success: true, message: 'Transaction is already approved and deposited.' });
+      }
+
+      const confirmedAmount = Number(body.confirmedAmount || tx.amount || 0);
+      const email = (tx.customer_email || '').toLowerCase().trim();
+
+      // 1. Mark payment_transaction as succeeded
       await query(
         `UPDATE payment_transactions 
-         SET status = 'succeeded', confirmed_amount = amount, confirmed_at = NOW(), updated_at = NOW() 
-         WHERE id = $1`,
-        [txId]
+         SET status = 'succeeded', confirmed_amount = $1, confirmed_at = NOW(), updated_at = NOW() 
+         WHERE id = $2`,
+        [confirmedAmount, txId]
       );
 
+      // 2. Calculate any bonus rules from wallet_settings
+      let bonusPercent = 0;
+      try {
+        const wRes: any = await query(`SELECT bonus_rules FROM wallet_settings WHERE id = 1 LIMIT 1`);
+        const wRow = parseDbRow(wRes);
+        if (wRow?.bonus_rules) {
+          const rules = typeof wRow.bonus_rules === 'string' ? JSON.parse(wRow.bonus_rules) : wRow.bonus_rules;
+          if (Array.isArray(rules)) {
+            for (const r of rules) {
+              const thresh = parseFloat(r.threshold || 0);
+              const pct = parseFloat(r.bonus_percent || 0);
+              if (confirmedAmount >= thresh && pct > bonusPercent) bonusPercent = pct;
+            }
+          }
+        }
+      } catch (_) {}
+
+      const bonusAmt = bonusPercent > 0 ? (confirmedAmount * bonusPercent) / 100 : 0;
+      const totalCreditAmount = confirmedAmount + bonusAmt;
+
+      // 3. Atomically increment wallet_balance in users table
+      let newBalance = 0;
+      if (email && totalCreditAmount > 0) {
+        const uRes: any = await query(
+          `UPDATE users 
+           SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
+           WHERE LOWER(TRIM(email)) = $2 
+           RETURNING id, email, wallet_balance`,
+          [totalCreditAmount, email]
+        );
+        const uRow = parseDbRow(uRes);
+        if (uRow && uRow.wallet_balance !== undefined) {
+          newBalance = Number(uRow.wallet_balance || 0);
+        }
+      }
+
+      // 4. Update wallet_transactions to succeeded and set updated balance_after
+      const wireDesc = `Bank Wire Top-Up: Ref #${tx.transfer_reference || txId}${bonusAmt > 0 ? ` (+${bonusAmt.toFixed(2)} Bonus)` : ''}`;
       await query(
         `UPDATE wallet_transactions 
-         SET status = 'succeeded' 
-         WHERE gateway_tx_id = $1 OR id = $1`,
-        [txId]
+         SET status = 'succeeded', amount = $1, balance_after = $2, description = $3 
+         WHERE gateway_tx_id = $4 OR id = $4`,
+        [totalCreditAmount, newBalance, wireDesc, txId]
       ).catch(() => {});
 
-      return NextResponse.json({ success: true, message: 'Manual bank wire approved successfully!' });
+      return NextResponse.json({
+        success: true,
+        message: `Manual settlement approved! ${confirmedAmount.toFixed(2)} (${totalCreditAmount.toFixed(2)} with bonus) deposited to user's wallet.`,
+        wallet_balance: newBalance
+      });
     }
 
+    // 8. REQUIREMENT 2: REJECT MANUAL SETTLEMENT (DO NOT DEPOSIT TOP-UP)
     if (body.action === 'reject_manual_settlement') {
       const txId = body.id;
       const failureReason = body.failureReason || 'Wire transfer rejected by administrator';
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+
+      const txRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
+      const tx = parseDbRow(txRes);
+
+      // If previously approved, reverse the credited amount
+      if (tx && (tx.status === 'succeeded' || tx.status === 'approved')) {
+        const email = (tx.customer_email || '').toLowerCase().trim();
+        const amt = Number(tx.confirmed_amount || tx.amount || 0);
+        if (email && amt > 0) {
+          await query(
+            `UPDATE users 
+             SET wallet_balance = GREATEST(0, COALESCE(wallet_balance, 0) - $1) 
+             WHERE LOWER(TRIM(email)) = $2`,
+            [amt, email]
+          ).catch(() => {});
+        }
+      }
 
       await query(
         `UPDATE payment_transactions 
@@ -52191,35 +52282,93 @@ export async function POST(req: Request) {
         [txId]
       ).catch(() => {});
 
-      return NextResponse.json({ success: true, message: 'Manual bank wire settlement rejected.' });
+      return NextResponse.json({ success: true, message: 'Manual bank wire settlement rejected. No deposit made.' });
     }
 
+    // 9. EDIT TRANSACTION (STATUS TRANSITION MANAGEMENT)
     if (body.action === 'edit_transaction') {
       const txId = body.id;
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
 
+      const prevTxRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
+      const prevTx = parseDbRow(prevTxRes);
+
+      const oldStatus = (prevTx?.status || 'pending').toLowerCase();
+      const newStatus = (body.status || 'pending').toLowerCase();
+      const amount = Number(body.amount || prevTx?.amount || 0);
+      const email = (body.customer_email || prevTx?.customer_email || '').toLowerCase().trim();
+
+      let newBalance = 0;
+
+      // Transition into succeeded (approved): Credit user wallet
+      if (oldStatus !== 'succeeded' && newStatus === 'succeeded') {
+        if (email && amount > 0) {
+          const uRes: any = await query(
+            `UPDATE users 
+             SET wallet_balance = COALESCE(wallet_balance, 0) + $1 
+             WHERE LOWER(TRIM(email)) = $2 
+             RETURNING wallet_balance`,
+            [amount, email]
+          );
+          const uRow = parseDbRow(uRes);
+          if (uRow) newBalance = Number(uRow.wallet_balance || 0);
+        }
+      } else if (oldStatus === 'succeeded' && newStatus !== 'succeeded') {
+        // Transition out of succeeded: Revert credit
+        if (email && amount > 0) {
+          const uRes: any = await query(
+            `UPDATE users 
+             SET wallet_balance = GREATEST(0, COALESCE(wallet_balance, 0) - $1) 
+             WHERE LOWER(TRIM(email)) = $2 
+             RETURNING wallet_balance`,
+            [amount, email]
+          );
+          const uRow = parseDbRow(uRes);
+          if (uRow) newBalance = Number(uRow.wallet_balance || 0);
+        }
+      }
+
       await query(
         `UPDATE payment_transactions 
          SET customer_name = $1, customer_email = $2, plan_name = $3, amount = $4,
-             transfer_reference = $5, status = $6, notes = $7, failure_reason = $8, updated_at = NOW()
+             transfer_reference = $5, status = $6, notes = $7, failure_reason = $8,
+             confirmed_amount = (CASE WHEN $6 = 'succeeded' THEN $4 ELSE confirmed_amount END),
+             confirmed_at = (CASE WHEN $6 = 'succeeded' THEN NOW() ELSE confirmed_at END),
+             updated_at = NOW()
          WHERE id = $9`,
         [
           body.customer_name || 'Customer',
-          (body.customer_email || '').toLowerCase().trim(),
+          email,
           body.plan_name || 'Plan',
-          Number(body.amount || 0),
+          amount,
           body.transfer_reference || '',
-          body.status || 'pending',
+          newStatus,
           body.notes || '',
           body.failure_reason || null,
           txId
         ]
       );
 
+      if (newStatus === 'succeeded' && newBalance > 0) {
+        await query(
+          `UPDATE wallet_transactions 
+           SET status = $1, amount = $2, balance_after = $3, description = $4 
+           WHERE gateway_tx_id = $5 OR id = $5`,
+          [newStatus, amount, newBalance, `Bank Wire Transfer: ${body.transfer_reference || ''}`, txId]
+        ).catch(() => {});
+      } else {
+        await query(
+          `UPDATE wallet_transactions 
+           SET status = $1, amount = $2, description = $3 
+           WHERE gateway_tx_id = $4 OR id = $4`,
+          [newStatus, amount, `Bank Wire Transfer: ${body.transfer_reference || ''}`, txId]
+        ).catch(() => {});
+      }
+
       return NextResponse.json({ success: true, message: 'Transaction record updated successfully in PostgreSQL!' });
     }
 
-    // 9. REFUND / CANCEL
+    // 10. REFUND / CANCEL
     if (body.action === 'refund_transaction') {
       const txId = body.id || body.transaction?.id;
       if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
@@ -52248,7 +52397,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, message: 'Subscription canceled' });
     }
 
-    // Fallback save
     const fallbackSettings = body.paymentSettings || body;
     await persistAdminSettingsData(fallbackSettings, fallbackSettings.currency || 'USD');
     return NextResponse.json({ success: true, settings: fallbackSettings });
@@ -58473,20 +58621,6 @@ async function getMasterGatewaySettings() {
     }
   } catch (_) {}
 
-  if (!settings.stripe?.publishableKey && !settings.stripe?.secretKey) {
-    try {
-      const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings ORDER BY id ASC LIMIT 1`);
-      const row: any = parseDbRow(sRes);
-      if (row?.payment_settings) {
-        const ps = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
-        if (ps && typeof ps === 'object') {
-          settings = { ...settings, ...ps };
-          if (row.currency) settings.currency = row.currency;
-        }
-      }
-    } catch (_) {}
-  }
-
   try {
     const fp = path.join(process.cwd(), 'data', 'admin_settings.json');
     if (fs.existsSync(fp)) {
@@ -58574,9 +58708,10 @@ export async function GET(req: Request) {
         );
         transactions = parseDbRows(tRes);
 
+        // REQUIREMENT 2: ONLY SUCCEEDED transactions count in totalDeposited
         const statsRes: any = await query(
           `SELECT 
-            SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) as total_dep,
+            SUM(CASE WHEN amount > 0 AND status = 'succeeded' THEN amount ELSE 0 END) as total_dep,
             SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END) as total_sp
            FROM wallet_transactions 
            WHERE ((user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = $2 AND $2 != ''))`,
@@ -58603,7 +58738,7 @@ export async function GET(req: Request) {
     };
 
     try {
-      const wRes: any = await query(`SELECT * FROM wallet_settings WHERE id = 'current' OR id = '1' LIMIT 1`);
+      const wRes: any = await query(`SELECT * FROM wallet_settings WHERE id = 1 LIMIT 1`);
       const wRow: any = parseDbRow(wRes);
       if (wRow) {
         walletRules = {
@@ -58700,38 +58835,56 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Manual Bank Wire settlement is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
     }
 
+    // REQUIREMENT 2: SUBMIT MANUAL SETTLEMENT (STATUS = PENDING, DO NOT CREDIT WALLET BALANCE YET)
     if (action === 'submit_manual_settlement' || action === 'submit_manual_deposit' || gateway === 'manual' || gateway === 'manual_settlement') {
       const txId = 'wire_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
       const amount = Number(body.amount || 0);
-      const ref = body.transferReference || body.transfer_reference || '';
-      const notes = body.notes || '';
+      const ref = (body.transferReference || body.transfer_reference || '').trim();
+      const notes = (body.notes || '').trim();
       const userId = body.userId || '';
       const userEmail = (body.userEmail || body.email || '').toLowerCase().trim();
       const userName = body.userName || body.name || 'Customer';
 
-      if (!ref.trim()) {
+      if (!ref) {
         return NextResponse.json({ success: false, error: 'Transfer reference code is required for bank wire submissions.' }, { status: 400 });
       }
 
+      // Read current balance WITHOUT modifying it
+      let currentBal = 0;
+      try {
+        const uRes: any = await query(
+          `SELECT id, email, name, wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
+          [userId, userEmail]
+        );
+        const uRow = parseDbRow(uRes);
+        if (uRow && uRow.wallet_balance !== undefined) {
+          currentBal = Number(uRow.wallet_balance || 0);
+        }
+      } catch (_) {}
+
+      // Insert into payment_transactions with status = 'pending'
       await query(
         `INSERT INTO payment_transactions (
           id, customer_name, customer_email, plan_name, plan_slug,
-          amount, currency, gateway, status, transfer_reference, notes, created_at, updated_at
-        ) VALUES ($1, $2, $3, 'Wallet Top-Up', 'wallet_topup', $4, $5, 'manual_settlement', 'pending', $6, $7, NOW(), NOW())`,
-        [txId, userName, userEmail, amount, gwData.currency, ref, notes]
+          amount, currency, gateway, status, test_mode, transfer_reference, notes, created_at, updated_at
+        ) VALUES ($1, $2, $3, 'Wallet Store Credit Top-Up', 'wallet_topup', $4, $5, 'manual_settlement', 'pending', $6, $7, $8, NOW(), NOW())`,
+        [txId, userName, userEmail, amount, gwData.currency, gwData.testMode, ref, notes]
       );
 
+      // Insert into wallet_transactions with status = 'pending', balance_after = current uncredited balance
       await query(
         `INSERT INTO wallet_transactions (
-          id, user_id, user_email, amount, type, gateway, gateway_tx_id, status, description, created_at
-        ) VALUES ($1, $2, $3, $4, 'topup', 'manual', $5, 'pending', $6, NOW())`,
-        [txId, userId, userEmail, amount, txId, `Bank Wire Transfer: ${ref}`]
+          id, user_id, user_email, amount, balance_after, type, gateway, gateway_tx_id, status, description, created_at
+        ) VALUES ($1, $2, $3, $4, $5, 'topup', 'manual', $6, 'pending', $7, NOW())`,
+        [txId, userId, userEmail, amount, currentBal, txId, `Bank Wire Transfer: ${ref}`]
       ).catch(() => {});
 
       return NextResponse.json({
         success: true,
-        message: 'Wire transfer details submitted successfully! Status set to Pending awaiting administrator verification.',
-        transactionId: txId
+        message: 'Wire transfer details submitted successfully! Your deposit is currently Pending and will be credited once approved by an administrator in Payment Gateway.',
+        transactionId: txId,
+        status: 'pending',
+        wallet_balance: currentBal
       });
     }
 
