@@ -3,6 +3,20 @@ import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
+export const dynamic = 'force-dynamic';
+
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
+  return [];
+}
+
+function parseDbRow<T = any>(res: any): T | null {
+  const rows = parseDbRows<T>(res);
+  return rows.length > 0 ? rows[0] : null;
+}
+
 async function getMasterGatewaySettings() {
   let settings: any = {
     currency: 'USD',
@@ -22,10 +36,9 @@ async function getMasterGatewaySettings() {
     }
   };
 
-  // 1. PostgreSQL admin_settings query
   try {
-    const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-    const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+    const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+    const row: any = parseDbRow(sRes);
     if (row?.payment_settings) {
       const ps = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
       if (ps && typeof ps === 'object') {
@@ -35,11 +48,10 @@ async function getMasterGatewaySettings() {
     }
   } catch (_) {}
 
-  // 1.1 Fallback query across admin_settings
   if (!settings.stripe?.publishableKey && !settings.stripe?.secretKey) {
     try {
-      const sRes = await query(`SELECT payment_settings, currency FROM admin_settings ORDER BY id ASC LIMIT 1`);
-      const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings ORDER BY id ASC LIMIT 1`);
+      const row: any = parseDbRow(sRes);
       if (row?.payment_settings) {
         const ps = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
         if (ps && typeof ps === 'object') {
@@ -50,7 +62,6 @@ async function getMasterGatewaySettings() {
     } catch (_) {}
   }
 
-  // 2. File fallback mirror
   try {
     const fp = path.join(process.cwd(), 'data', 'admin_settings.json');
     if (fs.existsSync(fp)) {
@@ -101,19 +112,17 @@ export async function GET(req: Request) {
     let totalDeposited = 0;
     let totalSpent = 0;
 
-    // Fetch user balance
     if (userId || userEmail) {
       try {
-        const uRes = await query(
+        const uRes: any = await query(
           `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
           [userId, userEmail]
         );
-        const uRow = Array.isArray(uRes) ? uRes[0] : uRes?.rows?.[0];
+        const uRow: any = parseDbRow(uRes);
         if (uRow && uRow.wallet_balance !== undefined) {
           balance = Number(uRow.wallet_balance || 0);
         }
 
-        // Transactions query with filtering and pagination
         let queryParams: any[] = [userId, userEmail];
         let whereClauses = [`((user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = $2 AND $2 != ''))`];
 
@@ -128,20 +137,19 @@ export async function GET(req: Request) {
         }
 
         const whereSql = whereClauses.join(' AND ');
-        const countRes = await query(`SELECT COUNT(*) as count FROM wallet_transactions WHERE ${whereSql}`, queryParams);
-        const countRow = Array.isArray(countRes) ? countRes[0] : countRes?.rows?.[0];
+        const countRes: any = await query(`SELECT COUNT(*) as count FROM wallet_transactions WHERE ${whereSql}`, queryParams);
+        const countRow: any = parseDbRow(countRes);
         totalCount = parseInt(countRow?.count || '0', 10);
 
         const offset = (page - 1) * limit;
         queryParams.push(limit, offset);
-        const tRes = await query(
+        const tRes: any = await query(
           `SELECT * FROM wallet_transactions WHERE ${whereSql} ORDER BY created_at DESC LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`,
           queryParams
         );
-        transactions = Array.isArray(tRes) ? tRes : (tRes?.rows || []);
+        transactions = parseDbRows(tRes);
 
-        // Aggregate statistics
-        const statsRes = await query(
+        const statsRes: any = await query(
           `SELECT 
             SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) as total_dep,
             SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END) as total_sp
@@ -149,7 +157,7 @@ export async function GET(req: Request) {
            WHERE ((user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = $2 AND $2 != ''))`,
           [userId, userEmail]
         );
-        const statsRow = Array.isArray(statsRes) ? statsRes[0] : statsRes?.rows?.[0];
+        const statsRow: any = parseDbRow(statsRes);
         totalDeposited = Number(statsRow?.total_dep || 0);
         totalSpent = Number(statsRow?.total_sp || 0);
       } catch (dbErr) {
@@ -157,7 +165,6 @@ export async function GET(req: Request) {
       }
     }
 
-    // Load Wallet Configuration rules
     let walletRules: any = {
       is_enabled: true,
       min_topup: 5.00,
@@ -171,8 +178,8 @@ export async function GET(req: Request) {
     };
 
     try {
-      const wRes = await query(`SELECT * FROM wallet_settings WHERE id = 'current' OR id = '1' LIMIT 1`);
-      const wRow = Array.isArray(wRes) ? wRes[0] : wRes?.rows?.[0];
+      const wRes: any = await query(`SELECT * FROM wallet_settings WHERE id = 'current' OR id = '1' LIMIT 1`);
+      const wRow: any = parseDbRow(wRes);
       if (wRow) {
         walletRules = {
           ...walletRules,
@@ -258,7 +265,6 @@ export async function POST(req: Request) {
     const action = body.action || '';
     const gateway = (body.gateway || '').toLowerCase();
 
-    // Enforce active gateway restrictions
     if ((gateway === 'stripe' || action === 'create_stripe_session') && !gwData.stripeEnabled) {
       return NextResponse.json({ success: false, error: 'Credit Card (Stripe) is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
     }
@@ -269,7 +275,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Manual Bank Wire settlement is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
     }
 
-    // Submit Manual Bank Wire Deposit
     if (action === 'submit_manual_settlement' || action === 'submit_manual_deposit' || gateway === 'manual' || gateway === 'manual_settlement') {
       const txId = 'wire_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
       const amount = Number(body.amount || 0);

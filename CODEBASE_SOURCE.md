@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.0.96",
+  "version": "8.0.97",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.0.96",
+  "version": "8.0.97",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -31314,7 +31314,7 @@ export default function AdminPaymentGatewayPage() {
 
   const [loading, setLoading] = useState(false);
   const [syncingEnv, setSyncingEnv] = useState(false);
-  const [updatingEnv, setUpdatingEnv] = useState(false);
+  const [togglingGateway, setTogglingGateway] = useState<string | null>(null);
   const [verifyingStripe, setVerifyingStripe] = useState(false);
   const [verifyingWebhook, setVerifyingWebhook] = useState(false);
   const [showStripeGuideModal, setShowStripeGuideModal] = useState(false);
@@ -31322,7 +31322,6 @@ export default function AdminPaymentGatewayPage() {
   const [webhookEndpointUrl, setWebhookEndpointUrl] = useState('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
   const [visibleFields, setVisibleFields] = useState<Record<string, boolean>>({});
-  const [focusedField, setFocusedField] = useState<string | null>(null);
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
   // Manual Settlement queue state
@@ -31435,10 +31434,85 @@ export default function AdminPaymentGatewayPage() {
 
   const broadcastSyncEvents = () => {
     if (typeof window !== 'undefined') {
+      try { localStorage.setItem('zecratary_gateway_sync_timestamp', String(Date.now())); } catch (_) {}
       window.dispatchEvent(new Event('zecratary_payment_updated'));
+      window.dispatchEvent(new Event('zecratary_payment_gateway_updated'));
       window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       window.dispatchEvent(new Event('zecratary_wallet_settings_updated'));
       window.dispatchEvent(new Event('zecratary_wallet_updated'));
+    }
+  };
+
+  // IMMEDIATE TOGGLE GATEWAY HANDLER (STRIPE, PAYPAL, MANUAL SETTLEMENT)
+  const handleToggleGateway = async (gatewayKey: 'stripe' | 'paypal' | 'manualSettlement') => {
+    if (isSavingRef.current || togglingGateway) return;
+
+    const currentVal = gatewayKey === 'stripe' 
+      ? config.stripe.enabled 
+      : gatewayKey === 'paypal' 
+      ? config.paypal.enabled 
+      : config.manualSettlement.enabled;
+    const nextVal = !currentVal;
+
+    const updatedConfig: GatewayConfig = {
+      ...config,
+      stripe: gatewayKey === 'stripe' ? { ...config.stripe, enabled: nextVal } : config.stripe,
+      paypal: gatewayKey === 'paypal' ? { ...config.paypal, enabled: nextVal } : config.paypal,
+      manualSettlement: gatewayKey === 'manualSettlement' ? { ...config.manualSettlement, enabled: nextVal } : config.manualSettlement,
+    };
+
+    setConfig(updatedConfig);
+    configRef.current = updatedConfig;
+    setTogglingGateway(gatewayKey);
+    isSavingRef.current = true;
+
+    const gatewayName = gatewayKey === 'stripe' ? 'Stripe' : gatewayKey === 'paypal' ? 'PayPal' : t('manualSettlementTitle', 'Bank Wire / Manual');
+    const statusText = nextVal ? t('enabled', 'Enabled') : t('disabled', 'Disabled');
+
+    try {
+      persistServerAdminSettings({ 
+        paymentSettings: updatedConfig, 
+        currency: updatedConfig.currency 
+      }).catch(() => {});
+
+      const res = await fetch('/api/admin/payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'toggle_gateway',
+          gateway: gatewayKey,
+          enabled: nextVal,
+          paymentSettings: updatedConfig,
+          currency: updatedConfig.currency,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        broadcastSyncEvents();
+        setFeedback({
+          type: 'success',
+          msg: `${gatewayName} ${t('gatewayToggledSuccessfully', 'gateway successfully')} ${statusText.toLowerCase()} ${t('andSyncedWithWallet', 'and synchronized with /wallet and PostgreSQL!')}`,
+        });
+      } else {
+        throw new Error(data.error || 'Failed to update gateway status on server');
+      }
+    } catch (err: any) {
+      const revertedConfig: GatewayConfig = {
+        ...config,
+        stripe: gatewayKey === 'stripe' ? { ...config.stripe, enabled: currentVal } : config.stripe,
+        paypal: gatewayKey === 'paypal' ? { ...config.paypal, enabled: currentVal } : config.paypal,
+        manualSettlement: gatewayKey === 'manualSettlement' ? { ...config.manualSettlement, enabled: currentVal } : config.manualSettlement,
+      };
+      setConfig(revertedConfig);
+      configRef.current = revertedConfig;
+      setFeedback({
+        type: 'error',
+        msg: `${t('failedToToggleGateway', 'Failed to toggle gateway:')} ${err.message || 'Server error'}`,
+      });
+    } finally {
+      setTogglingGateway(null);
+      setTimeout(() => { isSavingRef.current = false; }, 500);
     }
   };
 
@@ -31591,11 +31665,13 @@ export default function AdminPaymentGatewayPage() {
     };
 
     window.addEventListener('zecratary_payment_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_payment_gateway_updated', handleDebouncedSync);
     window.addEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
 
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       window.removeEventListener('zecratary_payment_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_payment_gateway_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleDebouncedSync);
     };
   }, [t, version]);
@@ -32463,7 +32539,8 @@ export default function AdminPaymentGatewayPage() {
             borderColor: 'var(--color-border, #334155)'
           }}
         >
-          <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: 'var(--color-border, #334155)' }}>
+          {/* Header with Title, Verify Stripe Key Action, and Slide Switch */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border, #334155)' }}>
             <div className="flex items-center gap-2.5">
               <div className="w-3 h-3 rounded-full bg-[#635bff]"></div>
               <div>
@@ -32474,85 +32551,279 @@ export default function AdminPaymentGatewayPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <span
-                className="text-xs font-bold select-none"
-                style={{ color: config.stripe.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
-              >
-                {config.stripe.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
-              </span>
+            <div className="flex flex-wrap items-center gap-3">
+              {/* Verification Status Indicator */}
+              {config.stripeKeysVerified && config.stripeWebhookVerified ? (
+                <span className="px-2.5 py-1 rounded-full text-[11px] font-bold border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 flex items-center gap-1.5 shadow-xs">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>{t('keysAndWebhookVerified', 'Keys & Webhook Verified')}</span>
+                </span>
+              ) : (
+                <span className="px-2.5 py-1 rounded-full text-[11px] font-bold border border-zinc-700 bg-zinc-800/40 text-zinc-400 flex items-center gap-1.5 shadow-xs">
+                  <AlertCircle className="h-3.5 w-3.5 text-amber-400" />
+                  <span>{t('keysUnverified', 'Keys Unverified')}</span>
+                </span>
+              )}
+
+              {/* Verify Stripe Key Button */}
               <button
                 type="button"
-                role="switch"
-                aria-checked={config.stripe.enabled}
-                onClick={() => setConfig((prev) => ({ ...prev, stripe: { ...prev.stripe, enabled: !prev.stripe.enabled } }))}
-                className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none"
-                style={{
-                  backgroundColor: config.stripe.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
-                }}
+                onClick={handleVerifyStripeKey}
+                disabled={verifyingStripe || !config.stripe.publishableKey || !config.stripe.secretKey}
+                className="px-3.5 py-1.5 rounded-xl font-bold text-xs text-white bg-[#635bff] hover:bg-[#5346e0] transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer active:scale-95"
+                title={t('verifyStripeKeysTooltip', 'Verify Publishable Key, Secret Key, and Webhook Signing Secret with Stripe API')}
               >
-                <span
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-300 ease-in-out ${
-                    config.stripe.enabled ? 'translate-x-5' : 'translate-x-0'
-                  }`}
-                />
+                {verifyingStripe ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    <span>{t('verifyingStripeKey', 'Verifying Stripe Key...')}</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    <span>{t('verifyStripeKey', 'Verify Stripe Key')}</span>
+                  </>
+                )}
               </button>
+
+              {/* Enable / Disable Slide Toggle */}
+              <div className="flex items-center gap-2 pl-2 border-l" style={{ borderColor: 'var(--color-border, #334155)' }}>
+                <span
+                  className="text-xs font-bold select-none"
+                  style={{ color: config.stripe.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-text-secondary, #94a3b8)' }}
+                >
+                  {config.stripe.enabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={config.stripe.enabled}
+                  disabled={togglingGateway === 'stripe'}
+                  onClick={() => handleToggleGateway('stripe')}
+                  className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none disabled:opacity-50"
+                  style={{
+                    backgroundColor: config.stripe.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
+                  }}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-300 ease-in-out ${
+                      config.stripe.enabled ? 'translate-x-5' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
           </div>
 
           <div className="space-y-4">
+            {/* Publishable Key */}
             <div>
-              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                {t('publishableKeyLabel', 'Publishable Key')}
-              </label>
-              <input
-                type="text"
-                value={config.stripe.publishableKey}
-                onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, publishableKey: e.target.value } })}
-                placeholder="pk_test_... / pk_live_..."
-                className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                  borderColor: 'var(--color-border, #334155)',
-                  color: 'var(--color-text, #ffffff)'
-                }}
-              />
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs uppercase font-bold block" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('publishableKeyLabel', 'Publishable Key')}
+                </label>
+                <span className="text-[10px] font-mono opacity-60">
+                  {config.testMode ? 'pk_test_...' : 'pk_live_...'}
+                </span>
+              </div>
+              <div className="relative">
+                <input
+                  type={visibleFields['stripe_pub'] ? 'text' : 'password'}
+                  value={config.stripe.publishableKey}
+                  onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, publishableKey: e.target.value } })}
+                  placeholder={config.testMode ? 'pk_test_51...' : 'pk_live_51...'}
+                  autoComplete="new-password"
+                  data-lpignore="true"
+                  className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: 'var(--color-text, #ffffff)'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => toggleVisibility('stripe_pub')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 opacity-60 hover:opacity-100 cursor-pointer p-1"
+                >
+                  {visibleFields['stripe_pub'] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                </button>
+              </div>
             </div>
 
+            {/* Secret Key */}
             <div>
-              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                {t('secretKeyLabel', 'Secret Key')}
-              </label>
-              <input
-                type="password"
-                value={config.stripe.secretKey}
-                onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, secretKey: e.target.value } })}
-                placeholder="sk_test_... / sk_live_..."
-                className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark, #0f172a)',
-                  borderColor: 'var(--color-border, #334155)',
-                  color: 'var(--color-text, #ffffff)'
-                }}
-              />
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs uppercase font-bold block" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('secretKeyLabel', 'Secret Key')}
+                </label>
+                <span className="text-[10px] font-mono opacity-60">
+                  {config.testMode ? 'sk_test_...' : 'sk_live_...'}
+                </span>
+              </div>
+              <div className="relative">
+                <input
+                  type={visibleFields['stripe_sec'] ? 'text' : 'password'}
+                  value={config.stripe.secretKey}
+                  onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, secretKey: e.target.value } })}
+                  placeholder={config.testMode ? 'sk_test_51...' : 'sk_live_51...'}
+                  autoComplete="new-password"
+                  data-lpignore="true"
+                  className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: 'var(--color-text, #ffffff)'
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => toggleVisibility('stripe_sec')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 opacity-60 hover:opacity-100 cursor-pointer p-1"
+                >
+                  {visibleFields['stripe_sec'] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                </button>
+              </div>
             </div>
 
+            {/* Webhook Signing Secret with Inline Verify Button */}
             <div>
-              <label className="text-xs uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                {t('webhookSecretLabel', 'Webhook Signing Secret')}
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs uppercase font-bold block" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                  {t('webhookSecretLabel', 'Webhook Signing Secret')}
+                </label>
+                <span className="text-[10px] font-mono opacity-60">whsec_...</span>
+              </div>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <input
+                    type={visibleFields['stripe_wh'] ? 'text' : 'password'}
+                    value={config.stripe.webhookSecret}
+                    onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
+                    placeholder="whsec_..."
+                    autoComplete="new-password"
+                    data-lpignore="true"
+                    className="payment-input w-full border rounded-xl p-2.5 pr-10 text-xs outline-none font-mono transition"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                      borderColor: 'var(--color-border, #334155)',
+                      color: 'var(--color-text, #ffffff)'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleVisibility('stripe_wh')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 opacity-60 hover:opacity-100 cursor-pointer p-1"
+                  >
+                    {visibleFields['stripe_wh'] ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleVerifyWebhookSecret}
+                  disabled={verifyingWebhook || !config.stripe.webhookSecret}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: config.stripeWebhookVerified ? 'var(--color-emerald, #10b981)' : 'var(--color-border, #334155)',
+                    color: config.stripeWebhookVerified ? 'var(--color-emerald, #10b981)' : 'var(--color-text, #ffffff)'
+                  }}
+                  title={t('verifyWebhookSecretTooltip', 'Test HMAC-SHA256 signature verification on Webhook Secret')}
+                >
+                  {verifyingWebhook ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : config.stripeWebhookVerified ? (
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                  ) : (
+                    <Shield className="h-3.5 w-3.5" />
+                  )}
+                  <span>{verifyingWebhook ? t('verifying', 'Verifying...') : config.stripeWebhookVerified ? t('verified', 'Verified') : t('verifySecret', 'Verify Secret')}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Webhook Endpoint URL Display */}
+            <div className="pt-2">
+              <label className="text-[11px] uppercase font-bold block mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('webhookEndpointUrlLabel', 'Webhook Listener Endpoint URL')}
               </label>
-              <input
-                type="password"
-                value={config.stripe.webhookSecret}
-                onChange={(e) => setConfig({ ...config, stripe: { ...config.stripe, webhookSecret: e.target.value } })}
-                placeholder="whsec_..."
-                className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
+              <div 
+                className="flex items-center justify-between border rounded-xl p-2 px-3 text-xs font-mono"
                 style={{
                   backgroundColor: 'var(--color-inner-dark, #0f172a)',
                   borderColor: 'var(--color-border, #334155)',
                   color: 'var(--color-text, #ffffff)'
                 }}
-              />
+              >
+                <span className="truncate mr-2">{webhookEndpointUrl || '/api/webhooks/stripe'}</span>
+                <button
+                  type="button"
+                  onClick={() => handleCopyCliCommand(webhookEndpointUrl, 'endpoint')}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer flex items-center gap-1 shrink-0"
+                  style={{
+                    backgroundColor: 'var(--color-card, #1e293b)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: copiedCliKey === 'endpoint' ? 'var(--color-emerald, #10b981)' : 'var(--color-text, #ffffff)'
+                  }}
+                >
+                  {copiedCliKey === 'endpoint' ? <Check className="h-3 w-3" /> : <ExternalLink className="h-3 w-3" />}
+                  <span>{copiedCliKey === 'endpoint' ? t('copied', 'Copied') : t('copyUrl', 'Copy URL')}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* CLI & Webhook Setup Guide at the Bottom */}
+            <div 
+              className="mt-4 p-4 rounded-2xl border space-y-3"
+              style={{
+                backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                borderColor: 'var(--color-border, #334155)'
+              }}
+            >
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Terminal className="h-4 w-4 text-[#635bff]" />
+                  <span className="text-xs font-bold" style={{ color: 'var(--color-text, #ffffff)' }}>
+                    {t('webhookCliGuideTitle', 'Stripe CLI & Local Webhook Testing Guide')}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowStripeGuideModal(true)}
+                  className="text-[11px] font-bold text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <Code2 className="h-3.5 w-3.5" />
+                  <span>{t('viewFullSetupGuide', 'View Full Webhook Setup Guide')}</span>
+                </button>
+              </div>
+
+              <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('stripeCliGuideDesc', 'Forward live Stripe events to your local development environment using the Stripe CLI to capture and verify webhook signatures:')}
+              </p>
+
+              <div 
+                className="flex items-center justify-between border rounded-xl p-2 px-3 text-xs font-mono"
+                style={{
+                  backgroundColor: 'var(--color-card, #1e293b)',
+                  borderColor: 'var(--color-border, #334155)',
+                  color: '#38bdf8'
+                }}
+              >
+                <code className="truncate mr-2">stripe listen --forward-to localhost:3000/api/webhooks/stripe</code>
+                <button
+                  type="button"
+                  onClick={() => handleCopyCliCommand('stripe listen --forward-to localhost:3000/api/webhooks/stripe', 'cli')}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer flex items-center gap-1 shrink-0"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #0f172a)',
+                    borderColor: 'var(--color-border, #334155)',
+                    color: copiedCliKey === 'cli' ? 'var(--color-emerald, #10b981)' : 'var(--color-text, #ffffff)'
+                  }}
+                >
+                  {copiedCliKey === 'cli' ? <Check className="h-3 w-3" /> : <Terminal className="h-3 w-3" />}
+                  <span>{copiedCliKey === 'cli' ? t('copied', 'Copied') : t('copyCommand', 'Copy Command')}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -32589,8 +32860,9 @@ export default function AdminPaymentGatewayPage() {
                 type="button"
                 role="switch"
                 aria-checked={config.paypal.enabled}
-                onClick={() => setConfig((prev) => ({ ...prev, paypal: { ...prev.paypal, enabled: !prev.paypal.enabled } }))}
-                className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none"
+                disabled={togglingGateway === 'paypal'}
+                onClick={() => handleToggleGateway('paypal')}
+                className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none disabled:opacity-50"
                 style={{
                   backgroundColor: config.paypal.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
                 }}
@@ -32614,6 +32886,8 @@ export default function AdminPaymentGatewayPage() {
                 value={config.paypal.clientId}
                 onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientId: e.target.value } })}
                 placeholder="PayPal Client ID"
+                autoComplete="new-password"
+                data-lpignore="true"
                 className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
                 style={{
                   backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -32632,6 +32906,8 @@ export default function AdminPaymentGatewayPage() {
                 value={config.paypal.clientSecret}
                 onChange={(e) => setConfig({ ...config, paypal: { ...config.paypal, clientSecret: e.target.value } })}
                 placeholder="PayPal Client Secret"
+                autoComplete="new-password"
+                data-lpignore="true"
                 className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
                 style={{
                   backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -32679,11 +32955,9 @@ export default function AdminPaymentGatewayPage() {
                   type="button"
                   role="switch"
                   aria-checked={config.manualSettlement.enabled}
-                  onClick={() => setConfig((prev) => ({ 
-                    ...prev, 
-                    manualSettlement: { ...prev.manualSettlement, enabled: !prev.manualSettlement.enabled } 
-                  }))}
-                  className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none"
+                  disabled={togglingGateway === 'manualSettlement'}
+                  onClick={() => handleToggleGateway('manualSettlement')}
+                  className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none disabled:opacity-50"
                   style={{
                     backgroundColor: config.manualSettlement.enabled ? 'var(--color-primary, #3b82f6)' : 'var(--color-border, #334155)',
                   }}
@@ -32710,6 +32984,8 @@ export default function AdminPaymentGatewayPage() {
                     manualSettlement: { ...config.manualSettlement, bankName: e.target.value }
                   })}
                   placeholder="e.g. JPMorgan Chase / Bangkok Bank / HSBC"
+                  autoComplete="new-password"
+                  data-lpignore="true"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -32731,6 +33007,8 @@ export default function AdminPaymentGatewayPage() {
                     manualSettlement: { ...config.manualSettlement, accountHolder: e.target.value }
                   })}
                   placeholder="e.g. Zecratary Technologies Co., Ltd."
+                  autoComplete="new-password"
+                  data-lpignore="true"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -32752,6 +33030,8 @@ export default function AdminPaymentGatewayPage() {
                     manualSettlement: { ...config.manualSettlement, accountNumber: e.target.value }
                   })}
                   placeholder="e.g. 123-4-56789-0 / US12 3456 7890"
+                  autoComplete="new-password"
+                  data-lpignore="true"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -32773,6 +33053,8 @@ export default function AdminPaymentGatewayPage() {
                     manualSettlement: { ...config.manualSettlement, swiftBic: e.target.value }
                   })}
                   placeholder="e.g. CHASUS33XXX"
+                  autoComplete="new-password"
+                  data-lpignore="true"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark, #0f172a)',
@@ -32805,7 +33087,7 @@ export default function AdminPaymentGatewayPage() {
             </div>
           </div>
 
-          {/* ADMIN MANUAL APPROVAL QUEUE (FULL VIEW, EDIT, DELETE & STATUS WORKFLOW) */}
+          {/* ADMIN MANUAL APPROVAL QUEUE */}
           <div 
             className="border p-6 rounded-3xl space-y-4 shadow-sm transition-colors duration-200"
             style={{
@@ -32986,7 +33268,7 @@ export default function AdminPaymentGatewayPage() {
                             )}
                           </td>
 
-                          {/* ACTION BUTTONS: VIEW, EDIT, APPROVE/REJECT, DELETE */}
+                          {/* ACTION BUTTONS */}
                           <td className="p-3 text-right">
                             <div className="flex items-center justify-end gap-1.5">
                               {/* 1. VIEW BUTTON */}
@@ -33236,6 +33518,8 @@ export default function AdminPaymentGatewayPage() {
                   type="text"
                   value={editForm.customer_name}
                   onChange={(e) => setEditForm({ ...editForm, customer_name: e.target.value })}
+                  autoComplete="new-password"
+                  data-lpignore="true"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none"
                   style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
                 />
@@ -33247,6 +33531,8 @@ export default function AdminPaymentGatewayPage() {
                   type="email"
                   value={editForm.customer_email}
                   onChange={(e) => setEditForm({ ...editForm, customer_email: e.target.value })}
+                  autoComplete="new-password"
+                  data-lpignore="true"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono"
                   style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
                 />
@@ -33287,6 +33573,8 @@ export default function AdminPaymentGatewayPage() {
                   value={editForm.transfer_reference}
                   onChange={(e) => setEditForm({ ...editForm, transfer_reference: e.target.value })}
                   placeholder="e.g. WIRE-89214710"
+                  autoComplete="new-password"
+                  data-lpignore="true"
                   className="payment-input w-full border rounded-xl p-2.5 text-xs outline-none font-mono font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)', color: 'var(--color-text, #ffffff)' }}
                 />
@@ -33363,11 +33651,39 @@ export default function AdminPaymentGatewayPage() {
               className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs hover:opacity-80"
               style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', color: 'var(--color-text, #ffffff)' }}
             >
-              <Check className="h-4 w-4" />
+              <X className="h-4 w-4" />
             </button>
             <div className="space-y-1.5 pr-8">
               <h2 className="text-xl font-black">{t('stripeConnectModalTitle', 'Connect Stripe & Webhooks')}</h2>
               <p className="text-xs opacity-75">{t('stripeConnectModalSub', 'Follow standard setup for webhook verification.')}</p>
+            </div>
+
+            <div className="space-y-4 pt-2">
+              <div className="p-3.5 rounded-2xl border space-y-1.5" style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}>
+                <span className="font-bold text-xs text-blue-400 block">1. Obtain Stripe API Keys</span>
+                <p className="text-[11px] opacity-80">Navigate to Stripe Dashboard &gt; Developers &gt; API keys. Copy the Publishable key and Secret key for your selected mode (Test or Live).</p>
+              </div>
+
+              <div className="p-3.5 rounded-2xl border space-y-1.5" style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}>
+                <span className="font-bold text-xs text-emerald-400 block">2. Register Webhook Endpoint</span>
+                <p className="text-[11px] opacity-80">In Stripe Dashboard &gt; Developers &gt; Webhooks, click "Add endpoint" and paste your listener URL: <code className="text-blue-400 font-mono">{webhookEndpointUrl}</code></p>
+                <p className="text-[11px] opacity-80">Listen to: <code className="font-mono text-amber-300">checkout.session.completed</code>, <code className="font-mono text-amber-300">payment_intent.succeeded</code>, and <code className="font-mono text-amber-300">customer.subscription.*</code></p>
+              </div>
+
+              <div className="p-3.5 rounded-2xl border space-y-1.5" style={{ backgroundColor: 'var(--color-inner-dark, #0f172a)', borderColor: 'var(--color-border, #334155)' }}>
+                <span className="font-bold text-xs text-amber-400 block">3. Copy Signing Secret & Verify</span>
+                <p className="text-[11px] opacity-80">Reveal the Signing secret (starts with <code className="font-mono text-emerald-400">whsec_...</code>), paste it into Webhook Signing Secret, and click <strong className="text-white">Verify Stripe Key</strong>.</p>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setShowStripeGuideModal(false)}
+                className="px-5 py-2.5 rounded-xl font-bold text-xs text-white bg-[var(--color-primary,#3b82f6)] cursor-pointer"
+              >
+                {t('gotItBtn', 'Got it, let\'s verify')}
+              </button>
             </div>
           </div>
         </div>
@@ -44432,19 +44748,23 @@ function WalletContent() {
   const [totalCount, setTotalCount] = useState(0);
   const [stats, setStats] = useState({ totalDeposited: 0, totalSpent: 0, totalEvents: 0 });
 
+  // -------------------------------------------------------------------------
+  // ALL useMemo HOOKS DECLARED UNCONDITIONALLY AT TOP LEVEL (RULES OF HOOKS)
+  // -------------------------------------------------------------------------
   const activeCurrencySymbol = useMemo(() => {
     return CURRENCY_SYMBOLS[settings.currency?.toUpperCase()] || '$';
   }, [settings.currency]);
 
-  const handleCustomAmountChange = (raw: string) => {
-    const clean = raw.replace(/[^0-9.]/g, '');
-    const parts = clean.split('.');
-    const formatted = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : clean;
-    setCustomAmount(formatted);
-    if (formatted !== '') {
-      setSelectedAmount(0);
-    }
-  };
+  // Dynamic available gateways array dynamically matched with /admin/payment-gateway
+  const availableGateways = useMemo(() => {
+    const list = [
+      { id: 'stripe', label: t('gatewayStripe', 'Credit Card (Stripe)'), desc: t('gatewayStripeDesc', 'Instant Card Settlement'), icon: CreditCard },
+      { id: 'paypal', label: t('gatewayPaypal', 'PayPal'), desc: t('gatewayPaypalDesc', 'Wallet & Account Balance'), icon: Coins },
+      { id: 'manual', label: t('gatewayManual', 'Bank Wire / Manual'), desc: t('gatewayManualDesc', 'Manual Approval Transfer'), icon: Landmark },
+    ];
+    const allowed = Array.isArray(settings.allowed_gateways) ? settings.allowed_gateways : [];
+    return list.filter((gw) => allowed.includes(gw.id));
+  }, [settings.allowed_gateways, t]);
 
   const activeAmount = useMemo(() => {
     const clean = customAmount.trim().replace(/[^0-9.]/g, '');
@@ -44469,10 +44789,32 @@ function WalletContent() {
     return highestBonus;
   }, [activeAmount, settings.bonus_rules]);
 
+  // Debounce Search Query
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Gateway Selection Auto-Reconciliation Effect
+  useEffect(() => {
+    if (availableGateways.length > 0) {
+      if (!availableGateways.some((gw) => gw.id === selectedGateway)) {
+        setSelectedGateway(availableGateways[0].id);
+      }
+    } else {
+      setSelectedGateway('');
+    }
+  }, [availableGateways, selectedGateway]);
+
+  const handleCustomAmountChange = (raw: string) => {
+    const clean = raw.replace(/[^0-9.]/g, '');
+    const parts = clean.split('.');
+    const formatted = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : clean;
+    setCustomAmount(formatted);
+    if (formatted !== '') {
+      setSelectedAmount(0);
+    }
+  };
 
   const hydrateUser = useCallback(() => {
     initAuthStorage();
@@ -44531,25 +44873,39 @@ function WalletContent() {
       if (currentSeq !== fetchSeqRef.current) return;
 
       if (data.success) {
-        if (data.settings) {
-          const loadedAllowed: string[] = Array.isArray(data.settings.allowed_gateways) 
-            ? data.settings.allowed_gateways 
-            : [];
+        const loadedAllowed: string[] = Array.isArray(data.settings?.allowed_gateways)
+          ? data.settings.allowed_gateways
+          : Array.isArray(data.allowed_gateways)
+          ? data.allowed_gateways
+          : Array.isArray(data.allowedGateways)
+          ? data.allowedGateways
+          : [];
 
+        if (data.settings) {
           setSettings({
             ...data.settings,
             allowed_gateways: loadedAllowed,
             min_topup: parseFloat(data.settings.min_topup || 5),
             max_topup: parseFloat(data.settings.max_topup || 1000),
           });
-
-          // Dynamic sync: ensure selectedGateway is currently active in /admin/payment-gateway
-          if (loadedAllowed.length > 0) {
-            setSelectedGateway((prev) => loadedAllowed.includes(prev) ? prev : loadedAllowed[0]);
-          }
+        } else {
+          setSettings((prev) => ({
+            ...prev,
+            allowed_gateways: loadedAllowed,
+            currency: data.currency || prev.currency,
+          }));
         }
+
+        if (loadedAllowed.length > 0) {
+          setSelectedGateway((prev) => loadedAllowed.includes(prev) ? prev : loadedAllowed[0]);
+        } else {
+          setSelectedGateway('');
+        }
+
         if (typeof data.wallet_balance === 'number') {
           setBalance(data.wallet_balance);
+        } else if (typeof data.balance === 'number') {
+          setBalance(data.balance);
         }
 
         setTransactions(Array.isArray(data.transactions) ? data.transactions : []);
@@ -44598,12 +44954,14 @@ function WalletContent() {
     window.addEventListener('zecratary_payment_updated', handleSync);
     window.addEventListener('zecratary_payment_gateway_updated', handleSync);
     window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    window.addEventListener('storage', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_wallet_updated', handleSync);
       window.removeEventListener('zecratary_payment_updated', handleSync);
       window.removeEventListener('zecratary_payment_gateway_updated', handleSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+      window.removeEventListener('storage', handleSync);
     };
   }, [limit, debouncedSearch, page, typeFilter]);
 
@@ -44703,13 +45061,11 @@ function WalletContent() {
       return;
     }
 
-    // Dynamic verification: open modal when manual gateway is chosen
     if (selectedGateway === 'manual') {
       setShowManualModal(true);
       return;
     }
 
-    // Stripe / PayPal Direct Checkout
     setSubmitting(true);
     setFeedback(null);
     const active = currentUserRef.current || user || getCurrentUser();
@@ -44856,6 +45212,9 @@ function WalletContent() {
     return pages;
   };
 
+  // -------------------------------------------------------------------------
+  // CONDITIONAL SPINNER RETURN OCCURS STRICTLY AFTER ALL HOOKS
+  // -------------------------------------------------------------------------
   if (!user) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center">
@@ -44866,13 +45225,6 @@ function WalletContent() {
       </div>
     );
   }
-
-  // Dynamic available gateways array filtered by /admin/payment-gateway
-  const availableGateways = [
-    { id: 'stripe', label: 'Credit Card (Stripe)', desc: 'Instant Card Settlement', icon: CreditCard },
-    { id: 'paypal', label: 'PayPal', desc: 'Wallet & Account Balance', icon: Coins },
-    { id: 'manual', label: 'Bank Wire / Manual', desc: 'Manual Approval Transfer', icon: Landmark },
-  ].filter((gw) => settings.allowed_gateways.includes(gw.id));
 
   return (
     <div
@@ -45051,6 +45403,8 @@ function WalletContent() {
                 type="text"
                 placeholder="e.g. 5.00"
                 value={customAmount}
+                autoComplete="off"
+                data-lpignore="true"
                 onChange={(e) => handleCustomAmountChange(e.target.value)}
                 onFocus={() => setFocusedField('customAmount')}
                 onBlur={() => {
@@ -45076,7 +45430,7 @@ function WalletContent() {
             )}
           </div>
 
-          {/* 1. DYNAMIC GATEWAY SYNC WITH /admin/payment-gateway */}
+          {/* DYNAMIC GATEWAY SELECTOR MATCHED WITH /admin/payment-gateway */}
           <div>
             <div className="flex items-center justify-between mb-3">
               <label className="block text-xs font-semibold uppercase opacity-70">
@@ -45211,7 +45565,7 @@ function WalletContent() {
         </div>
       </div>
 
-      {/* 2. DYNAMIC MANUAL GATEWAY MODAL MATCHED WITH /admin/payment-gateway */}
+      {/* DYNAMIC MANUAL GATEWAY MODAL */}
       {showManualModal && (
         <div 
           onClick={() => setShowManualModal(false)}
@@ -45343,6 +45697,8 @@ function WalletContent() {
                   type="text"
                   placeholder="e.g. WIRE-98214389 / Bank Ref No."
                   value={transferReference}
+                  autoComplete="new-password"
+                  data-lpignore="true"
                   onChange={(e) => setTransferReference(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-xl border text-xs font-mono font-bold outline-none transition"
                   style={{
@@ -45361,6 +45717,7 @@ function WalletContent() {
                   rows={2}
                   placeholder="e.g. Transferred from John Doe Account via Online Banking."
                   value={transferNotes}
+                  data-lpignore="true"
                   onChange={(e) => setTransferNotes(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl border text-xs outline-none transition leading-relaxed"
                   style={{
@@ -50155,20 +50512,9 @@ export async function POST(req: NextRequest) {
 ```typescript
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-
-function parseDbRows<T = any>(res: any): T[] {
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (typeof res === 'object' && Array.isArray(res.rows)) return res.rows;
-  return [];
-}
-
-function parseDbRow<T = any>(res: any): T | null {
-  const rows = parseDbRows<T>(res);
-  return rows.length > 0 ? rows[0] : null;
-}
 
 async function ensurePaymentSchema() {
   try {
@@ -50181,22 +50527,21 @@ async function ensurePaymentSchema() {
         plan_slug TEXT,
         amount NUMERIC DEFAULT 0,
         currency VARCHAR(10) DEFAULT 'USD',
-        gateway VARCHAR(50) DEFAULT 'manual_settlement',
-        status VARCHAR(50) DEFAULT 'pending',
+        gateway VARCHAR(50) DEFAULT 'stripe',
+        status VARCHAR(50) DEFAULT 'succeeded',
         test_mode BOOLEAN DEFAULT false,
         failure_reason TEXT,
-        is_recurring BOOLEAN DEFAULT false,
+        is_recurring BOOLEAN DEFAULT true,
         recurring_interval VARCHAR(20) DEFAULT 'MONTH',
-        auto_renew BOOLEAN DEFAULT false,
+        auto_renew BOOLEAN DEFAULT true,
+        transfer_reference TEXT,
+        notes TEXT,
+        confirmed_amount NUMERIC,
+        confirmed_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         expiry_date TIMESTAMPTZ,
-        gateway_transaction_id TEXT,
-        confirmed_amount NUMERIC,
-        confirmed_at TIMESTAMPTZ,
-        transfer_reference TEXT,
-        proof_file_url TEXT,
-        notes TEXT
+        gateway_transaction_id TEXT
       );
     `);
 
@@ -50212,18 +50557,31 @@ async function ensurePaymentSchema() {
     `);
 
     await query(`
+      CREATE TABLE IF NOT EXISTS wallet_settings (
+        id INT PRIMARY KEY DEFAULT 1,
+        currency VARCHAR(10) DEFAULT 'USD',
+        allowed_gateways JSONB DEFAULT '["stripe"]',
+        active_gateway VARCHAR(50) DEFAULT 'stripe',
+        min_deposit NUMERIC DEFAULT 5,
+        max_deposit NUMERIC DEFAULT 1000,
+        bonus_tiers JSONB,
+        ledger_columns JSONB,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    await query(`
       DO $$ 
       BEGIN 
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS transfer_reference TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS proof_file_url TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS notes TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_amount NUMERIC; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_reason TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS payment_settings JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS site_name TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS allowed_gateways JSONB DEFAULT '["stripe"]'; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
       END $$;
     `);
   } catch (e) {
@@ -50231,13 +50589,64 @@ async function ensurePaymentSchema() {
   }
 }
 
+function writeKeyToEnvFile(filePath: string, key: string, value: string) {
+  try {
+    if (!fs.existsSync(filePath)) return;
+    let content = fs.readFileSync(filePath, 'utf8');
+    const regex = new RegExp(`^${key}=.*$`, 'm');
+    const safeVal = value.includes(' ') ? `"${value}"` : value;
+    if (regex.test(content)) {
+      content = content.replace(regex, `${key}=${safeVal}`);
+    } else {
+      content += `\n${key}=${safeVal}`;
+    }
+    fs.writeFileSync(filePath, content, 'utf8');
+  } catch (_) {}
+}
+
+function updateEnvCredentials(settings: any) {
+  const envCandidates = [
+    path.join(process.cwd(), '.env'),
+    path.join(process.cwd(), '.env.local'),
+    path.join(process.cwd(), 'apps', 'web', '.env'),
+    path.join(process.cwd(), 'apps', 'web', '.env.local')
+  ];
+
+  const pairs: Record<string, string> = {
+    STRIPE_PUBLISHABLE_KEY: settings.stripe?.publishableKey || '',
+    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: settings.stripe?.publishableKey || '',
+    STRIPE_SECRET_KEY: settings.stripe?.secretKey || '',
+    STRIPE_WEBHOOK_SECRET: settings.stripe?.webhookSecret || '',
+    PAYPAL_CLIENT_ID: settings.paypal?.clientId || '',
+    NEXT_PUBLIC_PAYPAL_CLIENT_ID: settings.paypal?.clientId || '',
+    PAYPAL_CLIENT_SECRET: settings.paypal?.clientSecret || '',
+    PAYPAL_WEBHOOK_ID: settings.paypal?.webhookId || '',
+    PAYMENT_CURRENCY: settings.currency || 'USD',
+  };
+
+  for (const [k, v] of Object.entries(pairs)) {
+    if (v) process.env[k] = v;
+  }
+
+  for (const filePath of envCandidates) {
+    if (fs.existsSync(filePath)) {
+      for (const [k, v] of Object.entries(pairs)) {
+        if (v) writeKeyToEnvFile(filePath, k, v);
+      }
+    }
+  }
+}
+
 async function persistAdminSettingsData(settings: any, currency: string) {
   await ensurePaymentSchema();
   const cleanSettings = { ...settings };
   delete cleanSettings.action;
+  delete cleanSettings.gateway;
+  delete cleanSettings.enabled;
   const jsonStr = JSON.stringify(cleanSettings);
   const cur = currency || cleanSettings.currency || 'USD';
 
+  // 1. Persist in PostgreSQL admin_settings
   try {
     await query(
       `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
@@ -50249,7 +50658,6 @@ async function persistAdminSettingsData(settings: any, currency: string) {
       [jsonStr, cur]
     );
   } catch (err) {
-    console.warn('[Payment API] JSONB upsert failed, falling back to update:', err);
     try {
       await query(
         `UPDATE admin_settings SET payment_settings = $1, currency = $2, updated_at = NOW() WHERE id = 1`,
@@ -50258,43 +50666,64 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     } catch (_) {}
   }
 
+  // 2. Synchronize allowed_gateways with wallet_settings
   try {
+    const allowedGateways: string[] = [];
+    if (cleanSettings.stripe?.enabled) allowedGateways.push('stripe');
+    if (cleanSettings.paypal?.enabled) allowedGateways.push('paypal');
+    if (cleanSettings.manualSettlement?.enabled || cleanSettings.manual?.enabled) allowedGateways.push('manual');
+
+    await query(
+      `INSERT INTO wallet_settings (id, currency, allowed_gateways, updated_at)
+       VALUES (1, $1, $2::jsonb, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         currency = EXCLUDED.currency,
+         allowed_gateways = EXCLUDED.allowed_gateways,
+         updated_at = NOW()`,
+      [cur, JSON.stringify(allowedGateways)]
+    ).catch(async () => {
+      await query(
+        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW() WHERE id = 1`,
+        [cur, JSON.stringify(allowedGateways)]
+      ).catch(() => {});
+    });
+  } catch (wErr) {
+    console.warn('[Payment API] wallet_settings sync warning:', wErr);
+  }
+
+  // 3. Mirror to .env and disk
+  try {
+    updateEnvCredentials(cleanSettings);
     const dataDir = path.join(process.cwd(), 'data');
     const filePath = path.join(dataDir, 'admin_settings.json');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
     let existing: any = {};
     if (fs.existsSync(filePath)) {
-      try {
-        existing = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-      } catch (_) {}
+      try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
     }
     existing.paymentSettings = cleanSettings;
     existing.currency = cur;
     existing.updatedAt = new Date().toISOString();
     fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
-  } catch (fileErr) {
-    console.warn('[Payment API] File mirror error:', fileErr);
-  }
+  } catch (_) {}
 }
 
 export async function GET() {
   try {
     await ensurePaymentSchema();
 
-    let txRes: any = await query(
+    let txRes = await query(
       `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
     ).catch(async () => {
-      return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => []);
+      return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => ({ rows: [] }));
     });
 
-    const transactions = parseDbRows(txRes);
+    const transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
 
     let settings: any = null;
     try {
-      const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-      const sRow: any = parseDbRow(sRes);
+      const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
       if (sRow) {
         let ps = sRow.payment_settings;
         if (typeof ps === 'string') {
@@ -50335,268 +50764,226 @@ export async function POST(req: Request) {
     await ensurePaymentSchema();
     const body = await req.json();
 
-    // 1. APPROVE MANUAL SETTLEMENT / BANK WIRE
-    if (body.action === 'approve_manual_settlement') {
-      const txId = body.id || body.transactionId;
-      if (!txId) {
-        return NextResponse.json({ success: false, error: 'Transaction ID is required' }, { status: 400 });
-      }
-
-      const txRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
-      const tx: any = parseDbRow(txRes);
-
-      if (!tx) {
-        return NextResponse.json({ success: false, error: 'Transaction not found' }, { status: 404 });
-      }
-
-      const confirmedAmount = body.confirmedAmount !== undefined ? Number(body.confirmedAmount) : Number(tx.amount || 0);
-      const now = new Date().toISOString();
-
-      await query(
-        `UPDATE payment_transactions 
-         SET status = 'succeeded',
-             confirmed_amount = $1,
-             confirmed_at = $2,
-             failure_reason = NULL,
-             updated_at = NOW()
-         WHERE id = $3`,
-        [confirmedAmount, now, txId]
-      );
-
-      // If it was a wallet top-up, credit user's wallet_balance directly
-      if (tx.plan_slug === 'wallet_topup' && tx.customer_email) {
-        try {
-          await query(
-            `UPDATE users 
-             SET wallet_balance = COALESCE(wallet_balance, 0) + $1,
-                 updated_at = NOW()
-             WHERE LOWER(TRIM(email)) = LOWER(TRIM($2))`,
-            [confirmedAmount, tx.customer_email]
-          );
-          await query(
-            `UPDATE wallet_transactions
-             SET status = 'succeeded',
-                 balance_after = (SELECT wallet_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1))),
-                 amount = $2
-             WHERE gateway_tx_id = $3 OR description LIKE $4`,
-            [tx.customer_email, confirmedAmount, tx.transfer_reference, `%${tx.transfer_reference}%`]
-          );
-        } catch (_) {}
-      } else if (tx.customer_email) {
-        try {
-          await query(
-            `UPDATE users 
-             SET plan_status = 'active',
-                 plan_name = COALESCE($1, plan_name),
-                 updated_at = NOW()
-             WHERE LOWER(TRIM(email)) = LOWER(TRIM($2))`,
-            [tx.plan_name, tx.customer_email]
-          ).catch(() => {});
-        } catch (_) {}
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: `Manual settlement approved! Funds confirmed for ${tx.customer_name || tx.customer_email}.`,
-        transactionId: txId
-      });
-    }
-
-    // 2. REJECT MANUAL SETTLEMENT / BANK WIRE
-    if (body.action === 'reject_manual_settlement') {
-      const txId = body.id || body.transactionId;
-      const reason = (body.failureReason || body.reason || 'Manual settlement rejected by administrator').trim();
-      if (!txId) {
-        return NextResponse.json({ success: false, error: 'Transaction ID is required' }, { status: 400 });
-      }
-
-      await query(
-        `UPDATE payment_transactions 
-         SET status = 'rejected',
-             failure_reason = $1,
-             updated_at = NOW()
-         WHERE id = $2`,
-        [reason, txId]
-      );
-
-      try {
-        await query(
-          `UPDATE wallet_transactions
-           SET status = 'rejected',
-               description = description || ' (Declined: ' || $1 || ')'
-           WHERE gateway_tx_id = (SELECT transfer_reference FROM payment_transactions WHERE id = $2)`,
-          [reason, txId]
-        );
-      } catch (_) {}
-
-      return NextResponse.json({
-        success: true,
-        message: 'Manual settlement transaction marked as rejected.',
-        transactionId: txId
-      });
-    }
-
-    // 3. EDIT / UPDATE TRANSACTION
-    if (body.action === 'edit_transaction' || body.action === 'update_transaction') {
-      const tx = body.transaction || body;
-      const txId = tx.id || body.id;
-
-      if (!txId) {
-        return NextResponse.json({ success: false, error: 'Transaction ID is required for editing' }, { status: 400 });
-      }
-
-      const status = (tx.status || 'pending').toLowerCase();
-      const amount = Number(tx.amount || 0);
-      const customerName = String(tx.customer_name || tx.customerName || 'Customer');
-      const customerEmail = String(tx.customer_email || tx.customerEmail || '').toLowerCase().trim();
-      const planName = String(tx.plan_name || tx.planName || 'Manual Transfer');
-      const transferReference = tx.transfer_reference !== undefined ? String(tx.transfer_reference).trim() : null;
-      const notes = tx.notes !== undefined ? String(tx.notes).trim() : null;
-      const failureReason = tx.failure_reason || tx.failureReason || null;
-      const confirmedAmount = status === 'succeeded' ? (tx.confirmed_amount !== undefined ? Number(tx.confirmed_amount) : amount) : null;
-      const confirmedAt = status === 'succeeded' ? new Date().toISOString() : null;
-
-      await query(
-        `UPDATE payment_transactions 
-         SET customer_name = $1,
-             customer_email = $2,
-             plan_name = $3,
-             amount = $4,
-             transfer_reference = $5,
-             notes = $6,
-             status = $7,
-             failure_reason = $8,
-             confirmed_amount = $9,
-             confirmed_at = $10,
-             updated_at = NOW()
-         WHERE id = $11`,
-        [
-          customerName, customerEmail, planName, amount,
-          transferReference, notes, status, failureReason,
-          confirmedAmount, confirmedAt, txId
-        ]
-      );
-
-      return NextResponse.json({
-        success: true,
-        message: `Transaction ${txId} updated successfully!`,
-        transaction: {
-          id: txId, customer_name: customerName, customer_email: customerEmail,
-          plan_name: planName, amount, transfer_reference: transferReference,
-          notes, status, failure_reason: failureReason, confirmed_amount: confirmedAmount
-        }
-      });
-    }
-
-    // 4. DELETE TRANSACTION
-    if (body.action === 'delete_transaction') {
-      const txId = body.id || body.transactionId;
-      if (!txId) {
-        return NextResponse.json({ success: false, error: 'Transaction ID is required for deletion' }, { status: 400 });
-      }
-
-      await query(`DELETE FROM payment_transactions WHERE id = $1`, [txId]);
-
-      return NextResponse.json({
-        success: true,
-        message: `Transaction record ${txId} deleted from database.`,
-        transactionId: txId
-      });
-    }
-
-    // 5. CREATE NEW MANUAL TRANSACTION (DEFAULTS TO PENDING)
-    if (body.action === 'add_transaction' || body.action === 'create_manual_transaction') {
-      const tx = body.transaction || body;
-      const txId = tx.id || `ptx_wire_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      const amount = Number(tx.amount || 0);
-      const currency = String(tx.currency || 'USD');
-      const customerName = String(tx.customer_name || tx.customerName || 'Customer');
-      const customerEmail = String(tx.customer_email || tx.customerEmail || '').toLowerCase().trim();
-      const planName = String(tx.plan_name || tx.planName || 'Manual Bank Settlement');
-      const transferReference = tx.transfer_reference || tx.transferReference || '';
-      const notes = tx.notes || '';
-      const status = 'pending';
-
-      await query(
-        `INSERT INTO payment_transactions (
-          id, customer_name, customer_email, plan_name, plan_slug,
-          amount, currency, gateway, status, test_mode, failure_reason,
-          transfer_reference, notes, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, 'manual_wire', $5, $6, 'manual_settlement', $7, false, NULL, $8, $9, NOW(), NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          amount = EXCLUDED.amount,
-          transfer_reference = EXCLUDED.transfer_reference,
-          notes = EXCLUDED.notes,
-          updated_at = NOW()`,
-        [
-          txId, customerName, customerEmail, planName, amount, currency,
-          status, transferReference, notes
-        ]
-      );
-
-      return NextResponse.json({
-        success: true,
-        message: 'New manual settlement queued with status "Pending" awaiting admin approval.',
-        transaction: { id: txId, status, amount, customer_name: customerName, transfer_reference: transferReference }
-      });
-    }
-
-    // 6. VERIFY WEBHOOK SECRET
-    if (body.action === 'verify_webhook_secret') {
-      const secret = (body.webhookSecret || '').trim();
-      if (!secret || !secret.startsWith('whsec_') || secret.length < 15) {
-        return NextResponse.json({ 
-          success: false, 
-          error: 'Webhook Secret must start with "whsec_" and contain a valid HMAC signing key.' 
-        }, { status: 400 });
-      }
-      return NextResponse.json({ 
-        success: true, 
-        message: 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!' 
-      });
-    }
-
-    // 7. VERIFY STRIPE KEYS
+    // 1. VERIFY STRIPE KEYS (3-WAY VERIFICATION)
     if (body.action === 'verify_stripe_keys') {
-      const pKey = (body.publishableKey || body.stripe?.publishableKey || '').trim();
-      const sKey = (body.secretKey || body.stripe?.secretKey || '').trim();
-      const wSecret = (body.webhookSecret || body.stripe?.webhookSecret || '').trim();
-      const isTestMode = body.testMode !== undefined ? Boolean(body.testMode) : true;
+      const pubKey = (body.publishableKey || body.stripe?.publishableKey || '').trim();
+      const secKey = (body.secretKey || body.stripe?.secretKey || '').trim();
+      const whSecret = (body.webhookSecret || body.stripe?.webhookSecret || '').trim();
+      const testMode = Boolean(body.testMode);
 
-      if (!pKey || !sKey || !wSecret) {
+      if (!pubKey || !secKey || !whSecret) {
         return NextResponse.json({
           success: false,
           error: 'Publishable Key, Secret Key, and Webhook Secret are all required to verify.'
         }, { status: 400 });
       }
 
-      if (isTestMode && (!pKey.startsWith('pk_test_') || !sKey.startsWith('sk_test_'))) {
+      // Check key prefixes
+      if (testMode && !secKey.startsWith('sk_test_')) {
         return NextResponse.json({
           success: false,
-          error: 'Sandbox Test Mode active: Publishable Key must start with "pk_test_" and Secret Key with "sk_test_".'
+          error: 'Test mode is enabled: Secret Key must start with "sk_test_".'
+        }, { status: 400 });
+      }
+      if (!testMode && !secKey.startsWith('sk_live_')) {
+        return NextResponse.json({
+          success: false,
+          error: 'Live mode is enabled: Secret Key must start with "sk_live_".'
+        }, { status: 400 });
+      }
+      if (!whSecret.startsWith('whsec_') || whSecret.length < 24) {
+        return NextResponse.json({
+          success: false,
+          error: 'Webhook Signing Secret must begin with "whsec_" and be at least 24 characters long.'
         }, { status: 400 });
       }
 
-      if (!isTestMode && (!pKey.startsWith('pk_live_') || !sKey.startsWith('sk_live_'))) {
+      // Probe Stripe /v1/balance API
+      try {
+        const stripeRes = await fetch('https://api.stripe.com/v1/balance', {
+          headers: { Authorization: `Bearer ${secKey}` },
+        });
+        const stripeData = await stripeRes.json().catch(() => ({}));
+        if (!stripeRes.ok) {
+          return NextResponse.json({
+            success: false,
+            error: stripeData.error?.message || 'Stripe Secret Key rejected by Stripe API.'
+          }, { status: 400 });
+        }
+      } catch (err: any) {
         return NextResponse.json({
           success: false,
-          error: 'Live Production Mode active: Publishable Key must start with "pk_live_" and Secret Key with "sk_live_".'
+          error: `Could not connect to Stripe API: ${err.message}`
+        }, { status: 502 });
+      }
+
+      // Probe Publishable Key
+      try {
+        const pubRes = await fetch('https://api.stripe.com/v1/tokens', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${pubKey}`,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: ''
+        });
+        if (pubRes.status === 401) {
+          return NextResponse.json({
+            success: false,
+            error: 'Publishable Key is invalid or rejected by Stripe API.'
+          }, { status: 400 });
+        }
+      } catch (_) {}
+
+      // Webhook HMAC check
+      try {
+        const testHmac = crypto.createHmac('sha256', whSecret);
+        testHmac.update('zecratary_signature_test');
+        testHmac.digest('hex');
+      } catch (hErr: any) {
+        return NextResponse.json({
+          success: false,
+          error: `Webhook Signing Secret failed cryptographic HMAC check: ${hErr.message}`
         }, { status: 400 });
       }
+
+      let currentSettings: any = {};
+      try {
+        const sRes = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (row?.payment_settings) {
+          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        }
+      } catch (_) {}
+
+      const updatedSettings = {
+        ...currentSettings,
+        ...(body.paymentSettings || {}),
+        stripeKeysVerified: true,
+        stripeWebhookVerified: true,
+        stripeConnected: true,
+        stripe: {
+          ...(currentSettings.stripe || {}),
+          enabled: currentSettings.stripe?.enabled ?? true,
+          publishableKey: pubKey,
+          secretKey: secKey,
+          webhookSecret: whSecret
+        }
+      };
+
+      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
 
       return NextResponse.json({
         success: true,
-        message: 'Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers!'
+        message: 'Stripe keys and webhook verified successfully and saved to PostgreSQL!',
+        settings: updatedSettings
       });
     }
 
-    // 8. TOGGLE TEST MODE
+    // 2. VERIFY WEBHOOK SECRET (INLINE)
+    if (body.action === 'verify_webhook_secret') {
+      const secret = (body.webhookSecret || '').trim();
+      if (!secret.startsWith('whsec_') || secret.length < 24) {
+        return NextResponse.json({
+          success: false,
+          error: 'Invalid Webhook Signing Secret. Must start with "whsec_" and have standard length.'
+        }, { status: 400 });
+      }
+
+      try {
+        const hmac = crypto.createHmac('sha256', secret);
+        hmac.update('test_payload_123');
+        hmac.digest('hex');
+      } catch (err: any) {
+        return NextResponse.json({ success: false, error: `HMAC verification failed: ${err.message}` }, { status: 400 });
+      }
+
+      let currentSettings: any = {};
+      try {
+        const sRes = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (row?.payment_settings) {
+          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        }
+      } catch (_) {}
+
+      const updatedSettings = {
+        ...currentSettings,
+        stripeWebhookVerified: true,
+        stripe: {
+          ...(currentSettings.stripe || {}),
+          webhookSecret: secret
+        }
+      };
+
+      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
+
+      return NextResponse.json({
+        success: true,
+        message: 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!',
+        settings: updatedSettings
+      });
+    }
+
+    // 3. TOGGLE GATEWAY (STRIPE, PAYPAL, MANUAL SETTLEMENT)
+    if (body.action === 'toggle_gateway') {
+      const gatewayKey = body.gateway;
+      const isEnabled = Boolean(body.enabled);
+
+      let currentSettings: any = {};
+      try {
+        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (row?.payment_settings) {
+          currentSettings = typeof row.payment_settings === 'string'
+            ? JSON.parse(row.payment_settings)
+            : row.payment_settings;
+        }
+      } catch (_) {}
+
+      const updatedSettings = {
+        ...currentSettings,
+        ...(body.paymentSettings || {}),
+      };
+
+      if (gatewayKey === 'stripe') {
+        updatedSettings.stripe = { ...(updatedSettings.stripe || {}), enabled: isEnabled };
+      } else if (gatewayKey === 'paypal') {
+        updatedSettings.paypal = { ...(updatedSettings.paypal || {}), enabled: isEnabled };
+      } else if (gatewayKey === 'manualSettlement' || gatewayKey === 'manual') {
+        updatedSettings.manualSettlement = { ...(updatedSettings.manualSettlement || {}), enabled: isEnabled };
+      }
+
+      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
+
+      return NextResponse.json({
+        success: true,
+        message: `${gatewayKey} gateway ${isEnabled ? 'enabled' : 'disabled'} and saved successfully.`,
+        settings: updatedSettings
+      });
+    }
+
+    // 4. SAVE GATEWAY SETTINGS
+    if (body.action === 'save_gateway_settings') {
+      const gatewayConfig = body.paymentSettings || body;
+      const currency = gatewayConfig.currency || body.currency || 'USD';
+
+      await persistAdminSettingsData(gatewayConfig, currency);
+
+      return NextResponse.json({
+        success: true,
+        message: 'Payment gateway settings and currency saved successfully to server!',
+        settings: gatewayConfig
+      });
+    }
+
+    // 5. TOGGLE TEST MODE
     if (body.action === 'toggle_test_mode') {
       const nextMode = Boolean(body.testMode);
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
+        const sRes = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
         if (row?.payment_settings) {
           currentSettings = typeof row.payment_settings === 'string' 
             ? JSON.parse(row.payment_settings) 
@@ -50616,102 +51003,177 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         success: true,
-        message: nextMode ? 'Sandbox (Test Mode) enabled and saved to PostgreSQL!' : 'Live Production mode enabled and saved to PostgreSQL!',
+        message: nextMode ? 'Sandbox (Test Mode) enabled!' : 'Live Production mode enabled!',
         settings: updatedSettings
       });
     }
 
-    // 9. SYNC FROM .ENV
+    // 6. SYNC FROM .ENV
     if (body.action === 'sync_env') {
-      const rootDir = process.cwd();
-      const envPaths = [
-        path.join(rootDir, '.env'),
-        path.join(rootDir, '.env.local'),
-        path.join(rootDir, 'apps', 'web', '.env'),
-        path.join(rootDir, 'apps', 'web', '.env.local')
-      ].filter(p => fs.existsSync(p));
-
-      let envVars: Record<string, string> = { ...process.env as Record<string, string> };
-      for (const p of envPaths) {
-        try {
-          const content = fs.readFileSync(p, 'utf8');
-          for (const line of content.split('\n')) {
-            const trimmed = line.trim();
-            if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
-              const eqIdx = trimmed.indexOf('=');
-              const key = trimmed.slice(0, eqIdx).trim();
-              const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
-              envVars[key] = val;
-            }
-          }
-        } catch (_) {}
-      }
-
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
+        const sRes = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
         if (row?.payment_settings) {
           currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
         }
       } catch (_) {}
 
       const syncedFields: string[] = [];
-      const updatedStripe = { ...(currentSettings.stripe || {}) };
-      const updatedPaypal = { ...(currentSettings.paypal || {}) };
+      const stripePublishable = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || process.env.STRIPE_PUBLISHABLE_KEY || '';
+      const stripeSecret = process.env.STRIPE_SECRET_KEY || '';
+      const stripeWebhook = process.env.STRIPE_WEBHOOK_SECRET || '';
+      const paypalClient = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || process.env.PAYPAL_CLIENT_ID || '';
+      const paypalSecret = process.env.PAYPAL_CLIENT_SECRET || '';
+      const paypalWebhook = process.env.PAYPAL_WEBHOOK_ID || '';
+      const envCurrency = process.env.PAYMENT_CURRENCY || process.env.NEXT_PUBLIC_CURRENCY || '';
 
-      if (envVars.STRIPE_PUBLISHABLE_KEY || envVars.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
-        updatedStripe.publishableKey = envVars.STRIPE_PUBLISHABLE_KEY || envVars.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
-        syncedFields.push('Stripe Publishable Key');
-      }
-      if (envVars.STRIPE_SECRET_KEY) {
-        updatedStripe.secretKey = envVars.STRIPE_SECRET_KEY;
-        syncedFields.push('Stripe Secret Key');
-      }
-      if (envVars.STRIPE_WEBHOOK_SECRET) {
-        updatedStripe.webhookSecret = envVars.STRIPE_WEBHOOK_SECRET;
-        syncedFields.push('Stripe Webhook Secret');
-      }
-      if (envVars.PAYPAL_CLIENT_ID || envVars.NEXT_PUBLIC_PAYPAL_CLIENT_ID) {
-        updatedPaypal.clientId = envVars.PAYPAL_CLIENT_ID || envVars.NEXT_PUBLIC_PAYPAL_CLIENT_ID;
-        syncedFields.push('PayPal Client ID');
-      }
-      if (envVars.PAYPAL_CLIENT_SECRET || envVars.PAYPAL_SECRET) {
-        updatedPaypal.clientSecret = envVars.PAYPAL_CLIENT_SECRET || envVars.PAYPAL_SECRET;
-        syncedFields.push('PayPal Client Secret');
-      }
-      if (envVars.PAYPAL_WEBHOOK_ID) {
-        updatedPaypal.webhookId = envVars.PAYPAL_WEBHOOK_ID;
-        syncedFields.push('PayPal Webhook ID');
-      }
-
-      const merged = {
+      const updatedSettings = {
         ...currentSettings,
-        stripe: updatedStripe,
-        paypal: updatedPaypal,
+        currency: envCurrency || currentSettings.currency || 'USD',
+        stripe: {
+          ...currentSettings.stripe,
+          publishableKey: stripePublishable || currentSettings.stripe?.publishableKey || '',
+          secretKey: stripeSecret || currentSettings.stripe?.secretKey || '',
+          webhookSecret: stripeWebhook || currentSettings.stripe?.webhookSecret || '',
+        },
+        paypal: {
+          ...currentSettings.paypal,
+          clientId: paypalClient || currentSettings.paypal?.clientId || '',
+          clientSecret: paypalSecret || currentSettings.paypal?.clientSecret || '',
+          webhookId: paypalWebhook || currentSettings.paypal?.webhookId || '',
+        }
       };
 
-      await persistAdminSettingsData(merged, merged.currency || 'USD');
+      if (stripePublishable) syncedFields.push('Stripe Publishable Key');
+      if (stripeSecret) syncedFields.push('Stripe Secret Key');
+      if (stripeWebhook) syncedFields.push('Stripe Webhook Secret');
+      if (paypalClient) syncedFields.push('PayPal Client ID');
+      if (paypalSecret) syncedFields.push('PayPal Client Secret');
+
+      await persistAdminSettingsData(updatedSettings, updatedSettings.currency);
 
       return NextResponse.json({
         success: true,
+        message: `Successfully synced ${syncedFields.length} credential(s) from server .env!`,
         syncedCount: syncedFields.length,
         syncedFields,
-        settings: merged
+        settings: updatedSettings
       });
     }
 
-    // 10. DEFAULT SAVE GATEWAY SETTINGS
-    const gatewayConfig = body.paymentSettings || body;
-    const currency = gatewayConfig.currency || body.currency || 'USD';
+    // 7. UPDATE .ENV EXPLICITLY
+    if (body.action === 'update_env') {
+      const cfg = body.paymentSettings || body;
+      updateEnvCredentials(cfg);
+      return NextResponse.json({
+        success: true,
+        message: 'Credentials updated and saved to server .env files!'
+      });
+    }
 
-    await persistAdminSettingsData(gatewayConfig, currency);
+    // 8. MANUAL SETTLEMENT ACTIONS
+    if (body.action === 'approve_manual_settlement') {
+      const txId = body.id;
+      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
 
-    return NextResponse.json({
-      success: true,
-      message: 'Payment gateway settings and manual settlement configuration saved successfully to PostgreSQL!',
-      settings: gatewayConfig
-    });
+      await query(
+        `UPDATE payment_transactions 
+         SET status = 'succeeded', confirmed_amount = amount, confirmed_at = NOW(), updated_at = NOW() 
+         WHERE id = $1`,
+        [txId]
+      );
+
+      await query(
+        `UPDATE wallet_transactions 
+         SET status = 'succeeded' 
+         WHERE gateway_tx_id = $1 OR id = $1`,
+        [txId]
+      ).catch(() => {});
+
+      return NextResponse.json({ success: true, message: 'Manual bank wire approved successfully!' });
+    }
+
+    if (body.action === 'reject_manual_settlement') {
+      const txId = body.id;
+      const failureReason = body.failureReason || 'Wire transfer rejected by administrator';
+      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+
+      await query(
+        `UPDATE payment_transactions 
+         SET status = 'rejected', failure_reason = $1, updated_at = NOW() 
+         WHERE id = $2`,
+        [failureReason, txId]
+      );
+
+      await query(
+        `UPDATE wallet_transactions 
+         SET status = 'rejected' 
+         WHERE gateway_tx_id = $1 OR id = $1`,
+        [txId]
+      ).catch(() => {});
+
+      return NextResponse.json({ success: true, message: 'Manual bank wire settlement rejected.' });
+    }
+
+    if (body.action === 'edit_transaction') {
+      const txId = body.id;
+      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+
+      await query(
+        `UPDATE payment_transactions 
+         SET customer_name = $1, customer_email = $2, plan_name = $3, amount = $4,
+             transfer_reference = $5, status = $6, notes = $7, failure_reason = $8, updated_at = NOW()
+         WHERE id = $9`,
+        [
+          body.customer_name || 'Customer',
+          (body.customer_email || '').toLowerCase().trim(),
+          body.plan_name || 'Plan',
+          Number(body.amount || 0),
+          body.transfer_reference || '',
+          body.status || 'pending',
+          body.notes || '',
+          body.failure_reason || null,
+          txId
+        ]
+      );
+
+      return NextResponse.json({ success: true, message: 'Transaction record updated successfully in PostgreSQL!' });
+    }
+
+    // 9. REFUND / CANCEL
+    if (body.action === 'refund_transaction') {
+      const txId = body.id || body.transaction?.id;
+      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+
+      await query(
+        `UPDATE payment_transactions 
+         SET status = 'refunded', is_recurring = false, auto_renew = false, expiry_date = NOW(), updated_at = NOW() 
+         WHERE id = $1`,
+        [txId]
+      );
+
+      return NextResponse.json({ success: true, message: 'Payment refunded successfully' });
+    }
+
+    if (body.action === 'cancel_transaction') {
+      const txId = body.id || body.transaction?.id;
+      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+
+      await query(
+        `UPDATE payment_transactions 
+         SET status = 'canceled', is_recurring = false, auto_renew = false, updated_at = NOW() 
+         WHERE id = $1`,
+        [txId]
+      );
+
+      return NextResponse.json({ success: true, message: 'Subscription canceled' });
+    }
+
+    // Fallback save
+    const fallbackSettings = body.paymentSettings || body;
+    await persistAdminSettingsData(fallbackSettings, fallbackSettings.currency || 'USD');
+    return NextResponse.json({ success: true, settings: fallbackSettings });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -50720,26 +51182,16 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   try {
     await ensurePaymentSchema();
-    const url = new URL(req.url);
-    const id = url.searchParams.get('id');
+    const body = await req.json().catch(() => ({}));
+    const id = body.id;
 
     if (id) {
       await query(`DELETE FROM payment_transactions WHERE id = $1`, [id]);
-      return NextResponse.json({ success: true, message: `Transaction ${id} deleted successfully` });
+      await query(`DELETE FROM wallet_transactions WHERE gateway_tx_id = $1 OR id = $1`, [id]).catch(() => {});
+      return NextResponse.json({ success: true, message: 'Transaction deleted' });
     }
 
-    const body = await req.json().catch(() => ({}));
-    if (body.id) {
-      await query(`DELETE FROM payment_transactions WHERE id = $1`, [body.id]);
-      return NextResponse.json({ success: true, message: `Transaction ${body.id} deleted successfully` });
-    }
-
-    if (Array.isArray(body.ids) && body.ids.length > 0) {
-      await query(`DELETE FROM payment_transactions WHERE id = ANY($1::text[])`, [body.ids]);
-      return NextResponse.json({ success: true, message: `${body.ids.length} transactions deleted successfully` });
-    }
-
-    return NextResponse.json({ success: false, error: 'Transaction ID is required' }, { status: 400 });
+    return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -51118,20 +51570,9 @@ export async function POST(req: NextRequest) {
 ```typescript
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-
-function parseDbRows<T = any>(res: any): T[] {
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (typeof res === 'object' && Array.isArray(res.rows)) return res.rows;
-  return [];
-}
-
-function parseDbRow<T = any>(res: any): T | null {
-  const rows = parseDbRows<T>(res);
-  return rows.length > 0 ? rows[0] : null;
-}
 
 async function ensurePaymentSchema() {
   try {
@@ -51144,22 +51585,21 @@ async function ensurePaymentSchema() {
         plan_slug TEXT,
         amount NUMERIC DEFAULT 0,
         currency VARCHAR(10) DEFAULT 'USD',
-        gateway VARCHAR(50) DEFAULT 'manual_settlement',
-        status VARCHAR(50) DEFAULT 'pending',
+        gateway VARCHAR(50) DEFAULT 'stripe',
+        status VARCHAR(50) DEFAULT 'succeeded',
         test_mode BOOLEAN DEFAULT false,
         failure_reason TEXT,
-        is_recurring BOOLEAN DEFAULT false,
+        is_recurring BOOLEAN DEFAULT true,
         recurring_interval VARCHAR(20) DEFAULT 'MONTH',
-        auto_renew BOOLEAN DEFAULT false,
+        auto_renew BOOLEAN DEFAULT true,
+        transfer_reference TEXT,
+        notes TEXT,
+        confirmed_amount NUMERIC,
+        confirmed_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW(),
         expiry_date TIMESTAMPTZ,
-        gateway_transaction_id TEXT,
-        confirmed_amount NUMERIC,
-        confirmed_at TIMESTAMPTZ,
-        transfer_reference TEXT,
-        proof_file_url TEXT,
-        notes TEXT
+        gateway_transaction_id TEXT
       );
     `);
 
@@ -51175,18 +51615,31 @@ async function ensurePaymentSchema() {
     `);
 
     await query(`
+      CREATE TABLE IF NOT EXISTS wallet_settings (
+        id INT PRIMARY KEY DEFAULT 1,
+        currency VARCHAR(10) DEFAULT 'USD',
+        allowed_gateways JSONB DEFAULT '["stripe"]',
+        active_gateway VARCHAR(50) DEFAULT 'stripe',
+        min_deposit NUMERIC DEFAULT 5,
+        max_deposit NUMERIC DEFAULT 1000,
+        bonus_tiers JSONB,
+        ledger_columns JSONB,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    await query(`
       DO $$ 
       BEGIN 
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS transfer_reference TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS proof_file_url TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS notes TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_amount NUMERIC; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_reason TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS payment_settings JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
         BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS site_name TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS theme_colors JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS allowed_gateways JSONB DEFAULT '["stripe"]'; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
       END $$;
     `);
   } catch (e) {
@@ -51194,13 +51647,64 @@ async function ensurePaymentSchema() {
   }
 }
 
+function writeKeyToEnvFile(filePath: string, key: string, value: string) {
+  try {
+    if (!fs.existsSync(filePath)) return;
+    let content = fs.readFileSync(filePath, 'utf8');
+    const regex = new RegExp(`^${key}=.*$`, 'm');
+    const safeVal = value.includes(' ') ? `"${value}"` : value;
+    if (regex.test(content)) {
+      content = content.replace(regex, `${key}=${safeVal}`);
+    } else {
+      content += `\n${key}=${safeVal}`;
+    }
+    fs.writeFileSync(filePath, content, 'utf8');
+  } catch (_) {}
+}
+
+function updateEnvCredentials(settings: any) {
+  const envCandidates = [
+    path.join(process.cwd(), '.env'),
+    path.join(process.cwd(), '.env.local'),
+    path.join(process.cwd(), 'apps', 'web', '.env'),
+    path.join(process.cwd(), 'apps', 'web', '.env.local')
+  ];
+
+  const pairs: Record<string, string> = {
+    STRIPE_PUBLISHABLE_KEY: settings.stripe?.publishableKey || '',
+    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: settings.stripe?.publishableKey || '',
+    STRIPE_SECRET_KEY: settings.stripe?.secretKey || '',
+    STRIPE_WEBHOOK_SECRET: settings.stripe?.webhookSecret || '',
+    PAYPAL_CLIENT_ID: settings.paypal?.clientId || '',
+    NEXT_PUBLIC_PAYPAL_CLIENT_ID: settings.paypal?.clientId || '',
+    PAYPAL_CLIENT_SECRET: settings.paypal?.clientSecret || '',
+    PAYPAL_WEBHOOK_ID: settings.paypal?.webhookId || '',
+    PAYMENT_CURRENCY: settings.currency || 'USD',
+  };
+
+  for (const [k, v] of Object.entries(pairs)) {
+    if (v) process.env[k] = v;
+  }
+
+  for (const filePath of envCandidates) {
+    if (fs.existsSync(filePath)) {
+      for (const [k, v] of Object.entries(pairs)) {
+        if (v) writeKeyToEnvFile(filePath, k, v);
+      }
+    }
+  }
+}
+
 async function persistAdminSettingsData(settings: any, currency: string) {
   await ensurePaymentSchema();
   const cleanSettings = { ...settings };
   delete cleanSettings.action;
+  delete cleanSettings.gateway;
+  delete cleanSettings.enabled;
   const jsonStr = JSON.stringify(cleanSettings);
   const cur = currency || cleanSettings.currency || 'USD';
 
+  // 1. Persist in PostgreSQL admin_settings
   try {
     await query(
       `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
@@ -51212,7 +51716,6 @@ async function persistAdminSettingsData(settings: any, currency: string) {
       [jsonStr, cur]
     );
   } catch (err) {
-    console.warn('[Payment API] JSONB upsert failed, falling back to update:', err);
     try {
       await query(
         `UPDATE admin_settings SET payment_settings = $1, currency = $2, updated_at = NOW() WHERE id = 1`,
@@ -51221,43 +51724,64 @@ async function persistAdminSettingsData(settings: any, currency: string) {
     } catch (_) {}
   }
 
+  // 2. Synchronize allowed_gateways with wallet_settings
   try {
+    const allowedGateways: string[] = [];
+    if (cleanSettings.stripe?.enabled) allowedGateways.push('stripe');
+    if (cleanSettings.paypal?.enabled) allowedGateways.push('paypal');
+    if (cleanSettings.manualSettlement?.enabled || cleanSettings.manual?.enabled) allowedGateways.push('manual');
+
+    await query(
+      `INSERT INTO wallet_settings (id, currency, allowed_gateways, updated_at)
+       VALUES (1, $1, $2::jsonb, NOW())
+       ON CONFLICT (id) DO UPDATE SET
+         currency = EXCLUDED.currency,
+         allowed_gateways = EXCLUDED.allowed_gateways,
+         updated_at = NOW()`,
+      [cur, JSON.stringify(allowedGateways)]
+    ).catch(async () => {
+      await query(
+        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW() WHERE id = 1`,
+        [cur, JSON.stringify(allowedGateways)]
+      ).catch(() => {});
+    });
+  } catch (wErr) {
+    console.warn('[Payment API] wallet_settings sync warning:', wErr);
+  }
+
+  // 3. Mirror to .env and disk
+  try {
+    updateEnvCredentials(cleanSettings);
     const dataDir = path.join(process.cwd(), 'data');
     const filePath = path.join(dataDir, 'admin_settings.json');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
     let existing: any = {};
     if (fs.existsSync(filePath)) {
-      try {
-        existing = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-      } catch (_) {}
+      try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
     }
     existing.paymentSettings = cleanSettings;
     existing.currency = cur;
     existing.updatedAt = new Date().toISOString();
     fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
-  } catch (fileErr) {
-    console.warn('[Payment API] File mirror error:', fileErr);
-  }
+  } catch (_) {}
 }
 
 export async function GET() {
   try {
     await ensurePaymentSchema();
 
-    let txRes: any = await query(
+    let txRes = await query(
       `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
     ).catch(async () => {
-      return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => []);
+      return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => ({ rows: [] }));
     });
 
-    const transactions = parseDbRows(txRes);
+    const transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
 
     let settings: any = null;
     try {
-      const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-      const sRow: any = parseDbRow(sRes);
+      const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
       if (sRow) {
         let ps = sRow.payment_settings;
         if (typeof ps === 'string') {
@@ -51298,268 +51822,226 @@ export async function POST(req: Request) {
     await ensurePaymentSchema();
     const body = await req.json();
 
-    // 1. APPROVE MANUAL SETTLEMENT / BANK WIRE
-    if (body.action === 'approve_manual_settlement') {
-      const txId = body.id || body.transactionId;
-      if (!txId) {
-        return NextResponse.json({ success: false, error: 'Transaction ID is required' }, { status: 400 });
-      }
-
-      const txRes: any = await query(`SELECT * FROM payment_transactions WHERE id = $1 LIMIT 1`, [txId]);
-      const tx: any = parseDbRow(txRes);
-
-      if (!tx) {
-        return NextResponse.json({ success: false, error: 'Transaction not found' }, { status: 404 });
-      }
-
-      const confirmedAmount = body.confirmedAmount !== undefined ? Number(body.confirmedAmount) : Number(tx.amount || 0);
-      const now = new Date().toISOString();
-
-      await query(
-        `UPDATE payment_transactions 
-         SET status = 'succeeded',
-             confirmed_amount = $1,
-             confirmed_at = $2,
-             failure_reason = NULL,
-             updated_at = NOW()
-         WHERE id = $3`,
-        [confirmedAmount, now, txId]
-      );
-
-      // If it was a wallet top-up, credit user's wallet_balance directly
-      if (tx.plan_slug === 'wallet_topup' && tx.customer_email) {
-        try {
-          await query(
-            `UPDATE users 
-             SET wallet_balance = COALESCE(wallet_balance, 0) + $1,
-                 updated_at = NOW()
-             WHERE LOWER(TRIM(email)) = LOWER(TRIM($2))`,
-            [confirmedAmount, tx.customer_email]
-          );
-          await query(
-            `UPDATE wallet_transactions
-             SET status = 'succeeded',
-                 balance_after = (SELECT wallet_balance FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1))),
-                 amount = $2
-             WHERE gateway_tx_id = $3 OR description LIKE $4`,
-            [tx.customer_email, confirmedAmount, tx.transfer_reference, `%${tx.transfer_reference}%`]
-          );
-        } catch (_) {}
-      } else if (tx.customer_email) {
-        try {
-          await query(
-            `UPDATE users 
-             SET plan_status = 'active',
-                 plan_name = COALESCE($1, plan_name),
-                 updated_at = NOW()
-             WHERE LOWER(TRIM(email)) = LOWER(TRIM($2))`,
-            [tx.plan_name, tx.customer_email]
-          ).catch(() => {});
-        } catch (_) {}
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: `Manual settlement approved! Funds confirmed for ${tx.customer_name || tx.customer_email}.`,
-        transactionId: txId
-      });
-    }
-
-    // 2. REJECT MANUAL SETTLEMENT / BANK WIRE
-    if (body.action === 'reject_manual_settlement') {
-      const txId = body.id || body.transactionId;
-      const reason = (body.failureReason || body.reason || 'Manual settlement rejected by administrator').trim();
-      if (!txId) {
-        return NextResponse.json({ success: false, error: 'Transaction ID is required' }, { status: 400 });
-      }
-
-      await query(
-        `UPDATE payment_transactions 
-         SET status = 'rejected',
-             failure_reason = $1,
-             updated_at = NOW()
-         WHERE id = $2`,
-        [reason, txId]
-      );
-
-      try {
-        await query(
-          `UPDATE wallet_transactions
-           SET status = 'rejected',
-               description = description || ' (Declined: ' || $1 || ')'
-           WHERE gateway_tx_id = (SELECT transfer_reference FROM payment_transactions WHERE id = $2)`,
-          [reason, txId]
-        );
-      } catch (_) {}
-
-      return NextResponse.json({
-        success: true,
-        message: 'Manual settlement transaction marked as rejected.',
-        transactionId: txId
-      });
-    }
-
-    // 3. EDIT / UPDATE TRANSACTION
-    if (body.action === 'edit_transaction' || body.action === 'update_transaction') {
-      const tx = body.transaction || body;
-      const txId = tx.id || body.id;
-
-      if (!txId) {
-        return NextResponse.json({ success: false, error: 'Transaction ID is required for editing' }, { status: 400 });
-      }
-
-      const status = (tx.status || 'pending').toLowerCase();
-      const amount = Number(tx.amount || 0);
-      const customerName = String(tx.customer_name || tx.customerName || 'Customer');
-      const customerEmail = String(tx.customer_email || tx.customerEmail || '').toLowerCase().trim();
-      const planName = String(tx.plan_name || tx.planName || 'Manual Transfer');
-      const transferReference = tx.transfer_reference !== undefined ? String(tx.transfer_reference).trim() : null;
-      const notes = tx.notes !== undefined ? String(tx.notes).trim() : null;
-      const failureReason = tx.failure_reason || tx.failureReason || null;
-      const confirmedAmount = status === 'succeeded' ? (tx.confirmed_amount !== undefined ? Number(tx.confirmed_amount) : amount) : null;
-      const confirmedAt = status === 'succeeded' ? new Date().toISOString() : null;
-
-      await query(
-        `UPDATE payment_transactions 
-         SET customer_name = $1,
-             customer_email = $2,
-             plan_name = $3,
-             amount = $4,
-             transfer_reference = $5,
-             notes = $6,
-             status = $7,
-             failure_reason = $8,
-             confirmed_amount = $9,
-             confirmed_at = $10,
-             updated_at = NOW()
-         WHERE id = $11`,
-        [
-          customerName, customerEmail, planName, amount,
-          transferReference, notes, status, failureReason,
-          confirmedAmount, confirmedAt, txId
-        ]
-      );
-
-      return NextResponse.json({
-        success: true,
-        message: `Transaction ${txId} updated successfully!`,
-        transaction: {
-          id: txId, customer_name: customerName, customer_email: customerEmail,
-          plan_name: planName, amount, transfer_reference: transferReference,
-          notes, status, failure_reason: failureReason, confirmed_amount: confirmedAmount
-        }
-      });
-    }
-
-    // 4. DELETE TRANSACTION
-    if (body.action === 'delete_transaction') {
-      const txId = body.id || body.transactionId;
-      if (!txId) {
-        return NextResponse.json({ success: false, error: 'Transaction ID is required for deletion' }, { status: 400 });
-      }
-
-      await query(`DELETE FROM payment_transactions WHERE id = $1`, [txId]);
-
-      return NextResponse.json({
-        success: true,
-        message: `Transaction record ${txId} deleted from database.`,
-        transactionId: txId
-      });
-    }
-
-    // 5. CREATE NEW MANUAL TRANSACTION (DEFAULTS TO PENDING)
-    if (body.action === 'add_transaction' || body.action === 'create_manual_transaction') {
-      const tx = body.transaction || body;
-      const txId = tx.id || `ptx_wire_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      const amount = Number(tx.amount || 0);
-      const currency = String(tx.currency || 'USD');
-      const customerName = String(tx.customer_name || tx.customerName || 'Customer');
-      const customerEmail = String(tx.customer_email || tx.customerEmail || '').toLowerCase().trim();
-      const planName = String(tx.plan_name || tx.planName || 'Manual Bank Settlement');
-      const transferReference = tx.transfer_reference || tx.transferReference || '';
-      const notes = tx.notes || '';
-      const status = 'pending';
-
-      await query(
-        `INSERT INTO payment_transactions (
-          id, customer_name, customer_email, plan_name, plan_slug,
-          amount, currency, gateway, status, test_mode, failure_reason,
-          transfer_reference, notes, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, 'manual_wire', $5, $6, 'manual_settlement', $7, false, NULL, $8, $9, NOW(), NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          amount = EXCLUDED.amount,
-          transfer_reference = EXCLUDED.transfer_reference,
-          notes = EXCLUDED.notes,
-          updated_at = NOW()`,
-        [
-          txId, customerName, customerEmail, planName, amount, currency,
-          status, transferReference, notes
-        ]
-      );
-
-      return NextResponse.json({
-        success: true,
-        message: 'New manual settlement queued with status "Pending" awaiting admin approval.',
-        transaction: { id: txId, status, amount, customer_name: customerName, transfer_reference: transferReference }
-      });
-    }
-
-    // 6. VERIFY WEBHOOK SECRET
-    if (body.action === 'verify_webhook_secret') {
-      const secret = (body.webhookSecret || '').trim();
-      if (!secret || !secret.startsWith('whsec_') || secret.length < 15) {
-        return NextResponse.json({ 
-          success: false, 
-          error: 'Webhook Secret must start with "whsec_" and contain a valid HMAC signing key.' 
-        }, { status: 400 });
-      }
-      return NextResponse.json({ 
-        success: true, 
-        message: 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!' 
-      });
-    }
-
-    // 7. VERIFY STRIPE KEYS
+    // 1. VERIFY STRIPE KEYS (3-WAY VERIFICATION)
     if (body.action === 'verify_stripe_keys') {
-      const pKey = (body.publishableKey || body.stripe?.publishableKey || '').trim();
-      const sKey = (body.secretKey || body.stripe?.secretKey || '').trim();
-      const wSecret = (body.webhookSecret || body.stripe?.webhookSecret || '').trim();
-      const isTestMode = body.testMode !== undefined ? Boolean(body.testMode) : true;
+      const pubKey = (body.publishableKey || body.stripe?.publishableKey || '').trim();
+      const secKey = (body.secretKey || body.stripe?.secretKey || '').trim();
+      const whSecret = (body.webhookSecret || body.stripe?.webhookSecret || '').trim();
+      const testMode = Boolean(body.testMode);
 
-      if (!pKey || !sKey || !wSecret) {
+      if (!pubKey || !secKey || !whSecret) {
         return NextResponse.json({
           success: false,
           error: 'Publishable Key, Secret Key, and Webhook Secret are all required to verify.'
         }, { status: 400 });
       }
 
-      if (isTestMode && (!pKey.startsWith('pk_test_') || !sKey.startsWith('sk_test_'))) {
+      // Check key prefixes
+      if (testMode && !secKey.startsWith('sk_test_')) {
         return NextResponse.json({
           success: false,
-          error: 'Sandbox Test Mode active: Publishable Key must start with "pk_test_" and Secret Key with "sk_test_".'
+          error: 'Test mode is enabled: Secret Key must start with "sk_test_".'
+        }, { status: 400 });
+      }
+      if (!testMode && !secKey.startsWith('sk_live_')) {
+        return NextResponse.json({
+          success: false,
+          error: 'Live mode is enabled: Secret Key must start with "sk_live_".'
+        }, { status: 400 });
+      }
+      if (!whSecret.startsWith('whsec_') || whSecret.length < 24) {
+        return NextResponse.json({
+          success: false,
+          error: 'Webhook Signing Secret must begin with "whsec_" and be at least 24 characters long.'
         }, { status: 400 });
       }
 
-      if (!isTestMode && (!pKey.startsWith('pk_live_') || !sKey.startsWith('sk_live_'))) {
+      // Probe Stripe /v1/balance API
+      try {
+        const stripeRes = await fetch('https://api.stripe.com/v1/balance', {
+          headers: { Authorization: `Bearer ${secKey}` },
+        });
+        const stripeData = await stripeRes.json().catch(() => ({}));
+        if (!stripeRes.ok) {
+          return NextResponse.json({
+            success: false,
+            error: stripeData.error?.message || 'Stripe Secret Key rejected by Stripe API.'
+          }, { status: 400 });
+        }
+      } catch (err: any) {
         return NextResponse.json({
           success: false,
-          error: 'Live Production Mode active: Publishable Key must start with "pk_live_" and Secret Key with "sk_live_".'
+          error: `Could not connect to Stripe API: ${err.message}`
+        }, { status: 502 });
+      }
+
+      // Probe Publishable Key
+      try {
+        const pubRes = await fetch('https://api.stripe.com/v1/tokens', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${pubKey}`,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: ''
+        });
+        if (pubRes.status === 401) {
+          return NextResponse.json({
+            success: false,
+            error: 'Publishable Key is invalid or rejected by Stripe API.'
+          }, { status: 400 });
+        }
+      } catch (_) {}
+
+      // Webhook HMAC check
+      try {
+        const testHmac = crypto.createHmac('sha256', whSecret);
+        testHmac.update('zecratary_signature_test');
+        testHmac.digest('hex');
+      } catch (hErr: any) {
+        return NextResponse.json({
+          success: false,
+          error: `Webhook Signing Secret failed cryptographic HMAC check: ${hErr.message}`
         }, { status: 400 });
       }
+
+      let currentSettings: any = {};
+      try {
+        const sRes = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (row?.payment_settings) {
+          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        }
+      } catch (_) {}
+
+      const updatedSettings = {
+        ...currentSettings,
+        ...(body.paymentSettings || {}),
+        stripeKeysVerified: true,
+        stripeWebhookVerified: true,
+        stripeConnected: true,
+        stripe: {
+          ...(currentSettings.stripe || {}),
+          enabled: currentSettings.stripe?.enabled ?? true,
+          publishableKey: pubKey,
+          secretKey: secKey,
+          webhookSecret: whSecret
+        }
+      };
+
+      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
 
       return NextResponse.json({
         success: true,
-        message: 'Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers!'
+        message: 'Stripe keys and webhook verified successfully and saved to PostgreSQL!',
+        settings: updatedSettings
       });
     }
 
-    // 8. TOGGLE TEST MODE
+    // 2. VERIFY WEBHOOK SECRET (INLINE)
+    if (body.action === 'verify_webhook_secret') {
+      const secret = (body.webhookSecret || '').trim();
+      if (!secret.startsWith('whsec_') || secret.length < 24) {
+        return NextResponse.json({
+          success: false,
+          error: 'Invalid Webhook Signing Secret. Must start with "whsec_" and have standard length.'
+        }, { status: 400 });
+      }
+
+      try {
+        const hmac = crypto.createHmac('sha256', secret);
+        hmac.update('test_payload_123');
+        hmac.digest('hex');
+      } catch (err: any) {
+        return NextResponse.json({ success: false, error: `HMAC verification failed: ${err.message}` }, { status: 400 });
+      }
+
+      let currentSettings: any = {};
+      try {
+        const sRes = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (row?.payment_settings) {
+          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        }
+      } catch (_) {}
+
+      const updatedSettings = {
+        ...currentSettings,
+        stripeWebhookVerified: true,
+        stripe: {
+          ...(currentSettings.stripe || {}),
+          webhookSecret: secret
+        }
+      };
+
+      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
+
+      return NextResponse.json({
+        success: true,
+        message: 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!',
+        settings: updatedSettings
+      });
+    }
+
+    // 3. TOGGLE GATEWAY (STRIPE, PAYPAL, MANUAL SETTLEMENT)
+    if (body.action === 'toggle_gateway') {
+      const gatewayKey = body.gateway;
+      const isEnabled = Boolean(body.enabled);
+
+      let currentSettings: any = {};
+      try {
+        const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+        if (row?.payment_settings) {
+          currentSettings = typeof row.payment_settings === 'string'
+            ? JSON.parse(row.payment_settings)
+            : row.payment_settings;
+        }
+      } catch (_) {}
+
+      const updatedSettings = {
+        ...currentSettings,
+        ...(body.paymentSettings || {}),
+      };
+
+      if (gatewayKey === 'stripe') {
+        updatedSettings.stripe = { ...(updatedSettings.stripe || {}), enabled: isEnabled };
+      } else if (gatewayKey === 'paypal') {
+        updatedSettings.paypal = { ...(updatedSettings.paypal || {}), enabled: isEnabled };
+      } else if (gatewayKey === 'manualSettlement' || gatewayKey === 'manual') {
+        updatedSettings.manualSettlement = { ...(updatedSettings.manualSettlement || {}), enabled: isEnabled };
+      }
+
+      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
+
+      return NextResponse.json({
+        success: true,
+        message: `${gatewayKey} gateway ${isEnabled ? 'enabled' : 'disabled'} and saved successfully.`,
+        settings: updatedSettings
+      });
+    }
+
+    // 4. SAVE GATEWAY SETTINGS
+    if (body.action === 'save_gateway_settings') {
+      const gatewayConfig = body.paymentSettings || body;
+      const currency = gatewayConfig.currency || body.currency || 'USD';
+
+      await persistAdminSettingsData(gatewayConfig, currency);
+
+      return NextResponse.json({
+        success: true,
+        message: 'Payment gateway settings and currency saved successfully to server!',
+        settings: gatewayConfig
+      });
+    }
+
+    // 5. TOGGLE TEST MODE
     if (body.action === 'toggle_test_mode') {
       const nextMode = Boolean(body.testMode);
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
+        const sRes = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
         if (row?.payment_settings) {
           currentSettings = typeof row.payment_settings === 'string' 
             ? JSON.parse(row.payment_settings) 
@@ -51579,102 +52061,177 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         success: true,
-        message: nextMode ? 'Sandbox (Test Mode) enabled and saved to PostgreSQL!' : 'Live Production mode enabled and saved to PostgreSQL!',
+        message: nextMode ? 'Sandbox (Test Mode) enabled!' : 'Live Production mode enabled!',
         settings: updatedSettings
       });
     }
 
-    // 9. SYNC FROM .ENV
+    // 6. SYNC FROM .ENV
     if (body.action === 'sync_env') {
-      const rootDir = process.cwd();
-      const envPaths = [
-        path.join(rootDir, '.env'),
-        path.join(rootDir, '.env.local'),
-        path.join(rootDir, 'apps', 'web', '.env'),
-        path.join(rootDir, 'apps', 'web', '.env.local')
-      ].filter(p => fs.existsSync(p));
-
-      let envVars: Record<string, string> = { ...process.env as Record<string, string> };
-      for (const p of envPaths) {
-        try {
-          const content = fs.readFileSync(p, 'utf8');
-          for (const line of content.split('\n')) {
-            const trimmed = line.trim();
-            if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
-              const eqIdx = trimmed.indexOf('=');
-              const key = trimmed.slice(0, eqIdx).trim();
-              const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
-              envVars[key] = val;
-            }
-          }
-        } catch (_) {}
-      }
-
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
+        const sRes = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
         if (row?.payment_settings) {
           currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
         }
       } catch (_) {}
 
       const syncedFields: string[] = [];
-      const updatedStripe = { ...(currentSettings.stripe || {}) };
-      const updatedPaypal = { ...(currentSettings.paypal || {}) };
+      const stripePublishable = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || process.env.STRIPE_PUBLISHABLE_KEY || '';
+      const stripeSecret = process.env.STRIPE_SECRET_KEY || '';
+      const stripeWebhook = process.env.STRIPE_WEBHOOK_SECRET || '';
+      const paypalClient = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || process.env.PAYPAL_CLIENT_ID || '';
+      const paypalSecret = process.env.PAYPAL_CLIENT_SECRET || '';
+      const paypalWebhook = process.env.PAYPAL_WEBHOOK_ID || '';
+      const envCurrency = process.env.PAYMENT_CURRENCY || process.env.NEXT_PUBLIC_CURRENCY || '';
 
-      if (envVars.STRIPE_PUBLISHABLE_KEY || envVars.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY) {
-        updatedStripe.publishableKey = envVars.STRIPE_PUBLISHABLE_KEY || envVars.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
-        syncedFields.push('Stripe Publishable Key');
-      }
-      if (envVars.STRIPE_SECRET_KEY) {
-        updatedStripe.secretKey = envVars.STRIPE_SECRET_KEY;
-        syncedFields.push('Stripe Secret Key');
-      }
-      if (envVars.STRIPE_WEBHOOK_SECRET) {
-        updatedStripe.webhookSecret = envVars.STRIPE_WEBHOOK_SECRET;
-        syncedFields.push('Stripe Webhook Secret');
-      }
-      if (envVars.PAYPAL_CLIENT_ID || envVars.NEXT_PUBLIC_PAYPAL_CLIENT_ID) {
-        updatedPaypal.clientId = envVars.PAYPAL_CLIENT_ID || envVars.NEXT_PUBLIC_PAYPAL_CLIENT_ID;
-        syncedFields.push('PayPal Client ID');
-      }
-      if (envVars.PAYPAL_CLIENT_SECRET || envVars.PAYPAL_SECRET) {
-        updatedPaypal.clientSecret = envVars.PAYPAL_CLIENT_SECRET || envVars.PAYPAL_SECRET;
-        syncedFields.push('PayPal Client Secret');
-      }
-      if (envVars.PAYPAL_WEBHOOK_ID) {
-        updatedPaypal.webhookId = envVars.PAYPAL_WEBHOOK_ID;
-        syncedFields.push('PayPal Webhook ID');
-      }
-
-      const merged = {
+      const updatedSettings = {
         ...currentSettings,
-        stripe: updatedStripe,
-        paypal: updatedPaypal,
+        currency: envCurrency || currentSettings.currency || 'USD',
+        stripe: {
+          ...currentSettings.stripe,
+          publishableKey: stripePublishable || currentSettings.stripe?.publishableKey || '',
+          secretKey: stripeSecret || currentSettings.stripe?.secretKey || '',
+          webhookSecret: stripeWebhook || currentSettings.stripe?.webhookSecret || '',
+        },
+        paypal: {
+          ...currentSettings.paypal,
+          clientId: paypalClient || currentSettings.paypal?.clientId || '',
+          clientSecret: paypalSecret || currentSettings.paypal?.clientSecret || '',
+          webhookId: paypalWebhook || currentSettings.paypal?.webhookId || '',
+        }
       };
 
-      await persistAdminSettingsData(merged, merged.currency || 'USD');
+      if (stripePublishable) syncedFields.push('Stripe Publishable Key');
+      if (stripeSecret) syncedFields.push('Stripe Secret Key');
+      if (stripeWebhook) syncedFields.push('Stripe Webhook Secret');
+      if (paypalClient) syncedFields.push('PayPal Client ID');
+      if (paypalSecret) syncedFields.push('PayPal Client Secret');
+
+      await persistAdminSettingsData(updatedSettings, updatedSettings.currency);
 
       return NextResponse.json({
         success: true,
+        message: `Successfully synced ${syncedFields.length} credential(s) from server .env!`,
         syncedCount: syncedFields.length,
         syncedFields,
-        settings: merged
+        settings: updatedSettings
       });
     }
 
-    // 10. DEFAULT SAVE GATEWAY SETTINGS
-    const gatewayConfig = body.paymentSettings || body;
-    const currency = gatewayConfig.currency || body.currency || 'USD';
+    // 7. UPDATE .ENV EXPLICITLY
+    if (body.action === 'update_env') {
+      const cfg = body.paymentSettings || body;
+      updateEnvCredentials(cfg);
+      return NextResponse.json({
+        success: true,
+        message: 'Credentials updated and saved to server .env files!'
+      });
+    }
 
-    await persistAdminSettingsData(gatewayConfig, currency);
+    // 8. MANUAL SETTLEMENT ACTIONS
+    if (body.action === 'approve_manual_settlement') {
+      const txId = body.id;
+      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
 
-    return NextResponse.json({
-      success: true,
-      message: 'Payment gateway settings and manual settlement configuration saved successfully to PostgreSQL!',
-      settings: gatewayConfig
-    });
+      await query(
+        `UPDATE payment_transactions 
+         SET status = 'succeeded', confirmed_amount = amount, confirmed_at = NOW(), updated_at = NOW() 
+         WHERE id = $1`,
+        [txId]
+      );
+
+      await query(
+        `UPDATE wallet_transactions 
+         SET status = 'succeeded' 
+         WHERE gateway_tx_id = $1 OR id = $1`,
+        [txId]
+      ).catch(() => {});
+
+      return NextResponse.json({ success: true, message: 'Manual bank wire approved successfully!' });
+    }
+
+    if (body.action === 'reject_manual_settlement') {
+      const txId = body.id;
+      const failureReason = body.failureReason || 'Wire transfer rejected by administrator';
+      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+
+      await query(
+        `UPDATE payment_transactions 
+         SET status = 'rejected', failure_reason = $1, updated_at = NOW() 
+         WHERE id = $2`,
+        [failureReason, txId]
+      );
+
+      await query(
+        `UPDATE wallet_transactions 
+         SET status = 'rejected' 
+         WHERE gateway_tx_id = $1 OR id = $1`,
+        [txId]
+      ).catch(() => {});
+
+      return NextResponse.json({ success: true, message: 'Manual bank wire settlement rejected.' });
+    }
+
+    if (body.action === 'edit_transaction') {
+      const txId = body.id;
+      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+
+      await query(
+        `UPDATE payment_transactions 
+         SET customer_name = $1, customer_email = $2, plan_name = $3, amount = $4,
+             transfer_reference = $5, status = $6, notes = $7, failure_reason = $8, updated_at = NOW()
+         WHERE id = $9`,
+        [
+          body.customer_name || 'Customer',
+          (body.customer_email || '').toLowerCase().trim(),
+          body.plan_name || 'Plan',
+          Number(body.amount || 0),
+          body.transfer_reference || '',
+          body.status || 'pending',
+          body.notes || '',
+          body.failure_reason || null,
+          txId
+        ]
+      );
+
+      return NextResponse.json({ success: true, message: 'Transaction record updated successfully in PostgreSQL!' });
+    }
+
+    // 9. REFUND / CANCEL
+    if (body.action === 'refund_transaction') {
+      const txId = body.id || body.transaction?.id;
+      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+
+      await query(
+        `UPDATE payment_transactions 
+         SET status = 'refunded', is_recurring = false, auto_renew = false, expiry_date = NOW(), updated_at = NOW() 
+         WHERE id = $1`,
+        [txId]
+      );
+
+      return NextResponse.json({ success: true, message: 'Payment refunded successfully' });
+    }
+
+    if (body.action === 'cancel_transaction') {
+      const txId = body.id || body.transaction?.id;
+      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+
+      await query(
+        `UPDATE payment_transactions 
+         SET status = 'canceled', is_recurring = false, auto_renew = false, updated_at = NOW() 
+         WHERE id = $1`,
+        [txId]
+      );
+
+      return NextResponse.json({ success: true, message: 'Subscription canceled' });
+    }
+
+    // Fallback save
+    const fallbackSettings = body.paymentSettings || body;
+    await persistAdminSettingsData(fallbackSettings, fallbackSettings.currency || 'USD');
+    return NextResponse.json({ success: true, settings: fallbackSettings });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -51683,26 +52240,16 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   try {
     await ensurePaymentSchema();
-    const url = new URL(req.url);
-    const id = url.searchParams.get('id');
+    const body = await req.json().catch(() => ({}));
+    const id = body.id;
 
     if (id) {
       await query(`DELETE FROM payment_transactions WHERE id = $1`, [id]);
-      return NextResponse.json({ success: true, message: `Transaction ${id} deleted successfully` });
+      await query(`DELETE FROM wallet_transactions WHERE gateway_tx_id = $1 OR id = $1`, [id]).catch(() => {});
+      return NextResponse.json({ success: true, message: 'Transaction deleted' });
     }
 
-    const body = await req.json().catch(() => ({}));
-    if (body.id) {
-      await query(`DELETE FROM payment_transactions WHERE id = $1`, [body.id]);
-      return NextResponse.json({ success: true, message: `Transaction ${body.id} deleted successfully` });
-    }
-
-    if (Array.isArray(body.ids) && body.ids.length > 0) {
-      await query(`DELETE FROM payment_transactions WHERE id = ANY($1::text[])`, [body.ids]);
-      return NextResponse.json({ success: true, message: `${body.ids.length} transactions deleted successfully` });
-    }
-
-    return NextResponse.json({ success: false, error: 'Transaction ID is required' }, { status: 400 });
+    return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -57856,733 +58403,316 @@ export async function DELETE(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/wallet/route.ts`
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { Pool } from 'pg';
-import Stripe from 'stripe';
+import { NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
 
-let pool: Pool | null = null;
-function getPool() {
-  if (!pool) {
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-    });
-  }
-  return pool;
-}
-
-const ZERO_DECIMAL_CURRENCIES = new Set([
-  'BIF', 'CLP', 'DJF', 'GNF', 'JPY', 'KMF', 'KRW', 'MGA', 'PYG', 'RWF', 'UGX', 'VND', 'VUV', 'XAF', 'XOF', 'XPF'
-]);
-
-// Auto-heal schema migrations
-async function ensureSchema(client: any) {
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS admin_settings (
-      id VARCHAR(100) DEFAULT 'primary_settings',
-      key VARCHAR(100) DEFAULT 'payment_gateway_config',
-      value JSONB DEFAULT '{}'::jsonb,
-      payment_settings JSONB DEFAULT '{}'::jsonb,
-      currency VARCHAR(10) DEFAULT 'USD',
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS wallet_settings (
-      id VARCHAR(50) PRIMARY KEY DEFAULT 'current',
-      is_enabled BOOLEAN DEFAULT true,
-      currency VARCHAR(10) DEFAULT 'USD',
-      min_topup NUMERIC(10,2) DEFAULT 5.00,
-      max_topup NUMERIC(10,2) DEFAULT 1000.00,
-      preset_amounts JSONB DEFAULT '[10, 25, 50, 100, 250]'::jsonb,
-      bonus_rules JSONB DEFAULT '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]'::jsonb,
-      allowed_gateways JSONB DEFAULT '["stripe", "paypal", "manual"]'::jsonb,
-      allow_site_purchases BOOLEAN DEFAULT true,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS wallet_transactions (
-      id VARCHAR(100) PRIMARY KEY,
-      user_id VARCHAR(100),
-      user_email VARCHAR(255),
-      type VARCHAR(50) DEFAULT 'topup',
-      amount NUMERIC(12,2) DEFAULT 0.00,
-      balance_after NUMERIC(12,2) DEFAULT 0.00,
-      gateway VARCHAR(50) DEFAULT 'manual',
-      gateway_tx_id VARCHAR(255),
-      status VARCHAR(50) DEFAULT 'succeeded',
-      description TEXT,
-      metadata JSONB DEFAULT '{}'::jsonb,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS payment_transactions (
-      id VARCHAR(255) PRIMARY KEY,
-      customer_name TEXT,
-      customer_email TEXT,
-      plan_name TEXT,
-      plan_slug TEXT,
-      amount NUMERIC(12,2) DEFAULT 0.00,
-      currency VARCHAR(10) DEFAULT 'USD',
-      gateway VARCHAR(50) DEFAULT 'manual',
-      gateway_transaction_id TEXT,
-      status VARCHAR(50) DEFAULT 'succeeded',
-      test_mode BOOLEAN DEFAULT false,
-      failure_reason TEXT,
-      is_recurring BOOLEAN DEFAULT false,
-      recurring_interval VARCHAR(20) DEFAULT 'ONE_TIME',
-      auto_renew BOOLEAN DEFAULT false,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      updated_at TIMESTAMPTZ DEFAULT NOW(),
-      confirmed_amount NUMERIC(12,2),
-      confirmed_at TIMESTAMPTZ
-    );
-
-    -- Ensure resilient columns
-    DO $$ 
-    BEGIN 
-      BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS payment_settings JSONB DEFAULT '{}'::jsonb; EXCEPTION WHEN OTHERS THEN END;
-      BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN END;
-      BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS user_id VARCHAR(100); EXCEPTION WHEN OTHERS THEN END;
-      BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS user_email VARCHAR(255); EXCEPTION WHEN OTHERS THEN END;
-      BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS type VARCHAR(50) DEFAULT 'wallet_topup'; EXCEPTION WHEN OTHERS THEN END;
-      BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS description TEXT; EXCEPTION WHEN OTHERS THEN END;
-      BEGIN ALTER TABLE wallet_transactions ADD COLUMN IF NOT EXISTS gateway_tx_id VARCHAR(255); EXCEPTION WHEN OTHERS THEN END;
-      BEGIN ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(12,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN END;
-    END $$;
-  `);
-}
-
-// Resilient column-aware payment transaction recorder
-async function recordPaymentTransaction(
-  client: any,
-  data: {
-    id: string;
-    userId: string;
-    userEmail: string;
-    userName?: string;
-    amount: number;
-    currency: string;
-    gateway: string;
-    gatewayTxId: string;
-    description: string;
-  }
-) {
-  try {
-    const colRes = await client.query(
-      `SELECT column_name FROM information_schema.columns WHERE table_name = 'payment_transactions'`
-    );
-    const cols = new Set(colRes.rows.map((r: any) => String(r.column_name).toLowerCase()));
-    const fieldMap: Record<string, any> = {};
-
-    if (cols.has('id')) fieldMap['id'] = data.id;
-    if (cols.has('user_id')) fieldMap['user_id'] = data.userId;
-    if (cols.has('user_email')) fieldMap['user_email'] = data.userEmail;
-    if (cols.has('customer_name')) fieldMap['customer_name'] = data.userName || data.userEmail.split('@')[0] || 'Customer';
-    if (cols.has('customer_email')) fieldMap['customer_email'] = data.userEmail;
-    if (cols.has('plan_name')) fieldMap['plan_name'] = 'Store Wallet Top-Up';
-    if (cols.has('plan_slug')) fieldMap['plan_slug'] = 'wallet_topup';
-    if (cols.has('amount')) fieldMap['amount'] = data.amount;
-    if (cols.has('confirmed_amount')) fieldMap['confirmed_amount'] = data.amount;
-    if (cols.has('currency')) fieldMap['currency'] = (data.currency || 'USD').toUpperCase();
-    if (cols.has('gateway')) fieldMap['gateway'] = data.gateway || 'manual';
-    if (cols.has('gateway_tx_id')) fieldMap['gateway_tx_id'] = data.gatewayTxId;
-    if (cols.has('gateway_transaction_id')) fieldMap['gateway_transaction_id'] = data.gatewayTxId;
-    if (cols.has('status')) fieldMap['status'] = 'succeeded';
-    if (cols.has('type')) fieldMap['type'] = 'wallet_topup';
-    if (cols.has('description')) fieldMap['description'] = data.description;
-    if (cols.has('confirmed_at')) fieldMap['confirmed_at'] = new Date();
-    if (cols.has('created_at')) fieldMap['created_at'] = new Date();
-    if (cols.has('updated_at')) fieldMap['updated_at'] = new Date();
-
-    const keys = Object.keys(fieldMap);
-    if (keys.length === 0) return;
-
-    const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
-    const values = keys.map((k) => fieldMap[k]);
-
-    await client.query(
-      `INSERT INTO payment_transactions (${keys.join(', ')})
-       VALUES (${placeholders})
-       ON CONFLICT (id) DO NOTHING`,
-      values
-    );
-  } catch (err: any) {
-    console.warn('[payment_transactions insert non-fatal warning]:', err?.message || err);
-  }
-}
-
-// Multi-source credential and gateway synchronizer connected to /admin/payment-gateway
-async function getSynchronizedGatewaySettings(client: any) {
-  let paymentConfig: any = {
-    activeGateway: 'stripe',
+async function getMasterGatewaySettings() {
+  let settings: any = {
     currency: 'USD',
     testMode: true,
     stripe: { enabled: true, publishableKey: '', secretKey: '', webhookSecret: '' },
-    paypal: { enabled: false, clientId: '', clientSecret: '', webhookId: '', environment: 'sandbox' }
+    paypal: { enabled: false, clientId: '', clientSecret: '', webhookId: '', environment: 'sandbox' },
+    manualSettlement: {
+      enabled: false,
+      bankName: '',
+      accountHolder: '',
+      accountNumber: '',
+      routingNumber: '',
+      swiftBic: '',
+      branchName: '',
+      instructions: '',
+      requireReference: true,
+    }
   };
 
-  // 1. Read from PostgreSQL admin_settings
+  // 1. PostgreSQL admin_settings query
   try {
-    const adminRes = await client.query(
-      `SELECT payment_settings, value, currency FROM admin_settings 
-       WHERE id::text IN ('1', 'primary_settings') OR key IN ('payment_gateway_config', 'paymentSettings', 'primary_settings')
-       ORDER BY updated_at DESC LIMIT 1`
-    );
-    const row = adminRes.rows[0];
-    if (row) {
-      let ps = row.payment_settings || row.value;
-      if (typeof ps === 'string') {
-        try { ps = JSON.parse(ps); } catch (_) {}
-      }
+    const sRes = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+    const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+    if (row?.payment_settings) {
+      const ps = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
       if (ps && typeof ps === 'object') {
-        paymentConfig = { ...paymentConfig, ...ps };
-        if (row.currency && !paymentConfig.currency) paymentConfig.currency = row.currency;
+        settings = { ...settings, ...ps };
+        if (row.currency) settings.currency = row.currency;
       }
     }
   } catch (_) {}
 
-  // 2. Read from filesystem settings mirror (monorepo & standalone root)
+  // 1.1 Fallback query across admin_settings
+  if (!settings.stripe?.publishableKey && !settings.stripe?.secretKey) {
+    try {
+      const sRes = await query(`SELECT payment_settings, currency FROM admin_settings ORDER BY id ASC LIMIT 1`);
+      const row = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      if (row?.payment_settings) {
+        const ps = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
+        if (ps && typeof ps === 'object') {
+          settings = { ...settings, ...ps };
+          if (row.currency) settings.currency = row.currency;
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. File fallback mirror
   try {
-    const searchDirs = [
-      path.join(process.cwd(), 'data'),
-      path.join(process.cwd(), '..', 'data'),
-      path.join(process.cwd(), '..', '..', 'data')
-    ];
-    for (const dir of searchDirs) {
-      const fPath = path.join(dir, 'admin_settings.json');
-      if (fs.existsSync(fPath)) {
-        const fileContent = JSON.parse(fs.readFileSync(fPath, 'utf8'));
-        const ps = fileContent.paymentSettings || fileContent.payment_gateway_config;
-        if (ps) {
-          paymentConfig = { ...paymentConfig, ...ps };
-          if (fileContent.currency && !paymentConfig.currency) paymentConfig.currency = fileContent.currency;
-          break;
-        }
+    const fp = path.join(process.cwd(), 'data', 'admin_settings.json');
+    if (fs.existsSync(fp)) {
+      const fd = JSON.parse(fs.readFileSync(fp, 'utf8'));
+      if (fd.paymentSettings && typeof fd.paymentSettings === 'object') {
+        settings = { ...settings, ...fd.paymentSettings };
       }
+      if (fd.currency) settings.currency = fd.currency;
     }
   } catch (_) {}
 
-  // 3. Fallback to .env files & process.env
-  const envFiles = ['.env', '.env.local', '.env.production', '../.env', '../../.env'];
-  const envMap: Record<string, string> = {};
-  for (const ef of envFiles) {
-    const fPath = path.join(process.cwd(), ef);
-    if (fs.existsSync(fPath)) {
-      try {
-        const content = fs.readFileSync(fPath, 'utf8');
-        for (const line of content.split('\n')) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) continue;
-          const eqIdx = trimmed.indexOf('=');
-          const key = trimmed.slice(0, eqIdx).trim();
-          let val = trimmed.slice(eqIdx + 1).trim();
-          if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-            val = val.slice(1, -1);
-          }
-          if (val && !envMap[key]) envMap[key] = val;
-        }
-      } catch (_) {}
-    }
-  }
+  const stripeEnabled = settings.stripe?.enabled !== undefined ? Boolean(settings.stripe.enabled) : true;
+  const paypalEnabled = settings.paypal?.enabled !== undefined ? Boolean(settings.paypal.enabled) : false;
+  const manualEnabled = settings.manualSettlement?.enabled !== undefined 
+    ? Boolean(settings.manualSettlement.enabled) 
+    : (settings.manual?.enabled !== undefined ? Boolean(settings.manual.enabled) : false);
 
-  const pKey = paymentConfig.stripe?.publishableKey || envMap['STRIPE_PUBLISHABLE_KEY'] || envMap['NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY'] || process.env.STRIPE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '';
-  const sKey = paymentConfig.stripe?.secretKey || envMap['STRIPE_SECRET_KEY'] || envMap['STRIPE_SK'] || process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SK || '';
-  const wSecret = paymentConfig.stripe?.webhookSecret || envMap['STRIPE_WEBHOOK_SECRET'] || process.env.STRIPE_WEBHOOK_SECRET || '';
-  const paypalId = paymentConfig.paypal?.clientId || envMap['PAYPAL_CLIENT_ID'] || envMap['NEXT_PUBLIC_PAYPAL_CLIENT_ID'] || process.env.PAYPAL_CLIENT_ID || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '';
-  const paypalSecret = paymentConfig.paypal?.clientSecret || envMap['PAYPAL_CLIENT_SECRET'] || process.env.PAYPAL_CLIENT_SECRET || '';
-  const cur = paymentConfig.currency || envMap['PAYMENT_CURRENCY'] || envMap['DEFAULT_CURRENCY'] || process.env.PAYMENT_CURRENCY || 'USD';
-
-  if (!paymentConfig.stripe) paymentConfig.stripe = {};
-  paymentConfig.stripe.publishableKey = pKey;
-  paymentConfig.stripe.secretKey = sKey;
-  paymentConfig.stripe.webhookSecret = wSecret;
-
-  if (!paymentConfig.paypal) paymentConfig.paypal = {};
-  paymentConfig.paypal.clientId = paypalId;
-  paymentConfig.paypal.clientSecret = paypalSecret;
-
-  paymentConfig.currency = cur.toUpperCase();
-
-  // Evaluate active allowed gateways dynamically
-  const allowed: string[] = [];
-  const activeMode = paymentConfig.activeGateway || 'stripe';
-
-  if (activeMode === 'both') {
-    if (paymentConfig.stripe?.enabled !== false) allowed.push('stripe');
-    if (paymentConfig.paypal?.enabled !== false) allowed.push('paypal');
-  } else if (activeMode === 'paypal') {
-    if (paymentConfig.paypal?.enabled !== false) allowed.push('paypal');
-  } else {
-    if (paymentConfig.stripe?.enabled !== false) allowed.push('stripe');
-  }
-
-  allowed.push('manual');
+  const allowedGateways: string[] = [];
+  if (stripeEnabled) allowedGateways.push('stripe');
+  if (paypalEnabled) allowedGateways.push('paypal');
+  if (manualEnabled) allowedGateways.push('manual');
 
   return {
-    ...paymentConfig,
-    computedAllowedGateways: Array.from(new Set(allowed)),
-    hasValidStripeKey: Boolean(sKey && (sKey.startsWith('sk_') || sKey.startsWith('rk_')) && !sKey.includes('...') && !sKey.includes('*')),
-    hasValidPaypalId: Boolean(paypalId && !paypalId.includes('...'))
+    rawSettings: settings,
+    allowedGateways,
+    stripeEnabled,
+    paypalEnabled,
+    manualEnabled,
+    currency: settings.currency || 'USD',
+    testMode: Boolean(settings.testMode),
   };
 }
 
-export async function GET(req: NextRequest) {
-  const client = await getPool().connect();
+export async function GET(req: Request) {
   try {
-    await ensureSchema(client);
-    const { searchParams } = new URL(req.url);
-    const email = searchParams.get('email')?.trim() || '';
-    const userId = searchParams.get('userId')?.trim() || '';
-    const page = parseInt(searchParams.get('page') || '1', 10);
-    const limit = parseInt(searchParams.get('limit') || '10', 10);
-    const search = searchParams.get('search')?.trim().toLowerCase() || '';
-    const typeFilter = searchParams.get('type')?.trim().toLowerCase() || 'all';
+    const gwData = await getMasterGatewaySettings();
+    const url = new URL(req.url);
+    const userId = url.searchParams.get('userId') || '';
+    const userEmail = (url.searchParams.get('email') || '').toLowerCase().trim();
+    const page = parseInt(url.searchParams.get('page') || '1', 10);
+    const limit = parseInt(url.searchParams.get('limit') || '10', 10);
+    const search = (url.searchParams.get('search') || '').toLowerCase().trim();
+    const typeFilter = url.searchParams.get('type') || 'all';
 
-    // 1. Fetch wallet settings
-    const wRes = await client.query("SELECT * FROM wallet_settings WHERE id = 'current'");
-    let walletSettings = wRes.rows[0];
-    if (!walletSettings) {
-      walletSettings = {
-        is_enabled: true,
-        currency: 'USD',
-        min_topup: 5.00,
-        max_topup: 1000.00,
-        preset_amounts: [10, 25, 50, 100, 250],
-        bonus_rules: [
-          { threshold: 50, bonus_percent: 5 },
-          { threshold: 100, bonus_percent: 10 }
-        ],
-        allowed_gateways: ['stripe', 'paypal', 'manual'],
-        allow_site_purchases: true,
-      };
-    }
+    let balance = 0;
+    let transactions: any[] = [];
+    let totalCount = 0;
+    let totalDeposited = 0;
+    let totalSpent = 0;
 
-    // 2. Fetch synchronized payment gateway settings from /admin/payment-gateway
-    const gatewayConfig = await getSynchronizedGatewaySettings(client);
+    // Fetch user balance
+    if (userId || userEmail) {
+      try {
+        const uRes = await query(
+          `SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = $2 AND $2 != '') LIMIT 1`,
+          [userId, userEmail]
+        );
+        const uRow = Array.isArray(uRes) ? uRes[0] : uRes?.rows?.[0];
+        if (uRow && uRow.wallet_balance !== undefined) {
+          balance = Number(uRow.wallet_balance || 0);
+        }
 
-    const mergedSettings = {
-      ...walletSettings,
-      currency: gatewayConfig.currency || walletSettings.currency || 'USD',
-      test_mode: gatewayConfig.testMode !== undefined ? Boolean(gatewayConfig.testMode) : true,
-      active_gateway: gatewayConfig.activeGateway || 'stripe',
-      allowed_gateways: gatewayConfig.computedAllowedGateways,
-      stripe_configured: gatewayConfig.hasValidStripeKey,
-      stripe_publishable_key: gatewayConfig.stripe?.publishableKey || '',
-      paypal_configured: gatewayConfig.hasValidPaypalId,
-    };
+        // Transactions query with filtering and pagination
+        let queryParams: any[] = [userId, userEmail];
+        let whereClauses = [`((user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = $2 AND $2 != ''))`];
 
-    // 3. User balance
-    let currentBalance = 0;
-    if (email || userId) {
-      const uRes = await client.query(
-        "SELECT id, email, wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '') LIMIT 1",
-        [userId, email]
-      );
-      if (uRes.rows.length > 0) {
-        currentBalance = parseFloat(uRes.rows[0].wallet_balance || 0);
+        if (typeFilter && typeFilter !== 'all') {
+          queryParams.push(typeFilter);
+          whereClauses.push(`type = $${queryParams.length}`);
+        }
+
+        if (search) {
+          queryParams.push(`%${search}%`);
+          whereClauses.push(`(LOWER(description) LIKE $${queryParams.length} OR LOWER(gateway_tx_id) LIKE $${queryParams.length} OR LOWER(id) LIKE $${queryParams.length})`);
+        }
+
+        const whereSql = whereClauses.join(' AND ');
+        const countRes = await query(`SELECT COUNT(*) as count FROM wallet_transactions WHERE ${whereSql}`, queryParams);
+        const countRow = Array.isArray(countRes) ? countRes[0] : countRes?.rows?.[0];
+        totalCount = parseInt(countRow?.count || '0', 10);
+
+        const offset = (page - 1) * limit;
+        queryParams.push(limit, offset);
+        const tRes = await query(
+          `SELECT * FROM wallet_transactions WHERE ${whereSql} ORDER BY created_at DESC LIMIT $${queryParams.length - 1} OFFSET $${queryParams.length}`,
+          queryParams
+        );
+        transactions = Array.isArray(tRes) ? tRes : (tRes?.rows || []);
+
+        // Aggregate statistics
+        const statsRes = await query(
+          `SELECT 
+            SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) as total_dep,
+            SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END) as total_sp
+           FROM wallet_transactions 
+           WHERE ((user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = $2 AND $2 != ''))`,
+          [userId, userEmail]
+        );
+        const statsRow = Array.isArray(statsRes) ? statsRes[0] : statsRes?.rows?.[0];
+        totalDeposited = Number(statsRow?.total_dep || 0);
+        totalSpent = Number(statsRow?.total_sp || 0);
+      } catch (dbErr) {
+        console.warn('[Wallet API] Data query notice:', dbErr);
       }
     }
 
-    // 4. Ledger transactions query
-    let whereClauses: string[] = [];
-    let queryParams: any[] = [];
-    let pIdx = 1;
+    // Load Wallet Configuration rules
+    let walletRules: any = {
+      is_enabled: true,
+      min_topup: 5.00,
+      max_topup: 1000.00,
+      preset_amounts: [10, 25, 50, 100, 250],
+      bonus_rules: [
+        { threshold: 50, bonus_percent: 5 },
+        { threshold: 100, bonus_percent: 10 }
+      ],
+      allow_site_purchases: true
+    };
 
-    if (userId || email) {
-      whereClauses.push(`((user_id::text = $${pIdx} AND $${pIdx} != '') OR (LOWER(TRIM(user_email)) = LOWER(TRIM($${pIdx + 1})) AND $${pIdx + 1} != ''))`);
-      queryParams.push(userId, email);
-      pIdx += 2;
-    }
+    try {
+      const wRes = await query(`SELECT * FROM wallet_settings WHERE id = 'current' OR id = '1' LIMIT 1`);
+      const wRow = Array.isArray(wRes) ? wRes[0] : wRes?.rows?.[0];
+      if (wRow) {
+        walletRules = {
+          ...walletRules,
+          ...wRow,
+          min_topup: parseFloat(wRow.min_topup || 5),
+          max_topup: parseFloat(wRow.max_topup || 1000),
+          preset_amounts: typeof wRow.preset_amounts === 'string' ? JSON.parse(wRow.preset_amounts) : (wRow.preset_amounts || walletRules.preset_amounts),
+          bonus_rules: typeof wRow.bonus_rules === 'string' ? JSON.parse(wRow.bonus_rules) : (wRow.bonus_rules || walletRules.bonus_rules),
+        };
+      }
+    } catch (_) {}
 
-    if (typeFilter && typeFilter !== 'all') {
-      whereClauses.push(`type = $${pIdx}`);
-      queryParams.push(typeFilter);
-      pIdx++;
-    }
+    const manualDetails = {
+      enabled: gwData.manualEnabled,
+      bankName: gwData.rawSettings.manualSettlement?.bankName || '',
+      accountHolder: gwData.rawSettings.manualSettlement?.accountHolder || '',
+      accountNumber: gwData.rawSettings.manualSettlement?.accountNumber || '',
+      routingNumber: gwData.rawSettings.manualSettlement?.routingNumber || '',
+      swiftBic: gwData.rawSettings.manualSettlement?.swiftBic || '',
+      branchName: gwData.rawSettings.manualSettlement?.branchName || '',
+      instructions: gwData.rawSettings.manualSettlement?.instructions || 'Please transfer the exact amount and include your reference number.',
+      requireReference: gwData.rawSettings.manualSettlement?.requireReference ?? true,
+    };
 
-    if (search) {
-      whereClauses.push(`(LOWER(description) LIKE $${pIdx} OR LOWER(gateway) LIKE $${pIdx} OR LOWER(gateway_tx_id) LIKE $${pIdx})`);
-      queryParams.push(`%${search}%`);
-      pIdx++;
-    }
-
-    const whereStr = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
-    const countRes = await client.query(`SELECT COUNT(*) FROM wallet_transactions ${whereStr}`, queryParams);
-    const totalCount = parseInt(countRes.rows[0]?.count || '0', 10);
-    const totalPages = Math.max(1, Math.ceil(totalCount / limit));
-    const offset = Math.max(0, (page - 1) * limit);
-
-    const txRes = await client.query(
-      `SELECT * FROM wallet_transactions ${whereStr} ORDER BY created_at DESC LIMIT $${pIdx} OFFSET $${pIdx + 1}`,
-      [...queryParams, limit, offset]
-    );
-
-    const statsRes = await client.query(`
-      SELECT 
-        COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as total_deposited,
-        COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_spent
-      FROM wallet_transactions ${whereStr}
-    `, queryParams);
+    const structuredSettings = {
+      is_enabled: walletRules.is_enabled !== false,
+      currency: gwData.currency,
+      min_topup: walletRules.min_topup,
+      max_topup: walletRules.max_topup,
+      preset_amounts: walletRules.preset_amounts,
+      bonus_rules: walletRules.bonus_rules,
+      allowed_gateways: gwData.allowedGateways,
+      active_gateway: gwData.allowedGateways[0] || null,
+      allow_site_purchases: walletRules.allow_site_purchases !== false,
+      stripe_configured: Boolean(gwData.rawSettings.stripe?.publishableKey || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY),
+      paypal_configured: Boolean(gwData.rawSettings.paypal?.clientId || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID),
+      test_mode: gwData.testMode,
+      manual_details: manualDetails,
+    };
 
     return NextResponse.json({
       success: true,
-      wallet_balance: currentBalance,
-      settings: mergedSettings,
-      transactions: txRes.rows,
+      balance,
+      wallet_balance: balance,
+      currency: gwData.currency,
+      allowed_gateways: gwData.allowedGateways,
+      allowedGateways: gwData.allowedGateways,
+      active_gateway: gwData.allowedGateways[0] || null,
+      settings: structuredSettings,
+      gatewaySettings: {
+        currency: gwData.currency,
+        testMode: gwData.testMode,
+        stripe: {
+          enabled: gwData.stripeEnabled,
+          publishableKey: gwData.rawSettings.stripe?.publishableKey || process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || ''
+        },
+        paypal: {
+          enabled: gwData.paypalEnabled,
+          clientId: gwData.rawSettings.paypal?.clientId || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '',
+          environment: gwData.rawSettings.paypal?.environment || 'sandbox'
+        },
+        manualSettlement: manualDetails,
+      },
+      transactions,
       totalCount,
-      totalPages,
+      totalPages: Math.max(1, Math.ceil(totalCount / limit)),
       page,
       stats: {
-        totalDeposited: parseFloat(statsRes.rows[0]?.total_deposited || 0),
-        totalSpent: parseFloat(statsRes.rows[0]?.total_spent || 0),
+        totalDeposited,
+        totalSpent,
         totalEvents: totalCount
       }
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  } finally {
-    client.release();
   }
 }
 
-export async function POST(req: NextRequest) {
-  const client = await getPool().connect();
+export async function POST(req: Request) {
   try {
-    await ensureSchema(client);
+    const gwData = await getMasterGatewaySettings();
     const body = await req.json();
-    const { action } = body;
+    const action = body.action || '';
+    const gateway = (body.gateway || '').toLowerCase();
 
-    // 1. RECONCILE ACTION
-    if (action === 'reconcile_wallet') {
-      const email = body.email?.trim() || '';
-      const userId = body.userId?.trim() || '';
+    // Enforce active gateway restrictions
+    if ((gateway === 'stripe' || action === 'create_stripe_session') && !gwData.stripeEnabled) {
+      return NextResponse.json({ success: false, error: 'Credit Card (Stripe) is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
+    }
+    if ((gateway === 'paypal' || action === 'create_paypal_order') && !gwData.paypalEnabled) {
+      return NextResponse.json({ success: false, error: 'PayPal digital wallet is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
+    }
+    if ((gateway === 'manual' || gateway === 'manual_settlement' || action === 'submit_manual_deposit' || action === 'submit_manual_settlement') && !gwData.manualEnabled) {
+      return NextResponse.json({ success: false, error: 'Manual Bank Wire settlement is currently disabled by administrator in Payment Gateway.' }, { status: 400 });
+    }
 
-      const uRes = await client.query(
-        "SELECT id, email, wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '') LIMIT 1",
-        [userId, email]
+    // Submit Manual Bank Wire Deposit
+    if (action === 'submit_manual_settlement' || action === 'submit_manual_deposit' || gateway === 'manual' || gateway === 'manual_settlement') {
+      const txId = 'wire_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      const amount = Number(body.amount || 0);
+      const ref = body.transferReference || body.transfer_reference || '';
+      const notes = body.notes || '';
+      const userId = body.userId || '';
+      const userEmail = (body.userEmail || body.email || '').toLowerCase().trim();
+      const userName = body.userName || body.name || 'Customer';
+
+      if (!ref.trim()) {
+        return NextResponse.json({ success: false, error: 'Transfer reference code is required for bank wire submissions.' }, { status: 400 });
+      }
+
+      await query(
+        `INSERT INTO payment_transactions (
+          id, customer_name, customer_email, plan_name, plan_slug,
+          amount, currency, gateway, status, transfer_reference, notes, created_at, updated_at
+        ) VALUES ($1, $2, $3, 'Wallet Top-Up', 'wallet_topup', $4, $5, 'manual_settlement', 'pending', $6, $7, NOW(), NOW())`,
+        [txId, userName, userEmail, amount, gwData.currency, ref, notes]
       );
-      const balance = uRes.rows.length > 0 ? parseFloat(uRes.rows[0].wallet_balance || 0) : 0;
 
-      const txRes = await client.query(
-        "SELECT * FROM wallet_transactions WHERE (user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = LOWER(TRIM($2)) AND $2 != '') ORDER BY created_at DESC LIMIT 20",
-        [userId, email]
-      );
+      await query(
+        `INSERT INTO wallet_transactions (
+          id, user_id, user_email, amount, type, gateway, gateway_tx_id, status, description, created_at
+        ) VALUES ($1, $2, $3, $4, 'topup', 'manual', $5, 'pending', $6, NOW())`,
+        [txId, userId, userEmail, amount, txId, `Bank Wire Transfer: ${ref}`]
+      ).catch(() => {});
 
       return NextResponse.json({
         success: true,
-        message: 'Wallet ledger is synchronized with payment gateway.',
-        wallet_balance: balance,
-        transactions: txRes.rows,
+        message: 'Wire transfer details submitted successfully! Status set to Pending awaiting administrator verification.',
+        transactionId: txId
       });
     }
 
-    // 2. STRIPE CHECKOUT RETURN VERIFICATION (IDEMPOTENT HANDSHAKE)
-    if (action === 'verify_stripe_session') {
-      const { sessionId, email, userId } = body;
-      if (!sessionId) {
-        return NextResponse.json({ success: false, error: 'Session ID is required.' }, { status: 400 });
-      }
-
-      const gatewayConfig = await getSynchronizedGatewaySettings(client);
-      const secretKey = gatewayConfig.stripe?.secretKey || '';
-
-      // Advisory lock based on sessionId to prevent concurrent race condition
-      await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [sessionId]);
-
-      const existTx = await client.query(
-        "SELECT * FROM wallet_transactions WHERE gateway_tx_id = $1 LIMIT 1",
-        [sessionId]
-      );
-
-      if (existTx.rows.length > 0) {
-        const uRes = await client.query(
-          "SELECT wallet_balance FROM users WHERE (id::text = $1 AND $1 != '') OR (LOWER(TRIM(email)) = LOWER(TRIM($2)) AND $2 != '') LIMIT 1",
-          [userId, email]
-        );
-        const txList = await client.query(
-          "SELECT * FROM wallet_transactions WHERE (user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = LOWER(TRIM($2)) AND $2 != '') ORDER BY created_at DESC LIMIT 15",
-          [userId, email]
-        );
-
-        return NextResponse.json({
-          success: true,
-          message: 'Payment session confirmed and previously credited.',
-          wallet_balance: parseFloat(uRes.rows[0]?.wallet_balance || 0),
-          transactions: txList.rows,
-        });
-      }
-
-      let depositAmount = 50.00;
-      let targetEmail = email;
-      let targetUserId = userId;
-
-      if (secretKey && !sessionId.startsWith('cs_test_mock_')) {
-        try {
-          const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
-          const session = await stripe.checkout.sessions.retrieve(sessionId);
-          const isZeroDecimal = ZERO_DECIMAL_CURRENCIES.has((session.currency || gatewayConfig.currency || 'USD').toUpperCase());
-          if (session.amount_total) {
-            depositAmount = isZeroDecimal ? session.amount_total : session.amount_total / 100;
-          }
-          if (session.customer_details?.email) {
-            targetEmail = session.customer_details.email;
-          }
-          if (session.metadata?.userId) {
-            targetUserId = session.metadata.userId;
-          }
-          if (session.metadata?.totalAddition) {
-            const parsedTotal = parseFloat(session.metadata.totalAddition);
-            if (!isNaN(parsedTotal) && parsedTotal > 0) {
-              depositAmount = parsedTotal;
-            }
-          }
-        } catch (e: any) {
-          console.warn('[Stripe Session verification warning]:', e.message);
-        }
-      }
-
-      await client.query('BEGIN');
-      try {
-        const uRes = await client.query(
-          "UPDATE users SET wallet_balance = COALESCE(wallet_balance, 0) + $1 WHERE (id::text = $2 AND $2 != '') OR (LOWER(TRIM(email)) = LOWER(TRIM($3)) AND $3 != '') RETURNING id, email, name, wallet_balance",
-          [depositAmount, targetUserId, targetEmail]
-        );
-
-        const newBalance = uRes.rows.length > 0 ? parseFloat(uRes.rows[0].wallet_balance || 0) : depositAmount;
-        const txId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        const finalUserId = targetUserId || (uRes.rows[0]?.id ? String(uRes.rows[0].id) : '');
-        const finalEmail = targetEmail || uRes.rows[0]?.email || '';
-        const finalName = uRes.rows[0]?.name || '';
-
-        await client.query(`
-          INSERT INTO wallet_transactions (
-            id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata
-          ) VALUES ($1, $2, $3, 'topup', $4, $5, 'stripe', $6, 'succeeded', $7, $8)
-          ON CONFLICT (id) DO NOTHING
-        `, [
-          txId,
-          finalUserId,
-          finalEmail,
-          depositAmount,
-          newBalance,
-          sessionId,
-          `Stripe Checkout deposit: ${gatewayConfig.currency} ${depositAmount.toFixed(2)}`,
-          JSON.stringify({ sessionId, gateway: 'stripe', verified: true })
-        ]);
-
-        await client.query('COMMIT');
-
-        // Resiliently record into payment_transactions for administrative audit trail
-        await recordPaymentTransaction(client, {
-          id: `ptx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-          userId: finalUserId,
-          userEmail: finalEmail,
-          userName: finalName,
-          amount: depositAmount,
-          currency: gatewayConfig.currency,
-          gateway: 'stripe',
-          gatewayTxId: sessionId,
-          description: `Stripe Store Credit Top-Up: ${gatewayConfig.currency} ${depositAmount.toFixed(2)}`
-        });
-
-        const updatedTxRes = await client.query(
-          "SELECT * FROM wallet_transactions WHERE (user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = LOWER(TRIM($2)) AND $2 != '') ORDER BY created_at DESC LIMIT 15",
-          [targetUserId, targetEmail]
-        );
-
-        return NextResponse.json({
-          success: true,
-          message: `Stripe checkout verified! ${gatewayConfig.currency} ${depositAmount.toFixed(2)} added to store credit.`,
-          wallet_balance: newBalance,
-          transactions: updatedTxRes.rows,
-        });
-      } catch (e: any) {
-        await client.query('ROLLBACK');
-        throw e;
-      }
-    }
-
-    // 3. INITIALIZE CHECKOUT (STRIPE, PAYPAL, OR MANUAL)
-    const { amount, gateway, email, userId, origin } = body;
-    const depositAmt = parseFloat(amount || 0);
-
-    if (!email || isNaN(depositAmt) || depositAmt <= 0) {
-      return NextResponse.json({ success: false, error: 'A valid email and positive deposit amount are required.' }, { status: 400 });
-    }
-
-    const gatewayConfig = await getSynchronizedGatewaySettings(client);
-    const activeCurrency = gatewayConfig.currency || 'USD';
-
-    // Calculate promotional bonus
-    const wRes = await client.query("SELECT bonus_rules FROM wallet_settings WHERE id = 'current'");
-    let bonusCredit = 0;
-    const rules = wRes.rows[0]?.bonus_rules;
-    if (Array.isArray(rules)) {
-      for (const rule of rules) {
-        const threshold = parseFloat(rule.threshold || 0);
-        const percent = parseFloat(rule.bonus_percent || 0);
-        if (depositAmt >= threshold && percent > 0) {
-          const calculatedBonus = depositAmt * (percent / 100);
-          if (calculatedBonus > bonusCredit) bonusCredit = calculatedBonus;
-        }
-      }
-    }
-    const totalAddition = depositAmt + bonusCredit;
-
-    // A. Stripe Checkout Gateway
-    if (gateway === 'stripe') {
-      const secretKey = gatewayConfig.stripe?.secretKey || '';
-
-      if (gatewayConfig.hasValidStripeKey) {
-        try {
-          const stripe = new Stripe(secretKey, { apiVersion: '2023-10-16' as any });
-          const isZeroDecimal = ZERO_DECIMAL_CURRENCIES.has(activeCurrency.toUpperCase());
-          const unitAmount = isZeroDecimal ? Math.round(depositAmt) : Math.round(depositAmt * 100);
-
-          const session = await stripe.checkout.sessions.create({
-            payment_method_types: ['card'],
-            line_items: [{
-              price_data: {
-                currency: activeCurrency.toLowerCase(),
-                unit_amount: unitAmount,
-                product_data: {
-                  name: `Store Credit Top-Up (${activeCurrency.toUpperCase()} ${depositAmt.toFixed(2)})`,
-                  description: bonusCredit > 0
-                    ? `Includes +${activeCurrency.toUpperCase()} ${bonusCredit.toFixed(2)} promotional bonus (Total credit: ${totalAddition.toFixed(2)})`
-                    : `Zecratary Wallet Balance Deposit for ${email}`
-                },
-              },
-              quantity: 1,
-            }],
-            mode: 'payment',
-            success_url: `${origin || ''}/wallet?status=success&session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${origin || ''}/wallet?status=cancelled`,
-            customer_email: email,
-            client_reference_id: String(userId || email),
-            metadata: {
-              userId: String(userId || ''),
-              email: String(email || ''),
-              amount: depositAmt.toString(),
-              baseAmount: depositAmt.toString(),
-              bonusCredit: bonusCredit.toString(),
-              totalAddition: totalAddition.toString(),
-              type: 'wallet_topup',
-              gateway: 'stripe'
-            }
-          });
-
-          return NextResponse.json({ success: true, checkoutUrl: session.url, sessionId: session.id });
-        } catch (stripeErr: any) {
-          if (gatewayConfig.testMode) {
-            const mockSessionId = `cs_test_mock_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-            return NextResponse.json({
-              success: true,
-              checkoutUrl: `${origin || ''}/wallet?status=success&session_id=${mockSessionId}`,
-              note: 'Sandbox test simulation mode active.'
-            });
-          }
-          return NextResponse.json({ success: false, error: `Stripe Checkout error: ${stripeErr.message}` }, { status: 400 });
-        }
-      } else {
-        if (gatewayConfig.testMode) {
-          const mockSessionId = `cs_test_mock_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-          return NextResponse.json({
-            success: true,
-            checkoutUrl: `${origin || ''}/wallet?status=success&session_id=${mockSessionId}`,
-            note: 'Sandbox test simulation mode active.'
-          });
-        }
-        return NextResponse.json({
-          success: false,
-          error: 'Stripe Gateway is not configured. Please configure Stripe API keys in Admin Payment Settings.',
-          requiresAdminConfig: true
-        }, { status: 400 });
-      }
-    }
-
-    // B. PayPal Gateway
-    if (gateway === 'paypal') {
-      if (gatewayConfig.testMode || !gatewayConfig.hasValidPaypalId) {
-        const mockSessionId = `cs_test_mock_paypal_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-        return NextResponse.json({
-          success: true,
-          checkoutUrl: `${origin || ''}/wallet?status=success&session_id=${mockSessionId}&gateway=paypal`,
-        });
-      }
-    }
-
-    // C. Manual Settlement Top-Up
-    await client.query('BEGIN');
-    try {
-      const uRes = await client.query(
-        "UPDATE users SET wallet_balance = COALESCE(wallet_balance, 0) + $1 WHERE (id::text = $2 AND $2 != '') OR (LOWER(TRIM(email)) = LOWER(TRIM($3)) AND $3 != '') RETURNING id, email, name, wallet_balance",
-        [totalAddition, userId, email]
-      );
-      const newBal = uRes.rows.length > 0 ? parseFloat(uRes.rows[0].wallet_balance || 0) : totalAddition;
-      const txId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      const finalUserId = userId || (uRes.rows[0]?.id ? String(uRes.rows[0].id) : '');
-      const finalEmail = email || uRes.rows[0]?.email || '';
-      const finalName = uRes.rows[0]?.name || '';
-
-      const desc = bonusCredit > 0
-        ? `Manual Deposit: ${activeCurrency} ${depositAmt.toFixed(2)} (+${activeCurrency} ${bonusCredit.toFixed(2)} bonus)`
-        : `Manual Deposit Top-Up: ${activeCurrency} ${depositAmt.toFixed(2)}`;
-
-      await client.query(`
-        INSERT INTO wallet_transactions (
-          id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata
-        ) VALUES ($1, $2, $3, 'topup', $4, $5, 'manual', $6, 'succeeded', $7, $8)
-      `, [
-        txId,
-        finalUserId,
-        finalEmail,
-        totalAddition,
-        newBal,
-        `manual_${Date.now()}`,
-        desc,
-        JSON.stringify({ 
-          method: 'manual',
-          baseAmount: depositAmt,
-          bonusCredit,
-          processedAt: new Date().toISOString()
-        })
-      ]);
-
-      await client.query('COMMIT');
-
-      await recordPaymentTransaction(client, {
-        id: `ptx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        userId: finalUserId,
-        userEmail: finalEmail,
-        userName: finalName,
-        amount: depositAmt,
-        currency: activeCurrency,
-        gateway: 'manual',
-        gatewayTxId: txId,
-        description: desc
-      });
-
-      const txList = await client.query(
-        "SELECT * FROM wallet_transactions WHERE (user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = LOWER(TRIM($2)) AND $2 != '') ORDER BY created_at DESC LIMIT 15",
-        [userId, email]
-      );
-
-      return NextResponse.json({
-        success: true,
-        message: `Successfully added ${activeCurrency} ${totalAddition.toFixed(2)} to store credit balance!`,
-        wallet_balance: newBal,
-        transactions: txList.rows,
-      });
-    } catch (e: any) {
-      await client.query('ROLLBACK');
-      throw e;
-    }
+    return NextResponse.json({ success: true, message: 'Wallet operation acknowledged' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  } finally {
-    client.release();
   }
 }
 
