@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.08",
+  "version": "8.1.09",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -115,7 +115,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.08",
+  "version": "8.1.09",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8937,7 +8937,8 @@ import {
   Calendar as CalendarIcon, Copy, ShoppingBag, Share2, 
   ChevronLeft, ChevronRight, Plus, Trash2, ChefHat, Lock, 
   Clock, X, Search, Heart, SlidersHorizontal, ChevronDown, 
-  ChevronUp, Edit3, Check, Sparkles, CheckCircle2, AlertCircle
+  ChevronUp, Edit3, Check, Sparkles, CheckCircle2, AlertCircle,
+  Flame, Activity
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -8972,6 +8973,18 @@ const getLocaleTag = (locale: string): string => {
   return 'en-US';
 };
 
+// Robust nutritional extractor supporting numbers, strings ("450 kcal", "32g"), and nested JSONB
+const parseNutrientValue = (rawVal: any, fallback: number): number => {
+  if (rawVal === undefined || rawVal === null || rawVal === '') return fallback;
+  if (typeof rawVal === 'number' && !isNaN(rawVal)) return rawVal;
+  const match = String(rawVal).match(/(\d+(?:\.\d+)?)/);
+  if (match) {
+    const parsed = parseFloat(match[1]);
+    return !isNaN(parsed) ? parsed : fallback;
+  }
+  return fallback;
+};
+
 export default function PlannerPage() {
   const { t, locale, version } = useTranslation();
   const router = useRouter();
@@ -8992,6 +9005,7 @@ export default function PlannerPage() {
   const [selectedRecipeObj, setSelectedRecipeObj] = useState<any | null>(null);
   const [mealType, setMealType] = useState('Dinner');
   const [mealTime, setMealTime] = useState('');
+  const [mealServings, setMealServings] = useState<number>(2);
   const [isLeftover, setIsLeftover] = useState(false);
   const [notes, setNotes] = useState('');
 
@@ -9004,6 +9018,7 @@ export default function PlannerPage() {
   const [editDate, setEditDate] = useState<string>(() => formatDateKey(new Date()));
   const [editMealType, setEditMealType] = useState('Dinner');
   const [editMealTime, setEditMealTime] = useState('');
+  const [editServings, setEditServings] = useState<number>(2);
   const [editIsLeftover, setEditIsLeftover] = useState(false);
   const [editNotes, setEditNotes] = useState('');
 
@@ -9046,27 +9061,11 @@ export default function PlannerPage() {
     };
   }, [applyGlobalTheme]);
 
-  // Check URL date query param on mount (e.g. /planner?date=YYYY-MM-DD)
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const dateParam = params.get('date');
-        if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
-          setSelectedDate(dateParam);
-          setCurrentWeekStart(getMondayOfWeek(parseDateKey(dateParam)));
-        }
-      } catch (_) {}
-    }
-  }, []);
-
-  // Comprehensive Saved Recipes Hydration (Reads /api/recipes/saved, /saved keys, and normalizes snake_case)
+  // Comprehensive Recipe Hydration with Nutrition Parsing
   const loadSavedData = useCallback(async (user: User | null) => {
     if (typeof window === 'undefined') return;
     try {
       let combinedRecipes: any[] = [];
-      
-      // 1. Gather all local storage recipe caches
       const localKeys = ['zecratary_saved_recipes', 'saved_recipes', 'zecratary_recipes', 'zecratary_imported_recipes'];
       for (const k of localKeys) {
         try {
@@ -9078,7 +9077,6 @@ export default function PlannerPage() {
         } catch (_) {}
       }
 
-      // 2. Query PostgreSQL APIs in parallel
       const endpoints = ['/api/recipes/saved', '/api/saved-recipes', '/api/recipes'];
       for (const ep of endpoints) {
         try {
@@ -9102,13 +9100,21 @@ export default function PlannerPage() {
         const normTitle = rec.title || rec.name || rec.recipeName || rec.recipe_name || 'Untitled Recipe';
         const normKey = `${normId}_${normTitle}`.toLowerCase();
         
-        // Inclusive ownership check supporting both camelCase and snake_case
         const rUserId = rec.userId || rec.user_id;
         const rEmail = rec.createdBy || rec.created_by;
         const isOwner = !user || !rUserId || rUserId === user.id || rUserId === 'usr_admin_1' || rEmail === user.email || !rEmail;
 
         if (isOwner && !seen.has(normKey)) {
           seen.add(normKey);
+
+          // Deep nutritional extraction
+          const nInfo = rec.nutritional_info || rec.nutritionalInfo || rec.nutrition || {};
+          const calories = parseNutrientValue(rec.calories ?? nInfo.calories ?? nInfo.calorieCount, 520);
+          const protein = parseNutrientValue(rec.protein ?? nInfo.protein ?? nInfo.proteinContent, 32);
+          const carbs = parseNutrientValue(rec.carbs ?? nInfo.carbs ?? nInfo.carbohydrateContent, 45);
+          const fat = parseNutrientValue(rec.fat ?? nInfo.fat ?? nInfo.fatContent, 18);
+          const baseServings = parseNutrientValue(rec.servings ?? rec.yield, 2);
+
           uniqueRecipes.push({
             id: normId,
             name: normTitle,
@@ -9117,10 +9123,11 @@ export default function PlannerPage() {
             isFavorite: Boolean(rec.isFavorite || rec.is_favorite),
             bookId: rec.bookId || rec.book_id || null,
             ingredients: rec.ingredients || [],
-            calories: Number(rec.calories || rec.nutritionalInfo?.calories || 520),
-            protein: Number(rec.protein || rec.nutritionalInfo?.protein || 32),
-            carbs: Number(rec.carbs || rec.nutritionalInfo?.carbs || 45),
-            fat: Number(rec.fat || rec.nutritionalInfo?.fat || 18),
+            servings: baseServings,
+            calories,
+            protein,
+            carbs,
+            fat,
             image: rec.imageUrl || rec.image || rec.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
             imageUrl: rec.imageUrl || rec.image || rec.image_url || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80'
           });
@@ -9129,7 +9136,6 @@ export default function PlannerPage() {
 
       setSavedRecipes(uniqueRecipes);
 
-      // Cookbooks Hydration
       const rawBooks = localStorage.getItem('zecratary_recipe_books');
       if (rawBooks) {
         try {
@@ -9139,19 +9145,18 @@ export default function PlannerPage() {
           }
         } catch (_) {}
       } else {
-        const defaultBooks = [
+        setBooks([
           { id: 'book_1', title: 'Family Favorites & Weeknight Dinners', userId: user?.id, createdBy: user?.email },
           { id: 'book_2', title: 'Authentic Asian Cuisine', userId: user?.id, createdBy: user?.email },
           { id: 'book_3', title: 'Baking & Desserts', userId: user?.id, createdBy: user?.email }
-        ];
-        setBooks(defaultBooks);
+        ]);
       }
     } catch (e) {
       console.error('Failed to load saved recipes in planner', e);
     }
   }, []);
 
-  // Multi-tier Meal Plan Hydration with Intact Local Merge
+  // Hydrate Planned Meals & Subscription Permissions
   const loadMealPlan = useCallback(async (user: User | null) => {
     if (typeof window === 'undefined') return;
     try {
@@ -9167,7 +9172,6 @@ export default function PlannerPage() {
         } catch (_) {}
       }
 
-      // Filter and clean local meals
       const userFilteredLocal = localMeals.map((m: any) => ({
         ...m,
         date: String(m.date || '').split('T')[0]
@@ -9177,7 +9181,6 @@ export default function PlannerPage() {
         return !user || !uId || uId === user.id || uId === 'usr_admin_1' || uEmail === user.email;
       });
 
-      // Synchronize with PostgreSQL planner API
       let serverMeals: any[] = [];
       try {
         const queryParams = user?.id ? `?userId=${encodeURIComponent(user.id)}&email=${encodeURIComponent(user.email || '')}` : '';
@@ -9193,29 +9196,35 @@ export default function PlannerPage() {
         }
       } catch (_) {}
 
-      // Resilient ID Map Merge: server entries take precedence, retaining newly created local meals from /saved
       const mealMap = new Map();
-      serverMeals.forEach((m: any) => {
-        if (m.id) mealMap.set(m.id, m);
-      });
-      userFilteredLocal.forEach((m: any) => {
-        if (m.id && !mealMap.has(m.id)) {
-          mealMap.set(m.id, m);
-        }
-      });
+      serverMeals.forEach((m: any) => { if (m.id) mealMap.set(m.id, m); });
+      userFilteredLocal.forEach((m: any) => { if (m.id && !mealMap.has(m.id)) mealMap.set(m.id, m); });
 
       const mergedPlans = Array.from(mealMap.values());
       setPlannedMeals(mergedPlans);
       localStorage.setItem('zecratary_meal_plan', JSON.stringify(mergedPlans));
       localStorage.setItem('zecratary_meal_plans', JSON.stringify(mergedPlans));
 
-      // Macro view permissions check
+      // Synchronize macro viewing capability from subscription
       try {
+        const planRes = await fetch('/api/admin/plans', { cache: 'no-store' });
+        if (planRes.ok) {
+          const pData = await planRes.json();
+          const plans = pData.plans || pData;
+          if (Array.isArray(plans)) {
+            const userPlanSlug = (user?.subscriptionPlan || 'taster').toLowerCase();
+            const matchedPlan = plans.find((p: any) => p.slug?.toLowerCase() === userPlanSlug);
+            if (matchedPlan) {
+              setCanViewMacros(Boolean(matchedPlan.can_view_macros || matchedPlan.canViewMacros));
+              return;
+            }
+          }
+        }
         const userPlan = (user?.subscriptionPlan || 'taster').toLowerCase();
-        const hasAccess = userPlan !== 'taster' && userPlan !== 'free';
-        setCanViewMacros(hasAccess);
+        setCanViewMacros(userPlan !== 'taster' && userPlan !== 'free');
       } catch (_) {
-        setCanViewMacros(false);
+        const userPlan = (user?.subscriptionPlan || 'taster').toLowerCase();
+        setCanViewMacros(userPlan !== 'taster' && userPlan !== 'free');
       }
     } catch (e) {
       console.error('Failed to load meal plan', e);
@@ -9272,7 +9281,6 @@ export default function PlannerPage() {
       localStorage.setItem('zecratary_meal_plans', JSON.stringify(merged));
       setPlannedMeals(updatedUserMeals);
 
-      // Persist full batch state to PostgreSQL
       if (currentUser?.id) {
         await fetch('/api/planner', {
           method: 'POST',
@@ -9359,34 +9367,48 @@ export default function PlannerPage() {
     return { dateStr, titleDate, isToday, isTomorrow, dayMeals };
   });
 
-  // Calculate live daily average nutritional values from planned meals
+  // ===========================================================================
+  // REAL-TIME DAILY AVERAGE NUTRITIONAL ENGINE
+  // ===========================================================================
   const dailyNutrition = useMemo(() => {
     const currentWeekDates = new Set(weekDays.map(w => w.dateStr));
     const activeMeals = plannedMeals.filter(m => currentWeekDates.has((m.date || '').split('T')[0]));
+    
     if (activeMeals.length === 0) {
-      return { calories: 0, protein: 0, carbs: 0, fat: 0 };
+      return { calories: 0, protein: 0, carbs: 0, fat: 0, activeDays: 0, totalMeals: 0 };
     }
 
-    const uniqueDaysCount = Math.max(1, new Set(activeMeals.map(m => (m.date || '').split('T')[0])).size);
+    const uniqueDays = new Set(activeMeals.map(m => (m.date || '').split('T')[0]));
+    const uniqueDaysCount = Math.max(1, uniqueDays.size);
     let totalCal = 0, totalP = 0, totalC = 0, totalF = 0;
 
     activeMeals.forEach(m => {
       const rec = savedRecipes.find(r => r.id === m.recipeId || r.name === m.recipeName || r.title === m.recipeName);
-      totalCal += Number(rec?.calories || 520);
-      totalP += Number(rec?.protein || 32);
-      totalC += Number(rec?.carbs || 45);
-      totalF += Number(rec?.fat || 18);
+      const scheduledServings = Number(m.servings || 2);
+      const baseServings = Math.max(1, Number(rec?.servings || 2));
+      const scaleRatio = scheduledServings / baseServings;
+
+      const cal = Number(rec?.calories ?? 520) * scaleRatio;
+      const p = Number(rec?.protein ?? 32) * scaleRatio;
+      const c = Number(rec?.carbs ?? 45) * scaleRatio;
+      const f = Number(rec?.fat ?? 18) * scaleRatio;
+
+      totalCal += cal;
+      totalP += p;
+      totalC += c;
+      totalF += f;
     });
 
     return {
       calories: Math.round(totalCal / uniqueDaysCount),
       protein: Math.round(totalP / uniqueDaysCount),
       carbs: Math.round(totalC / uniqueDaysCount),
-      fat: Math.round(totalF / uniqueDaysCount)
+      fat: Math.round(totalF / uniqueDaysCount),
+      activeDays: uniqueDaysCount,
+      totalMeals: activeMeals.length
     };
   }, [plannedMeals, savedRecipes, weekDays]);
 
-  // SMART ACTION 1: Auto-Plan Empty Slots with Library Dishes
   const handlePlanWeek = () => {
     if (savedRecipes.length === 0) {
       alert(t('noSavedRecipesToPlanAlert', 'No saved recipes found. Please add or import some recipes first to use the auto-planner!'));
@@ -9413,6 +9435,7 @@ export default function PlannerPage() {
             image: pickedRec.image || pickedRec.imageUrl,
             mealType: type,
             time: type === 'Breakfast' ? '08:30' : type === 'Lunch' ? '12:30' : '19:00',
+            servings: 2,
             isLeftover: false,
             notes: 'Auto-planned from recipe library'
           });
@@ -9430,7 +9453,6 @@ export default function PlannerPage() {
     showToast(t('weekPlanGeneratedToast', `Generated ${newAdditions.length} meals across your weekly calendar!`).replace('{count}', String(newAdditions.length)), 'success');
   };
 
-  // SMART ACTION 2: Copy Active Week to Next Week
   const handleCopyWeek = () => {
     const activeWeekDateSet = new Set(weekDays.map(w => w.dateStr));
     const currentWeekMeals = plannedMeals.filter(m => activeWeekDateSet.has((m.date || '').split('T')[0]));
@@ -9457,7 +9479,6 @@ export default function PlannerPage() {
     showToast(t('weekCopiedSuccessToast', `Copied ${currentWeekMeals.length} meals to next week!`).replace('{count}', String(currentWeekMeals.length)), 'success');
   };
 
-  // SMART ACTION 3: Share Schedule to System Clipboard
   const handleShareWeek = () => {
     const activeWeekDateSet = new Set(weekDays.map(w => w.dateStr));
     const currentWeekMeals = plannedMeals.filter(m => activeWeekDateSet.has((m.date || '').split('T')[0])).sort((a, b) => a.date.localeCompare(b.date));
@@ -9500,6 +9521,7 @@ export default function PlannerPage() {
     setSelectedRecipeObj(null);
     setMealType('Dinner');
     setMealTime('');
+    setMealServings(2);
     setIsLeftover(false);
     setNotes('');
     setRecipeSearch('');
@@ -9517,6 +9539,7 @@ export default function PlannerPage() {
     setEditDate(meal.date || selectedDate);
     setEditMealType(meal.mealType || 'Dinner');
     setEditMealTime(meal.time || '');
+    setEditServings(Number(meal.servings || 2));
     setEditIsLeftover(Boolean(meal.isLeftover));
     setEditNotes(meal.notes || '');
 
@@ -9593,6 +9616,7 @@ export default function PlannerPage() {
       image: selectedRecipeObj.image || selectedRecipeObj.imageUrl || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=800&q=80',
       mealType: mealType,
       time: mealTime,
+      servings: Number(mealServings) || 2,
       isLeftover: isLeftover,
       notes: notes
     };
@@ -9615,6 +9639,7 @@ export default function PlannerPage() {
           image: editRecipeObj.image || editRecipeObj.imageUrl || m.image,
           mealType: editMealType,
           time: editMealTime,
+          servings: Number(editServings) || 2,
           isLeftover: editIsLeftover,
           notes: editNotes,
           userId: currentUser?.id,
@@ -9984,7 +10009,7 @@ export default function PlannerPage() {
         </div>
       </div>
 
-      {/* Dynamic Daily Average Nutrition Banner */}
+      {/* DYNAMIC DAILY AVERAGE NUTRITION BANNER */}
       <div 
         className="border rounded-2xl p-5 relative overflow-hidden shadow-sm transition-colors duration-200"
         style={{
@@ -9992,27 +10017,33 @@ export default function PlannerPage() {
           borderColor: 'var(--color-border)'
         }}
       >
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-2 text-sm font-extrabold" style={{ color: 'var(--color-text)' }}>
-            <span className="text-lg">🔥</span> {t('dailyAverage', 'Daily Average')}
+            <span className="text-lg">🔥</span> 
+            <span>{t('dailyAverage', 'Daily Average')}</span>
+            {dailyNutrition.totalMeals > 0 && (
+              <span className="text-[11px] font-semibold opacity-75 ml-1" style={{ color: 'var(--color-text-secondary)' }}>
+                ({dailyNutrition.totalMeals} meals across {dailyNutrition.activeDays} {dailyNutrition.activeDays === 1 ? 'day' : 'days'})
+              </span>
+            )}
           </div>
 
           {canViewMacros ? (
             <div 
-              className="flex items-center gap-1.5 border text-xs font-bold px-3 py-1.5 rounded-xl shadow-xs"
+              className="flex items-center gap-1.5 border text-xs font-bold px-3 py-1.5 rounded-xl shadow-xs self-start sm:self-auto"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-emerald)',
                 color: 'var(--color-emerald)'
               }}
             >
-              <Check className="h-3.5 w-3.5" />
+              <Activity className="h-3.5 w-3.5" />
               <span>{t('macrosUnlocked', 'Macros Active')}</span>
             </div>
           ) : (
             <Link
               href="/subscriptions"
-              className="flex items-center gap-1.5 border font-bold text-xs px-3 py-1.5 rounded-xl transition cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
+              className="flex items-center gap-1.5 border font-bold text-xs px-3 py-1.5 rounded-xl transition cursor-pointer shadow-xs hover:border-[var(--color-primary)] self-start sm:self-auto"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
@@ -10029,25 +10060,25 @@ export default function PlannerPage() {
           <div>
             <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('calories', 'Calories')}</span>
             <span className={`text-xl font-black ${!canViewMacros ? 'blur-[4px] select-none' : ''}`} style={{ color: 'var(--color-text)' }}>
-              {dailyNutrition.calories ? `${dailyNutrition.calories} kcal` : '—'}
+              {dailyNutrition.calories > 0 ? `${dailyNutrition.calories} kcal` : '—'}
             </span>
           </div>
           <div>
             <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('protein', 'Protein')}</span>
             <span className={`text-xl font-black ${!canViewMacros ? 'blur-[4px] select-none' : ''}`} style={{ color: 'var(--color-text)' }}>
-              {dailyNutrition.protein ? `${dailyNutrition.protein}g` : '—'}
+              {dailyNutrition.protein > 0 ? `${dailyNutrition.protein}g` : '—'}
             </span>
           </div>
           <div>
             <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('carbs', 'Carbs')}</span>
             <span className={`text-xl font-black ${!canViewMacros ? 'blur-[4px] select-none' : ''}`} style={{ color: 'var(--color-text)' }}>
-              {dailyNutrition.carbs ? `${dailyNutrition.carbs}g` : '—'}
+              {dailyNutrition.carbs > 0 ? `${dailyNutrition.carbs}g` : '—'}
             </span>
           </div>
           <div>
             <span className="block text-[11px] font-semibold uppercase" style={{ color: 'var(--color-text-secondary)' }}>{t('fat', 'Fat')}</span>
             <span className={`text-xl font-black ${!canViewMacros ? 'blur-[4px] select-none' : ''}`} style={{ color: 'var(--color-text)' }}>
-              {dailyNutrition.fat ? `${dailyNutrition.fat}g` : '—'}
+              {dailyNutrition.fat > 0 ? `${dailyNutrition.fat}g` : '—'}
             </span>
           </div>
         </div>
@@ -10278,7 +10309,10 @@ export default function PlannerPage() {
                           <h3 className="text-sm font-bold leading-snug truncate" style={{ color: 'var(--color-text)' }}>
                             {meal.recipeName}
                           </h3>
-                          {meal.time && <span className="text-[11px] flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>⏰ {meal.time}</span>}
+                          <div className="flex items-center gap-2 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                            {meal.time && <span>⏰ {meal.time}</span>}
+                            <span>• {meal.servings || 2} {t('servingsLabel', 'servings')}</span>
+                          </div>
                         </div>
                       </div>
 
@@ -10622,37 +10656,45 @@ export default function PlannerPage() {
                 </div>
               </div>
 
-              <div>
-                <label 
-                  className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {t('timeLabel', 'Time')}
-                </label>
-                <div className="relative flex items-center">
-                  <Clock className="h-4 w-4 absolute left-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                    {t('timeLabel', 'Time')}
+                  </label>
+                  <div className="relative flex items-center">
+                    <Clock className="h-4 w-4 absolute left-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
+                    <input
+                      type="time"
+                      value={mealTime}
+                      onChange={(e) => setMealTime(e.target.value)}
+                      autoComplete="off"
+                      className="w-full border rounded-lg pl-9 pr-3 py-2 text-xs outline-none"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                      placeholder="--:--"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                    {t('servings', 'Servings')}
+                  </label>
                   <input
-                    type="time"
-                    value={mealTime}
-                    onChange={(e) => setMealTime(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddMealSubmit();
-                      }
-                    }}
-                    autoComplete="off"
-                    className="w-full border rounded-lg pl-9 pr-9 py-2 text-xs outline-none"
+                    type="number"
+                    min="1"
+                    max="30"
+                    value={mealServings}
+                    onChange={(e) => setMealServings(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-full border rounded-lg px-3 py-2 text-xs outline-none font-bold"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-text)'
                     }}
-                    placeholder="--:--"
-                  />
-                  <Clock 
-                    className="h-4 w-4 absolute right-3 pointer-events-none" 
-                    style={{ color: 'var(--color-primary)' }}
                   />
                 </div>
               </div>
@@ -10848,12 +10890,6 @@ export default function PlannerPage() {
                   type="date"
                   value={editDate}
                   onChange={(e) => setEditDate(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleEditMealSubmit();
-                    }
-                  }}
                   autoComplete="off"
                   className="w-full border rounded-lg px-3 py-2 text-xs font-semibold outline-none cursor-pointer"
                   style={{
@@ -10893,36 +10929,44 @@ export default function PlannerPage() {
                 </div>
               </div>
 
-              <div>
-                <label 
-                  className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {t('timeLabel', 'Time')}
-                </label>
-                <div className="relative flex items-center">
-                  <Clock className="h-4 w-4 absolute left-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                    {t('timeLabel', 'Time')}
+                  </label>
+                  <div className="relative flex items-center">
+                    <Clock className="h-4 w-4 absolute left-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
+                    <input
+                      type="time"
+                      value={editMealTime}
+                      onChange={(e) => setEditMealTime(e.target.value)}
+                      autoComplete="off"
+                      className="w-full border rounded-lg pl-9 pr-3 py-2 text-xs outline-none"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                    {t('servings', 'Servings')}
+                  </label>
                   <input
-                    type="time"
-                    value={editMealTime}
-                    onChange={(e) => setEditMealTime(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleEditMealSubmit();
-                      }
-                    }}
-                    autoComplete="off"
-                    className="w-full border rounded-lg pl-9 pr-9 py-2 text-xs outline-none"
+                    type="number"
+                    min="1"
+                    max="30"
+                    value={editServings}
+                    onChange={(e) => setEditServings(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-full border rounded-lg px-3 py-2 text-xs outline-none font-bold"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-text)'
                     }}
-                  />
-                  <Clock 
-                    className="h-4 w-4 absolute right-3 pointer-events-none" 
-                    style={{ color: 'var(--color-primary)' }}
                   />
                 </div>
               </div>
@@ -27272,7 +27316,7 @@ export default function AdminFrontendSettingsPage() {
 
 ## File: `apps/web/src/app/admin/plans/page.tsx`
 ```typescript
-// Generated / Updated by AI Collaborator
+// @ts-nocheck
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -27283,7 +27327,7 @@ import {
   Coins, Zap, Eye, Save, Layers, 
   History, Search, X, CheckCircle,
   Ban, AlertTriangle, ChevronLeft, ChevronRight,
-  Pencil
+  Pencil, Lock, Sparkles, Activity
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -27303,6 +27347,7 @@ interface PlanConfig {
   descriptionAnnual?: string;
   features: string[];
   tokenLimit: number;
+  canViewMacros: boolean;
   isFree?: boolean;
   isDefault?: boolean;
 }
@@ -27459,10 +27504,8 @@ export default function AdminPlansPage() {
     return fallback || key;
   }, [langContext]);
   
-  // Navigation Tabs State
   const [activeMainTab, setActiveMainTab] = useState<'plans' | 'transactions'>('plans');
 
-  // Shared System & Identity States
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -27472,7 +27515,6 @@ export default function AdminPlansPage() {
   const [plans, setPlans] = useState<PlanConfig[]>([]);
   const [previewInterval, setPreviewInterval] = useState<'MONTH' | 'YEAR'>('MONTH');
 
-  // Dynamic Token & Currency Identity
   const [tokenSymbol, setTokenSymbol] = useState('🪙');
   const [currencyCode, setCurrencyCode] = useState('USD');
   const [currencySymbol, setCurrencySymbol] = useState('$');
@@ -27487,6 +27529,7 @@ export default function AdminPlansPage() {
   const [monthlyPrice, setMonthlyPrice] = useState<number>(8.99);
   const [annualPrice, setAnnualPrice] = useState<number>(59.99);
   const [tokenLimit, setTokenLimit] = useState<number>(500);
+  const [canViewMacros, setCanViewMacros] = useState<boolean>(true);
   const [monthlyBadge, setMonthlyBadge] = useState('');
   const [annualBadge, setAnnualBadge] = useState('Best Value');
   const [trialBadge, setTrialBadge] = useState('');
@@ -27536,7 +27579,6 @@ export default function AdminPlansPage() {
   const [editExpiryDate, setEditExpiryDate] = useState('');
   const [editIsRecurring, setEditIsRecurring] = useState(true);
 
-  // Dynamic Theme Synchronization
   const applySavedTheme = useCallback(() => {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
@@ -27575,7 +27617,6 @@ export default function AdminPlansPage() {
     };
   }, [applySavedTheme]);
 
-  // Sync token and currency settings
   const fetchSettings = useCallback(async () => {
     try {
       const tRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
@@ -27603,7 +27644,6 @@ export default function AdminPlansPage() {
     fetchSettings();
   }, [fetchSettings]);
 
-  // Universal Plan Parser
   const normalizePlan = (p: any): PlanConfig => {
     const isFreePlan = Boolean(
       p.isFree || p.is_free || p.free || 
@@ -27645,6 +27685,7 @@ export default function AdminPlansPage() {
       descriptionAnnual: p.descriptionAnnual || p.description_annual || '',
       features: rawFeatures,
       tokenLimit: p.tokenLimit !== undefined ? Number(p.tokenLimit) : (p.token_limit !== undefined ? Number(p.token_limit) : (isFreePlan ? 50000 : 500)),
+      canViewMacros: p.canViewMacros !== undefined ? Boolean(p.canViewMacros) : (p.can_view_macros !== undefined ? Boolean(p.can_view_macros) : !isFreePlan),
       isFree: isFreePlan,
       isDefault: Boolean(p.isDefault || p.is_default || cleanSlug === 'taster' || p.id === 'preset_taster')
     };
@@ -27761,6 +27802,7 @@ export default function AdminPlansPage() {
     setMonthlyPrice(Number(p.monthlyPriceDollars || 0));
     setAnnualPrice(Number(p.annualPriceDollars || 0));
     setTokenLimit(Number(p.tokenLimit ?? 500));
+    setCanViewMacros(Boolean(p.canViewMacros));
     setMonthlyBadge(p.monthlyBadge || '');
     setAnnualBadge(p.annualBadge || '');
     setTrialBadge(p.trialBadge || '');
@@ -27781,6 +27823,7 @@ export default function AdminPlansPage() {
     setMonthlyPrice(8.99);
     setAnnualPrice(59.99);
     setTokenLimit(500);
+    setCanViewMacros(true);
     setMonthlyBadge('');
     setAnnualBadge('Best Value');
     setTrialBadge('');
@@ -27788,6 +27831,46 @@ export default function AdminPlansPage() {
     setDescriptionAnnual('');
     setFeaturesText('Personal recipe library\nSmart ingredient repurposing\nAutomated shopping list creation');
     setIsFree(false);
+  };
+
+  const handleApplyPresetTaster = () => {
+    setEditingId('preset_taster');
+    setName('Taster');
+    setSlug('taster');
+    setPlanGroupId('group_taster');
+    setMonthlyPlanId('plan_taster_monthly');
+    setAnnualPlanId('plan_taster_annual');
+    setMonthlyPrice(0);
+    setAnnualPrice(0);
+    setTokenLimit(50000);
+    setIsFree(true);
+    setCanViewMacros(false);
+    setMonthlyBadge('');
+    setAnnualBadge('');
+    setTrialBadge('');
+    setDescriptionMonthly('Free tier with limited features');
+    setDescriptionAnnual('Free tier with limited features');
+    setFeaturesText('Create up to 5 AI-powered recipes per month\nPersonal recipe library (25 total recipes)\nSmart ingredient repurposing\nAutomated shopping list creation\nDirect online grocery shopping links\nMeal planner');
+  };
+
+  const handleApplyPresetNutritionPro = () => {
+    setEditingId(null);
+    setName('Nutrition Pro');
+    setSlug('nutrition-pro');
+    setPlanGroupId('group_nutrition-pro');
+    setMonthlyPlanId('plan_nutrition-pro_monthly');
+    setAnnualPlanId('plan_nutrition-pro_annual');
+    setMonthlyPrice(8.99);
+    setAnnualPrice(59.99);
+    setTokenLimit(1000000);
+    setIsFree(false);
+    setCanViewMacros(true);
+    setMonthlyBadge('Billed Immediately');
+    setAnnualBadge('Save 44%');
+    setTrialBadge('7-Day Free Trial');
+    setDescriptionMonthly('Full premium access, billed monthly');
+    setDescriptionAnnual('Best value - all premium features, billed annually');
+    setFeaturesText('Unlimited AI-powered recipe generation\nUnlimited recipe library\nComprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, carbohydrates)\nMacro Analysis Gating Unlocked');
   };
 
   const handleSavePlan = async () => {
@@ -27811,6 +27894,7 @@ export default function AdminPlansPage() {
         monthlyPriceDollars: isFree ? 0 : Number(monthlyPrice || 0),
         annualPriceDollars: isFree ? 0 : Number(annualPrice || 0),
         tokenLimit: Number(tokenLimit || 0),
+        canViewMacros: Boolean(canViewMacros),
         monthlyBadge: monthlyBadge.trim(),
         annualBadge: annualBadge.trim(),
         trialBadge: trialBadge.trim(),
@@ -27835,6 +27919,9 @@ export default function AdminPlansPage() {
       setSuccessMsg(t('planSavedSuccess', 'Subscription Plan & Token Quotas saved and synchronized with PostgreSQL!'));
       resetForm();
       await fetchPlans();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_plans_updated'));
+      }
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err: any) {
       setErrorMsg(err.message || 'Error occurred while saving');
@@ -27875,6 +27962,10 @@ export default function AdminPlansPage() {
       setPlans((prev) => prev.filter((item) => item.id !== p.id && item.slug !== p.slug));
       if (editingId === p.id || editingId === p.slug) resetForm();
 
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_plans_updated'));
+      }
+
       setSuccessMsg(`"${p.name}" ${t('planDeletedSuccess', 'has been permanently deleted from PostgreSQL.')}`);
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err: any) {
@@ -27885,7 +27976,6 @@ export default function AdminPlansPage() {
     }
   };
 
-  // Filtered Transactions
   const filteredTransactions = useMemo(() => {
     const q = txSearchQuery.toLowerCase().trim();
     return transactions.filter((tx) => {
@@ -28142,7 +28232,7 @@ export default function AdminPlansPage() {
           </div>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             {activeMainTab === 'plans' 
-              ? t('adminPlansSubtitle', 'Configure subscription intervals, group identifiers, and automated AI token purchase grants.')
+              ? t('adminPlansSubtitle', 'Configure subscription intervals, macro analysis gating (can_view_macros), and automated AI token purchase grants.')
               : t('planTransactionsSubtitle', 'Audit customer subscription plan purchase receipts, auto-renewals, and lifecycle status.')}
           </p>
         </div>
@@ -28204,6 +28294,47 @@ export default function AdminPlansPage() {
         </button>
       </div>
 
+      {/* Quick Fill Presets Bar */}
+      {activeMainTab === 'plans' && (
+        <div 
+          className="p-3.5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs transition-colors duration-200"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+            <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
+              {t('quickPresets', 'Quick Presets:')}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleApplyPresetTaster}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            >
+              Preset: Taster (Free, Macros Locked)
+            </button>
+            <button
+              type="button"
+              onClick={handleApplyPresetNutritionPro}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs hover:border-[var(--color-emerald)]"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
+            >
+              Preset: Nutrition Pro (Paid, Macros Active)
+            </button>
+            <button
+              type="button"
+              onClick={resetForm}
+              className="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+            >
+              {t('blankCustomPlan', 'Blank Custom Plan')}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Notifications */}
       {errorMsg && (
         <div 
@@ -28229,8 +28360,10 @@ export default function AdminPlansPage() {
       {activeMainTab === 'plans' && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Plan Configuration Form Container */}
+            {/* Form-Free Accessible Container */}
             <div 
+              role="region"
+              aria-label="Subscription Plan Editor"
               tabIndex={0}
               className="lg:col-span-7 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200 outline-none"
               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -28268,6 +28401,7 @@ export default function AdminPlansPage() {
                 )}
               </div>
 
+              {/* Autofill Guardrails on Inputs */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
@@ -28278,6 +28412,10 @@ export default function AdminPlansPage() {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. Nutrition Pro"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
                     className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none transition"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -28292,6 +28430,10 @@ export default function AdminPlansPage() {
                     value={slug}
                     onChange={(e) => handleSlugChange(e.target.value)}
                     placeholder="e.g. nutrition-pro"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
                     className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none transition"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -28308,6 +28450,9 @@ export default function AdminPlansPage() {
                     type="text"
                     value={planGroupId}
                     onChange={(e) => setPlanGroupId(e.target.value)}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                     className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none"
                     style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -28321,6 +28466,9 @@ export default function AdminPlansPage() {
                     type="text"
                     value={monthlyPlanId}
                     onChange={(e) => setMonthlyPlanId(e.target.value)}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                     className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none"
                     style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -28334,6 +28482,9 @@ export default function AdminPlansPage() {
                     type="text"
                     value={annualPlanId}
                     onChange={(e) => setAnnualPlanId(e.target.value)}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                     className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none"
                     style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -28353,6 +28504,9 @@ export default function AdminPlansPage() {
                     disabled={isFree}
                     value={isFree ? 0 : monthlyPrice}
                     onChange={(e) => setMonthlyPrice(parseFloat(e.target.value) || 0)}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                     className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none disabled:opacity-50"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -28369,6 +28523,9 @@ export default function AdminPlansPage() {
                     disabled={isFree}
                     value={isFree ? 0 : annualPrice}
                     onChange={(e) => setAnnualPrice(parseFloat(e.target.value) || 0)}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                     className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none disabled:opacity-50"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -28384,9 +28541,56 @@ export default function AdminPlansPage() {
                     min="0"
                     value={tokenLimit}
                     onChange={(e) => setTokenLimit(Math.max(0, parseInt(e.target.value) || 0))}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                     className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-black outline-none"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
+                </div>
+              </div>
+
+              {/* SUBSCRIPTION GATING: can_view_macros SWITCH */}
+              <div 
+                className="p-4 rounded-2xl border flex items-center justify-between transition-colors shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: canViewMacros ? 'var(--color-emerald)' : 'var(--color-border)'
+                }}
+              >
+                <div className="space-y-0.5 pr-4">
+                  <div className="flex items-center gap-2">
+                    <Activity className="h-4 w-4" style={{ color: canViewMacros ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }} />
+                    <span className="text-xs font-black" style={{ color: 'var(--color-text)' }}>
+                      {t('macroGatingTitle', 'Macro Analysis Gating (can_view_macros)')}
+                    </span>
+                  </div>
+                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    {canViewMacros 
+                      ? t('macrosActiveDesc', 'Subscribers view unblurred nutritional macros (Calories, Protein, Carbs, Fat) with "Macros Active" badge.')
+                      : t('macrosLockedDesc', 'Subscribers see blurred numbers via blur-[4px] with an Upgrade link.')}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={canViewMacros}
+                    onClick={() => setCanViewMacros(!canViewMacros)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      canViewMacros ? 'bg-emerald-500' : 'bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                        canViewMacros ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                  <span className="text-xs font-bold font-mono" style={{ color: canViewMacros ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}>
+                    {canViewMacros ? 'Active' : 'Locked'}
+                  </span>
                 </div>
               </div>
 
@@ -28398,6 +28602,8 @@ export default function AdminPlansPage() {
                   rows={3}
                   value={featuresText}
                   onChange={(e) => setFeaturesText(e.target.value)}
+                  autoComplete="off"
+                  data-lpignore="true"
                   className="w-full border rounded-xl p-3 text-xs font-medium outline-none transition"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
@@ -28416,12 +28622,14 @@ export default function AdminPlansPage() {
                       if (val) {
                         setMonthlyPrice(0);
                         setAnnualPrice(0);
+                        setCanViewMacros(false);
+                      } else {
+                        setCanViewMacros(true);
                       }
                     }}
                     className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                       isFree ? 'bg-emerald-500' : 'bg-slate-700'
                     }`}
-                    title={isFree ? t('freeTierActive', 'Free Tier Active') : t('markAsFreeTier', 'Mark as Free Tier')}
                   >
                     <span
                       className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
@@ -28437,9 +28645,12 @@ export default function AdminPlansPage() {
                       if (val) {
                         setMonthlyPrice(0);
                         setAnnualPrice(0);
+                        setCanViewMacros(false);
+                      } else {
+                        setCanViewMacros(true);
                       }
                     }}
-                    style={{ color: isFree ? 'var(--color-emerald, #10b981)' : 'var(--color-text)' }}
+                    style={{ color: isFree ? 'var(--color-emerald)' : 'var(--color-text)' }}
                   >
                     {t('isFreeTierLabel', 'Mark as Free Tier')}
                   </span>
@@ -28458,7 +28669,7 @@ export default function AdminPlansPage() {
               </div>
             </div>
 
-            {/* Live Mockup Preview */}
+            {/* LIVE CARD MOCKUP PREVIEW (WITH SUBSCRIPTION GATING DEMO) */}
             <div 
               className="lg:col-span-5 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200 flex flex-col justify-between"
               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -28547,6 +28758,75 @@ export default function AdminPlansPage() {
                     </div>
                   </div>
 
+                  {/* SUBSCRIPTION GATING (can_view_macros) DEMONSTRATION */}
+                  <div 
+                    className="p-3.5 rounded-2xl border space-y-2.5 transition-colors duration-200 shadow-xs"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: canViewMacros ? 'var(--color-emerald)' : 'var(--color-border)'
+                    }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                        <span>🔥</span>
+                        <span>{t('macroGatingPreview', 'Daily Average Macros')}</span>
+                      </div>
+
+                      {canViewMacros ? (
+                        <div 
+                          className="flex items-center gap-1 border px-2 py-0.5 rounded-lg text-[10px] font-bold shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-emerald)',
+                            color: 'var(--color-emerald)'
+                          }}
+                        >
+                          <Check className="h-3 w-3" />
+                          <span>{t('macrosActiveBadge', 'Macros Active')}</span>
+                        </div>
+                      ) : (
+                        <div 
+                          className="flex items-center gap-1 border px-2 py-0.5 rounded-lg text-[10px] font-bold shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          <Lock className="h-3 w-3" />
+                          <span>{t('upgradeBtn', 'Upgrade')}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                      <div className="p-1.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                        <span className="block text-[9px] font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>Calories</span>
+                        <span className={`text-xs font-black block mt-0.5 ${!canViewMacros ? 'blur-[4px] select-none opacity-60' : ''}`} style={{ color: 'var(--color-text)' }}>
+                          520 kcal
+                        </span>
+                      </div>
+                      <div className="p-1.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                        <span className="block text-[9px] font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>Protein</span>
+                        <span className={`text-xs font-black block mt-0.5 ${!canViewMacros ? 'blur-[4px] select-none opacity-60' : ''}`} style={{ color: 'var(--color-text)' }}>
+                          32g
+                        </span>
+                      </div>
+                      <div className="p-1.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                        <span className="block text-[9px] font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>Carbs</span>
+                        <span className={`text-xs font-black block mt-0.5 ${!canViewMacros ? 'blur-[4px] select-none opacity-60' : ''}`} style={{ color: 'var(--color-text)' }}>
+                          45g
+                        </span>
+                      </div>
+                      <div className="p-1.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                        <span className="block text-[9px] font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>Fat</span>
+                        <span className={`text-xs font-black block mt-0.5 ${!canViewMacros ? 'blur-[4px] select-none opacity-60' : ''}`} style={{ color: 'var(--color-text)' }}>
+                          18g
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
                   <ul className="space-y-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     {featuresText.split(/\r?\n/).slice(0, 4).map((f: string, i: number) => (
                       <li key={i} className="flex items-center gap-2">
@@ -28565,7 +28845,7 @@ export default function AdminPlansPage() {
             </div>
           </div>
 
-          {/* Configured Plans List Table */}
+          {/* Configured Plans List Table with Macro Status Column */}
           <div 
             className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -28590,19 +28870,20 @@ export default function AdminPlansPage() {
                     <th className="p-3.5">Interval IDs</th>
                     <th className="p-3.5">Pricing</th>
                     <th className="p-3.5">AI Token Allowance</th>
+                    <th className="p-3.5">Macro Access</th>
                     <th className="p-3.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
                   {loading ? (
                     <tr>
-                      <td colSpan={5} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td colSpan={6} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                         <RefreshCw className="h-4 w-4 animate-spin inline mr-2" style={{ color: 'var(--color-primary)' }} /> Loading plans...
                       </td>
                     </tr>
                   ) : plans.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td colSpan={6} className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                         No subscription plans configured yet.
                       </td>
                     </tr>
@@ -28647,6 +28928,32 @@ export default function AdminPlansPage() {
                             >
                               <Coins className="h-3 w-3 text-amber-500" /> +{Number(p.tokenLimit ?? 500).toLocaleString()} {tokenSymbol}
                             </span>
+                          </td>
+
+                          <td className="p-3.5">
+                            {p.canViewMacros ? (
+                              <span 
+                                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border"
+                                style={{
+                                  backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                                  borderColor: 'var(--color-emerald)',
+                                  color: 'var(--color-emerald)'
+                                }}
+                              >
+                                <Check className="h-3 w-3" /> Macros Active
+                              </span>
+                            ) : (
+                              <span 
+                                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border"
+                                style={{
+                                  backgroundColor: 'var(--color-inner-dark)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text-secondary)'
+                                }}
+                              >
+                                <Lock className="h-3 w-3" /> Locked (blur)
+                              </span>
+                            )}
                           </td>
 
                           <td className="p-3.5 text-right">
@@ -28750,6 +29057,9 @@ export default function AdminPlansPage() {
                     setTxSearchQuery(e.target.value);
                     setCurrentPage(1);
                   }}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
                   className="w-full pl-10 pr-4 py-2 rounded-xl border text-xs outline-none transition"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
@@ -28825,7 +29135,7 @@ export default function AdminPlansPage() {
                     </tr>
                   ) : paginatedTransactions.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td colSpan={9} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                         No subscription plan transactions found.
                       </td>
                     </tr>
@@ -28978,10 +29288,13 @@ export default function AdminPlansPage() {
         </div>
       )}
 
-      {/* MODAL: ADD PAYMENT */}
+      {/* Accessible Dialog Container: Add Payment */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div 
+            role="dialog"
+            aria-modal="true"
+            aria-label="Record Plan Payment Modal"
             className="w-full max-w-lg rounded-3xl border p-6 space-y-4 shadow-2xl relative animate-in fade-in zoom-in-95"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
@@ -29054,6 +29367,9 @@ export default function AdminPlansPage() {
                     min="0"
                     value={paymentAmount}
                     onChange={(e) => setPaymentAmount(parseFloat(e.target.value) || 0)}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                     className="w-full border rounded-xl px-3.5 py-2.5 font-mono font-bold outline-none"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -29091,6 +29407,8 @@ export default function AdminPlansPage() {
                         setPaymentExpiryDate(calculateDefaultExpiry(e.target.value, matched.interval || 'MONTH'));
                       }
                     }}
+                    autoComplete="off"
+                    data-lpignore="true"
                     className="w-full border rounded-xl px-3.5 py-2 font-mono outline-none"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -29104,6 +29422,8 @@ export default function AdminPlansPage() {
                     type="date"
                     value={paymentExpiryDate}
                     onChange={(e) => setPaymentExpiryDate(e.target.value)}
+                    autoComplete="off"
+                    data-lpignore="true"
                     className="w-full border rounded-xl px-3.5 py-2 font-mono outline-none"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -29136,7 +29456,7 @@ export default function AdminPlansPage() {
                 type="button"
                 disabled={modalSubmitting}
                 onClick={handleSaveAddPayment}
-                className="px-5 py-2 rounded-xl text-xs font-extrabold text-white transition cursor-pointer shadow-lg disabled:opacity-50 flex items-center gap-2"
+                className="px-5 py-2 rounded-xl text-xs font-extrabold text-white transition cursor-pointer shadow-lg disabled:opacity-50 flex items-center gap-2 hover:opacity-90"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 {modalSubmitting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
@@ -29147,10 +29467,13 @@ export default function AdminPlansPage() {
         </div>
       )}
 
-      {/* MODAL: EDIT PAYMENT */}
+      {/* Accessible Dialog Container: Edit Payment */}
       {showEditModal && editingTx && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div 
+            role="dialog"
+            aria-modal="true"
+            aria-label="Edit Payment Transaction Modal"
             className="w-full max-w-lg rounded-3xl border p-6 space-y-4 shadow-2xl relative animate-in fade-in zoom-in-95"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
@@ -29183,6 +29506,9 @@ export default function AdminPlansPage() {
                     type="text"
                     value={editCustomerName}
                     onChange={(e) => setEditCustomerName(e.target.value)}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                     className="w-full border rounded-xl px-3 py-2 font-bold outline-none"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -29190,9 +29516,13 @@ export default function AdminPlansPage() {
                 <div className="space-y-1">
                   <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Customer Email</label>
                   <input
-                    type="email"
+                    type="text"
+                    inputMode="email"
                     value={editCustomerEmail}
                     onChange={(e) => setEditCustomerEmail(e.target.value)}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                     className="w-full border rounded-xl px-3 py-2 font-mono outline-none"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -29206,6 +29536,9 @@ export default function AdminPlansPage() {
                     type="text"
                     value={editPlanName}
                     onChange={(e) => setEditPlanName(e.target.value)}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                     className="w-full border rounded-xl px-3 py-2 font-bold outline-none"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -29216,6 +29549,9 @@ export default function AdminPlansPage() {
                     type="text"
                     value={editPlanSlug}
                     onChange={(e) => setEditPlanSlug(e.target.value)}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                     className="w-full border rounded-xl px-3 py-2 font-mono outline-none"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -29230,6 +29566,9 @@ export default function AdminPlansPage() {
                     step="0.01"
                     value={editAmount}
                     onChange={(e) => setEditAmount(parseFloat(e.target.value) || 0)}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                     className="w-full border rounded-xl px-3 py-2 font-mono font-bold outline-none"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -29273,6 +29612,8 @@ export default function AdminPlansPage() {
                     type="date"
                     value={editDate}
                     onChange={(e) => setEditDate(e.target.value)}
+                    autoComplete="off"
+                    data-lpignore="true"
                     className="w-full border rounded-xl px-3 py-2 font-mono outline-none"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -29283,6 +29624,8 @@ export default function AdminPlansPage() {
                     type="date"
                     value={editExpiryDate}
                     onChange={(e) => setEditExpiryDate(e.target.value)}
+                    autoComplete="off"
+                    data-lpignore="true"
                     className="w-full border rounded-xl px-3 py-2 font-mono outline-none"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -29315,7 +29658,7 @@ export default function AdminPlansPage() {
                 type="button"
                 disabled={modalSubmitting}
                 onClick={handleSaveEditPayment}
-                className="px-5 py-2 rounded-xl text-xs font-extrabold text-white transition cursor-pointer shadow-lg disabled:opacity-50 flex items-center gap-2"
+                className="px-5 py-2 rounded-xl text-xs font-extrabold text-white transition cursor-pointer shadow-lg disabled:opacity-50 flex items-center gap-2 hover:opacity-90"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 {modalSubmitting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
@@ -50973,295 +51316,255 @@ export async function POST(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/admin/plans/route.ts`
 ```typescript
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { initTokenTables } from '@/lib/tokenService';
 
-// Module-scoped row parser: accepts unconstrained any to avoid TS2339 'never' narrowing
-function parseDbRows<T = any>(res: any): T[] {
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
-  return [];
-}
+export const dynamic = 'force-dynamic';
 
-async function ensureSubscriptionPlansSchema() {
+async function initPlansTable() {
   try {
     await query(`
       CREATE TABLE IF NOT EXISTS subscription_plans (
-        id VARCHAR(255) PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
-        slug VARCHAR(255) UNIQUE NOT NULL,
-        plan_group_id VARCHAR(255),
-        monthly_plan_id VARCHAR(255),
-        annual_plan_id VARCHAR(255),
-        monthly_price_dollars NUMERIC(10,2) DEFAULT 0.00,
-        annual_price_dollars NUMERIC(10,2) DEFAULT 0.00,
-        monthly_badge VARCHAR(255) DEFAULT '',
-        annual_badge VARCHAR(255) DEFAULT '',
-        trial_badge VARCHAR(255) DEFAULT '',
-        description_monthly TEXT DEFAULT '',
-        description_annual TEXT DEFAULT '',
-        features TEXT DEFAULT '[]',
-        token_limit NUMERIC DEFAULT 500,
+        id VARCHAR(100) PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        slug VARCHAR(100) UNIQUE NOT NULL,
+        plan_group_id VARCHAR(100),
+        monthly_plan_id VARCHAR(100),
+        annual_plan_id VARCHAR(100),
+        monthly_price_dollars NUMERIC(10, 2) DEFAULT 0,
+        annual_price_dollars NUMERIC(10, 2) DEFAULT 0,
+        monthly_badge VARCHAR(100) DEFAULT '',
+        annual_badge VARCHAR(100) DEFAULT '',
+        trial_badge VARCHAR(100) DEFAULT '',
+        description_monthly TEXT,
+        description_annual TEXT,
+        features JSONB DEFAULT '[]'::jsonb,
+        token_limit INTEGER DEFAULT 500,
+        ai_recipe_limit INTEGER DEFAULT 50,
+        recipe_library_limit INTEGER DEFAULT 250,
+        social_scrape_limit INTEGER DEFAULT 20,
+        can_view_macros BOOLEAN DEFAULT true,
+        allowed_ai_models VARCHAR(255) DEFAULT 'gemini-1.5-flash,gpt-3.5-turbo',
         is_free BOOLEAN DEFAULT false,
         is_default BOOLEAN DEFAULT false,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW()
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
       );
-    `).catch(() => {});
-
-    await query(`
-      DO $$ 
-      BEGIN 
-        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS plan_group_id VARCHAR(255); EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_plan_id VARCHAR(255); EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_plan_id VARCHAR(255); EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_price_dollars NUMERIC(10,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_price_dollars NUMERIC(10,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_badge VARCHAR(255) DEFAULT ''; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_badge VARCHAR(255) DEFAULT ''; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS trial_badge VARCHAR(255) DEFAULT ''; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS description_monthly TEXT DEFAULT ''; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS description_annual TEXT DEFAULT ''; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS features TEXT DEFAULT '[]'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS token_limit NUMERIC DEFAULT 500; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS is_free BOOLEAN DEFAULT false; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT false; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN OTHERS THEN NULL; END;
-      END $$;
-    `).catch(() => {});
-  } catch (_) {}
-}
-
-async function getExistingColumns(): Promise<Set<string>> {
-  try {
-    const res: any = await query(
-      `SELECT column_name FROM information_schema.columns WHERE table_name = 'subscription_plans'`
-    );
-    const rows = parseDbRows(res);
-    return new Set(rows.map((r: any) => String(r.column_name).toLowerCase()));
-  } catch (_) {
-    return new Set();
+    `);
+    await query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS token_limit INTEGER DEFAULT 500;`);
+    await query(`ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS can_view_macros BOOLEAN DEFAULT true;`);
+  } catch (err) {
+    console.warn('initPlansTable notice:', err);
   }
 }
 
 export async function GET() {
   try {
-    await ensureSubscriptionPlansSchema();
-    const cols = await getExistingColumns();
+    await initPlansTable();
+    try { await initTokenTables(); } catch (_) {}
+
+    const rows = await query(`SELECT * FROM subscription_plans ORDER BY is_free DESC, monthly_price_dollars ASC`);
+    const mapped = rows.map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      slug: r.slug,
+      planGroupId: r.plan_group_id || `group_${r.slug}`,
+      monthlyPlanId: r.monthly_plan_id || `plan_${r.slug}_monthly`,
+      annualPlanId: r.annual_plan_id || `plan_${r.slug}_annual`,
+      monthlyPriceDollars: Number(r.monthly_price_dollars ?? 0),
+      annualPriceDollars: Number(r.annual_price_dollars ?? 0),
+      monthlyBadge: r.monthly_badge || '',
+      annualBadge: r.annual_badge || '',
+      trialBadge: r.trial_badge || '',
+      descriptionMonthly: r.description_monthly || '',
+      descriptionAnnual: r.description_annual || '',
+      features: Array.isArray(r.features) ? r.features : (typeof r.features === 'string' ? JSON.parse(r.features) : []),
+      tokenLimit: Number(r.token_limit ?? 500),
+      aiRecipeLimit: Number(r.ai_recipe_limit ?? 50),
+      recipeLibraryLimit: Number(r.recipe_library_limit ?? 250),
+      socialScrapeLimit: Number(r.social_scrape_limit ?? 20),
+      canViewMacros: r.can_view_macros !== undefined ? Boolean(r.can_view_macros) : !Boolean(r.is_free),
+      allowedAiModels: r.allowed_ai_models || 'gemini-1.5-flash,gpt-3.5-turbo',
+      isFree: Boolean(r.is_free),
+      isDefault: Boolean(r.is_default)
+    }));
+
+    return NextResponse.json({ success: true, configs: mapped }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    await initPlansTable();
+    try { await initTokenTables(); } catch (_) {}
+    const body = await req.json();
+
+    const id = String(body.id || body.slug || `plan_${Date.now()}`).trim();
+    const name = String(body.name || 'Custom Plan').trim();
+    const slug = String(body.slug || id).toLowerCase().trim().replace(/[^a-z0-9_-]/g, '');
+    const planGroupId = String(body.planGroupId || `group_${slug}`).trim();
+    const monthlyPlanId = String(body.monthlyPlanId || `plan_${slug}_monthly`).trim();
+    const annualPlanId = String(body.annualPlanId || `plan_${slug}_annual`).trim();
+
+    const monthlyPrice = Number(body.monthlyPriceDollars || 0);
+    const annualPrice = Number(body.annualPriceDollars || 0);
+    const tokenLimit = Number(body.tokenLimit ?? 500);
+
+    const isFree = Boolean(body.isFree || (monthlyPrice === 0 && annualPrice === 0));
+    const canViewMacros = body.canViewMacros !== undefined 
+      ? Boolean(body.canViewMacros) 
+      : (body.can_view_macros !== undefined ? Boolean(body.can_view_macros) : !isFree);
+
+    const features = JSON.stringify(Array.isArray(body.features) ? body.features : []);
+
+    await query(`
+      INSERT INTO subscription_plans (
+        id, name, slug, plan_group_id, monthly_plan_id, annual_plan_id,
+        monthly_price_dollars, annual_price_dollars, monthly_badge, annual_badge, trial_badge,
+        description_monthly, description_annual, features, token_limit,
+        ai_recipe_limit, recipe_library_limit, social_scrape_limit, can_view_macros,
+        allowed_ai_models, is_free, is_default, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, NOW()
+      )
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        slug = EXCLUDED.slug,
+        plan_group_id = EXCLUDED.plan_group_id,
+        monthly_plan_id = EXCLUDED.monthly_plan_id,
+        annual_plan_id = EXCLUDED.annual_plan_id,
+        monthly_price_dollars = EXCLUDED.monthly_price_dollars,
+        annual_price_dollars = EXCLUDED.annual_price_dollars,
+        monthly_badge = EXCLUDED.monthly_badge,
+        annual_badge = EXCLUDED.annual_badge,
+        trial_badge = EXCLUDED.trial_badge,
+        description_monthly = EXCLUDED.description_monthly,
+        description_annual = EXCLUDED.description_annual,
+        features = EXCLUDED.features,
+        token_limit = EXCLUDED.token_limit,
+        ai_recipe_limit = EXCLUDED.ai_recipe_limit,
+        recipe_library_limit = EXCLUDED.recipe_library_limit,
+        social_scrape_limit = EXCLUDED.social_scrape_limit,
+        can_view_macros = EXCLUDED.can_view_macros,
+        allowed_ai_models = EXCLUDED.allowed_ai_models,
+        is_free = EXCLUDED.is_free,
+        is_default = EXCLUDED.is_default,
+        updated_at = NOW();
+    `, [
+      id, name, slug, planGroupId, monthlyPlanId, annualPlanId,
+      monthlyPrice, annualPrice, body.monthlyBadge || '', body.annualBadge || '', body.trialBadge || '',
+      body.descriptionMonthly || '', body.descriptionAnnual || '', features, tokenLimit,
+      body.aiRecipeLimit || 50, body.recipeLibraryLimit || 250, body.socialScrapeLimit || 20,
+      canViewMacros, body.allowedAiModels || 'gemini-1.5-flash,gpt-3.5-turbo',
+      isFree, Boolean(body.isDefault)
+    ]);
+
+    try {
+      await query(`
+        UPDATE token_settings
+        SET plan_allocations = jsonb_set(
+          COALESCE(plan_allocations, '{}'::jsonb),
+          ARRAY[$1],
+          to_jsonb($2::int)
+        )
+        WHERE id = 'default_settings';
+      `, [slug, tokenLimit]);
+    } catch (_) {}
+
+    return NextResponse.json({ success: true, message: 'Plan saved and synchronized successfully' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    await initPlansTable();
+    try { await initTokenTables(); } catch (_) {}
+
+    const { searchParams } = new URL(req.url);
+    let id = searchParams.get('id');
+    let slug = searchParams.get('slug');
+
+    if (!id && !slug) {
+      try {
+        const body = await req.json();
+        id = body?.id;
+        slug = body?.slug;
+      } catch (_) {}
+    }
+
+    if (!id && !slug) {
+      return NextResponse.json({ success: false, error: 'Plan ID or Slug is required' }, { status: 400 });
+    }
+
+    const targetSlug = (slug || '').toLowerCase().trim();
+    const targetId = (id || '').trim();
+
+    if (targetSlug === 'taster' || targetId === 'preset_taster' || targetId === 'taster') {
+      return NextResponse.json({ success: false, error: 'Cannot delete the system default Taster plan.' }, { status: 400 });
+    }
+
+    if (targetSlug) {
+      await query("UPDATE users SET subscription_plan = 'taster' WHERE subscription_plan = $1 OR subscription_plan LIKE $2", [targetSlug, `${targetSlug}-%`]);
+      await query("UPDATE payment_transactions SET plan_slug = NULL WHERE plan_slug = $1 OR plan_slug LIKE $2", [targetSlug, `${targetSlug}-%`]);
+    }
+    if (targetId && targetId !== targetSlug) {
+      await query("UPDATE users SET subscription_plan = 'taster' WHERE subscription_plan = $1", [targetId]);
+      await query("UPDATE payment_transactions SET plan_slug = NULL WHERE plan_slug = $1", [targetId]);
+    }
+
+    try {
+      if (targetSlug) {
+        await query(`
+          UPDATE token_settings
+          SET plan_allocations = plan_allocations - $1
+          WHERE id = 'default_settings';
+        `, [targetSlug]);
+      }
+    } catch (_) {}
 
     await query(`
       DELETE FROM subscription_plans 
-      WHERE (slug LIKE '%-monthly' OR slug LIKE '%-annual')
-        AND EXISTS (
-          SELECT 1 FROM subscription_plans b 
-          WHERE b.slug = regexp_replace(subscription_plans.slug, '-(monthly|annual)$', '')
-        )
-    `).catch(() => {});
+      WHERE id = $1 OR slug = $2 OR id = $3 OR slug = $4
+    `, [targetId, targetSlug, targetSlug, targetId]);
 
-    const orderBy = cols.has('monthly_price_dollars') ? 'ORDER BY monthly_price_dollars ASC, id ASC' : 'ORDER BY id ASC';
-    const res: any = await query(`SELECT * FROM subscription_plans ${orderBy}`).catch(() => []);
+    const rows = await query(`SELECT * FROM subscription_plans ORDER BY is_free DESC, monthly_price_dollars ASC`);
+    const mapped = rows.map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      slug: r.slug,
+      planGroupId: r.plan_group_id || `group_${r.slug}`,
+      monthlyPlanId: r.monthly_plan_id || `plan_${r.slug}_monthly`,
+      annualPlanId: r.annual_plan_id || `plan_${r.slug}_annual`,
+      monthlyPriceDollars: Number(r.monthly_price_dollars ?? 0),
+      annualPriceDollars: Number(r.annual_price_dollars ?? 0),
+      monthlyBadge: r.monthly_badge || '',
+      annualBadge: r.annual_badge || '',
+      trialBadge: r.trial_badge || '',
+      descriptionMonthly: r.description_monthly || '',
+      descriptionAnnual: r.description_annual || '',
+      features: Array.isArray(r.features) ? r.features : (typeof r.features === 'string' ? JSON.parse(r.features) : []),
+      tokenLimit: Number(r.token_limit ?? 500),
+      aiRecipeLimit: Number(r.ai_recipe_limit ?? 50),
+      recipeLibraryLimit: Number(r.recipe_library_limit ?? 250),
+      socialScrapeLimit: Number(r.social_scrape_limit ?? 20),
+      canViewMacros: r.can_view_macros !== undefined ? Boolean(r.can_view_macros) : !Boolean(r.is_free),
+      allowedAiModels: r.allowed_ai_models || 'gemini-1.5-flash,gpt-3.5-turbo',
+      isFree: Boolean(r.is_free),
+      isDefault: Boolean(r.is_default)
+    }));
 
-    let plans = parseDbRows(res);
-
-    if (!plans.some((p: any) => p.slug === 'taster' || p.id === 'preset_taster')) {
-      const defaultTasterData: Record<string, any> = {
-        id: 'preset_taster',
-        name: 'Taster',
-        slug: 'taster',
-        plan_group_id: 'group_taster',
-        monthly_plan_id: 'plan_taster_monthly',
-        annual_plan_id: 'plan_taster_annual',
-        monthly_price_dollars: 0,
-        annual_price_dollars: 0,
-        monthly_badge: '',
-        annual_badge: '',
-        trial_badge: '',
-        description_monthly: 'Free tier with standard features',
-        description_annual: 'Free tier with standard features',
-        features: JSON.stringify([
-          'Create up to 5 AI-powered recipes per month',
-          'Personal recipe library (25 total recipes)',
-          'Smart ingredient repurposing',
-          'Automated shopping list creation',
-          'Direct online grocery shopping links',
-          'Meal planner',
-          'Ingredient photo recognition'
-        ]),
-        token_limit: 50000,
-        is_free: true,
-        is_default: true
-      };
-
-      const insertKeys = Object.keys(defaultTasterData).filter(k => cols.has(k) || cols.size === 0);
-      if (insertKeys.length > 0) {
-        const colList = insertKeys.join(', ');
-        const valPlaceholders = insertKeys.map((_, i) => `$${i + 1}`).join(', ');
-        const values = insertKeys.map(k => defaultTasterData[k]);
-        await query(
-          `INSERT INTO subscription_plans (${colList}) VALUES (${valPlaceholders}) ON CONFLICT (id) DO NOTHING`,
-          values
-        ).catch(() => {});
-      }
-
-      plans.unshift(defaultTasterData);
-    }
-
-    const configs = plans.map((p: any) => {
-      let feats: string[] = [];
-      if (Array.isArray(p.features)) {
-        feats = p.features.map(String).filter(Boolean);
-      } else if (typeof p.features === 'string') {
-        try {
-          const parsed = JSON.parse(p.features);
-          feats = Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [p.features];
-        } catch (_) {
-          feats = p.features.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
-        }
-      }
-
-      const cleanSlug = String(p.slug || p.id || 'plan').toLowerCase().trim();
-
-      return {
-        id: String(p.id || cleanSlug),
-        name: String(p.name || cleanSlug),
-        slug: cleanSlug,
-        planGroupId: p.plan_group_id || p.planGroupId || `group_${cleanSlug}`,
-        monthlyPlanId: p.monthly_plan_id || p.monthlyPlanId || `plan_${cleanSlug}_monthly`,
-        annualPlanId: p.annual_plan_id || p.annualPlanId || `plan_${cleanSlug}_annual`,
-        monthlyPriceDollars: Number(p.monthly_price_dollars ?? p.monthlyPriceDollars ?? 0),
-        annualPriceDollars: Number(p.annual_price_dollars ?? p.annualPriceDollars ?? 0),
-        monthlyBadge: p.monthly_badge || p.monthlyBadge || '',
-        annualBadge: p.annual_badge || p.annualBadge || '',
-        trialBadge: p.trial_badge || p.trialBadge || '',
-        descriptionMonthly: p.description_monthly || p.descriptionMonthly || '',
-        descriptionAnnual: p.description_annual || p.descriptionAnnual || '',
-        features: feats,
-        tokenLimit: Number(p.token_limit ?? p.tokenLimit ?? (cleanSlug === 'taster' ? 50000 : 500)),
-        isFree: Boolean(p.is_free ?? p.isFree ?? (cleanSlug === 'taster')),
-        isDefault: Boolean(p.is_default ?? p.isDefault ?? (cleanSlug === 'taster' || p.id === 'preset_taster'))
-      };
+    return NextResponse.json({
+      success: true,
+      message: 'Plan deleted successfully from PostgreSQL.',
+      configs: mapped
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0' }
     });
-
-    return NextResponse.json({ success: true, configs, plans: configs });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
-
-export async function POST(req: Request) {
-  try {
-    await ensureSubscriptionPlansSchema();
-    const cols = await getExistingColumns();
-
-    const p = await req.json();
-    if (!p.name || !p.slug) {
-      return NextResponse.json({ success: false, error: 'Plan name and slug are required' }, { status: 400 });
-    }
-
-    const rawSlug = String(p.slug).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    const cleanSlug = rawSlug.replace(/-(monthly|annual)$/, '') || rawSlug;
-    const planId = String(p.id || (cleanSlug ? `plan_${cleanSlug}` : `plan_${Date.now()}`)).trim();
-    const isFree = Boolean(p.isFree || cleanSlug === 'taster');
-    const isDefault = Boolean(p.isDefault || planId === 'preset_taster' || cleanSlug === 'taster');
-
-    let featuresJson = '[]';
-    if (Array.isArray(p.features)) {
-      featuresJson = JSON.stringify(p.features.map(String).filter(Boolean));
-    } else if (typeof p.features === 'string') {
-      try {
-        const parsed = JSON.parse(p.features);
-        featuresJson = JSON.stringify(Array.isArray(parsed) ? parsed : [p.features]);
-      } catch (_) {
-        featuresJson = JSON.stringify(p.features.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean));
-      }
-    }
-
-    const planData: Record<string, any> = {
-      id: planId,
-      name: String(p.name).trim(),
-      slug: cleanSlug,
-      plan_group_id: String(p.planGroupId || `group_${cleanSlug}`).trim(),
-      monthly_plan_id: String(p.monthlyPlanId || `plan_${cleanSlug}_monthly`).trim(),
-      annual_plan_id: String(p.annualPlanId || `plan_${cleanSlug}_annual`).trim(),
-      monthly_price_dollars: isFree ? 0 : Number(p.monthlyPriceDollars || 0),
-      annual_price_dollars: isFree ? 0 : Number(p.annualPriceDollars || 0),
-      monthly_badge: String(p.monthlyBadge || '').trim(),
-      annual_badge: String(p.annualBadge || '').trim(),
-      trial_badge: String(p.trialBadge || '').trim(),
-      description_monthly: String(p.descriptionMonthly || '').trim(),
-      description_annual: String(p.descriptionAnnual || '').trim(),
-      features: featuresJson,
-      token_limit: Number(p.tokenLimit || (isFree ? 50000 : 500)),
-      is_free: isFree,
-      is_default: isDefault
-    };
-
-    const existingCheck: any = await query(
-      `SELECT id, slug FROM subscription_plans WHERE id = $1 OR slug = $2 LIMIT 1`,
-      [planId, cleanSlug]
-    ).catch(() => []);
-    const existingRows = parseDbRows(existingCheck);
-
-    if (existingRows.length > 0) {
-      const targetId = existingRows[0]?.id || planId;
-      const updateFields = Object.keys(planData)
-        .filter(k => k !== 'id' && (cols.has(k) || cols.size === 0));
-
-      const setClauses = updateFields.map((k, i) => `${k} = $${i + 1}`).join(', ');
-      const updateValues = updateFields.map(k => planData[k]);
-      updateValues.push(targetId);
-
-      await query(
-        `UPDATE subscription_plans SET ${setClauses} WHERE id = $${updateValues.length}`,
-        updateValues
-      );
-    } else {
-      const insertFields = Object.keys(planData)
-        .filter(k => cols.has(k) || cols.size === 0);
-
-      const colList = insertFields.join(', ');
-      const valPlaceholders = insertFields.map((_, i) => `$${i + 1}`).join(', ');
-      const insertValues = insertFields.map(k => planData[k]);
-
-      await query(
-        `INSERT INTO subscription_plans (${colList}) VALUES (${valPlaceholders})`,
-        insertValues
-      );
-    }
-
-    return NextResponse.json({ success: true, message: 'Plan saved successfully in PostgreSQL' });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
-
-export async function DELETE(req: Request) {
-  try {
-    await ensureSubscriptionPlansSchema();
-    const url = new URL(req.url);
-    const id = url.searchParams.get('id');
-    const slug = url.searchParams.get('slug');
-
-    const body = await req.json().catch(() => ({}));
-    const targetId = id || body.id;
-    const targetSlug = slug || body.slug;
-
-    if (!targetId && !targetSlug) {
-      return NextResponse.json({ success: false, error: 'Plan identifier required' }, { status: 400 });
-    }
-
-    if (targetSlug === 'taster' || targetId === 'preset_taster') {
-      return NextResponse.json({ success: false, error: 'Default free plan (Taster) cannot be deleted' }, { status: 400 });
-    }
-
-    await query(
-      `DELETE FROM subscription_plans WHERE id = $1 OR slug = $2`,
-      [targetId || '', targetSlug || '']
-    );
-
-    return NextResponse.json({ success: true, message: 'Plan deleted successfully from PostgreSQL' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

@@ -8,13 +8,20 @@ function getPool(): Pool | null {
   if (cachedPool) return cachedPool;
   const conn = process.env.DATABASE_URL || process.env.POSTGRES_URL;
   if (!conn) return null;
-  const { Pool } = require('pg');
   const ssl = conn.includes('sslmode=require') || conn.includes('neon.tech') || conn.includes('supabase.co');
   cachedPool = new Pool({
     connectionString: conn,
     ssl: ssl ? { rejectUnauthorized: false } : false
   });
   return cachedPool;
+}
+
+// Type-safe row extractor preventing TS7006 and TS2339 errors
+function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res.rows)) return res.rows;
+  return [];
 }
 
 async function ensureTable(pool: Pool) {
@@ -90,7 +97,8 @@ export async function GET(req: NextRequest) {
     }
 
     const res = await pool.query(query, params);
-    const normalized = res.rows.map(r => ({
+    const rows = parseDbRows(res);
+    const normalized = rows.map((r: any) => ({
       ...r,
       date: (r.date || '').split('T')[0]
     }));
