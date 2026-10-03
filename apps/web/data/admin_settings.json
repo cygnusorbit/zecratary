@@ -2426,7 +2426,7 @@
       "stripeKeysVerified": false,
       "stripeWebhookVerified": false,
       "stripe": {
-        "enabled": false,
+        "enabled": true,
         "publishableKey": "admin@zecratary.com",
         "secretKey": "admin",
         "webhookSecret": ""
@@ -3799,7 +3799,7 @@
       "stripeKeysVerified": false,
       "stripeWebhookVerified": false,
       "stripe": {
-        "enabled": false,
+        "enabled": true,
         "publishableKey": "admin@zecratary.com",
         "secretKey": "admin",
         "webhookSecret": ""
@@ -3929,5 +3929,37 @@
     ],
     "recommendedRecipeUrls": []
   },
-  "updatedAt": "2026-10-03T03:36:36.066Z"
+  "updatedAt": "2026-10-03T04:32:13.172Z",
+  "paymentSettings": {
+    "currency": "USD",
+    "testMode": true,
+    "stripeConnected": false,
+    "stripeKeysVerified": false,
+    "stripeWebhookVerified": false,
+    "stripe": {
+      "enabled": true,
+      "publishableKey": "admin@zecratary.com",
+      "secretKey": "admin",
+      "webhookSecret": ""
+    },
+    "paypal": {
+      "enabled": false,
+      "clientId": "",
+      "clientSecret": "",
+      "webhookId": "",
+      "environment": "sandbox"
+    },
+    "manualSettlement": {
+      "enabled": true,
+      "bankName": "OCBC",
+      "accountHolder": "Zacratary",
+      "accountNumber": "23123123233",
+      "routingNumber": "",
+      "swiftBic": "23233ASS",
+      "branchName": "",
+      "instructions": "Please transfer the exact amount to the bank account above and include your Order ID or registered email as the payment reference. Your subscription will be activated upon admin verification.",
+      "requireReference": true
+    }
+  },
+  "currency": "USD"
 }
