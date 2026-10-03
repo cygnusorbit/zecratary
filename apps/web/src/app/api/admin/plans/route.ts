@@ -1,24 +1,73 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
-export async function GET() {
+async function ensureSubscriptionPlansSchema() {
   try {
-    // 1. Safe, non-blocking migration to add columns if possible without throwing
+    await query(`
+      CREATE TABLE IF NOT EXISTS subscription_plans (
+        id VARCHAR(255) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        slug VARCHAR(255) UNIQUE NOT NULL,
+        plan_group_id VARCHAR(255),
+        monthly_plan_id VARCHAR(255),
+        annual_plan_id VARCHAR(255),
+        monthly_price_dollars NUMERIC(10,2) DEFAULT 0.00,
+        annual_price_dollars NUMERIC(10,2) DEFAULT 0.00,
+        monthly_badge VARCHAR(255) DEFAULT '',
+        annual_badge VARCHAR(255) DEFAULT '',
+        trial_badge VARCHAR(255) DEFAULT '',
+        description_monthly TEXT DEFAULT '',
+        description_annual TEXT DEFAULT '',
+        features TEXT DEFAULT '[]',
+        token_limit NUMERIC DEFAULT 500,
+        is_free BOOLEAN DEFAULT false,
+        is_default BOOLEAN DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `).catch(() => {});
+
     await query(`
       DO $$ 
       BEGIN 
-        BEGIN
-          ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-        EXCEPTION WHEN OTHERS THEN NULL;
-        END;
-        BEGIN
-          ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
-        EXCEPTION WHEN OTHERS THEN NULL;
-        END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS plan_group_id VARCHAR(255); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_plan_id VARCHAR(255); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_plan_id VARCHAR(255); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_price_dollars NUMERIC(10,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_price_dollars NUMERIC(10,2) DEFAULT 0.00; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_badge VARCHAR(255) DEFAULT ''; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_badge VARCHAR(255) DEFAULT ''; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS trial_badge VARCHAR(255) DEFAULT ''; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS description_monthly TEXT DEFAULT ''; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS description_annual TEXT DEFAULT ''; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS features TEXT DEFAULT '[]'; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS token_limit NUMERIC DEFAULT 500; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS is_free BOOLEAN DEFAULT false; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT false; EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN OTHERS THEN NULL; END;
+        BEGIN ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW(); EXCEPTION WHEN OTHERS THEN NULL; END;
       END $$;
     `).catch(() => {});
+  } catch (_) {}
+}
 
-    // 2. Clean up any rogue duplicate plans auto-created with -monthly or -annual suffixes
+async function getExistingColumns(): Promise<Set<string>> {
+  try {
+    const res = await query(
+      `SELECT column_name FROM information_schema.columns WHERE table_name = 'subscription_plans'`
+    );
+    const rows = Array.isArray(res) ? res : (res?.rows || []);
+    return new Set(rows.map((r: any) => String(r.column_name).toLowerCase()));
+  } catch (_) {
+    return new Set();
+  }
+}
+
+export async function GET() {
+  try {
+    await ensureSubscriptionPlansSchema();
+    const cols = await getExistingColumns();
+
     await query(`
       DELETE FROM subscription_plans 
       WHERE (slug LIKE '%-monthly' OR slug LIKE '%-annual')
@@ -28,16 +77,13 @@ export async function GET() {
         )
     `).catch(() => {});
 
-    // 3. Query plans from subscription_plans table (Order by monthly_price_dollars and id, NEVER created_at)
-    const res = await query(
-      `SELECT * FROM subscription_plans ORDER BY monthly_price_dollars ASC, id ASC`
-    ).catch(() => ({ rows: [] }));
+    const orderBy = cols.has('monthly_price_dollars') ? 'ORDER BY monthly_price_dollars ASC, id ASC' : 'ORDER BY id ASC';
+    const res = await query(`SELECT * FROM subscription_plans ${orderBy}`).catch(() => ({ rows: [] }));
 
-    let plans = Array.isArray(res) ? res : ((res as any)?.rows || []);
+    let plans = Array.isArray(res) ? res : (res?.rows || []);
 
-    // 4. Ensure default free plan (taster) exists
     if (!plans.some((p: any) => p.slug === 'taster' || p.id === 'preset_taster')) {
-      const defaultTaster = {
+      const defaultTasterData: Record<string, any> = {
         id: 'preset_taster',
         name: 'Taster',
         slug: 'taster',
@@ -65,46 +111,42 @@ export async function GET() {
         is_default: true
       };
 
-      await query(
-        `INSERT INTO subscription_plans (
-          id, name, slug, plan_group_id, monthly_plan_id, annual_plan_id,
-          monthly_price_dollars, annual_price_dollars, monthly_badge, annual_badge,
-          trial_badge, description_monthly, description_annual, features,
-          token_limit, is_free, is_default
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-        ON CONFLICT (id) DO NOTHING`,
-        [
-          defaultTaster.id, defaultTaster.name, defaultTaster.slug, defaultTaster.plan_group_id,
-          defaultTaster.monthly_plan_id, defaultTaster.annual_plan_id, defaultTaster.monthly_price_dollars,
-          defaultTaster.annual_price_dollars, defaultTaster.monthly_badge, defaultTaster.annual_badge,
-          defaultTaster.trial_badge, defaultTaster.description_monthly, defaultTaster.description_annual,
-          defaultTaster.features, defaultTaster.token_limit, defaultTaster.is_free, defaultTaster.is_default
-        ]
-      ).catch(() => {});
+      const insertKeys = Object.keys(defaultTasterData).filter(k => cols.has(k) || cols.size === 0);
+      if (insertKeys.length > 0) {
+        const colList = insertKeys.join(', ');
+        const valPlaceholders = insertKeys.map((_, i) => `$${i + 1}`).join(', ');
+        const values = insertKeys.map(k => defaultTasterData[k]);
+        await query(
+          `INSERT INTO subscription_plans (${colList}) VALUES (${valPlaceholders}) ON CONFLICT (id) DO NOTHING`,
+          values
+        ).catch(() => {});
+      }
 
-      plans.unshift(defaultTaster);
+      plans.unshift(defaultTasterData);
     }
 
     const configs = plans.map((p: any) => {
       let feats: string[] = [];
       if (Array.isArray(p.features)) {
-        feats = p.features;
+        feats = p.features.map(String).filter(Boolean);
       } else if (typeof p.features === 'string') {
         try {
           const parsed = JSON.parse(p.features);
-          feats = Array.isArray(parsed) ? parsed : [p.features];
+          feats = Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [p.features];
         } catch (_) {
           feats = p.features.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
         }
       }
 
+      const cleanSlug = String(p.slug || p.id || 'plan').toLowerCase().trim();
+
       return {
-        id: p.id || p.slug,
-        name: p.name,
-        slug: p.slug,
-        planGroupId: p.plan_group_id || p.planGroupId || `group_${p.slug}`,
-        monthlyPlanId: p.monthly_plan_id || p.monthlyPlanId || `plan_${p.slug}_monthly`,
-        annualPlanId: p.annual_plan_id || p.annualPlanId || `plan_${p.slug}_annual`,
+        id: String(p.id || cleanSlug),
+        name: String(p.name || cleanSlug),
+        slug: cleanSlug,
+        planGroupId: p.plan_group_id || p.planGroupId || `group_${cleanSlug}`,
+        monthlyPlanId: p.monthly_plan_id || p.monthlyPlanId || `plan_${cleanSlug}_monthly`,
+        annualPlanId: p.annual_plan_id || p.annualPlanId || `plan_${cleanSlug}_annual`,
         monthlyPriceDollars: Number(p.monthly_price_dollars ?? p.monthlyPriceDollars ?? 0),
         annualPriceDollars: Number(p.annual_price_dollars ?? p.annualPriceDollars ?? 0),
         monthlyBadge: p.monthly_badge || p.monthlyBadge || '',
@@ -113,9 +155,9 @@ export async function GET() {
         descriptionMonthly: p.description_monthly || p.descriptionMonthly || '',
         descriptionAnnual: p.description_annual || p.descriptionAnnual || '',
         features: feats,
-        tokenLimit: Number(p.token_limit ?? p.tokenLimit ?? 500),
-        isFree: Boolean(p.is_free ?? p.isFree ?? (p.slug === 'taster')),
-        isDefault: Boolean(p.is_default ?? p.isDefault ?? (p.slug === 'taster'))
+        tokenLimit: Number(p.token_limit ?? p.tokenLimit ?? (cleanSlug === 'taster' ? 50000 : 500)),
+        isFree: Boolean(p.is_free ?? p.isFree ?? (cleanSlug === 'taster')),
+        isDefault: Boolean(p.is_default ?? p.isDefault ?? (cleanSlug === 'taster' || p.id === 'preset_taster'))
       };
     });
 
@@ -127,63 +169,86 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    await ensureSubscriptionPlansSchema();
+    const cols = await getExistingColumns();
+
     const p = await req.json();
     if (!p.name || !p.slug) {
       return NextResponse.json({ success: false, error: 'Plan name and slug are required' }, { status: 400 });
     }
 
-    const cleanSlug = p.slug.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    const planId = p.id || (cleanSlug ? `plan_${cleanSlug}` : `plan_${Date.now()}`);
+    const rawSlug = String(p.slug).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    const cleanSlug = rawSlug.replace(/-(monthly|annual)$/, '') || rawSlug;
+    const planId = String(p.id || (cleanSlug ? `plan_${cleanSlug}` : `plan_${Date.now()}`)).trim();
     const isFree = Boolean(p.isFree || cleanSlug === 'taster');
+    const isDefault = Boolean(p.isDefault || planId === 'preset_taster' || cleanSlug === 'taster');
 
-    const featuresJson = JSON.stringify(Array.isArray(p.features) ? p.features : []);
+    let featuresJson = '[]';
+    if (Array.isArray(p.features)) {
+      featuresJson = JSON.stringify(p.features.map(String).filter(Boolean));
+    } else if (typeof p.features === 'string') {
+      try {
+        const parsed = JSON.parse(p.features);
+        featuresJson = JSON.stringify(Array.isArray(parsed) ? parsed : [p.features]);
+      } catch (_) {
+        featuresJson = JSON.stringify(p.features.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean));
+      }
+    }
 
-    await query(
-      `INSERT INTO subscription_plans (
-        id, name, slug, plan_group_id, monthly_plan_id, annual_plan_id,
-        monthly_price_dollars, annual_price_dollars, monthly_badge, annual_badge,
-        trial_badge, description_monthly, description_annual, features,
-        token_limit, is_free, is_default
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-      ON CONFLICT (id) DO UPDATE SET
-        name = EXCLUDED.name,
-        slug = EXCLUDED.slug,
-        plan_group_id = EXCLUDED.plan_group_id,
-        monthly_plan_id = EXCLUDED.monthly_plan_id,
-        annual_plan_id = EXCLUDED.annual_plan_id,
-        monthly_price_dollars = EXCLUDED.monthly_price_dollars,
-        annual_price_dollars = EXCLUDED.annual_price_dollars,
-        monthly_badge = EXCLUDED.monthly_badge,
-        annual_badge = EXCLUDED.annual_badge,
-        trial_badge = EXCLUDED.trial_badge,
-        description_monthly = EXCLUDED.description_monthly,
-        description_annual = EXCLUDED.description_annual,
-        features = EXCLUDED.features,
-        token_limit = EXCLUDED.token_limit,
-        is_free = EXCLUDED.is_free,
-        is_default = EXCLUDED.is_default`,
-      [
-        planId,
-        p.name.trim(),
-        cleanSlug,
-        p.planGroupId || `group_${cleanSlug}`,
-        p.monthlyPlanId || `plan_${cleanSlug}_monthly`,
-        p.annualPlanId || `plan_${cleanSlug}_annual`,
-        isFree ? 0 : Number(p.monthlyPriceDollars || 0),
-        isFree ? 0 : Number(p.annualPriceDollars || 0),
-        p.monthlyBadge || '',
-        p.annualBadge || '',
-        p.trialBadge || '',
-        p.descriptionMonthly || '',
-        p.descriptionAnnual || '',
-        featuresJson,
-        Number(p.tokenLimit || 0),
-        isFree,
-        Boolean(p.isDefault || cleanSlug === 'taster')
-      ]
-    );
+    const planData: Record<string, any> = {
+      id: planId,
+      name: String(p.name).trim(),
+      slug: cleanSlug,
+      plan_group_id: String(p.planGroupId || `group_${cleanSlug}`).trim(),
+      monthly_plan_id: String(p.monthlyPlanId || `plan_${cleanSlug}_monthly`).trim(),
+      annual_plan_id: String(p.annualPlanId || `plan_${cleanSlug}_annual`).trim(),
+      monthly_price_dollars: isFree ? 0 : Number(p.monthlyPriceDollars || 0),
+      annual_price_dollars: isFree ? 0 : Number(p.annualPriceDollars || 0),
+      monthly_badge: String(p.monthlyBadge || '').trim(),
+      annual_badge: String(p.annualBadge || '').trim(),
+      trial_badge: String(p.trialBadge || '').trim(),
+      description_monthly: String(p.descriptionMonthly || '').trim(),
+      description_annual: String(p.descriptionAnnual || '').trim(),
+      features: featuresJson,
+      token_limit: Number(p.tokenLimit || (isFree ? 50000 : 500)),
+      is_free: isFree,
+      is_default: isDefault
+    };
 
-    return NextResponse.json({ success: true, message: 'Plan saved successfully' });
+    const existingCheck = await query(
+      `SELECT id, slug FROM subscription_plans WHERE id = $1 OR slug = $2 LIMIT 1`,
+      [planId, cleanSlug]
+    ).catch(() => ({ rows: [] }));
+    const existingRows = Array.isArray(existingCheck) ? existingCheck : (existingCheck?.rows || []);
+
+    if (existingRows.length > 0) {
+      const targetId = existingRows[0].id || planId;
+      const updateFields = Object.keys(planData)
+        .filter(k => k !== 'id' && (cols.has(k) || cols.size === 0));
+
+      const setClauses = updateFields.map((k, i) => `${k} = $${i + 1}`).join(', ');
+      const updateValues = updateFields.map(k => planData[k]);
+      updateValues.push(targetId);
+
+      await query(
+        `UPDATE subscription_plans SET ${setClauses} WHERE id = $${updateValues.length}`,
+        updateValues
+      );
+    } else {
+      const insertFields = Object.keys(planData)
+        .filter(k => cols.has(k) || cols.size === 0);
+
+      const colList = insertFields.join(', ');
+      const valPlaceholders = insertFields.map((_, i) => `$${i + 1}`).join(', ');
+      const insertValues = insertFields.map(k => planData[k]);
+
+      await query(
+        `INSERT INTO subscription_plans (${colList}) VALUES (${valPlaceholders})`,
+        insertValues
+      );
+    }
+
+    return NextResponse.json({ success: true, message: 'Plan saved successfully in PostgreSQL' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -191,6 +256,7 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
+    await ensureSubscriptionPlansSchema();
     const url = new URL(req.url);
     const id = url.searchParams.get('id');
     const slug = url.searchParams.get('slug');
@@ -204,7 +270,7 @@ export async function DELETE(req: Request) {
     }
 
     if (targetSlug === 'taster' || targetId === 'preset_taster') {
-      return NextResponse.json({ success: false, error: 'Default free plan cannot be deleted' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Default free plan (Taster) cannot be deleted' }, { status: 400 });
     }
 
     await query(
@@ -212,7 +278,7 @@ export async function DELETE(req: Request) {
       [targetId || '', targetSlug || '']
     );
 
-    return NextResponse.json({ success: true, message: 'Plan deleted successfully' });
+    return NextResponse.json({ success: true, message: 'Plan deleted successfully from PostgreSQL' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

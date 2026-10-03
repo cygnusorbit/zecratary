@@ -1,16 +1,15 @@
 // Generated / Updated by AI Collaborator
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { 
-  ArrowLeft, Plus, Check, Trash2, Edit3, Sparkles, 
-  RefreshCw, CheckCircle2, AlertCircle, Shield, 
-  Coins, Zap, Eye, Save, Layers, ArrowRight,
-  History, Search, Filter, Sliders, X, CheckCircle,
-  Ban, AlertTriangle, ArrowUpRight, User as UserIcon,
-  Calendar, CreditCard, ChevronLeft, ChevronRight,
-  Pencil, DollarSign
+  ArrowLeft, Plus, Check, Trash2, Edit3, 
+  RefreshCw, CheckCircle2, AlertCircle, 
+  Coins, Zap, Eye, Save, Layers, 
+  History, Search, X, CheckCircle,
+  Ban, AlertTriangle, ChevronLeft, ChevronRight,
+  Pencil
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -30,11 +29,6 @@ interface PlanConfig {
   descriptionAnnual?: string;
   features: string[];
   tokenLimit: number;
-  aiRecipeLimit?: number;
-  recipeLibraryLimit?: number;
-  socialScrapeLimit?: number;
-  canViewMacros?: boolean;
-  allowedAiModels?: string;
   isFree?: boolean;
   isDefault?: boolean;
 }
@@ -175,7 +169,21 @@ const normalizeTransaction = (raw: any, defaultCurrency: string): PaymentTransac
 };
 
 export default function AdminPlansPage() {
-  const { t } = useTranslation();
+  const langContext = useTranslation();
+  const t = useCallback((key: string, fallback?: string): string => {
+    if (typeof langContext === 'function') {
+      try {
+        const val = (langContext as any)(key, fallback);
+        if (val && val !== key) return val;
+      } catch (_) {}
+    } else if (langContext && typeof langContext.t === 'function') {
+      try {
+        const val = langContext.t(key, fallback);
+        if (val && val !== key) return val;
+      } catch (_) {}
+    }
+    return fallback || key;
+  }, [langContext]);
   
   // Navigation Tabs State
   const [activeMainTab, setActiveMainTab] = useState<'plans' | 'transactions'>('plans');
@@ -189,11 +197,9 @@ export default function AdminPlansPage() {
 
   const [plans, setPlans] = useState<PlanConfig[]>([]);
   const [previewInterval, setPreviewInterval] = useState<'MONTH' | 'YEAR'>('MONTH');
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
   // Dynamic Token & Currency Identity
   const [tokenSymbol, setTokenSymbol] = useState('🪙');
-  const [tokenName, setTokenName] = useState('Tokens');
   const [currencyCode, setCurrencyCode] = useState('USD');
   const [currencySymbol, setCurrencySymbol] = useState('$');
 
@@ -261,8 +267,24 @@ export default function AdminPlansPage() {
     try {
       const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
       const root = typeof document !== 'undefined' ? document.documentElement : null;
-      const day = mode === 'light' || mode === 'day' || (root && root.classList.contains('light'));
-      setIsDayMode(Boolean(day));
+      const isDay = mode === 'light' || mode === 'day' || (root && root.classList.contains('light'));
+      if (root) {
+        if (isDay) {
+          root.style.setProperty('--color-bg', '#f8fafc');
+          root.style.setProperty('--color-card', '#ffffff');
+          root.style.setProperty('--color-inner-dark', '#f1f5f9');
+          root.style.setProperty('--color-border', '#e2e8f0');
+          root.style.setProperty('--color-text', '#0f172a');
+          root.style.setProperty('--color-text-secondary', '#64748b');
+        } else {
+          root.style.setProperty('--color-bg', '#070b13');
+          root.style.setProperty('--color-card', '#111726');
+          root.style.setProperty('--color-inner-dark', '#0B101D');
+          root.style.setProperty('--color-border', '#1e293b');
+          root.style.setProperty('--color-text', '#ffffff');
+          root.style.setProperty('--color-text-secondary', '#94a3b8');
+        }
+      }
     } catch (_) {}
   }, []);
 
@@ -270,13 +292,11 @@ export default function AdminPlansPage() {
     applySavedTheme();
     window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
     window.addEventListener('zecratary_theme_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_updated', applySavedTheme);
     window.addEventListener('storage', applySavedTheme);
 
     return () => {
       window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
       window.removeEventListener('zecratary_theme_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('storage', applySavedTheme);
     };
   }, [applySavedTheme]);
@@ -288,10 +308,7 @@ export default function AdminPlansPage() {
       if (tRes.ok) {
         const tData = await tRes.json();
         const cfg = tData.settings || tData.config || tData;
-        if (cfg) {
-          if (cfg.tokenSymbol || cfg.symbol) setTokenSymbol(cfg.tokenSymbol || cfg.symbol);
-          if (cfg.tokenName || cfg.name) setTokenName(cfg.tokenName || cfg.name);
-        }
+        if (cfg?.tokenSymbol || cfg?.symbol) setTokenSymbol(cfg.tokenSymbol || cfg.symbol);
       }
     } catch (_) {}
 
@@ -310,13 +327,6 @@ export default function AdminPlansPage() {
 
   useEffect(() => {
     fetchSettings();
-    window.addEventListener('zecratary_token_settings_updated', fetchSettings);
-    window.addEventListener('zecratary_admin_settings_updated', fetchSettings);
-
-    return () => {
-      window.removeEventListener('zecratary_token_settings_updated', fetchSettings);
-      window.removeEventListener('zecratary_admin_settings_updated', fetchSettings);
-    };
   }, [fetchSettings]);
 
   // Universal Plan Parser
@@ -371,6 +381,9 @@ export default function AdminPlansPage() {
     try {
       const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
       const data = await res.json();
+      if (!res.ok || data.success === false) {
+        throw new Error(data.error || 'Failed to fetch plans');
+      }
       const rawList = Array.isArray(data) 
         ? data 
         : (data.configs || data.plans || data.packages || data.subscriptionPlans || data.data || []);
@@ -385,7 +398,6 @@ export default function AdminPlansPage() {
     }
   }, []);
 
-  // Fetch Users for Transaction Association
   const fetchUsers = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
@@ -401,7 +413,6 @@ export default function AdminPlansPage() {
     } catch (_) {}
   }, [selectedUserId]);
 
-  // Fetch Payment Transactions (Tab 2: Plan Transactions)
   const fetchTransactions = useCallback(async () => {
     setLoadingTransactions(true);
     try {
@@ -423,25 +434,8 @@ export default function AdminPlansPage() {
     fetchPlans();
     fetchUsers();
     fetchTransactions();
-
-    const handleSync = () => {
-      fetchPlans();
-      fetchUsers();
-      fetchTransactions();
-    };
-
-    window.addEventListener('zecratary_plans_updated', handleSync);
-    window.addEventListener('zecratary_payment_updated', handleSync);
-    window.addEventListener('zecratary_users_updated', handleSync);
-
-    return () => {
-      window.removeEventListener('zecratary_plans_updated', handleSync);
-      window.removeEventListener('zecratary_payment_updated', handleSync);
-      window.removeEventListener('zecratary_users_updated', handleSync);
-    };
   }, [fetchPlans, fetchUsers, fetchTransactions]);
 
-  // Flattened Available Plans for Payment Operations
   const availablePlanOptions = useMemo<PlanOption[]>(() => {
     const list: PlanOption[] = [];
     plans.forEach((p) => {
@@ -472,7 +466,6 @@ export default function AdminPlansPage() {
     return list;
   }, [plans, currencySymbol]);
 
-  // Plan Slug Change Helper
   const handleSlugChange = (val: string) => {
     const clean = val.toLowerCase().replace(/[^a-z0-9_-]/g, '');
     setSlug(clean);
@@ -523,7 +516,6 @@ export default function AdminPlansPage() {
     setIsFree(false);
   };
 
-  // Save Plan to PostgreSQL (Tab 1)
   const handleSavePlan = async () => {
     if (!name.trim()) return;
     setSaving(true);
@@ -569,10 +561,6 @@ export default function AdminPlansPage() {
       setSuccessMsg(t('planSavedSuccess', 'Subscription Plan & Token Quotas saved and synchronized with PostgreSQL!'));
       resetForm();
       await fetchPlans();
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_plans_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err: any) {
       setErrorMsg(err.message || 'Error occurred while saving');
@@ -581,14 +569,13 @@ export default function AdminPlansPage() {
     }
   };
 
-  // Delete Plan from PostgreSQL (Tab 1)
   const handleDeletePlan = async (p: PlanConfig) => {
     if (p.isDefault || p.slug === 'taster' || p.id === 'preset_taster') {
       alert(t('cannotDeleteDefaultPlan', 'The default free plan (Taster) is required by the system and cannot be deleted.'));
       return;
     }
 
-    const confirmMsg = `${t('confirmDeletePlan', 'Are you sure you want to permanently delete plan')} "${p.name}"? ${t('actionCannotBeUndone', 'This action cannot be undone.')}`;
+    const confirmMsg = `${t('confirmDeletePlan', 'Are you sure you want to permanently delete plan')} "${p.name}"?`;
     if (!confirm(confirmMsg)) return;
 
     setDeletingId(p.id);
@@ -614,11 +601,6 @@ export default function AdminPlansPage() {
       setPlans((prev) => prev.filter((item) => item.id !== p.id && item.slug !== p.slug));
       if (editingId === p.id || editingId === p.slug) resetForm();
 
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_plans_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
-
       setSuccessMsg(`"${p.name}" ${t('planDeletedSuccess', 'has been permanently deleted from PostgreSQL.')}`);
       setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err: any) {
@@ -629,9 +611,7 @@ export default function AdminPlansPage() {
     }
   };
 
-  // -------------------------------------------------------------
-  // Plan Transactions Logic (Tab 2)
-  // -------------------------------------------------------------
+  // Filtered Transactions
   const filteredTransactions = useMemo(() => {
     const q = txSearchQuery.toLowerCase().trim();
     return transactions.filter((tx) => {
@@ -665,7 +645,6 @@ export default function AdminPlansPage() {
     return filteredTransactions.slice(start, start + pageSize);
   }, [filteredTransactions, currentPage, pageSize]);
 
-  // Inline Auto-Renew Toggle
   const handleToggleRecurring = async (tx: PaymentTransaction) => {
     const nextVal = !tx.autoRenew;
     setTogglingTxId(tx.id);
@@ -689,12 +668,8 @@ export default function AdminPlansPage() {
       if (!res.ok) throw new Error('Failed to update recurring state');
 
       setTransactions((prev) => prev.map((tItem) => tItem.id === tx.id ? updatedTx : tItem));
-      setSuccessMsg(t('recurringUpdated', `Recurring renewal turned ${nextVal ? 'ON' : 'OFF'} for ${tx.customerName}`));
+      setSuccessMsg(t('recurringUpdated', `Recurring renewal updated for ${tx.customerName}`));
       setTimeout(() => setSuccessMsg(''), 3000);
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-      }
     } catch (err: any) {
       setErrorMsg(err.message || 'Error updating recurring auto-renew status');
       setTimeout(() => setErrorMsg(''), 4000);
@@ -703,7 +678,6 @@ export default function AdminPlansPage() {
     }
   };
 
-  // Open Add Transaction Modal
   const handleOpenAddModal = () => {
     setModalError('');
     const today = new Date().toISOString().slice(0, 10);
@@ -735,7 +709,6 @@ export default function AdminPlansPage() {
     }
   };
 
-  // Submit Add Transaction (Tab 2)
   const handleSaveAddPayment = async () => {
     setModalSubmitting(true);
     setModalError('');
@@ -779,13 +752,9 @@ export default function AdminPlansPage() {
       }
 
       setShowAddModal(false);
-      setSuccessMsg(t('paymentRecordedSuccess', `Payment of ${currencySymbol}${Number(paymentAmount).toFixed(2)} recorded successfully in PostgreSQL!`));
+      setSuccessMsg(t('paymentRecordedSuccess', `Payment recorded successfully in PostgreSQL!`));
       setTimeout(() => setSuccessMsg(''), 4000);
       await fetchTransactions();
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-      }
     } catch (err: any) {
       setModalError(err.message || 'Error recording transaction');
     } finally {
@@ -793,7 +762,6 @@ export default function AdminPlansPage() {
     }
   };
 
-  // Open Edit Transaction Modal
   const handleOpenEditModal = (tx: PaymentTransaction) => {
     setEditingTx(tx);
     setEditCustomerName(tx.customerName || '');
@@ -811,7 +779,6 @@ export default function AdminPlansPage() {
     setShowEditModal(true);
   };
 
-  // Save Edit Transaction
   const handleSaveEditPayment = async () => {
     if (!editingTx) return;
     setModalSubmitting(true);
@@ -852,10 +819,6 @@ export default function AdminPlansPage() {
       setSuccessMsg(t('paymentUpdatedSuccess', 'Transaction successfully updated in PostgreSQL!'));
       setTimeout(() => setSuccessMsg(''), 4000);
       await fetchTransactions();
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-      }
     } catch (err: any) {
       setModalError(err.message || 'Error updating transaction');
     } finally {
@@ -863,10 +826,8 @@ export default function AdminPlansPage() {
     }
   };
 
-  // Delete Transaction
   const handleDeleteTransaction = async (tx: PaymentTransaction) => {
-    const confirmMsg = `${t('confirmDeleteTx', 'Are you sure you want to permanently delete transaction')} "${tx.id}"?`;
-    if (!confirm(confirmMsg)) return;
+    if (!confirm(`${t('confirmDeleteTx', 'Are you sure you want to permanently delete transaction')} "${tx.id}"?`)) return;
 
     try {
       const res = await fetch(`/api/admin/payment?id=${encodeURIComponent(tx.id)}`, {
@@ -878,10 +839,6 @@ export default function AdminPlansPage() {
       setTransactions((prev) => prev.filter((item) => item.id !== tx.id));
       setSuccessMsg(t('txDeletedSuccess', 'Transaction permanently removed from PostgreSQL.'));
       setTimeout(() => setSuccessMsg(''), 3000);
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-      }
     } catch (err: any) {
       setErrorMsg(err.message || 'Error deleting transaction');
       setTimeout(() => setErrorMsg(''), 4000);
@@ -994,16 +951,14 @@ export default function AdminPlansPage() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* TAB 1: SUBSCRIPTION PLANS (ORIGINAL DESIGN PRESERVED)     */}
-      {/* ========================================================= */}
+      {/* TAB 1: SUBSCRIPTION PLANS */}
       {activeMainTab === 'plans' && (
         <div className="space-y-6">
-          {/* Main Grid: Editor & Live Preview */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Plan Configuration Form (Replaced <form> with <div> per constraint 9) */}
+            {/* Plan Configuration Form Container (Accessible div per Constraint 9) */}
             <div 
-              className="lg:col-span-7 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+              tabIndex={0}
+              className="lg:col-span-7 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200 outline-none"
               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
             >
               <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
@@ -1046,7 +1001,6 @@ export default function AdminPlansPage() {
                   </label>
                   <input
                     type="text"
-                    required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     placeholder="e.g. Nutrition Pro"
@@ -1061,7 +1015,6 @@ export default function AdminPlansPage() {
                   </label>
                   <input
                     type="text"
-                    required
                     value={slug}
                     onChange={(e) => handleSlugChange(e.target.value)}
                     placeholder="e.g. nutrition-pro"
@@ -1147,7 +1100,6 @@ export default function AdminPlansPage() {
                   />
                 </div>
 
-                {/* AI Token Allowance on Purchase */}
                 <div className="space-y-1">
                   <label className="block text-xs font-bold flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
                     <span>{t('tokenAllowanceLabel', 'Token Grant on Purchase')}</span>
@@ -1164,10 +1116,6 @@ export default function AdminPlansPage() {
                 </div>
               </div>
 
-              <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('tokenGrantHelp', 'When a user purchases this plan, these tokens are credited to their balance and an audit record appears on /admin/token-setting.')}
-              </p>
-
               <div className="space-y-1">
                 <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('planFeaturesListLabel', 'Plan Features (One per line)')}
@@ -1181,23 +1129,47 @@ export default function AdminPlansPage() {
                 />
               </div>
 
+              {/* Action Bar with "Mark as Free Tier" Slide Button */}
               <div className="flex items-center justify-between pt-2">
-                <label className="flex items-center gap-2 text-xs font-bold cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={isFree}
-                    onChange={(e) => {
-                      const val = e.target.checked;
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={isFree}
+                    onClick={() => {
+                      const val = !isFree;
                       setIsFree(val);
                       if (val) {
                         setMonthlyPrice(0);
                         setAnnualPrice(0);
                       }
                     }}
-                    className="rounded w-4 h-4 cursor-pointer accent-[#10b981]"
-                  />
-                  <span>{t('isFreeTierLabel', 'Mark as Free Tier')}</span>
-                </label>
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      isFree ? 'bg-emerald-500' : 'bg-slate-700'
+                    }`}
+                    title={isFree ? t('freeTierActive', 'Free Tier Active') : t('markAsFreeTier', 'Mark as Free Tier')}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                        isFree ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                  <span
+                    className="text-xs font-bold cursor-pointer select-none transition-colors"
+                    onClick={() => {
+                      const val = !isFree;
+                      setIsFree(val);
+                      if (val) {
+                        setMonthlyPrice(0);
+                        setAnnualPrice(0);
+                      }
+                    }}
+                    style={{ color: isFree ? 'var(--color-emerald, #10b981)' : 'var(--color-text)' }}
+                  >
+                    {t('isFreeTierLabel', 'Mark as Free Tier')}
+                  </span>
+                </div>
 
                 <button
                   type="button"
@@ -1255,7 +1227,6 @@ export default function AdminPlansPage() {
                   </div>
                 </div>
 
-                {/* Mockup Card */}
                 <div 
                   className="p-5 rounded-2xl border space-y-4 relative shadow-inner"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -1281,7 +1252,6 @@ export default function AdminPlansPage() {
                     </span>
                   </div>
 
-                  {/* Price & Token Allowance Display */}
                   <div className="flex items-baseline gap-1">
                     <span className="text-3xl font-black" style={{ color: 'var(--color-text)' }}>
                       {currencySymbol}{previewInterval === 'MONTH' 
@@ -1293,7 +1263,6 @@ export default function AdminPlansPage() {
                     </span>
                   </div>
 
-                  {/* Token Allocation Badge in Card */}
                   <div className="flex items-center gap-2 p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
                     <Coins className="h-4 w-4 text-amber-500 shrink-0" />
                     <div className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
@@ -1304,7 +1273,6 @@ export default function AdminPlansPage() {
                     </div>
                   </div>
 
-                  {/* Features snippet */}
                   <ul className="space-y-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                     {featuresText.split(/\r?\n/).slice(0, 4).map((f: string, i: number) => (
                       <li key={i} className="flex items-center gap-2">
@@ -1449,12 +1417,9 @@ export default function AdminPlansPage() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* TAB 2: PLAN TRANSACTIONS (MATCHING /admin/payment HISTORY) */}
-      {/* ========================================================= */}
+      {/* TAB 2: PLAN TRANSACTIONS */}
       {activeMainTab === 'transactions' && (
         <div className="space-y-6">
-          {/* Quick Metrics Bar */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <div className="border rounded-2xl p-4 shadow-sm" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
               <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
@@ -1496,12 +1461,10 @@ export default function AdminPlansPage() {
             </div>
           </div>
 
-          {/* Table Container */}
           <div 
             className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
-            {/* Search and Filters Toolbar */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
               <div className="relative flex-1">
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 opacity-40" />
@@ -1564,7 +1527,6 @@ export default function AdminPlansPage() {
               </div>
             </div>
 
-            {/* Transactions Table */}
             <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
@@ -1657,7 +1619,6 @@ export default function AdminPlansPage() {
                             )}
                           </td>
 
-                          {/* Inline Auto-Renew Toggle */}
                           <td className="p-3.5">
                             <button
                               type="button"
@@ -1666,7 +1627,6 @@ export default function AdminPlansPage() {
                               className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                                 tx.autoRenew ? 'bg-emerald-500' : 'bg-slate-700'
                               }`}
-                              title={tx.autoRenew ? 'Click to disable auto-renewal' : 'Click to enable auto-renewal'}
                             >
                               <span
                                 className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
@@ -1711,7 +1671,6 @@ export default function AdminPlansPage() {
               </table>
             </div>
 
-            {/* Pagination Controls */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs pt-2" style={{ color: 'var(--color-text-secondary)' }}>
               <span>
                 {t('showingCount', 'Showing')} {Math.min(filteredTransactions.length, (currentPage - 1) * pageSize + 1)} - {Math.min(filteredTransactions.length, currentPage * pageSize)} {t('ofTotal', 'of')} {filteredTransactions.length}
@@ -1745,9 +1704,7 @@ export default function AdminPlansPage() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* MODAL: ADD PAYMENT TRANSACTION                           */}
-      {/* ========================================================= */}
+      {/* MODAL: ADD PAYMENT */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div 
@@ -1916,9 +1873,7 @@ export default function AdminPlansPage() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* MODAL: EDIT PAYMENT TRANSACTION                          */}
-      {/* ========================================================= */}
+      {/* MODAL: EDIT PAYMENT */}
       {showEditModal && editingTx && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
           <div 
