@@ -1,20 +1,20 @@
 'use client';
 
 // Generated / Updated by AI Collaborator
-import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { 
   Coins, Wallet, ArrowDownLeft, ArrowUpRight, Activity, Search, Filter, 
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, RefreshCw, 
   ChefHat, DownloadCloud, DollarSign, Layers, Shield, Plus, ArrowLeft,
-  User as UserIcon
+  User as UserIcon, CheckCircle, Ban, XCircle, Calendar, CreditCard
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
-import { formatSystemTimestamp, getSystemTimezone } from '@/lib/timezone';
+import { formatSystemTimestamp } from '@/lib/timezone';
 
-type TabKey = 'tokens' | 'wallet';
+type TabKey = 'tokens' | 'wallet' | 'subscriptions';
 
 interface TokenSettingIdentity {
   tokenName: string;
@@ -43,14 +43,35 @@ interface UserWalletTransaction {
   created_at: string;
 }
 
+interface UserSubscriptionTransaction {
+  id: string;
+  customerName?: string;
+  customerEmail?: string;
+  planName: string;
+  planSlug: string;
+  amount: number;
+  currency: string;
+  gateway: string;
+  status: string;
+  failureReason?: string;
+  testMode?: boolean;
+  isRecurring?: boolean;
+  recurringInterval?: string;
+  autoRenew?: boolean;
+  expiryDate?: string;
+  createdAt: string;
+}
+
 interface ExtendedUser extends User {
   token_balance?: number;
   tokenBalance?: number;
   wallet_balance?: number;
+  subscription_plan?: string;
+  subscriptionPlan?: string;
 }
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
-  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'AU$', JPY: '¥'
+  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'AU$', JPY: '¥', THB: '฿'
 };
 
 function formatDate(dateStr?: string): string {
@@ -64,6 +85,28 @@ function formatDate(dateStr?: string): string {
     return new Date(dateStr).toLocaleString();
   }
 }
+
+const normalizeSubTx = (r: any): UserSubscriptionTransaction => {
+  const rawInterval = r.recurring_interval || r.recurringInterval || (String(r.plan_slug || r.planSlug || '').toLowerCase().includes('annual') ? 'YEAR' : 'MONTH');
+  return {
+    id: String(r.id || ''),
+    customerName: r.customer_name || r.customerName || '',
+    customerEmail: r.customer_email || r.customerEmail || '',
+    planName: r.plan_name || r.planName || 'Subscription Plan',
+    planSlug: r.plan_slug || r.planSlug || '',
+    amount: Number(r.amount !== undefined ? r.amount : 0),
+    currency: r.currency || 'USD',
+    gateway: r.gateway || 'stripe',
+    status: (r.status || 'succeeded').toLowerCase(),
+    failureReason: r.failure_reason || r.failureReason,
+    testMode: Boolean(r.test_mode !== undefined ? r.test_mode : r.testMode),
+    isRecurring: Boolean(r.is_recurring !== undefined ? r.is_recurring : (r.isRecurring !== undefined ? r.isRecurring : true)),
+    recurringInterval: rawInterval,
+    autoRenew: Boolean(r.auto_renew !== undefined ? r.auto_renew : (r.autoRenew !== undefined ? r.autoRenew : true)),
+    expiryDate: r.expiry_date || r.expiryDate || undefined,
+    createdAt: r.created_at || r.createdAt || new Date().toISOString()
+  };
+};
 
 function TransactionsContent() {
   const router = useRouter();
@@ -79,17 +122,19 @@ function TransactionsContent() {
     return fallback || key;
   }, [rawT]);
 
-  // Initial tab resolution (?tab=tokens or ?tab=wallet)
+  // Initial tab resolution (?tab=tokens | ?tab=wallet | ?tab=subscriptions)
   const initialTabParam = searchParams.get('tab')?.toLowerCase();
   const initialTab: TabKey = (initialTabParam === 'wallet' || initialTabParam === 'wallet-transactions')
     ? 'wallet'
+    : (initialTabParam === 'subscription' || initialTabParam === 'subscriptions' || initialTabParam === 'subscription-history' || initialTabParam === 'plans')
+    ? 'subscriptions'
     : 'tokens';
 
   const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
   const activeTabRef = useRef<TabKey>(initialTab);
   activeTabRef.current = activeTab;
 
-  // SSR-deterministic state initialization (Guarantees identical Server/Client initial render tree)
+  // SSR-deterministic state initialization
   const [mounted, setMounted] = useState<boolean>(false);
   const [user, setUser] = useState<ExtendedUser | null>(null);
   const currentUserRef = useRef<ExtendedUser | null>(null);
@@ -102,6 +147,9 @@ function TransactionsContent() {
   const [walletCurrency, setWalletCurrency] = useState('USD');
   const [walletSymbol, setWalletSymbol] = useState('$');
   const [ownerWalletBalance, setOwnerWalletBalance] = useState<number>(0);
+
+  // User Plan Identity
+  const [userPlanName, setUserPlanName] = useState<string>('Taster (Free)');
 
   // Token Tab State
   const [tokenTransactions, setTokenTransactions] = useState<UserTokenTransaction[]>([]);
@@ -127,9 +175,20 @@ function TransactionsContent() {
   const [walletTotalCount, setWalletTotalCount] = useState(0);
   const [walletSummaryStats, setWalletSummaryStats] = useState({ totalDeposited: 0, totalSpent: 0, totalEvents: 0 });
 
-  // Concurrency and Loop Prevention Guards
+  // Subscriptions Tab State
+  const [subscriptionTransactions, setSubscriptionTransactions] = useState<UserSubscriptionTransaction[]>([]);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(false);
+  const [subscriptionSearch, setSubscriptionSearch] = useState('');
+  const [debouncedSubscriptionSearch, setDebouncedSubscriptionSearch] = useState('');
+  const [subscriptionStatusFilter, setSubscriptionStatusFilter] = useState('all');
+  const [subscriptionIntervalFilter, setSubscriptionIntervalFilter] = useState('all');
+  const [subscriptionPage, setSubscriptionPage] = useState(1);
+  const [subscriptionLimit, setSubscriptionLimit] = useState(10);
+
+  // Concurrency Guards
   const isFetchingTokensRef = useRef(false);
   const isFetchingWalletRef = useRef(false);
+  const isFetchingSubscriptionRef = useRef(false);
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Sync tab with URL query parameter changes
@@ -137,6 +196,8 @@ function TransactionsContent() {
     const tabParam = searchParams.get('tab')?.toLowerCase();
     if (tabParam === 'wallet' || tabParam === 'wallet-transactions') {
       setActiveTab('wallet');
+    } else if (tabParam === 'subscription' || tabParam === 'subscriptions' || tabParam === 'subscription-history' || tabParam === 'plans') {
+      setActiveTab('subscriptions');
     } else if (tabParam === 'token' || tabParam === 'tokens' || tabParam === 'token-transactions') {
       setActiveTab('tokens');
     }
@@ -152,6 +213,11 @@ function TransactionsContent() {
     const timer = setTimeout(() => setDebouncedWalletSearch(walletSearch), 300);
     return () => clearTimeout(timer);
   }, [walletSearch]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSubscriptionSearch(subscriptionSearch), 300);
+    return () => clearTimeout(timer);
+  }, [subscriptionSearch]);
 
   // 1. Fetch Token Data
   const fetchTokenData = useCallback(async (
@@ -341,12 +407,69 @@ function TransactionsContent() {
     }
   }, []);
 
+  // 3. Fetch Subscription History Data
+  const fetchSubscriptionData = useCallback(async () => {
+    let active = currentUserRef.current || getCurrentUser();
+    if (!active?.id && !active?.email && typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user');
+        if (raw) active = JSON.parse(raw);
+      } catch (_) {}
+      if (!active) {
+        initAuthStorage();
+        active = getCurrentUser();
+      }
+    }
+
+    if (!active?.id && !active?.email) return;
+
+    if (isFetchingSubscriptionRef.current) return;
+    isFetchingSubscriptionRef.current = true;
+    setSubscriptionLoading(true);
+
+    try {
+      const userEmail = active.email || '';
+      const userId = active.id || '';
+      
+      let res = await fetch(`/api/billing?email=${encodeURIComponent(userEmail)}&userId=${encodeURIComponent(userId)}&t=${Date.now()}`, { cache: 'no-store' });
+      if (!res.ok) {
+        res = await fetch(`/api/subscriptions?email=${encodeURIComponent(userEmail)}&userId=${encodeURIComponent(userId)}&t=${Date.now()}`, { cache: 'no-store' });
+      }
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          if (data.user) {
+            const rawPlan = data.user.subscription_plan || data.user.subscriptionPlan || 'taster';
+            const formattedPlan = rawPlan.replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+            setUserPlanName(formattedPlan);
+          }
+
+          const rawList = Array.isArray(data.transactions)
+            ? data.transactions
+            : Array.isArray(data.transactions?.rows)
+            ? data.transactions.rows
+            : [];
+
+          const normalized = rawList.map(normalizeSubTx);
+          setSubscriptionTransactions(normalized);
+        }
+      }
+    } catch (_) {}
+    finally {
+      setSubscriptionLoading(false);
+      isFetchingSubscriptionRef.current = false;
+    }
+  }, []);
+
   const fetchTokenRef = useRef(fetchTokenData);
   fetchTokenRef.current = fetchTokenData;
   const fetchWalletRef = useRef(fetchWalletData);
   fetchWalletRef.current = fetchWalletData;
+  const fetchSubscriptionRef = useRef(fetchSubscriptionData);
+  fetchSubscriptionRef.current = fetchSubscriptionData;
 
-  // 3. Reload Active User Record (Client-Only)
+  // 4. Reload Active User Record (Client-Only)
   const reloadActiveUser = useCallback(async () => {
     initAuthStorage();
     let active = getCurrentUser() as ExtendedUser | null;
@@ -388,17 +511,21 @@ function TransactionsContent() {
       setOwnerWalletBalance(active.wallet_balance);
     }
 
+    const currentPlan = (active.subscription_plan || active.subscriptionPlan || 'taster').replace(/-/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase());
+    setUserPlanName(currentPlan);
+
     currentUserRef.current = active;
     setUser(active);
 
     fetchTokenRef.current(1, tokenLimit, debouncedTokenSearch, tokenTypeFilter);
     fetchWalletRef.current(1, walletLimit, debouncedWalletSearch, walletTypeFilter);
+    fetchSubscriptionRef.current();
   }, [router, tokenLimit, debouncedTokenSearch, tokenTypeFilter, walletLimit, debouncedWalletSearch, walletTypeFilter]);
 
   const reloadUserRef = useRef(reloadActiveUser);
   reloadUserRef.current = reloadActiveUser;
 
-  // Mount Lifecycle: Strictly runs client-side after hydration finishes
+  // Mount Lifecycle
   useEffect(() => {
     setMounted(true);
     reloadUserRef.current();
@@ -408,6 +535,7 @@ function TransactionsContent() {
       debounceTimerRef.current = setTimeout(() => {
         fetchTokenRef.current(tokenPage, tokenLimit, debouncedTokenSearch, tokenTypeFilter);
         fetchWalletRef.current(walletPage, walletLimit, debouncedWalletSearch, walletTypeFilter);
+        fetchSubscriptionRef.current();
       }, 300);
     };
 
@@ -415,6 +543,9 @@ function TransactionsContent() {
     window.addEventListener('zecratary_token_settings_updated', handleDebouncedSync);
     window.addEventListener('zecratary_wallet_updated', handleDebouncedSync);
     window.addEventListener('zecratary_wallet_settings_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_payment_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_plans_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_users_updated', handleDebouncedSync);
 
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
@@ -422,24 +553,94 @@ function TransactionsContent() {
       window.removeEventListener('zecratary_token_settings_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_wallet_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_wallet_settings_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_payment_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_plans_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_users_updated', handleDebouncedSync);
     };
-  }, []);
+  }, [tokenPage, tokenLimit, debouncedTokenSearch, tokenTypeFilter, walletPage, walletLimit, debouncedWalletSearch, walletTypeFilter]);
 
-  // Token Tab Filtering & Pagination Effect
+  // Tab Filtering & Pagination Effects
   useEffect(() => {
     if (mounted && activeTab === 'tokens') {
       fetchTokenRef.current(tokenPage, tokenLimit, debouncedTokenSearch, tokenTypeFilter);
     }
   }, [mounted, activeTab, tokenPage, tokenLimit, debouncedTokenSearch, tokenTypeFilter]);
 
-  // Wallet Tab Filtering & Pagination Effect
   useEffect(() => {
     if (mounted && activeTab === 'wallet') {
       fetchWalletRef.current(walletPage, walletLimit, debouncedWalletSearch, walletTypeFilter);
     }
   }, [mounted, activeTab, walletPage, walletLimit, debouncedWalletSearch, walletTypeFilter]);
 
-  // Safe Badges
+  useEffect(() => {
+    if (mounted && activeTab === 'subscriptions') {
+      fetchSubscriptionRef.current();
+    }
+  }, [mounted, activeTab]);
+
+  // Filtered & Paginated Subscription History
+  const filteredSubscriptionTransactions = useMemo(() => {
+    const q = debouncedSubscriptionSearch.toLowerCase().trim();
+    return subscriptionTransactions.filter((tx) => {
+      const matchesSearch = !q ||
+        tx.id.toLowerCase().includes(q) ||
+        tx.planName.toLowerCase().includes(q) ||
+        tx.planSlug.toLowerCase().includes(q) ||
+        tx.gateway.toLowerCase().includes(q) ||
+        tx.status.toLowerCase().includes(q);
+
+      const s = tx.status.toLowerCase();
+      const matchesStatus = subscriptionStatusFilter === 'all' ||
+        (subscriptionStatusFilter === 'succeeded' && (s === 'succeeded' || s === 'successful' || s === 'paid' || s === 'completed')) ||
+        (subscriptionStatusFilter === 'canceled' && (s === 'canceled' || s === 'cancelled')) ||
+        (subscriptionStatusFilter === 'refunded' && s === 'refunded') ||
+        (subscriptionStatusFilter === 'failed' && (s === 'failed' || s === 'declined'));
+
+      const interval = (tx.recurringInterval || '').toLowerCase();
+      const matchesInterval = subscriptionIntervalFilter === 'all' ||
+        (subscriptionIntervalFilter === 'year' && (interval.includes('year') || interval.includes('annual'))) ||
+        (subscriptionIntervalFilter === 'month' && (interval.includes('month') || (!interval.includes('year') && !interval.includes('annual'))));
+
+      return matchesSearch && matchesStatus && matchesInterval;
+    });
+  }, [subscriptionTransactions, debouncedSubscriptionSearch, subscriptionStatusFilter, subscriptionIntervalFilter]);
+
+  const subTotalCount = filteredSubscriptionTransactions.length;
+  const subTotalPages = Math.max(1, Math.ceil(subTotalCount / subscriptionLimit));
+  const paginatedSubscriptionTransactions = useMemo(() => {
+    const start = (subscriptionPage - 1) * subscriptionLimit;
+    return filteredSubscriptionTransactions.slice(start, start + subscriptionLimit);
+  }, [filteredSubscriptionTransactions, subscriptionPage, subscriptionLimit]);
+
+  // Subscriptions KPI Stats
+  const subSummaryStats = useMemo(() => {
+    let totalSpent = 0;
+    let activeTx: UserSubscriptionTransaction | null = null;
+    const now = Date.now();
+
+    for (const tx of subscriptionTransactions) {
+      const s = tx.status.toLowerCase();
+      const isPaid = s === 'succeeded' || s === 'successful' || s === 'paid' || s === 'completed';
+      if (isPaid) {
+        totalSpent += Number(tx.amount || 0);
+      }
+      if (!activeTx && (isPaid || s === 'canceled' || s === 'active')) {
+        if (!tx.expiryDate || new Date(tx.expiryDate).getTime() > now) {
+          activeTx = tx;
+        }
+      }
+    }
+
+    return {
+      totalSpent,
+      totalEvents: subscriptionTransactions.length,
+      activeTx,
+      activeExpiryDate: activeTx?.expiryDate,
+      isAutoRenew: Boolean(activeTx?.autoRenew && activeTx?.status !== 'canceled')
+    };
+  }, [subscriptionTransactions]);
+
+  // Badges
   const renderTokenBadge = (type?: string) => {
     const raw = String(type || '').toLowerCase().trim();
     if (raw === 'usage_chef') {
@@ -522,6 +723,59 @@ function TransactionsContent() {
     );
   };
 
+  const renderSubscriptionStatusBadge = (status?: string) => {
+    const s = String(status || '').toLowerCase().trim();
+    if (s === 'succeeded' || s === 'successful' || s === 'paid' || s === 'completed' || s === 'active') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+          <CheckCircle className="h-3 w-3" /> {t('statusSucceeded', 'Succeeded')}
+        </span>
+      );
+    }
+    if (s === 'canceled' || s === 'cancelled') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-orange-500/10 text-orange-400 border border-orange-500/20">
+          <Ban className="h-3 w-3" /> {t('statusCanceled', 'Canceled')}
+        </span>
+      );
+    }
+    if (s === 'refunded') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/20">
+          <RefreshCw className="h-3 w-3" /> {t('statusRefunded', 'Refunded')}
+        </span>
+      );
+    }
+    if (s === 'failed' || s === 'declined') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-red-500/10 text-red-400 border border-red-500/20">
+          <XCircle className="h-3 w-3" /> {t('statusFailed', 'Failed')}
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-slate-500/10 text-slate-400 border border-slate-500/20">
+        <Activity className="h-3 w-3" /> {s || 'Recorded'}
+      </span>
+    );
+  };
+
+  const renderIntervalBadge = (interval?: string) => {
+    const raw = String(interval || '').toUpperCase().trim();
+    if (raw === 'YEAR' || raw === 'ANNUAL') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">
+          Annual
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono font-bold uppercase tracking-wider bg-blue-500/10 text-blue-400 border border-blue-500/20">
+        Monthly
+      </span>
+    );
+  };
+
   // Pagination Helper
   const getPageNumbers = (curr: number, total: number) => {
     const pages: number[] = [];
@@ -532,7 +786,7 @@ function TransactionsContent() {
     return pages;
   };
 
-  // Unified SSR-Safe Loading Guard: Both Server and Client initial render output identical spinner DOM
+  // SSR-Safe Loading Guard
   if (!mounted || !user) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center">
@@ -549,7 +803,7 @@ function TransactionsContent() {
       className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200 min-h-screen"
       style={{ color: 'var(--color-text)', backgroundColor: 'var(--color-bg)' }}
     >
-      {/* Header with Live Token and Wallet Badges */}
+      {/* Header with Live Token, Wallet, and Membership Badges */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
         <div className="space-y-1">
           <div className="flex items-center gap-2">
@@ -565,11 +819,24 @@ function TransactionsContent() {
             </h1>
           </div>
           <p className="text-xs opacity-70">
-            {t('transactionsSubtitle', 'Audit and track your AI token quota consumption, package purchases, and wallet cash ledgers.')}
+            {t('transactionsSubtitle', 'Audit and track your AI token quota consumption, package purchases, store wallet cash ledgers, and membership subscriptions.')}
           </p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Active Plan Pill */}
+          <Link
+            href="/subscriptions"
+            className="border font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-2 shadow-xs transition hover:border-purple-500/50"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            title={t('activePlanTier', 'Active Plan Tier')}
+          >
+            <Layers className="h-4 w-4 text-purple-400" />
+            <span suppressHydrationWarning className="font-bold text-purple-400 capitalize">
+              {userPlanName}
+            </span>
+          </Link>
+
           {/* User Live Token Balance Pill */}
           <div 
             className="border font-bold text-xs px-3.5 py-2 rounded-xl flex items-center gap-2 shadow-xs transition"
@@ -618,7 +885,7 @@ function TransactionsContent() {
         </div>
       </div>
 
-      {/* 2-Tab Segmented Navigator */}
+      {/* 3-Tab Segmented Navigator */}
       <div 
         className="flex p-1.5 rounded-2xl border transition-colors duration-200 gap-1.5"
         style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -677,6 +944,35 @@ function TransactionsContent() {
           {walletSummaryStats.totalEvents > 0 && (
             <span className="ml-1 text-[10px] font-mono px-2 py-0.5 rounded-full border bg-emerald-500/10 text-emerald-400 border-[var(--color-border)]">
               {walletSummaryStats.totalEvents}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('subscriptions');
+            setSubscriptionPage(1);
+            if (typeof window !== 'undefined') {
+              window.history.replaceState(null, '', '/transactions?tab=subscriptions');
+            }
+          }}
+          className="flex-1 py-2.5 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
+          style={activeTab === 'subscriptions' ? {
+            backgroundColor: 'var(--color-card)',
+            color: '#c084fc',
+            borderColor: '#a855f7',
+            borderWidth: '1px',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+          } : {
+            color: 'var(--color-text-secondary, #94a3b8)'
+          }}
+        >
+          <Layers className="h-4 w-4 text-purple-400" />
+          <span>{t('subscriptionTransactionsTab', 'Subscription History')}</span>
+          {subscriptionTransactions.length > 0 && (
+            <span className="ml-1 text-[10px] font-mono px-2 py-0.5 rounded-full border bg-purple-500/10 text-purple-400 border-[var(--color-border)]">
+              {subscriptionTransactions.length}
             </span>
           )}
         </button>
@@ -1146,6 +1442,295 @@ function TransactionsContent() {
                 <button
                   disabled={walletPage >= walletTotalPages || walletLoading}
                   onClick={() => setWalletPage(walletTotalPages)}
+                  className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer bg-[var(--color-inner-dark)] border-[var(--color-border)]"
+                >
+                  <ChevronsRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* VIEW 3: SUBSCRIPTION HISTORY AUDIT LEDGER                                 */}
+      {/* ========================================================================= */}
+      {activeTab === 'subscriptions' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* KPI Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="border rounded-2xl p-4 shadow-md space-y-1 bg-[var(--color-card)] border-[var(--color-border)]">
+              <div className="flex items-center justify-between text-xs font-bold opacity-70">
+                <span>{t('activePlanTier', 'Active Plan Tier')}</span>
+                <Layers className="h-4 w-4 text-purple-400" />
+              </div>
+              <div className="text-xl font-black capitalize text-purple-400 truncate">
+                <span suppressHydrationWarning>{userPlanName}</span>
+              </div>
+              <p className="text-[10px] opacity-60">
+                {subSummaryStats.activeExpiryDate 
+                  ? `Renews/Expires: ${formatDate(subSummaryStats.activeExpiryDate)}`
+                  : 'Standard tier features'}
+              </p>
+            </div>
+
+            <div className="border rounded-2xl p-4 shadow-md space-y-1 bg-[var(--color-card)] border-[var(--color-border)]">
+              <div className="flex items-center justify-between text-xs font-bold opacity-70">
+                <span>{t('totalSubPayments', 'Total Billed')}</span>
+                <ArrowUpRight className="h-4 w-4 text-emerald-500" />
+              </div>
+              <div className="text-2xl font-black font-mono text-emerald-400">
+                <span suppressHydrationWarning>${subSummaryStats.totalSpent.toFixed(2)}</span> <span className="text-xs font-bold opacity-60 font-mono">USD</span>
+              </div>
+              <p className="text-[10px] opacity-60">Settled via Stripe, PayPal & Wallet</p>
+            </div>
+
+            <div className="border rounded-2xl p-4 shadow-md space-y-1 bg-[var(--color-card)] border-[var(--color-border)]">
+              <div className="flex items-center justify-between text-xs font-bold opacity-70">
+                <span>{t('membershipStanding', 'Renewal Standing')}</span>
+                <Calendar className="h-4 w-4 text-blue-400" />
+              </div>
+              <div className="text-xl font-black flex items-center gap-1.5">
+                {subSummaryStats.isAutoRenew ? (
+                  <span className="text-emerald-400 flex items-center gap-1">
+                    <CheckCircle className="h-4 w-4" /> Auto-Renew ON
+                  </span>
+                ) : (
+                  <span className="text-orange-400 flex items-center gap-1">
+                    <Ban className="h-4 w-4" /> Canceled / Inactive
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] opacity-60">
+                {subSummaryStats.isAutoRenew ? 'Recurring membership active' : 'Plan reverts to Free on expiry'}
+              </p>
+            </div>
+
+            <div className="border rounded-2xl p-4 shadow-md space-y-1 bg-[var(--color-card)] border-[var(--color-border)]">
+              <div className="flex items-center justify-between text-xs font-bold opacity-70">
+                <span>{t('totalSubInvoices', 'Total Plan Invoices')}</span>
+                <Activity className="h-4 w-4 text-amber-400" />
+              </div>
+              <div suppressHydrationWarning className="text-2xl font-black font-mono">
+                {subSummaryStats.totalEvents}
+              </div>
+              <p className="text-[10px] opacity-60">PostgreSQL payment_transactions</p>
+            </div>
+          </div>
+
+          {/* Filtering and Controls */}
+          <div className="border rounded-3xl p-5 shadow-xl space-y-4 bg-[var(--color-card)] border-[var(--color-border)]">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="relative flex-1 w-full">
+                <Search className="h-4 w-4 absolute left-3.5 top-3 opacity-50" />
+                <input
+                  type="text"
+                  value={subscriptionSearch}
+                  onChange={(e) => {
+                    setSubscriptionSearch(e.target.value);
+                    setSubscriptionPage(1);
+                  }}
+                  placeholder={t('searchSubscriptionsPlaceholder', 'Search by plan name, ID, or gateway...')}
+                  className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-xs font-semibold outline-none bg-[var(--color-inner-dark)] border-[var(--color-border)]"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <Filter className="h-4 w-4 text-purple-400 shrink-0" />
+                <select
+                  value={subscriptionStatusFilter}
+                  onChange={(e) => {
+                    setSubscriptionStatusFilter(e.target.value);
+                    setSubscriptionPage(1);
+                  }}
+                  className="w-full sm:w-40 border rounded-xl px-3 py-2.5 text-xs font-bold outline-none cursor-pointer bg-[var(--color-inner-dark)] border-[var(--color-border)]"
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="succeeded">Succeeded / Paid</option>
+                  <option value="canceled">Canceled</option>
+                  <option value="refunded">Refunded</option>
+                  <option value="failed">Failed</option>
+                </select>
+
+                <select
+                  value={subscriptionIntervalFilter}
+                  onChange={(e) => {
+                    setSubscriptionIntervalFilter(e.target.value);
+                    setSubscriptionPage(1);
+                  }}
+                  className="w-full sm:w-32 border rounded-xl px-3 py-2.5 text-xs font-bold outline-none cursor-pointer bg-[var(--color-inner-dark)] border-[var(--color-border)]"
+                >
+                  <option value="all">All Cycles</option>
+                  <option value="month">Monthly</option>
+                  <option value="year">Annual</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <span className="text-xs font-bold whitespace-nowrap opacity-70">Rows:</span>
+                <select
+                  value={subscriptionLimit}
+                  onChange={(e) => {
+                    setSubscriptionLimit(parseInt(e.target.value, 10));
+                    setSubscriptionPage(1);
+                  }}
+                  className="border rounded-xl px-3 py-2.5 text-xs font-bold outline-none cursor-pointer bg-[var(--color-inner-dark)] border-[var(--color-border)]"
+                >
+                  <option value="10">10</option>
+                  <option value="25">25</option>
+                  <option value="50">50</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/subscriptions"
+                  className="px-3.5 py-2.5 rounded-xl font-bold text-xs flex items-center gap-1.5 text-white shadow-xs shrink-0"
+                  style={{ backgroundColor: '#a855f7' }}
+                >
+                  <Layers className="h-3.5 w-3.5" />
+                  <span>{t('manageSubscriptions', 'Manage Plans')}</span>
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={() => fetchSubscriptionRef.current()}
+                  disabled={subscriptionLoading}
+                  className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs bg-[var(--color-inner-dark)] border-[var(--color-border)] hover:border-purple-500/50"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${subscriptionLoading ? 'animate-spin' : ''}`} style={{ color: '#a855f7' }} />
+                  <span>{t('refreshBtn', 'Refresh')}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="overflow-x-auto rounded-2xl border border-[var(--color-border)]">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b font-extrabold uppercase text-[10px] tracking-wider bg-[var(--color-inner-dark)] border-[var(--color-border)] opacity-70">
+                    <th className="p-3.5">{t('colPlan', 'Plan & Reference')}</th>
+                    <th className="p-3.5">{t('colInterval', 'Interval')}</th>
+                    <th className="p-3.5">{t('colAmount', 'Amount')}</th>
+                    <th className="p-3.5">{t('colGateway', 'Gateway')}</th>
+                    <th className="p-3.5">{t('colStatus', 'Status')}</th>
+                    <th className="p-3.5">{t('colAutoRenew', 'Auto-Renew')}</th>
+                    <th className="p-3.5">{t('colExpiry', 'Billing Expiry')}</th>
+                    <th className="p-3.5">{t('colDate', 'Timestamp')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--color-border)]">
+                  {subscriptionLoading ? (
+                    <tr>
+                      <td colSpan={8} className="p-8 text-center text-xs font-bold opacity-70">
+                        <div className="flex items-center justify-center gap-2">
+                          <RefreshCw className="h-4 w-4 animate-spin text-purple-400" />
+                          <span>Loading subscription transactions...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : paginatedSubscriptionTransactions.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-8 text-center text-xs font-semibold opacity-50">
+                        No subscription transactions recorded matching your search.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedSubscriptionTransactions.map((tx) => (
+                      <tr key={tx.id} className="hover:bg-slate-500/5 transition font-medium">
+                        <td className="p-3.5">
+                          <div className="font-bold flex items-center gap-1.5 text-xs">
+                            <Layers className="h-3.5 w-3.5 text-purple-400 shrink-0" />
+                            <span>{tx.planName}</span>
+                          </div>
+                          <span className="font-mono text-[10px] opacity-50 block truncate max-w-[140px]" title={tx.id}>
+                            {tx.id}
+                          </span>
+                        </td>
+                        <td className="p-3.5">
+                          {renderIntervalBadge(tx.recurringInterval)}
+                        </td>
+                        <td className="p-3.5">
+                          <span className="font-mono font-black text-xs text-emerald-400">
+                            {CURRENCY_SYMBOLS[tx.currency] || '$'}{Number(tx.amount || 0).toFixed(2)}
+                          </span>
+                          <span className="text-[10px] opacity-60 ml-1 font-mono uppercase">{tx.currency}</span>
+                        </td>
+                        <td className="p-3.5">
+                          <span className="uppercase text-[10px] font-mono px-2 py-0.5 rounded-md border bg-[var(--color-inner-dark)] border-[var(--color-border)]">
+                            {tx.gateway || 'stripe'}
+                          </span>
+                        </td>
+                        <td className="p-3.5">
+                          {renderSubscriptionStatusBadge(tx.status)}
+                        </td>
+                        <td className="p-3.5">
+                          {tx.autoRenew && tx.status !== 'canceled' ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-400">
+                              <CheckCircle className="h-3 w-3" /> ON
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold opacity-50">
+                              <Ban className="h-3 w-3 text-orange-400" /> OFF
+                            </span>
+                          )}
+                        </td>
+                        <td className="p-3.5 font-mono text-[11px] whitespace-nowrap opacity-75">
+                          <span suppressHydrationWarning>{tx.expiryDate ? formatDate(tx.expiryDate) : '—'}</span>
+                        </td>
+                        <td className="p-3.5 font-mono text-[11px] whitespace-nowrap opacity-60">
+                          <span suppressHydrationWarning>{formatDate(tx.createdAt)}</span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-[var(--color-border)] text-xs">
+              <span className="opacity-70">
+                Showing <strong>{subTotalCount > 0 ? (subscriptionPage - 1) * subscriptionLimit + 1 : 0}</strong> - <strong>{Math.min(subscriptionPage * subscriptionLimit, subTotalCount)}</strong> of <strong>{subTotalCount}</strong> subscription transactions
+              </span>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  disabled={subscriptionPage <= 1 || subscriptionLoading}
+                  onClick={() => setSubscriptionPage(1)}
+                  className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer bg-[var(--color-inner-dark)] border-[var(--color-border)]"
+                >
+                  <ChevronsLeft className="h-4 w-4" />
+                </button>
+                <button
+                  disabled={subscriptionPage <= 1 || subscriptionLoading}
+                  onClick={() => setSubscriptionPage(p => Math.max(1, p - 1))}
+                  className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer bg-[var(--color-inner-dark)] border-[var(--color-border)]"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+
+                {getPageNumbers(subscriptionPage, subTotalPages).map(num => (
+                  <button
+                    key={num}
+                    onClick={() => setSubscriptionPage(num)}
+                    className="min-w-[28px] h-7 px-2 rounded-lg text-xs font-bold border cursor-pointer"
+                    style={subscriptionPage === num ? { backgroundColor: '#a855f7', borderColor: '#a855f7', color: '#fff' } : { backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  >
+                    {num}
+                  </button>
+                ))}
+
+                <button
+                  disabled={subscriptionPage >= subTotalPages || subscriptionLoading}
+                  onClick={() => setSubscriptionPage(p => Math.min(subTotalPages, p + 1))}
+                  className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer bg-[var(--color-inner-dark)] border-[var(--color-border)]"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+                <button
+                  disabled={subscriptionPage >= subTotalPages || subscriptionLoading}
+                  onClick={() => setSubscriptionPage(subTotalPages)}
                   className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer bg-[var(--color-inner-dark)] border-[var(--color-border)]"
                 >
                   <ChevronsRight className="h-4 w-4" />

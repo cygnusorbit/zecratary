@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.14",
+  "version": "8.1.15",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -117,7 +117,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.14",
+  "version": "8.1.15",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -5882,11 +5882,8 @@ import {
   ArrowUpRight, 
   ArrowDownLeft, 
   Wallet, 
-  ShieldCheck, 
-  CreditCard, 
   Layers, 
-  Clock, 
-  ArrowRight 
+  Clock 
 } from 'lucide-react';
 import { getCurrentUser, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -5910,13 +5907,19 @@ interface TokenTransaction {
   user_total_tokens?: number;
 }
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'AU$', JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
+};
+
 export default function TokenPage() {
   const { t } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
 
-  // Live Token Balance & System Settings (Synchronized with /admin/token-setting)
+  // Live Balances & System Settings (Synchronized with PostgreSQL)
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [currency, setCurrency] = useState<string>('USD');
+  const [currencySymbol, setCurrencySymbol] = useState<string>('$');
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
   const [packages, setPackages] = useState<TokenPackage[]>([
@@ -5956,14 +5959,18 @@ export default function TokenPage() {
 
     if (typeof window !== 'undefined') {
       try {
-        const cachedRaw = localStorage.getItem('zecratary_user');
+        const cachedRaw = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
         if (cachedRaw) {
           const cached = JSON.parse(cachedRaw);
           if (typeof cached.token_balance === 'number') {
             setTokenBalance(cached.token_balance);
+          } else if (typeof cached.tokenBalance === 'number') {
+            setTokenBalance(cached.tokenBalance);
           }
           if (typeof cached.wallet_balance === 'number') {
             setWalletBalance(cached.wallet_balance);
+          } else if (typeof cached.walletBalance === 'number') {
+            setWalletBalance(cached.walletBalance);
           }
         }
       } catch (_) {}
@@ -5985,10 +5992,10 @@ export default function TokenPage() {
         search: searchQuery
       });
 
-      if (currentUser?.id) params.append('userId', currentUser.id);
+      if (currentUser?.id) params.append('userId', String(currentUser.id));
       if (currentUser?.email) params.append('email', currentUser.email);
 
-      const res = await fetch(`/api/tokens?${params.toString()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/tokens?${params.toString()}&t=${Date.now()}`, { cache: 'no-store' });
       const text = await res.text();
       let data: any = {};
       try {
@@ -5998,10 +6005,18 @@ export default function TokenPage() {
       }
 
       if (data.success) {
-        if (typeof data.balance === 'number') setTokenBalance(data.balance);
-        if (typeof data.walletBalance === 'number') setWalletBalance(data.walletBalance);
+        const rawTok = data.balance ?? data.tokenBalance ?? data.token_balance;
+        if (typeof rawTok === 'number') setTokenBalance(rawTok);
+
+        const rawWal = data.walletBalance ?? data.wallet_balance;
+        if (typeof rawWal === 'number') setWalletBalance(rawWal);
+
         if (data.tokenSymbol) setTokenSymbol(data.tokenSymbol);
         if (data.tokenName) setTokenName(data.tokenName);
+
+        const curr = data.currency || 'USD';
+        setCurrency(curr);
+        setCurrencySymbol(CURRENCY_SYMBOLS[curr.toUpperCase()] || data.currencySymbol || '$');
 
         if (Array.isArray(data.packages) && data.packages.length > 0) {
           setPackages(data.packages);
@@ -6024,7 +6039,7 @@ export default function TokenPage() {
         }
       }
     } catch (err: any) {
-      console.error('Error loading token data:', err);
+      console.warn('[Token Page] Error fetching tokens:', err?.message || err);
     } finally {
       if (!isSilent) setLoadingTransactions(false);
       isFetchingRef.current = false;
@@ -6057,9 +6072,10 @@ export default function TokenPage() {
     try {
       balanceChannel = new BroadcastChannel('zecratary_balance_channel');
       balanceChannel.onmessage = (event) => {
-        if (event.data?.type === 'BALANCE_UPDATED') {
+        if (event.data?.type === 'BALANCE_UPDATED' || event.data?.type === 'BALANCE_UPDATE') {
           if (typeof event.data.tokenBalance === 'number') setTokenBalance(event.data.tokenBalance);
-          if (typeof event.data.walletBalance === 'number') setWalletBalance(event.data.walletBalance);
+          if (typeof event.data.wallet_balance === 'number') setWalletBalance(event.data.wallet_balance);
+          else if (typeof event.data.walletBalance === 'number') setWalletBalance(event.data.walletBalance);
           fetchTokenData(true);
         }
       };
@@ -6075,7 +6091,7 @@ export default function TokenPage() {
     };
   }, [fetchTokenData]);
 
-  // 3. Purchase Package Handler (Atomic Dual-Ledger Settlement)
+  // Purchase Package Handler (Atomic Dual-Ledger Settlement)
   const handlePurchase = async (pkgId: string) => {
     const pkg = packages.find(p => p.id === pkgId);
     if (!pkg) return;
@@ -6089,7 +6105,7 @@ export default function TokenPage() {
         type: 'error',
         message: t(
           'insufficientWalletForTokens',
-          `Insufficient wallet balance ($${walletBalance.toFixed(2)} available). This bundle requires $${price.toFixed(2)}. Please top up your wallet first.`
+          `Insufficient wallet balance (${currencySymbol}${Number(walletBalance || 0).toFixed(2)} available). This bundle requires ${currencySymbol}${price.toFixed(2)}. Please top up your wallet first.`
         )
       });
       setPurchasingPkgId(null);
@@ -6157,12 +6173,15 @@ export default function TokenPage() {
 
       if (typeof window !== 'undefined') {
         try {
-          const raw = localStorage.getItem('zecratary_user');
+          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
           if (raw) {
             const u = JSON.parse(raw);
             u.token_balance = newBal;
             u.tokenBalance = newBal;
-            if (nextWalletBal !== null) u.wallet_balance = nextWalletBal;
+            if (nextWalletBal !== null) {
+              u.wallet_balance = nextWalletBal;
+              u.walletBalance = nextWalletBal;
+            }
             localStorage.setItem('zecratary_user', JSON.stringify(u));
           }
         } catch (_) {}
@@ -6197,33 +6216,31 @@ export default function TokenPage() {
     }
   };
 
-  const isAdmin = user && (user.role === 'admin' || user.email?.includes('admin'));
-
   const formatServiceType = (type: string) => {
     if (!type) return 'Operation';
     switch (type) {
       case 'usage_chef':
       case 'chef_prompt':
       case 'chef':
-        return 'AI Chef Recipe Assistant';
+        return t('opChefAi', 'AI Chef Recipe Assistant');
       case 'usage_import_url':
       case 'import_url':
-        return 'Import Recipe URL';
+        return t('opImportUrl', 'Import Recipe URL');
       case 'usage_import_text':
       case 'import_text':
-        return 'Import Recipe Text';
+        return t('opImportText', 'Import Recipe Text');
       case 'usage_import_photo':
       case 'import_photo':
-        return 'Import Recipe Photo';
+        return t('opImportPhoto', 'Import Recipe Photo');
       case 'package_purchase':
-        return 'Token Bundle Purchase';
+        return t('opPackagePurchase', 'Token Bundle Purchase');
       case 'plan_purchase':
       case 'plan_monthly_grant':
-        return 'Monthly Plan Allowance';
+        return t('opMonthlyPlanGrant', 'Monthly Plan Allowance');
       case 'manual_credit':
-        return 'Admin Credit';
+        return t('opAdminCredit', 'Admin Credit');
       case 'manual_debit':
-        return 'Admin Adjustment';
+        return t('opAdminAdjustment', 'Admin Adjustment');
       default:
         return type.replace(/_/g, ' ').replace(/ \w/g, l => l.toUpperCase());
     }
@@ -6237,8 +6254,10 @@ export default function TokenPage() {
         color: 'var(--color-text)'
       }}
     >
-      {/* 1. Header Bar */}
+      {/* 1. Header Bar: Accessible Region with Store Wallet Moved to the Left */}
       <div 
+        role="region"
+        aria-label={t('tokenHeaderRegion', 'Token Account Overview')}
         className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 rounded-3xl border shadow-sm"
         style={{
           backgroundColor: 'var(--color-card)',
@@ -6265,7 +6284,29 @@ export default function TokenPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          {/* Live Token Balance Pill */}
+          {/* 1. Live Wallet Balance Pill (Moved to the LEFT) */}
+          <Link
+            href="/wallet"
+            className="flex items-center gap-2 px-4 py-2 rounded-2xl border bg-[var(--color-inner-dark)] shadow-inner hover:border-[var(--color-primary)]/50 transition cursor-pointer"
+            style={{ borderColor: 'var(--color-border)' }}
+            title={t('viewWallet', 'View Store Wallet')}
+          >
+            <Wallet className="h-5 w-5 text-[var(--color-primary)]" />
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold uppercase tracking-wider opacity-60">
+                {t('walletBalance', 'Store Wallet')}
+              </span>
+              <span 
+                className="text-base font-black font-mono" 
+                style={{ color: 'var(--color-emerald)' }}
+                suppressHydrationWarning
+              >
+                {currencySymbol}{Number(walletBalance || 0).toFixed(2)}
+              </span>
+            </div>
+          </Link>
+
+          {/* 2. Live Token Balance Pill */}
           <div 
             className="flex items-center gap-2 px-4 py-2 rounded-2xl border bg-[var(--color-inner-dark)] shadow-inner"
             style={{ borderColor: 'var(--color-border)' }}
@@ -6275,46 +6316,22 @@ export default function TokenPage() {
               <span className="text-[10px] font-bold uppercase tracking-wider opacity-60">
                 {t('availableBalance', 'Available Balance')}
               </span>
-              <span className="text-base font-black font-mono" style={{ color: 'var(--color-emerald)' }}>
+              <span 
+                className="text-base font-black font-mono" 
+                style={{ color: 'var(--color-emerald)' }}
+                suppressHydrationWarning
+              >
                 {tokenBalance.toLocaleString()} {tokenSymbol}
               </span>
             </div>
           </div>
-
-          {/* Live Wallet Balance Pill */}
-          {walletBalance !== null && (
-            <div 
-              className="flex items-center gap-2 px-4 py-2 rounded-2xl border bg-[var(--color-inner-dark)] shadow-inner"
-              style={{ borderColor: 'var(--color-border)' }}
-            >
-              <Wallet className="h-5 w-5 text-blue-400" />
-              <div className="flex flex-col">
-                <span className="text-[10px] font-bold uppercase tracking-wider opacity-60">
-                  {t('walletBalance', 'Store Wallet')}
-                </span>
-                <span className="text-base font-black font-mono text-blue-400">
-                  ${walletBalance.toFixed(2)}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {isAdmin && (
-            <Link
-              href="/admin/token-setting"
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[var(--color-border)] hover:border-[var(--color-primary)] text-xs font-bold transition bg-[var(--color-inner-dark)]"
-              title="Admin Token Settings"
-            >
-              <ShieldCheck className="h-4 w-4 text-[var(--color-primary)]" />
-              <span className="hidden sm:inline">Configure Settings</span>
-            </Link>
-          )}
         </div>
       </div>
 
       {/* Global Feedback Banner */}
       {feedback && (
         <div 
+          role="alert"
           className={`p-4 rounded-2xl border flex items-center justify-between gap-3 text-xs font-bold shadow-md animate-in fade-in duration-200 ${
             feedback.type === 'success' 
               ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
@@ -6328,52 +6345,32 @@ export default function TokenPage() {
           <button 
             type="button" 
             onClick={() => setFeedback(null)} 
-            className="opacity-70 hover:opacity-100 cursor-pointer text-xs"
+            className="opacity-70 hover:opacity-100 cursor-pointer text-xs p-1"
+            aria-label="Dismiss alert"
           >
             ✕
           </button>
         </div>
       )}
 
-      {/* 2. Top-Up Package Catalog */}
+      {/* 2. Top-Up Package Catalog (Clean Header without edit/subscription links) */}
       <div 
+        role="region"
+        aria-label={t('tokenPackagesRegion', 'Token Bundles Catalog')}
         className="p-6 rounded-3xl border shadow-sm space-y-4"
         style={{
           backgroundColor: 'var(--color-card)',
           borderColor: 'var(--color-border)'
         }}
       >
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
-          <div>
-            <h2 className="text-base font-black flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-amber-500" />
-              <span>{t('topUpPackagesTitle', 'Top Up Token Bundles')}</span>
-            </h2>
-            <p className="text-xs opacity-70">
-              {t('topUpPackagesSubtitle', 'Choose an instant token package to fuel AI cooking, recipe generation, and OCR imports. Bundles synchronize with admin settings.')}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {isAdmin && (
-              <Link
-                href="/admin/token-setting"
-                className="text-xs font-bold text-amber-500 hover:text-amber-400 flex items-center gap-1"
-              >
-                <span>{t('editPackagesAdmin', 'Edit in /admin/token-setting')}</span>
-                <ArrowRight className="h-3 w-3" />
-              </Link>
-            )}
-            <Link 
-              href="/billing"
-              className="text-xs font-bold flex items-center gap-1 hover:underline"
-              style={{ color: 'var(--color-primary)' }}
-            >
-              <CreditCard className="h-3.5 w-3.5" />
-              <span>{t('viewMonthlyPlans', 'Looking for Monthly Subscriptions?')}</span>
-              <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
+        <div className="border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+          <h2 className="text-base font-black flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-amber-500" />
+            <span>{t('topUpPackagesTitle', 'Top Up Token Bundles')}</span>
+          </h2>
+          <p className="text-xs opacity-70 mt-1">
+            {t('topUpPackagesSubtitle', 'Choose an instant token package to fuel AI cooking, recipe generation, and OCR imports. Bundles synchronize with admin settings.')}
+          </p>
         </div>
 
         {/* Dynamic Packages Grid */}
@@ -6411,18 +6408,18 @@ export default function TokenPage() {
                   </div>
 
                   <p className="text-[11px] opacity-70">
-                    Instantly adds <strong className="font-bold">{pkg.tokens.toLocaleString()}</strong> spendable AI tokens to your live wallet.
+                    {t('bundleAddsNotice', 'Instantly adds')} <strong className="font-bold">{pkg.tokens.toLocaleString()}</strong> {t('spendableTokensNotice', 'spendable AI tokens to your live wallet.')}
                   </p>
                 </div>
 
                 <div className="pt-4 mt-4 border-t flex items-center justify-between gap-3" style={{ borderColor: 'var(--color-border)' }}>
                   <div className="flex flex-col">
-                    <span className="text-[10px] uppercase font-bold opacity-60">Price</span>
+                    <span className="text-[10px] uppercase font-bold opacity-60">{t('price', 'Price')}</span>
                     <div className="flex items-center gap-1.5">
-                      <span className="text-base font-black font-mono">${Number(pkg.price).toFixed(2)}</span>
+                      <span className="text-base font-black font-mono">{currencySymbol}{Number(pkg.price).toFixed(2)}</span>
                       {isShort && (
                         <span className="text-[10px] font-bold text-amber-500 font-mono">
-                          Short ${(Number(pkg.price) - Number(walletBalance)).toFixed(2)}
+                          {t('shortfallLabel', 'Short')} {currencySymbol}{(Number(pkg.price) - Number(walletBalance)).toFixed(2)}
                         </span>
                       )}
                     </div>
@@ -6441,7 +6438,7 @@ export default function TokenPage() {
                     {isBuying ? (
                       <>
                         <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                        <span>Processing...</span>
+                        <span>{t('processingBtn', 'Processing...')}</span>
                       </>
                     ) : (
                       <>
@@ -6458,7 +6455,11 @@ export default function TokenPage() {
       </div>
 
       {/* 3. 4-KPI Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div 
+        role="region"
+        aria-label={t('tokenMetricsRegion', 'Token Performance Metrics')}
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+      >
         <div 
           className="p-5 rounded-3xl border shadow-sm flex items-center gap-4"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -6468,7 +6469,7 @@ export default function TokenPage() {
           </div>
           <div className="min-w-0">
             <p className="text-[11px] font-bold uppercase tracking-wider opacity-60">{t('myTokenBalance', 'Token Balance')}</p>
-            <p className="text-xl font-black font-mono truncate" style={{ color: 'var(--color-emerald)' }}>
+            <p className="text-xl font-black font-mono truncate" style={{ color: 'var(--color-emerald)' }} suppressHydrationWarning>
               {tokenBalance.toLocaleString()} {tokenSymbol}
             </p>
           </div>
@@ -6483,7 +6484,7 @@ export default function TokenPage() {
           </div>
           <div className="min-w-0">
             <p className="text-[11px] font-bold uppercase tracking-wider opacity-60">{t('totalConsumed', 'Total Consumed')}</p>
-            <p className="text-xl font-black font-mono text-red-400 truncate">
+            <p className="text-xl font-black font-mono text-red-400 truncate" suppressHydrationWarning>
               -{stats.totalDeducted.toLocaleString()} {tokenSymbol}
             </p>
           </div>
@@ -6498,7 +6499,7 @@ export default function TokenPage() {
           </div>
           <div className="min-w-0">
             <p className="text-[11px] font-bold uppercase tracking-wider opacity-60">{t('totalGranted', 'Total Granted')}</p>
-            <p className="text-xl font-black font-mono text-emerald-400 truncate">
+            <p className="text-xl font-black font-mono text-emerald-400 truncate" suppressHydrationWarning>
               +{stats.totalGranted.toLocaleString()} {tokenSymbol}
             </p>
           </div>
@@ -6513,15 +6514,17 @@ export default function TokenPage() {
           </div>
           <div className="min-w-0">
             <p className="text-[11px] font-bold uppercase tracking-wider opacity-60">{t('totalEvents', 'Activity Events')}</p>
-            <p className="text-xl font-black font-mono truncate">
+            <p className="text-xl font-black font-mono truncate" suppressHydrationWarning>
               {stats.totalEvents.toLocaleString()}
             </p>
           </div>
         </div>
       </div>
 
-      {/* 4. Token Ledger & Transaction History */}
+      {/* 4. Token Ledger & Transaction History with Autofill Guardrails */}
       <div 
+        role="region"
+        aria-label={t('tokenLedgerRegion', 'Token Transaction Audit Ledger')}
         className="p-6 rounded-3xl border shadow-sm space-y-4"
         style={{
           backgroundColor: 'var(--color-card)',
@@ -6540,6 +6543,7 @@ export default function TokenPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            {/* Search Input with Autofill Guardrail (Constraint 9) */}
             <div 
               className="flex items-center gap-2 px-3 py-1.5 rounded-xl border bg-[var(--color-inner-dark)]"
               style={{ borderColor: 'var(--color-border)' }}
@@ -6548,6 +6552,11 @@ export default function TokenPage() {
               <input
                 type="text"
                 value={searchQuery}
+                autoComplete="off"
+                data-lpignore="true"
+                data-form-type="other"
+                spellCheck={false}
+                role="searchbox"
                 onChange={(e) => {
                   setSearchQuery(e.target.value);
                   setCurrentPage(1);
@@ -6557,8 +6566,10 @@ export default function TokenPage() {
               />
               {searchQuery && (
                 <button 
+                  type="button"
                   onClick={() => setSearchQuery('')}
-                  className="text-xs opacity-50 hover:opacity-100"
+                  className="text-xs opacity-50 hover:opacity-100 cursor-pointer"
+                  aria-label="Clear search"
                 >
                   ✕
                 </button>
@@ -6572,17 +6583,18 @@ export default function TokenPage() {
               <Filter className="h-3.5 w-3.5 opacity-50" />
               <select
                 value={typeFilter}
+                data-lpignore="true"
                 onChange={(e) => {
                   setTypeFilter(e.target.value);
                   setCurrentPage(1);
                 }}
                 className="bg-transparent text-xs font-bold outline-none cursor-pointer"
               >
-                <option value="all">All Operations</option>
-                <option value="chef">AI Chef Assistant</option>
-                <option value="import">Recipe Imports</option>
-                <option value="package_purchase">Package Purchases</option>
-                <option value="plan">Monthly Plan Grants</option>
+                <option value="all">{t('filterAll', 'All Operations')}</option>
+                <option value="chef">{t('filterChef', 'AI Chef Assistant')}</option>
+                <option value="import">{t('filterImport', 'Recipe Imports')}</option>
+                <option value="package_purchase">{t('filterPurchases', 'Package Purchases')}</option>
+                <option value="plan">{t('filterPlans', 'Monthly Plan Grants')}</option>
               </select>
             </div>
 
@@ -6590,9 +6602,10 @@ export default function TokenPage() {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border bg-[var(--color-inner-dark)]"
               style={{ borderColor: 'var(--color-border)' }}
             >
-              <span className="text-[11px] font-bold opacity-60">Rows:</span>
+              <span className="text-[11px] font-bold opacity-60">{t('rowsLabel', 'Rows:')}</span>
               <select
                 value={pageSize}
+                data-lpignore="true"
                 onChange={(e) => {
                   setPageSize(Number(e.target.value));
                   setCurrentPage(1);
@@ -6615,11 +6628,11 @@ export default function TokenPage() {
                 className="border-b uppercase font-mono text-[10px] tracking-wider opacity-60"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
               >
-                <th className="py-3 px-4">Service / Operation</th>
-                <th className="py-3 px-4">Description</th>
-                <th className="py-3 px-4 text-right">Amount</th>
-                <th className="py-3 px-4 text-right">Balance After</th>
-                <th className="py-3 px-4 text-right">Timestamp</th>
+                <th className="py-3 px-4">{t('colService', 'Service / Operation')}</th>
+                <th className="py-3 px-4">{t('colDescription', 'Description')}</th>
+                <th className="py-3 px-4 text-right">{t('colAmount', 'Amount')}</th>
+                <th className="py-3 px-4 text-right">{t('colBalanceAfter', 'Balance After')}</th>
+                <th className="py-3 px-4 text-right">{t('colTimestamp', 'Timestamp')}</th>
               </tr>
             </thead>
             <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
@@ -6628,7 +6641,7 @@ export default function TokenPage() {
                   <td colSpan={5} className="py-12 text-center opacity-60">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <RefreshCw className="h-5 w-5 animate-spin text-[var(--color-primary)]" />
-                      <span>Loading token transactions...</span>
+                      <span>{t('loadingTokenRecords', 'Loading token transactions...')}</span>
                     </div>
                   </td>
                 </tr>
@@ -6636,11 +6649,11 @@ export default function TokenPage() {
                 <tr>
                   <td colSpan={5} className="py-12 text-center opacity-60">
                     <Coins className="h-8 w-8 mx-auto mb-2 opacity-30 text-amber-500" />
-                    <p className="font-bold">No token transactions found</p>
+                    <p className="font-bold">{t('noTokenTxFound', 'No token transactions found')}</p>
                     <p className="text-[11px] opacity-75 mt-1">
                       {searchQuery || typeFilter !== 'all' 
-                        ? 'Try clearing your filters or search keywords.' 
-                        : 'Your token activity ledger will appear here once you interact with AI tools or top up.'}
+                        ? t('clearFiltersHint', 'Try clearing your filters or search keywords.') 
+                        : t('tokenActivityHint', 'Your token activity ledger will appear here once you interact with AI tools or top up.')}
                     </p>
                   </td>
                 </tr>
@@ -6674,7 +6687,9 @@ export default function TokenPage() {
                       </td>
 
                       <td className="py-3 px-4 text-right font-mono text-[11px] opacity-60 whitespace-nowrap">
-                        {new Date(tx.created_at).toLocaleString()}
+                        <span suppressHydrationWarning>
+                          {tx.created_at ? new Date(tx.created_at).toLocaleString() : '—'}
+                        </span>
                       </td>
                     </tr>
                   );
@@ -6687,7 +6702,7 @@ export default function TokenPage() {
         {/* Pagination Controls */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
           <div className="text-xs font-mono opacity-60">
-            Showing {totalCount > 0 ? (currentPage - 1) * pageSize + 1 : 0} - {Math.min(currentPage * pageSize, totalCount)} of {totalCount} transactions
+            {t('showingCount', 'Showing')} {totalCount > 0 ? (currentPage - 1) * pageSize + 1 : 0} - {Math.min(currentPage * pageSize, totalCount)} {t('ofTotal', 'of')} {totalCount} {t('transactionsLabel', 'transactions')}
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -6696,13 +6711,13 @@ export default function TokenPage() {
               disabled={currentPage <= 1 || loadingTransactions}
               onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
               className="p-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)] transition disabled:opacity-40 cursor-pointer"
-              title="Previous Page"
+              title={t('prevPage', 'Previous Page')}
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
 
             <span className="px-3 py-1 rounded-xl text-xs font-mono font-bold border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
-              Page {currentPage} of {totalPages}
+              {t('pageLabel', 'Page')} {currentPage} {t('ofTotal', 'of')} {totalPages}
             </span>
 
             <button
@@ -6710,7 +6725,7 @@ export default function TokenPage() {
               disabled={currentPage >= totalPages || loadingTransactions}
               onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
               className="p-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)] transition disabled:opacity-40 cursor-pointer"
-              title="Next Page"
+              title={t('nextPage', 'Next Page')}
             >
               <ChevronRight className="h-4 w-4" />
             </button>
