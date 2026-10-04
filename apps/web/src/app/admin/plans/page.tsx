@@ -1,7 +1,7 @@
 // @ts-nocheck
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { 
   ArrowLeft, Plus, Check, Trash2, Edit3, 
@@ -230,6 +230,11 @@ export default function AdminPlansPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [togglingTxId, setTogglingTxId] = useState<string | null>(null);
+
+  // Selection & Bulk Operations State
+  const [selectedTxIds, setSelectedTxIds] = useState<string[]>([]);
+  const [deletingTxId, setDeletingTxId] = useState<string | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState<boolean>(false);
 
   // Modal States for Transactions
   const [showAddModal, setShowAddModal] = useState(false);
@@ -691,6 +696,40 @@ export default function AdminPlansPage() {
     return filteredTransactions.slice(start, start + pageSize);
   }, [filteredTransactions, currentPage, pageSize]);
 
+  // Master Checkbox Select-All Logic
+  const isAllSelected = useMemo(() => {
+    if (paginatedTransactions.length === 0) return false;
+    return paginatedTransactions.every((tx) => selectedTxIds.includes(tx.id));
+  }, [paginatedTransactions, selectedTxIds]);
+
+  const isIndeterminate = useMemo(() => {
+    if (paginatedTransactions.length === 0) return false;
+    const count = paginatedTransactions.filter((tx) => selectedTxIds.includes(tx.id)).length;
+    return count > 0 && count < paginatedTransactions.length;
+  }, [paginatedTransactions, selectedTxIds]);
+
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = isIndeterminate;
+    }
+  }, [isIndeterminate]);
+
+  const handleToggleSelectAll = () => {
+    if (isAllSelected) {
+      const pageIds = new Set(paginatedTransactions.map((tx) => tx.id));
+      setSelectedTxIds((prev) => prev.filter((id) => !pageIds.has(id)));
+    } else {
+      const newSelected = new Set(selectedTxIds);
+      paginatedTransactions.forEach((tx) => newSelected.add(tx.id));
+      setSelectedTxIds(Array.from(newSelected));
+    }
+  };
+
+  const handleSelectAllMatching = () => {
+    setSelectedTxIds(filteredTransactions.map((tx) => tx.id));
+  };
+
   const handleToggleRecurring = async (tx: PaymentTransaction) => {
     const nextVal = !tx.autoRenew;
     setTogglingTxId(tx.id);
@@ -872,22 +911,85 @@ export default function AdminPlansPage() {
     }
   };
 
+  // Fixed Transaction Deletion
   const handleDeleteTransaction = async (tx: PaymentTransaction) => {
     if (!confirm(`${t('confirmDeleteTx', 'Are you sure you want to permanently delete transaction')} "${tx.id}"?`)) return;
 
+    setDeletingTxId(tx.id);
+    setErrorMsg('');
+    setSuccessMsg('');
+
     try {
       const res = await fetch(`/api/admin/payment?id=${encodeURIComponent(tx.id)}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: tx.id, ids: [tx.id] })
       });
 
-      if (!res.ok) throw new Error('Failed to delete transaction from database');
+      const data = await res.json().catch(() => null);
+      if (!res.ok || (data && data.success === false)) {
+        throw new Error(data?.error || t('failedDeleteTx', 'Failed to delete transaction from database'));
+      }
 
       setTransactions((prev) => prev.filter((item) => item.id !== tx.id));
+      setSelectedTxIds((prev) => prev.filter((item) => item !== tx.id));
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+      }
+
       setSuccessMsg(t('txDeletedSuccess', 'Transaction permanently removed from PostgreSQL.'));
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Error deleting transaction');
+      setErrorMsg(err.message || t('errorDeletingTx', 'Error deleting transaction'));
       setTimeout(() => setErrorMsg(''), 4000);
+      await fetchTransactions();
+    } finally {
+      setDeletingTxId(null);
+    }
+  };
+
+  // Bulk Delete Transactions
+  const handleBulkDeleteTransactions = async () => {
+    if (selectedTxIds.length === 0) return;
+    const confirmMsg = t('confirmBulkDeleteTx', 'Are you sure you want to permanently delete {count} selected transaction(s)?')
+      .replace('{count}', String(selectedTxIds.length));
+    if (!confirm(confirmMsg)) return;
+
+    setBulkDeleting(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedTxIds })
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || (data && data.success === false)) {
+        throw new Error(data?.error || t('failedBulkDeleteTx', 'Failed to delete selected transactions.'));
+      }
+
+      const deletedCount = selectedTxIds.length;
+      setTransactions((prev) => prev.filter((item) => !selectedTxIds.includes(item.id)));
+      setSelectedTxIds([]);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+      }
+
+      setSuccessMsg(t('bulkTxDeletedSuccess', `Successfully deleted {count} transaction(s) from PostgreSQL.`).replace('{count}', String(deletedCount)));
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || t('errorDeletingTx', 'Error deleting transactions'));
+      setTimeout(() => setErrorMsg(''), 4000);
+      await fetchTransactions();
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -1232,7 +1334,7 @@ export default function AdminPlansPage() {
                 </div>
               </div>
 
-              {/* SUBSCRIPTION GATING: can_view_macros SWITCH */}
+              {/* Macro Analysis Gating (can_view_macros) */}
               <div 
                 className="p-4 rounded-2xl border flex items-center justify-between transition-colors shadow-xs"
                 style={{
@@ -1351,7 +1453,7 @@ export default function AdminPlansPage() {
               </div>
             </div>
 
-            {/* LIVE CARD MOCKUP PREVIEW (WITH SUBSCRIPTION GATING DEMO) */}
+            {/* LIVE CARD MOCKUP PREVIEW */}
             <div 
               className="lg:col-span-5 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200 flex flex-col justify-between"
               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -1440,7 +1542,7 @@ export default function AdminPlansPage() {
                     </div>
                   </div>
 
-                  {/* SUBSCRIPTION GATING (can_view_macros) DEMONSTRATION */}
+                  {/* Macro Demo */}
                   <div 
                     className="p-3.5 rounded-2xl border space-y-2.5 transition-colors duration-200 shadow-xs"
                     style={{
@@ -1527,7 +1629,7 @@ export default function AdminPlansPage() {
             </div>
           </div>
 
-          {/* Configured Plans List Table with Macro Status Column */}
+          {/* Configured Plans List Table */}
           <div 
             className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -1728,6 +1830,7 @@ export default function AdminPlansPage() {
             className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
+            {/* Search, Filter & Controls */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
               <div className="relative flex-1">
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 opacity-40" />
@@ -1793,10 +1896,65 @@ export default function AdminPlansPage() {
               </div>
             </div>
 
+            {/* Active Bulk Actions Bar */}
+            {selectedTxIds.length > 0 && (
+              <div 
+                className="p-3 rounded-2xl border flex flex-wrap items-center justify-between gap-3 shadow-md animate-in fade-in"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold" style={{ color: 'var(--color-primary)' }}>
+                    {selectedTxIds.length} {t('selected', 'Selected')}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTxIds([])}
+                    className="text-[11px] underline opacity-70 hover:opacity-100 cursor-pointer ml-1"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    {t('clearSelection', 'Clear selection')}
+                  </button>
+                  {selectedTxIds.length < filteredTransactions.length && (
+                    <button
+                      type="button"
+                      onClick={handleSelectAllMatching}
+                      className="text-[11px] font-bold underline cursor-pointer ml-2"
+                      style={{ color: 'var(--color-emerald)' }}
+                    >
+                      {t('selectAllMatching', 'Select all {count} matching transactions').replace('{count}', String(filteredTransactions.length))}
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={bulkDeleting}
+                    onClick={handleBulkDeleteTransactions}
+                    className="px-3.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20 transition cursor-pointer disabled:opacity-50"
+                  >
+                    {bulkDeleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    <span>{t('deleteSelectedBtn', 'Delete Selected')} ({selectedTxIds.length})</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Transactions Table with Select All Checkbox */}
             <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b font-extrabold uppercase text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                    <th className="p-3.5 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        ref={headerCheckboxRef}
+                        checked={isAllSelected}
+                        onChange={handleToggleSelectAll}
+                        className="rounded w-4 h-4 cursor-pointer accent-[#10b981]"
+                        title={t('selectAll', 'Select All')}
+                      />
+                    </th>
                     <th className="p-3.5">{t('colDate', 'Date')}</th>
                     <th className="p-3.5">{t('colCustomer', 'Customer')}</th>
                     <th className="p-3.5">{t('colPlan', 'Plan')}</th>
@@ -1811,13 +1969,13 @@ export default function AdminPlansPage() {
                 <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
                   {loadingTransactions ? (
                     <tr>
-                      <td colSpan={9} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td colSpan={10} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                         <RefreshCw className="h-4 w-4 animate-spin inline mr-2" style={{ color: 'var(--color-primary)' }} /> Loading plan transactions...
                       </td>
                     </tr>
                   ) : paginatedTransactions.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td colSpan={10} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                         No subscription plan transactions found.
                       </td>
                     </tr>
@@ -1827,9 +1985,24 @@ export default function AdminPlansPage() {
                       const canceled = isCanceled(tx.status);
                       const refunded = isRefunded(tx.status);
                       const failed = isFailed(tx.status);
+                      const isSelected = selectedTxIds.includes(tx.id);
 
                       return (
-                        <tr key={tx.id} className="hover:bg-slate-500/5 transition">
+                        <tr key={tx.id} className={`hover:bg-slate-500/5 transition ${isSelected ? 'bg-primary/5' : ''}`}>
+                          <td className="p-3.5 w-10 text-center">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                setSelectedTxIds((prev) =>
+                                  prev.includes(tx.id) ? prev.filter((id) => id !== tx.id) : [...prev, tx.id]
+                                );
+                              }}
+                              className="rounded w-4 h-4 cursor-pointer accent-[#10b981]"
+                            />
+                          </td>
+
                           <td className="p-3.5 font-mono text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
                             {new Date(tx.createdAt).toLocaleDateString()}
                           </td>
@@ -1920,12 +2093,17 @@ export default function AdminPlansPage() {
 
                               <button
                                 type="button"
+                                disabled={deletingTxId === tx.id}
                                 onClick={() => handleDeleteTransaction(tx)}
-                                className="p-1.5 rounded-lg border transition hover:bg-red-500/10 text-red-400 border-red-500/30 hover:text-red-300 cursor-pointer shadow-xs"
+                                className="p-1.5 rounded-lg border transition hover:bg-red-500/10 text-red-400 border-red-500/30 hover:text-red-300 cursor-pointer shadow-xs disabled:opacity-50"
                                 style={{ backgroundColor: 'var(--color-inner-dark)' }}
                                 title={t('delete', 'Delete')}
                               >
-                                <Trash2 className="h-3 w-3" />
+                                {deletingTxId === tx.id ? (
+                                  <RefreshCw className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-3 w-3" />
+                                )}
                               </button>
                             </div>
                           </td>
@@ -1937,6 +2115,7 @@ export default function AdminPlansPage() {
               </table>
             </div>
 
+            {/* Pagination Controls */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs pt-2" style={{ color: 'var(--color-text-secondary)' }}>
               <span>
                 {t('showingCount', 'Showing')} {Math.min(filteredTransactions.length, (currentPage - 1) * pageSize + 1)} - {Math.min(filteredTransactions.length, currentPage * pageSize)} {t('ofTotal', 'of')} {filteredTransactions.length}
