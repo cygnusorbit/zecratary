@@ -9,7 +9,7 @@ import {
   ShieldCheck, CreditCard, Tag, Utensils, Settings, LogOut, 
   Menu, X, Wallet, Languages, Cpu, Moon, Sun, Key, Coins, 
   Bell, BellRing, User as UserIcon, Plus, ChevronDown, ChevronRight, 
-  Layers, Check, Database, Receipt, Globe
+  Layers, Check, Database, HardDrive, Receipt, Globe
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON } from '@/lib/siteConfig';
@@ -869,6 +869,10 @@ export default function Sidebar() {
                     <ShieldCheck className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('payments', 'Payment Gateway')}</span>}
                   </Link>
+                  <Link href="/admin/storage" className={navClass('/admin/storage')} style={navStyle('/admin/storage')} title={t('storage', 'Storage')}>
+                    <HardDrive className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('storage', 'Storage Settings')}</span>}
+                  </Link>
                   <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} style={navStyle('/admin/token-setting')} title={t('tokens', 'Tokens')}>
                     <Coins className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('tokens', 'Token Pricing')}</span>}
@@ -880,6 +884,10 @@ export default function Sidebar() {
                   <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} style={navStyle('/admin/notification-settings')} title={t('notifications', 'Alerts')}>
                     <BellRing className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('notifications', 'Notifications')}</span>}
+                  </Link>
+                  <Link href="/admin/language" className={navClass('/admin/language')} style={navStyle('/admin/language')} title={t('languages', 'Languages')}>
+                    <Languages className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('languageSettings', 'Languages')}</span>}
                   </Link>
                   <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} style={navStyle('/admin/ai-settings')} title={t('aiModels', 'AI Models')}>
                     <Cpu className="h-4 w-4 shrink-0" />
@@ -976,6 +984,9 @@ export default function Sidebar() {
                 </Link>
                 <Link href="/admin/payment" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/payment')} style={navStyle('/admin/payment')}>
                   <ShieldCheck className="h-4 w-4" /> <span>{t('payments', 'Payment Gateway')}</span>
+                </Link>
+                <Link href="/admin/storage" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/storage')} style={navStyle('/admin/storage')}>
+                  <HardDrive className="h-4 w-4" /> <span>{t('storage', 'Storage Settings')}</span>
                 </Link>
               </div>
             )}
