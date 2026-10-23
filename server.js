@@ -1,4 +1,4 @@
-// Universal Production Server Entry for Hostinger Node.js Web App
+// Production Server Runner for Hostinger Node.js Web App
 // GitHub: cygnusorbit/zecratary
 
 const path = require('path');
@@ -22,7 +22,7 @@ if (targetServer) {
   process.env.HOSTNAME = hostname;
   require(targetServer);
 } else {
-  console.log(`ℹ️ Standalone server bundle not detected. Starting standard Next.js runner on ${hostname}:${port}...`);
+  console.log(`ℹ️ Booting standard Next.js production server on ${hostname}:${port}...`);
   try {
     const next = require('next');
     const appDir = fs.existsSync(path.join(__dirname, 'apps', 'web')) ? path.join(__dirname, 'apps', 'web') : __dirname;
