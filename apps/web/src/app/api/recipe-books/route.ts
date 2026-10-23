@@ -14,10 +14,27 @@ async function ensureBooksTable() {
         creator_name VARCHAR(255) DEFAULT 'Chef',
         title VARCHAR(255) NOT NULL,
         description TEXT DEFAULT '',
+        cover_color VARCHAR(255) DEFAULT 'bg-gradient-to-r from-emerald-600 to-teal-600',
         recipe_ids JSONB DEFAULT '[]'::jsonb,
+        is_favorite BOOLEAN DEFAULT false,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS cookbooks (
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255) DEFAULT 'usr_admin_1',
+        title VARCHAR(255) NOT NULL,
+        description TEXT DEFAULT '',
+        cover_color VARCHAR(255) DEFAULT 'bg-gradient-to-r from-emerald-600 to-teal-600',
+        recipe_ids JSONB DEFAULT '[]'::jsonb,
+        is_favorite BOOLEAN DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      ALTER TABLE recipe_books ADD COLUMN IF NOT EXISTS cover_color VARCHAR(255) DEFAULT 'bg-gradient-to-r from-emerald-600 to-teal-600';
+      ALTER TABLE cookbooks ADD COLUMN IF NOT EXISTS cover_color VARCHAR(255) DEFAULT 'bg-gradient-to-r from-emerald-600 to-teal-600';
       ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS book_id VARCHAR(128);
     `);
   } catch (_) {}
@@ -40,7 +57,7 @@ export async function GET(req: NextRequest) {
 
     const books = await query(sql, params);
 
-    // Compute live recipe counts from saved_recipes
+    // Compute live recipe counts dynamically from saved_recipes
     const countMap: Record<string, number> = {};
     try {
       const countRows = await query(`
@@ -70,10 +87,13 @@ export async function GET(req: NextRequest) {
         title: b.title || 'Untitled Cookbook',
         name: b.title || 'Untitled Cookbook',
         description: b.description || '',
+        coverColor: b.cover_color || 'bg-gradient-to-r from-emerald-600 to-teal-600',
+        cover_color: b.cover_color || 'bg-gradient-to-r from-emerald-600 to-teal-600',
         recipeIds: recipeIdsArray,
         recipe_ids: recipeIdsArray,
         recipeCount: actualCount,
         recipes_count: actualCount,
+        is_favorite: Boolean(b.is_favorite),
         created_at: b.created_at,
         updated_at: b.updated_at,
       };
@@ -130,7 +150,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, recipe_ids: rList, recipes_count: rList.length });
     }
 
-    // Standard Create or Update (Single-statement executions)
+    // Standard Create or Update (Isolated Single-Statement Queries)
     const items = Array.isArray(body) ? body : (body.books || [body.book || body]);
 
     for (const b of items) {
@@ -138,15 +158,18 @@ export async function POST(req: NextRequest) {
       const targetUserId = b.userId || b.user_id || 'usr_admin_1';
       const title = b.title.trim();
       const desc = b.description || '';
+      const color = b.coverColor || b.cover_color || 'bg-gradient-to-r from-emerald-600 to-teal-600';
       const recipeIds = JSON.stringify(Array.isArray(b.recipeIds) ? b.recipeIds : (Array.isArray(b.recipe_ids) ? b.recipe_ids : []));
 
+      // 1. Single statement for recipe_books
       await query(`
         INSERT INTO recipe_books (
-          id, user_id, created_by, creator_name, title, description, recipe_ids, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, NOW())
+          id, user_id, created_by, creator_name, title, description, cover_color, recipe_ids, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           description = EXCLUDED.description,
+          cover_color = EXCLUDED.cover_color,
           recipe_ids = EXCLUDED.recipe_ids,
           updated_at = NOW();
       `, [
@@ -156,16 +179,19 @@ export async function POST(req: NextRequest) {
         b.creatorName || b.creator_name || 'Chef',
         title,
         desc,
+        color,
         recipeIds
       ]);
 
+      // 2. Single statement for cookbooks
       await query(`
         INSERT INTO cookbooks (
-          id, user_id, title, description, recipe_ids, updated_at
-        ) VALUES ($1, $2, $3, $4, $5::jsonb, NOW())
+          id, user_id, title, description, cover_color, recipe_ids, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           description = EXCLUDED.description,
+          cover_color = EXCLUDED.cover_color,
           recipe_ids = EXCLUDED.recipe_ids,
           updated_at = NOW();
       `, [
@@ -173,6 +199,7 @@ export async function POST(req: NextRequest) {
         targetUserId,
         title,
         desc,
+        color,
         recipeIds
       ]);
     }
