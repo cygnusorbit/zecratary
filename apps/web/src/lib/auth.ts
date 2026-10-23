@@ -195,12 +195,7 @@ export async function loginUser(
   };
 }
 
-export async function logoutUser(): Promise<void> {
-  try {
-    await fetch('/api/auth/logout', { method: 'POST' });
-  } catch (_) {}
-  setCurrentUser(null);
-}
+
 
 export async function registerUser(payload: { email: string; name?: string; password?: string }): Promise<any> {
   try {
@@ -219,4 +214,54 @@ export async function registerUser(payload: { email: string; name?: string; pass
   } catch (err: any) {
     return { success: false, error: err.message };
   }
+}
+
+export function logoutUser(redirectTo: string = '/') {
+  if (typeof window === 'undefined') return;
+
+  try {
+    // 1. Clear Local and Session Storage
+    localStorage.removeItem('zecratary_current_user');
+    localStorage.removeItem('zecratary_user');
+    localStorage.removeItem('currentUser');
+    localStorage.removeItem('token_balance');
+    localStorage.removeItem('wallet_balance');
+    localStorage.removeItem('zecratary_auth_session');
+    
+    sessionStorage.removeItem('zec_login_bounce_ts');
+    sessionStorage.removeItem('zec_login_bounce_count');
+  } catch (_) {}
+
+  // 2. Clear All Session Cookies across root path and domain
+  const cookieKeys = [
+    'zecratary_session',
+    'zecratary_current_user',
+    'zecratary_auth_session',
+    'currentUser'
+  ];
+  for (const key of cookieKeys) {
+    document.cookie = `${key}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; SameSite=Lax`;
+    if (typeof window !== 'undefined' && window.location.hostname) {
+      document.cookie = `${key}=; path=/; domain=${window.location.hostname}; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; SameSite=Lax`;
+    }
+  }
+
+  // 3. Notify app components and auth listeners
+  window.dispatchEvent(new Event('zecratary_auth_changed'));
+
+  // 4. Server-Side Logout Call to synchronize with PostgreSQL
+  try {
+    fetch('/api/auth/logout', { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ redirectUrl: redirectTo || '/' }),
+      keepalive: true 
+    }).catch(() => {});
+  } catch (_) {}
+
+  // 5. Navigate cleanly to Homepage ('/')
+  const target = redirectTo || '/';
+  setTimeout(() => {
+    window.location.replace(target);
+  }, 100);
 }

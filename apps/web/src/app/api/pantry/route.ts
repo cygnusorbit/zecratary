@@ -85,7 +85,7 @@ export async function GET(req: Request) {
          ORDER BY created_at DESC`,
         [userId]
       );
-      return NextResponse.json({ success: true, items: res.rows || [] });
+      return NextResponse.json({ success: true, items: (res as any)?.rows || [] });
     } catch {}
   }
 

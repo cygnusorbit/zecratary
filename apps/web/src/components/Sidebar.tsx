@@ -1072,8 +1072,7 @@ export default function Sidebar() {
                   type="button"
                   onClick={() => {
                     setShowProfileMenu(false);
-                    logoutUser();
-                    window.location.href = '/login';
+                    logoutUser('/');
                   }}
                   className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 transition cursor-pointer border-t border-[var(--color-border)] pt-2"
                 >
@@ -1364,8 +1363,7 @@ export default function Sidebar() {
                     type="button"
                     onClick={() => {
                       setShowProfileMenu(false);
-                      logoutUser();
-                      window.location.href = '/login';
+                      logoutUser('/');
                     }}
                     className="w-full flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 transition cursor-pointer text-left border-t border-[var(--color-border)] mt-1.5 pt-2"
                   >
@@ -1728,8 +1726,7 @@ export default function Sidebar() {
           {/* LOGOUT */}
           <button
             onClick={() => {
-              logoutUser();
-              window.location.href = '/login';
+              logoutUser('/');
             }}
             className={`w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer text-left ${
               isDarkMode ? 'text-slate-400 hover:text-red-400 hover:bg-red-950/20' : 'text-slate-800 hover:text-red-600 hover:bg-red-100/70 font-bold'

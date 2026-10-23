@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
         [email]
       ).catch(() => []);
       if (Array.isArray(uRows) && uRows.length > 0) userRow = uRows[0];
-      else if (uRows?.rows && uRows.rows.length > 0) userRow = uRows.rows[0];
+      else if ((uRows as any)?.rows && (uRows as any)?.rows.length > 0) userRow = (uRows as any)?.rows[0];
     }
 
     if (!userRow) {
@@ -67,7 +67,7 @@ export async function GET(req: NextRequest) {
          FROM users 
          ORDER BY CASE WHEN LOWER(role) = 'admin' THEN 1 ELSE 0 END, created_at ASC LIMIT 1`
       ).catch(() => []);
-      const rows = Array.isArray(anyUserRows) ? anyUserRows : (anyUserRows?.rows || []);
+      const rows = ((Array.isArray(anyUserRows) ? anyUserRows : ((anyUserRows as any)?.rows || [])));
       if (rows.length > 0) userRow = rows[0];
     }
 
@@ -75,13 +75,13 @@ export async function GET(req: NextRequest) {
     let txRows: any[] = [];
     if (showAll || !email) {
       const allRes = await query(`SELECT * FROM payment_transactions ORDER BY created_at DESC`).catch(() => []);
-      txRows = Array.isArray(allRes) ? allRes : (allRes?.rows || []);
+      txRows = ((Array.isArray(allRes) ? allRes : ((allRes as any)?.rows || [])));
     } else {
       const filteredRes = await query(
         `SELECT * FROM payment_transactions WHERE LOWER(TRIM(customer_email)) = LOWER(TRIM($1)) ORDER BY created_at DESC`,
         [email]
       ).catch(() => []);
-      txRows = Array.isArray(filteredRes) ? filteredRes : (filteredRes?.rows || []);
+      txRows = ((Array.isArray(filteredRes) ? filteredRes : ((filteredRes as any)?.rows || [])));
     }
 
     const transactions = txRows.map((r: any) => ({
@@ -116,7 +116,7 @@ export async function GET(req: NextRequest) {
 
     try {
       const sRes = await query(`SELECT payment_settings, currency FROM admin_settings LIMIT 1`);
-      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      const sRow = ((Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0]));
       if (sRow) {
         if (sRow.payment_settings) {
           const val = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;

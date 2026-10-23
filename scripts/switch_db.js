@@ -44,17 +44,17 @@ if (!dbUrl) {
   process.exit(0);
 }
 
-const isMySQL = dbType === 'mysql' || dbUrl.startsWith('mysql://') || Boolean(process.env.MYSQL_URL);
+const isMySQL = dbType === 'mysql' || dbUrl.startsWith('mysql://') || (Boolean(process.env.MYSQL_URL) && !dbUrl.startsWith('postgres'));
 
 if (isMySQL) {
-  console.log('🎯 Active Dialect: MySQL (Alternative Option)');
-  console.log('   Connection URI:', dbUrl.replace(/:[^:@]+@/, ':****@'));
-  console.log('   Schema File: scripts/schema.mysql.sql');
-  console.log('   Migration Script: node scripts/migrate_to_mysql.js');
+  console.log('🎯 Active Dialect: MySQL (Configured Option)');
+  console.log('   Connection URI:  ', dbUrl.replace(/:[^:@]+@/, ':****@'));
+  console.log('   Schema File:     scripts/schema.mysql.sql');
+  console.log('   Migration Tool:  node scripts/migrate_to_mysql.js');
 } else {
   console.log('✅ Active Dialect: PostgreSQL (Constraint 8 Compliant & Default)');
-  console.log('   Connection URI:', dbUrl.replace(/:[^:@]+@/, ':****@'));
-  console.log('   Schema File: scripts/schema.sql');
-  console.log('   Migration Script: node scripts/migrate_all_to_postgres.js');
+  console.log('   Connection URI:  ', dbUrl.replace(/:[^:@]+@/, ':****@'));
+  console.log('   Schema File:     scripts/schema.sql');
+  console.log('   Migration Tool:  node scripts/migrate_all_to_postgres.js');
 }
 console.log('=============================================================\n');

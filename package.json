@@ -1,6 +1,6 @@
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.16",
+  "version": "8.1.17",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -18,17 +18,21 @@
   },
   "devDependencies": {
     "@types/pg": "^8.11.0",
-    "prisma": "^7.10.0",
-    "typescript": "^5.7.3"
+    "prisma": "5.22.0",
+    "typescript": "^5.7.3",
+    "tailwindcss": "^3.4.17",
+    "postcss": "^8.4.49",
+    "autoprefixer": "^10.4.20"
   },
   "packageManager": "npm@10.8.2",
   "dependencies": {
+    "@prisma/client": "5.22.0",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",
+    "mysql2": "^3.24.6",
     "next": "^16.3.5",
     "pg": "^8.23.0",
     "stripe": "^22.6.2",
-    "tailwindcss": "4.3.3",
     "turbo": "^2.11.6"
   }
 }

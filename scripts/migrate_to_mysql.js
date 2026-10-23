@@ -3,7 +3,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const net = require('net');
 
 function loadEnvironmentVariables() {
   const candidateFiles = [
@@ -37,26 +36,6 @@ function loadEnvironmentVariables() {
 }
 loadEnvironmentVariables();
 
-function checkTcpPort(host, port, timeoutMs = 2500) {
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    socket.setTimeout(timeoutMs);
-    socket.on('connect', () => {
-      socket.destroy();
-      resolve(true);
-    });
-    socket.on('timeout', () => {
-      socket.destroy();
-      resolve(false);
-    });
-    socket.on('error', () => {
-      socket.destroy();
-      resolve(false);
-    });
-    socket.connect(port, host);
-  });
-}
-
 function readJsonFile(filename, fallback) {
   const searchDirs = [
     path.join(process.cwd(), 'apps/web/data', filename),
@@ -77,61 +56,28 @@ async function runMySQLMigration() {
   const connUri = process.env.MYSQL_URL || process.env.DATABASE_URL;
 
   console.log('\n======================================================');
-  console.log('🐬 MySQL Migration Runner for Zecratary');
+  console.log('🐬 MySQL Migration Suite for Zecratary');
   console.log('======================================================');
 
   if (!connUri || (!connUri.startsWith('mysql://') && !process.env.MYSQL_URL)) {
-    console.log('❌ Error: No MySQL connection string detected in .env.');
-    console.log('Please set MYSQL_URL in your .env or .env.local:');
-    console.log('  MYSQL_URL="mysql://root:password@127.0.0.1:3306/zecratary"\n');
+    console.error('❌ Error: No MySQL connection string detected.');
+    console.error('Please configure MYSQL_URL in your .env or .env.local:');
+    console.error('  MYSQL_URL="mysql://root:password@127.0.0.1:3306/zecratary"\n');
     process.exit(1);
   }
-
-  // Pre-flight TCP port check to prevent uncaught ECONNREFUSED
-  let host = '127.0.0.1';
-  let port = 3306;
-  try {
-    const u = new URL(connUri);
-    host = u.hostname || host;
-    port = u.port ? parseInt(u.port, 10) : port;
-  } catch (_) {}
-
-  process.stdout.write(`Checking MySQL TCP connectivity on ${host}:${port}... `);
-  const isPortOpen = await checkTcpPort(host, port);
-
-  if (!isPortOpen) {
-    console.log('FAILED ❌\n');
-    console.log(`[Error: ECONNREFUSED] No MySQL service is responding on ${host}:${port}.`);
-    if (host === '127.0.0.1' || host === 'localhost') {
-      console.log('\n👉 To start local MySQL on macOS, run:');
-      console.log('   brew services start mysql');
-      console.log('\n👉 Or run the Service Doctor:');
-      console.log('   node scripts/check_mysql_service.js');
-      console.log('\n👉 Or use PostgreSQL (Constraint 8 Compliant):');
-      console.log('   node scripts/migrate_all_to_postgres.js\n');
-    }
-    process.exit(1);
-  }
-  console.log('CONNECTED ✅');
 
   let mysql;
   try {
     mysql = require('mysql2/promise');
   } catch (_) {
-    console.log('❌ Error: "mysql2" package is not installed.');
-    console.log('Please install the driver:');
-    console.log('  npm install mysql2\n');
+    console.error('❌ Error: "mysql2" driver is not installed.');
+    console.error('Install it with:');
+    console.error('  npm install mysql2\n');
     process.exit(1);
   }
 
   console.log('Connecting to MySQL instance...');
-  let pool;
-  try {
-    pool = mysql.createPool({ uri: connUri, multipleStatements: true });
-  } catch (err) {
-    console.error('❌ Failed to create connection pool:', err.message);
-    process.exit(1);
-  }
+  const pool = mysql.createPool({ uri: connUri, multipleStatements: true });
 
   try {
     // 1. Apply Schema DDL
@@ -160,8 +106,8 @@ async function runMySQLMigration() {
           token_limit = VALUES(token_limit);
       `, [
         p.id || p.slug,
-        p.name,
-        p.slug,
+        p.name || 'Plan',
+        p.slug || 'plan',
         Boolean(p.isFree),
         Boolean(p.isDefault),
         p.monthlyPriceDollars || 0,
@@ -196,8 +142,8 @@ async function runMySQLMigration() {
           subscription_plan = VALUES(subscription_plan);
       `, [
         u.id || ('usr_' + Date.now().toString(36)),
-        u.name,
-        u.email.toLowerCase().trim(),
+        u.name || 'User',
+        (u.email || 'user@example.com').toLowerCase().trim(),
         u.role || 'user',
         u.subscriptionPlan || 'taster',
         u.createdAt ? new Date(u.createdAt) : new Date()
@@ -251,10 +197,10 @@ async function runMySQLMigration() {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE status = VALUES(status);
       `, [
-        t.id,
-        t.customerName,
-        t.customerEmail.toLowerCase().trim(),
-        t.planName,
+        t.id || ('tx_' + Date.now().toString(36)),
+        t.customerName || 'Customer',
+        (t.customerEmail || 'customer@example.com').toLowerCase().trim(),
+        t.planName || 'Plan',
         t.planSlug || null,
         t.amount || 0,
         t.currency || 'USD',
@@ -306,7 +252,7 @@ async function runMySQLMigration() {
   } catch (err) {
     console.error('\n❌ MySQL Migration error:', err.message);
   } finally {
-    if (pool) await pool.end();
+    await pool.end();
   }
 }
 

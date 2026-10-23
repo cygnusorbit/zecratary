@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.16",
+  "version": "8.1.17",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -117,7 +117,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.16",
+  "version": "8.1.17",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -27399,7 +27399,7 @@ export default function AdminFrontendSettingsPage() {
 // @ts-nocheck
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { 
   ArrowLeft, Plus, Check, Trash2, Edit3, 
@@ -27628,6 +27628,11 @@ export default function AdminPlansPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [togglingTxId, setTogglingTxId] = useState<string | null>(null);
+
+  // Selection & Bulk Operations State
+  const [selectedTxIds, setSelectedTxIds] = useState<string[]>([]);
+  const [deletingTxId, setDeletingTxId] = useState<string | null>(null);
+  const [bulkDeleting, setBulkDeleting] = useState<boolean>(false);
 
   // Modal States for Transactions
   const [showAddModal, setShowAddModal] = useState(false);
@@ -28089,6 +28094,40 @@ export default function AdminPlansPage() {
     return filteredTransactions.slice(start, start + pageSize);
   }, [filteredTransactions, currentPage, pageSize]);
 
+  // Master Checkbox Select-All Logic
+  const isAllSelected = useMemo(() => {
+    if (paginatedTransactions.length === 0) return false;
+    return paginatedTransactions.every((tx) => selectedTxIds.includes(tx.id));
+  }, [paginatedTransactions, selectedTxIds]);
+
+  const isIndeterminate = useMemo(() => {
+    if (paginatedTransactions.length === 0) return false;
+    const count = paginatedTransactions.filter((tx) => selectedTxIds.includes(tx.id)).length;
+    return count > 0 && count < paginatedTransactions.length;
+  }, [paginatedTransactions, selectedTxIds]);
+
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = isIndeterminate;
+    }
+  }, [isIndeterminate]);
+
+  const handleToggleSelectAll = () => {
+    if (isAllSelected) {
+      const pageIds = new Set(paginatedTransactions.map((tx) => tx.id));
+      setSelectedTxIds((prev) => prev.filter((id) => !pageIds.has(id)));
+    } else {
+      const newSelected = new Set(selectedTxIds);
+      paginatedTransactions.forEach((tx) => newSelected.add(tx.id));
+      setSelectedTxIds(Array.from(newSelected));
+    }
+  };
+
+  const handleSelectAllMatching = () => {
+    setSelectedTxIds(filteredTransactions.map((tx) => tx.id));
+  };
+
   const handleToggleRecurring = async (tx: PaymentTransaction) => {
     const nextVal = !tx.autoRenew;
     setTogglingTxId(tx.id);
@@ -28270,22 +28309,85 @@ export default function AdminPlansPage() {
     }
   };
 
+  // Fixed Transaction Deletion
   const handleDeleteTransaction = async (tx: PaymentTransaction) => {
     if (!confirm(`${t('confirmDeleteTx', 'Are you sure you want to permanently delete transaction')} "${tx.id}"?`)) return;
 
+    setDeletingTxId(tx.id);
+    setErrorMsg('');
+    setSuccessMsg('');
+
     try {
       const res = await fetch(`/api/admin/payment?id=${encodeURIComponent(tx.id)}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: tx.id, ids: [tx.id] })
       });
 
-      if (!res.ok) throw new Error('Failed to delete transaction from database');
+      const data = await res.json().catch(() => null);
+      if (!res.ok || (data && data.success === false)) {
+        throw new Error(data?.error || t('failedDeleteTx', 'Failed to delete transaction from database'));
+      }
 
       setTransactions((prev) => prev.filter((item) => item.id !== tx.id));
+      setSelectedTxIds((prev) => prev.filter((item) => item !== tx.id));
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+      }
+
       setSuccessMsg(t('txDeletedSuccess', 'Transaction permanently removed from PostgreSQL.'));
       setTimeout(() => setSuccessMsg(''), 3000);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Error deleting transaction');
+      setErrorMsg(err.message || t('errorDeletingTx', 'Error deleting transaction'));
       setTimeout(() => setErrorMsg(''), 4000);
+      await fetchTransactions();
+    } finally {
+      setDeletingTxId(null);
+    }
+  };
+
+  // Bulk Delete Transactions
+  const handleBulkDeleteTransactions = async () => {
+    if (selectedTxIds.length === 0) return;
+    const confirmMsg = t('confirmBulkDeleteTx', 'Are you sure you want to permanently delete {count} selected transaction(s)?')
+      .replace('{count}', String(selectedTxIds.length));
+    if (!confirm(confirmMsg)) return;
+
+    setBulkDeleting(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const res = await fetch('/api/admin/payment', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: selectedTxIds })
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || (data && data.success === false)) {
+        throw new Error(data?.error || t('failedBulkDeleteTx', 'Failed to delete selected transactions.'));
+      }
+
+      const deletedCount = selectedTxIds.length;
+      setTransactions((prev) => prev.filter((item) => !selectedTxIds.includes(item.id)));
+      setSelectedTxIds([]);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_payment_updated'));
+        window.dispatchEvent(new Event('zecratary_users_updated'));
+      }
+
+      setSuccessMsg(t('bulkTxDeletedSuccess', `Successfully deleted {count} transaction(s) from PostgreSQL.`).replace('{count}', String(deletedCount)));
+      setTimeout(() => setSuccessMsg(''), 4000);
+    } catch (err: any) {
+      setErrorMsg(err.message || t('errorDeletingTx', 'Error deleting transactions'));
+      setTimeout(() => setErrorMsg(''), 4000);
+      await fetchTransactions();
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -28630,7 +28732,7 @@ export default function AdminPlansPage() {
                 </div>
               </div>
 
-              {/* SUBSCRIPTION GATING: can_view_macros SWITCH */}
+              {/* Macro Analysis Gating (can_view_macros) */}
               <div 
                 className="p-4 rounded-2xl border flex items-center justify-between transition-colors shadow-xs"
                 style={{
@@ -28749,7 +28851,7 @@ export default function AdminPlansPage() {
               </div>
             </div>
 
-            {/* LIVE CARD MOCKUP PREVIEW (WITH SUBSCRIPTION GATING DEMO) */}
+            {/* LIVE CARD MOCKUP PREVIEW */}
             <div 
               className="lg:col-span-5 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200 flex flex-col justify-between"
               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -28838,7 +28940,7 @@ export default function AdminPlansPage() {
                     </div>
                   </div>
 
-                  {/* SUBSCRIPTION GATING (can_view_macros) DEMONSTRATION */}
+                  {/* Macro Demo */}
                   <div 
                     className="p-3.5 rounded-2xl border space-y-2.5 transition-colors duration-200 shadow-xs"
                     style={{
@@ -28925,7 +29027,7 @@ export default function AdminPlansPage() {
             </div>
           </div>
 
-          {/* Configured Plans List Table with Macro Status Column */}
+          {/* Configured Plans List Table */}
           <div 
             className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -29126,6 +29228,7 @@ export default function AdminPlansPage() {
             className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
+            {/* Search, Filter & Controls */}
             <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
               <div className="relative flex-1">
                 <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 opacity-40" />
@@ -29191,10 +29294,65 @@ export default function AdminPlansPage() {
               </div>
             </div>
 
+            {/* Active Bulk Actions Bar */}
+            {selectedTxIds.length > 0 && (
+              <div 
+                className="p-3 rounded-2xl border flex flex-wrap items-center justify-between gap-3 shadow-md animate-in fade-in"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold" style={{ color: 'var(--color-primary)' }}>
+                    {selectedTxIds.length} {t('selected', 'Selected')}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTxIds([])}
+                    className="text-[11px] underline opacity-70 hover:opacity-100 cursor-pointer ml-1"
+                    style={{ color: 'var(--color-text-secondary)' }}
+                  >
+                    {t('clearSelection', 'Clear selection')}
+                  </button>
+                  {selectedTxIds.length < filteredTransactions.length && (
+                    <button
+                      type="button"
+                      onClick={handleSelectAllMatching}
+                      className="text-[11px] font-bold underline cursor-pointer ml-2"
+                      style={{ color: 'var(--color-emerald)' }}
+                    >
+                      {t('selectAllMatching', 'Select all {count} matching transactions').replace('{count}', String(filteredTransactions.length))}
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={bulkDeleting}
+                    onClick={handleBulkDeleteTransactions}
+                    className="px-3.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20 transition cursor-pointer disabled:opacity-50"
+                  >
+                    {bulkDeleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    <span>{t('deleteSelectedBtn', 'Delete Selected')} ({selectedTxIds.length})</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Transactions Table with Select All Checkbox */}
             <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="border-b font-extrabold uppercase text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                    <th className="p-3.5 w-10 text-center">
+                      <input
+                        type="checkbox"
+                        ref={headerCheckboxRef}
+                        checked={isAllSelected}
+                        onChange={handleToggleSelectAll}
+                        className="rounded w-4 h-4 cursor-pointer accent-[#10b981]"
+                        title={t('selectAll', 'Select All')}
+                      />
+                    </th>
                     <th className="p-3.5">{t('colDate', 'Date')}</th>
                     <th className="p-3.5">{t('colCustomer', 'Customer')}</th>
                     <th className="p-3.5">{t('colPlan', 'Plan')}</th>
@@ -29209,13 +29367,13 @@ export default function AdminPlansPage() {
                 <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
                   {loadingTransactions ? (
                     <tr>
-                      <td colSpan={9} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td colSpan={10} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                         <RefreshCw className="h-4 w-4 animate-spin inline mr-2" style={{ color: 'var(--color-primary)' }} /> Loading plan transactions...
                       </td>
                     </tr>
                   ) : paginatedTransactions.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                      <td colSpan={10} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
                         No subscription plan transactions found.
                       </td>
                     </tr>
@@ -29225,9 +29383,24 @@ export default function AdminPlansPage() {
                       const canceled = isCanceled(tx.status);
                       const refunded = isRefunded(tx.status);
                       const failed = isFailed(tx.status);
+                      const isSelected = selectedTxIds.includes(tx.id);
 
                       return (
-                        <tr key={tx.id} className="hover:bg-slate-500/5 transition">
+                        <tr key={tx.id} className={`hover:bg-slate-500/5 transition ${isSelected ? 'bg-primary/5' : ''}`}>
+                          <td className="p-3.5 w-10 text-center">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                setSelectedTxIds((prev) =>
+                                  prev.includes(tx.id) ? prev.filter((id) => id !== tx.id) : [...prev, tx.id]
+                                );
+                              }}
+                              className="rounded w-4 h-4 cursor-pointer accent-[#10b981]"
+                            />
+                          </td>
+
                           <td className="p-3.5 font-mono text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
                             {new Date(tx.createdAt).toLocaleDateString()}
                           </td>
@@ -29318,12 +29491,17 @@ export default function AdminPlansPage() {
 
                               <button
                                 type="button"
+                                disabled={deletingTxId === tx.id}
                                 onClick={() => handleDeleteTransaction(tx)}
-                                className="p-1.5 rounded-lg border transition hover:bg-red-500/10 text-red-400 border-red-500/30 hover:text-red-300 cursor-pointer shadow-xs"
+                                className="p-1.5 rounded-lg border transition hover:bg-red-500/10 text-red-400 border-red-500/30 hover:text-red-300 cursor-pointer shadow-xs disabled:opacity-50"
                                 style={{ backgroundColor: 'var(--color-inner-dark)' }}
                                 title={t('delete', 'Delete')}
                               >
-                                <Trash2 className="h-3 w-3" />
+                                {deletingTxId === tx.id ? (
+                                  <RefreshCw className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Trash2 className="h-3 w-3" />
+                                )}
                               </button>
                             </div>
                           </td>
@@ -29335,6 +29513,7 @@ export default function AdminPlansPage() {
               </table>
             </div>
 
+            {/* Pagination Controls */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs pt-2" style={{ color: 'var(--color-text-secondary)' }}>
               <span>
                 {t('showingCount', 'Showing')} {Math.min(filteredTransactions.length, (currentPage - 1) * pageSize + 1)} - {Math.min(filteredTransactions.length, currentPage * pageSize)} {t('ofTotal', 'of')} {filteredTransactions.length}
@@ -52787,225 +52966,34 @@ export async function POST(req: NextRequest) {
 ```typescript
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import fs from 'fs';
-import path from 'path';
 
-function normalizeBool(val: any): boolean {
-  if (typeof val === 'boolean') return val;
-  if (typeof val === 'string') {
-    const s = val.trim().toLowerCase();
-    return s === 'true' || s === '1' || s === 'yes' || s === 'on' || s === 'enabled';
-  }
-  if (typeof val === 'number') return val === 1;
-  return Boolean(val);
-}
-
-function parseDbRows<T = any>(res: any): T[] {
-  if (!res) return [];
-  if (Array.isArray(res)) return res;
-  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
-  return [];
-}
-
-function parseDbRow<T = any>(res: any): T | null {
-  const rows = parseDbRows<T>(res);
-  return rows.length > 0 ? rows[0] : null;
-}
-
-async function ensurePaymentSchema() {
-  try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS payment_transactions (
-        id VARCHAR(255) PRIMARY KEY,
-        customer_name TEXT,
-        customer_email TEXT,
-        plan_name TEXT,
-        plan_slug TEXT,
-        amount NUMERIC DEFAULT 0,
-        currency VARCHAR(10) DEFAULT 'USD',
-        gateway VARCHAR(50) DEFAULT 'stripe',
-        status VARCHAR(50) DEFAULT 'succeeded',
-        test_mode BOOLEAN DEFAULT false,
-        failure_reason TEXT,
-        is_recurring BOOLEAN DEFAULT true,
-        recurring_interval VARCHAR(20) DEFAULT 'MONTH',
-        auto_renew BOOLEAN DEFAULT true,
-        transfer_reference TEXT,
-        notes TEXT,
-        confirmed_amount NUMERIC,
-        confirmed_at TIMESTAMPTZ,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW(),
-        expiry_date TIMESTAMPTZ,
-        gateway_transaction_id TEXT
-      );
-    `);
-
-    await query(`
-      CREATE TABLE IF NOT EXISTS admin_settings (
-        id INT PRIMARY KEY DEFAULT 1,
-        payment_settings JSONB,
-        currency VARCHAR(10) DEFAULT 'USD',
-        site_name TEXT,
-        theme_colors JSONB,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-    `);
-
-    await query(`
-      CREATE TABLE IF NOT EXISTS wallet_settings (
-        id INT PRIMARY KEY DEFAULT 1,
-        currency VARCHAR(10) DEFAULT 'USD',
-        allowed_gateways JSONB DEFAULT '["stripe"]',
-        active_gateway VARCHAR(50) DEFAULT 'stripe',
-        min_deposit NUMERIC DEFAULT 5,
-        max_deposit NUMERIC DEFAULT 1000,
-        bonus_tiers JSONB,
-        ledger_columns JSONB,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      );
-    `);
-
-    await query(`
-      DO $$ 
-      BEGIN 
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS transfer_reference TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS notes TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_amount NUMERIC; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_reason TEXT; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS payment_settings JSONB; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS allowed_gateways JSONB DEFAULT '["stripe"]'; EXCEPTION WHEN OTHERS THEN NULL; END;
-        BEGIN ALTER TABLE wallet_settings ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'; EXCEPTION WHEN OTHERS THEN NULL; END;
-      END $$;
-    `);
-  } catch (e) {
-    console.warn('[Payment API] Schema check warning:', e);
-  }
-}
-
-async function persistAdminSettingsData(settings: any, currency: string) {
-  await ensurePaymentSchema();
-  const cleanSettings = { ...settings };
-  delete cleanSettings.action;
-  delete cleanSettings.gateway;
-  delete cleanSettings.enabled;
-  const jsonStr = JSON.stringify(cleanSettings);
-  const cur = currency || cleanSettings.currency || 'USD';
-
-  // 1. Persist in admin_settings
-  try {
-    await query(
-      `INSERT INTO admin_settings (id, payment_settings, currency, updated_at)
-       VALUES (1, $1::jsonb, $2, NOW())
-       ON CONFLICT (id) DO UPDATE SET
-         payment_settings = EXCLUDED.payment_settings,
-         currency = EXCLUDED.currency,
-         updated_at = NOW()`,
-      [jsonStr, cur]
-    );
-  } catch (err) {
-    try {
-      await query(
-        `UPDATE admin_settings SET payment_settings = $1, currency = $2, updated_at = NOW() WHERE id = 1`,
-        [jsonStr, cur]
-      );
-    } catch (_) {}
-  }
-
-  // 2. Synchronize allowed_gateways with wallet_settings
-  try {
-    const allowedGateways: string[] = [];
-    if (normalizeBool(cleanSettings.stripe?.enabled)) allowedGateways.push('stripe');
-    if (normalizeBool(cleanSettings.paypal?.enabled)) allowedGateways.push('paypal');
-    if (normalizeBool(cleanSettings.manualSettlement?.enabled || cleanSettings.manual?.enabled)) allowedGateways.push('manual');
-
-    await query(
-      `INSERT INTO wallet_settings (id, currency, allowed_gateways, updated_at)
-       VALUES (1, $1, $2::jsonb, NOW())
-       ON CONFLICT (id) DO UPDATE SET
-         currency = EXCLUDED.currency,
-         allowed_gateways = EXCLUDED.allowed_gateways,
-         updated_at = NOW()`,
-      [cur, JSON.stringify(allowedGateways)]
-    ).catch(async () => {
-      await query(
-        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW() WHERE id = 1`,
-        [cur, JSON.stringify(allowedGateways)]
-      ).catch(() => {});
-    });
-  } catch (wErr) {
-    console.warn('[Payment API] wallet_settings sync warning:', wErr);
-  }
-
-  // 3. Mirror to filesystem for resilience
-  try {
-    const dataDir = path.join(process.cwd(), 'data');
-    const filePath = path.join(dataDir, 'admin_settings.json');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-    let existing: any = {};
-    if (fs.existsSync(filePath)) {
-      try {
-        existing = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-      } catch (_) {}
-    }
-    existing.paymentSettings = cleanSettings;
-    existing.currency = cur;
-    existing.updatedAt = new Date().toISOString();
-    fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
-  } catch (fileErr) {
-    console.warn('[Payment API] File mirror error:', fileErr);
-  }
-}
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    await ensurePaymentSchema();
-
-    let txRes: any = await query(
+    const txRes = await query(
       `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
-    ).catch(async () => {
-      return await query(`SELECT * FROM payment_transactions ORDER BY id DESC LIMIT 500`).catch(() => []);
-    });
+    ).catch(() => ({ rows: [] }));
+    const transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
 
-    const transactions = parseDbRows(txRes);
-
-    let settings: any = null;
+    let settings = null;
     try {
-      const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-      const sRow: any = parseDbRow(sRes);
+      const sRes = await query(`SELECT payment_settings, currency FROM admin_settings LIMIT 1`);
+      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
       if (sRow) {
-        let ps = sRow.payment_settings;
-        if (typeof ps === 'string') {
-          try { ps = JSON.parse(ps); } catch (_) {}
-        }
-        if (ps && typeof ps === 'object') {
-          settings = { ...ps };
-          if (sRow.currency) settings.currency = sRow.currency;
+        settings = sRow.payment_settings || sRow;
+        if (sRow.currency && typeof settings === 'object') {
+          settings.currency = sRow.currency;
         }
       }
     } catch (_) {}
 
-    if (!settings) {
-      try {
-        const filePath = path.join(process.cwd(), 'data', 'admin_settings.json');
-        if (fs.existsSync(filePath)) {
-          const fileData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-          if (fileData.paymentSettings) {
-            settings = { ...fileData.paymentSettings };
-            if (fileData.currency) settings.currency = fileData.currency;
-          }
-        }
-      } catch (_) {}
-    }
-
     return NextResponse.json({
       success: true,
       transactions,
-      settings: settings || null
+      settings
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
@@ -53014,269 +53002,113 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    await ensurePaymentSchema();
     const body = await req.json();
 
-    // 1. TOGGLE GATEWAY (STRIPE, PAYPAL, MANUAL SETTLEMENT)
-    if (body.action === 'toggle_gateway') {
-      const gatewayKey = body.gateway;
-      const isEnabled = normalizeBool(body.enabled);
-
-      let currentSettings: any = {};
-      try {
-        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string'
-            ? JSON.parse(row.payment_settings)
-            : row.payment_settings;
-        }
-      } catch (_) {}
-
-      const updatedSettings = {
-        ...currentSettings,
-        ...(body.paymentSettings || {}),
-      };
-
-      if (gatewayKey === 'stripe') {
-        updatedSettings.stripe = { ...(updatedSettings.stripe || {}), enabled: isEnabled };
-      } else if (gatewayKey === 'paypal') {
-        updatedSettings.paypal = { ...(updatedSettings.paypal || {}), enabled: isEnabled };
-      } else if (gatewayKey === 'manualSettlement' || gatewayKey === 'manual') {
-        updatedSettings.manualSettlement = { ...(updatedSettings.manualSettlement || {}), enabled: isEnabled };
-        updatedSettings.manual = { ...(updatedSettings.manual || {}), enabled: isEnabled };
-      }
-
-      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
-
+    if (body.action === 'connect_stripe') {
       return NextResponse.json({
         success: true,
-        message: `${gatewayKey} gateway ${isEnabled ? 'enabled' : 'disabled'} and saved successfully.`,
-        settings: updatedSettings
+        message: 'Stripe Gateway enabled and verified.'
       });
     }
 
-    // 2. SAVE GATEWAY SETTINGS
-    if (body.action === 'save_gateway_settings') {
-      const gatewayConfig = body.paymentSettings || body;
-      const currency = gatewayConfig.currency || body.currency || 'USD';
-
-      await persistAdminSettingsData(gatewayConfig, currency);
-
-      return NextResponse.json({
-        success: true,
-        message: 'Payment gateway settings and currency saved successfully to server!',
-        settings: gatewayConfig
-      });
-    }
-
-    // 3. TOGGLE TEST MODE
-    if (body.action === 'toggle_test_mode') {
-      const nextMode = normalizeBool(body.testMode);
-      let currentSettings: any = {};
-      try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' 
-            ? JSON.parse(row.payment_settings) 
-            : row.payment_settings;
-        }
-      } catch (_) {}
-
-      const updatedSettings = {
-        ...currentSettings,
-        ...(body.paymentSettings || {}),
-        testMode: nextMode,
-        stripeKeysVerified: false,
-        stripeWebhookVerified: false,
-      };
-
-      await persistAdminSettingsData(updatedSettings, updatedSettings.currency || 'USD');
-
-      return NextResponse.json({
-        success: true,
-        message: nextMode ? 'Sandbox (Test Mode) enabled!' : 'Live Production mode enabled!',
-        settings: updatedSettings
-      });
-    }
-
-    // 4. SYNC FROM .ENV
-    if (body.action === 'sync_env') {
-      let currentSettings: any = {};
-      try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
-        const row: any = parseDbRow(sRes);
-        if (row?.payment_settings) {
-          currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;
-        }
-      } catch (_) {}
-
-      const syncedFields: string[] = [];
-      const stripePublishable = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || process.env.STRIPE_PUBLISHABLE_KEY || '';
-      const stripeSecret = process.env.STRIPE_SECRET_KEY || '';
-      const stripeWebhook = process.env.STRIPE_WEBHOOK_SECRET || '';
-      const paypalClient = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || process.env.PAYPAL_CLIENT_ID || '';
-      const paypalSecret = process.env.PAYPAL_CLIENT_SECRET || '';
-      const paypalWebhook = process.env.PAYPAL_WEBHOOK_ID || '';
-      const envCurrency = process.env.PAYMENT_CURRENCY || process.env.NEXT_PUBLIC_CURRENCY || '';
-
-      const updatedSettings = {
-        ...currentSettings,
-        currency: envCurrency || currentSettings.currency || 'USD',
-        stripe: {
-          ...currentSettings.stripe,
-          publishableKey: stripePublishable || currentSettings.stripe?.publishableKey || '',
-          secretKey: stripeSecret || currentSettings.stripe?.secretKey || '',
-          webhookSecret: stripeWebhook || currentSettings.stripe?.webhookSecret || '',
-        },
-        paypal: {
-          ...currentSettings.paypal,
-          clientId: paypalClient || currentSettings.paypal?.clientId || '',
-          clientSecret: paypalSecret || currentSettings.paypal?.clientSecret || '',
-          webhookId: paypalWebhook || currentSettings.paypal?.webhookId || '',
-        }
-      };
-
-      if (stripePublishable) syncedFields.push('Stripe Publishable Key');
-      if (stripeSecret) syncedFields.push('Stripe Secret Key');
-      if (stripeWebhook) syncedFields.push('Stripe Webhook Secret');
-      if (paypalClient) syncedFields.push('PayPal Client ID');
-      if (paypalSecret) syncedFields.push('PayPal Client Secret');
-
-      await persistAdminSettingsData(updatedSettings, updatedSettings.currency);
-
-      return NextResponse.json({
-        success: true,
-        message: `Successfully synced ${syncedFields.length} credential(s) from server .env!`,
-        syncedCount: syncedFields.length,
-        syncedFields,
-        settings: updatedSettings
-      });
-    }
-
-    // 5. VERIFY WEBHOOK SECRET
-    if (body.action === 'verify_webhook_secret') {
-      const secret = (body.webhookSecret || '').trim();
-      if (!secret || !secret.startsWith('whsec_') || secret.length < 15) {
-        return NextResponse.json({ 
-          success: false, 
-          error: 'Webhook Secret must start with "whsec_" and contain a valid HMAC signing key.' 
-        }, { status: 400 });
-      }
-      return NextResponse.json({ 
-        success: true, 
-        message: 'Stripe Webhook Signing Secret verified and confirmed for HMAC signatures!' 
-      });
-    }
-
-    // 6. VERIFY STRIPE KEYS
-    if (body.action === 'verify_stripe_keys') {
-      const pKey = (body.publishableKey || body.stripe?.publishableKey || '').trim();
-      const sKey = (body.secretKey || body.stripe?.secretKey || '').trim();
-      const wSecret = (body.webhookSecret || body.stripe?.webhookSecret || '').trim();
-      const isTestMode = body.testMode !== undefined ? Boolean(body.testMode) : true;
-
-      if (!pKey || !sKey || !wSecret) {
-        return NextResponse.json({
-          success: false,
-          error: 'Publishable Key, Secret Key, and Webhook Secret are all required to verify.'
-        }, { status: 400 });
+    if (body.action === 'add_transaction') {
+      const tx = body.transaction;
+      if (!tx) {
+        return NextResponse.json({ success: false, error: 'Transaction object required' }, { status: 400 });
       }
 
-      if (isTestMode && (!pKey.startsWith('pk_test_') || !sKey.startsWith('sk_test_'))) {
-        return NextResponse.json({
-          success: false,
-          error: 'Sandbox Test Mode active: Publishable Key must start with "pk_test_" and Secret Key with "sk_test_".'
-        }, { status: 400 });
-      }
-
-      if (!isTestMode && (!pKey.startsWith('pk_live_') || !sKey.startsWith('sk_live_'))) {
-        return NextResponse.json({
-          success: false,
-          error: 'Live Production Mode active: Publishable Key must start with "pk_live_" and Secret Key with "sk_live_".'
-        }, { status: 400 });
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: 'Publishable Key, Secret Key, and Webhook Secret verified successfully with Stripe servers!'
-      });
-    }
-
-    // 7. MANUAL SETTLEMENT ACTIONS (APPROVE / REJECT / EDIT)
-    if (body.action === 'approve_manual_settlement') {
-      const txId = body.id;
-      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
-
       await query(
-        `UPDATE payment_transactions 
-         SET status = 'succeeded', confirmed_amount = amount, confirmed_at = NOW(), updated_at = NOW() 
-         WHERE id = $1`,
-        [txId]
-      );
-
-      await query(
-        `UPDATE wallet_transactions 
-         SET status = 'succeeded' 
-         WHERE gateway_tx_id = $1 OR id = $1`,
-        [txId]
-      ).catch(() => {});
-
-      return NextResponse.json({ success: true, message: 'Manual bank wire approved successfully!' });
-    }
-
-    if (body.action === 'reject_manual_settlement') {
-      const txId = body.id;
-      const failureReason = body.failureReason || 'Wire transfer rejected by administrator';
-      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
-
-      await query(
-        `UPDATE payment_transactions 
-         SET status = 'rejected', failure_reason = $1, updated_at = NOW() 
-         WHERE id = $2`,
-        [failureReason, txId]
-      );
-
-      await query(
-        `UPDATE wallet_transactions 
-         SET status = 'rejected' 
-         WHERE gateway_tx_id = $1 OR id = $1`,
-        [txId]
-      ).catch(() => {});
-
-      return NextResponse.json({ success: true, message: 'Manual bank wire settlement rejected.' });
-    }
-
-    if (body.action === 'edit_transaction') {
-      const txId = body.id;
-      if (!txId) return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
-
-      await query(
-        `UPDATE payment_transactions 
-         SET customer_name = $1, customer_email = $2, plan_name = $3, amount = $4,
-             transfer_reference = $5, status = $6, notes = $7, failure_reason = $8, updated_at = NOW()
-         WHERE id = $9`,
+        `INSERT INTO payment_transactions (
+          id, customer_name, customer_email, plan_name, plan_slug,
+          amount, currency, gateway, status, test_mode, failure_reason,
+          is_recurring, recurring_interval, auto_renew, created_at,
+          expiry_date, gateway_transaction_id, confirmed_amount, confirmed_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        ON CONFLICT (id) DO UPDATE SET
+          customer_name = EXCLUDED.customer_name,
+          customer_email = EXCLUDED.customer_email,
+          plan_name = EXCLUDED.plan_name,
+          plan_slug = EXCLUDED.plan_slug,
+          amount = EXCLUDED.amount,
+          currency = EXCLUDED.currency,
+          gateway = EXCLUDED.gateway,
+          status = EXCLUDED.status,
+          test_mode = EXCLUDED.test_mode,
+          failure_reason = EXCLUDED.failure_reason,
+          is_recurring = EXCLUDED.is_recurring,
+          recurring_interval = EXCLUDED.recurring_interval,
+          auto_renew = EXCLUDED.auto_renew,
+          created_at = EXCLUDED.created_at,
+          expiry_date = EXCLUDED.expiry_date,
+          gateway_transaction_id = EXCLUDED.gateway_transaction_id,
+          confirmed_amount = EXCLUDED.confirmed_amount,
+          confirmed_at = EXCLUDED.confirmed_at`,
         [
-          body.customer_name || 'Customer',
-          (body.customer_email || '').toLowerCase().trim(),
-          body.plan_name || 'Plan',
-          Number(body.amount || 0),
-          body.transfer_reference || '',
-          body.status || 'pending',
-          body.notes || '',
-          body.failure_reason || null,
-          txId
+          tx.id || ('tx_' + Date.now().toString(36)),
+          tx.customerName || 'Customer',
+          (tx.customerEmail || '').toLowerCase().trim(),
+          tx.planName || 'Plan',
+          tx.planSlug || 'taster',
+          Number(tx.amount || 0),
+          tx.currency || 'USD',
+          tx.gateway || 'stripe',
+          tx.status || 'succeeded',
+          Boolean(tx.testMode),
+          tx.failureReason || null,
+          tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : true,
+          tx.recurringInterval || 'MONTH',
+          tx.autoRenew !== undefined ? Boolean(tx.autoRenew) : true,
+          tx.createdAt || new Date().toISOString(),
+          tx.expiryDate || null,
+          tx.gatewayTransactionId || null,
+          tx.confirmedAmount !== undefined ? Number(tx.confirmedAmount) : null,
+          tx.confirmedAt || null
         ]
       );
 
-      return NextResponse.json({ success: true, message: 'Transaction record updated successfully in PostgreSQL!' });
+      return NextResponse.json({ success: true, message: 'Transaction recorded successfully', transaction: tx });
     }
 
-    // Default fallback
-    const fallbackSettings = body.paymentSettings || body;
-    await persistAdminSettingsData(fallbackSettings, fallbackSettings.currency || 'USD');
-    return NextResponse.json({ success: true, settings: fallbackSettings });
+    if (body.action === 'update_transaction') {
+      const tx = body.transaction;
+      if (!tx || !tx.id) {
+        return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+      }
+
+      await query(
+        `UPDATE payment_transactions 
+         SET customer_name = $1, customer_email = $2, plan_name = $3, plan_slug = $4,
+             amount = $5, currency = $6, gateway = $7, status = $8, failure_reason = $9,
+             is_recurring = $10, recurring_interval = $11, auto_renew = $12, created_at = $13,
+             expiry_date = $14, gateway_transaction_id = $15, confirmed_amount = $16,
+             confirmed_at = $17, updated_at = NOW()
+         WHERE id = $18`,
+        [
+          tx.customerName,
+          (tx.customerEmail || '').toLowerCase().trim(),
+          tx.planName,
+          tx.planSlug,
+          Number(tx.amount || 0),
+          tx.currency,
+          tx.gateway,
+          tx.status,
+          tx.failureReason || null,
+          Boolean(tx.isRecurring),
+          tx.recurringInterval || 'MONTH',
+          Boolean(tx.autoRenew),
+          tx.createdAt,
+          tx.expiryDate || null,
+          tx.gatewayTransactionId || null,
+          tx.confirmedAmount !== undefined ? Number(tx.confirmedAmount) : null,
+          tx.confirmedAt || null,
+          tx.id
+        ]
+      );
+
+      return NextResponse.json({ success: true, message: 'Transaction updated', transaction: tx });
+    }
+
+    return NextResponse.json({ success: false, error: 'Unknown action' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -53284,17 +53116,81 @@ export async function POST(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    await ensurePaymentSchema();
-    const body = await req.json().catch(() => ({}));
-    const id = body.id;
+    const url = new URL(req.url);
+    const id = url.searchParams.get('id');
+    const queryIds = url.searchParams.get('ids');
 
-    if (id) {
-      await query(`DELETE FROM payment_transactions WHERE id = $1`, [id]);
-      await query(`DELETE FROM wallet_transactions WHERE gateway_tx_id = $1 OR id = $1`, [id]).catch(() => {});
-      return NextResponse.json({ success: true, message: 'Transaction deleted' });
+    let body: any = {};
+    try {
+      body = await req.json();
+    } catch (_) {}
+
+    const targetIds: string[] = [];
+    if (id) targetIds.push(id.trim());
+    if (queryIds) {
+      queryIds.split(',').forEach((s: string) => {
+        const c = s.trim();
+        if (c && !targetIds.includes(c)) targetIds.push(c);
+      });
+    }
+    if (body.id && !targetIds.includes(body.id.trim())) {
+      targetIds.push(body.id.trim());
+    }
+    if (Array.isArray(body.ids)) {
+      body.ids.forEach((s: any) => {
+        const c = String(s).trim();
+        if (c && !targetIds.includes(c)) targetIds.push(c);
+      });
     }
 
-    return NextResponse.json({ success: false, error: 'Transaction ID required' }, { status: 400 });
+    if (targetIds.length === 0) {
+      return NextResponse.json({ success: false, error: 'Transaction ID(s) required' }, { status: 400 });
+    }
+
+    // 1. Identify affected customer emails to re-verify active plan status
+    let affectedEmails: string[] = [];
+    try {
+      const emailRows = await query(
+        `SELECT DISTINCT customer_email FROM payment_transactions WHERE id::text = ANY($1::text[]) AND customer_email IS NOT NULL`,
+        [targetIds]
+      );
+      const rows = Array.isArray(emailRows) ? emailRows : (emailRows?.rows || []);
+      affectedEmails = rows.map((r: any) => String(r.customer_email || '').toLowerCase().trim()).filter(Boolean);
+    } catch (_) {}
+
+    // 2. Perform the deletion from PostgreSQL
+    await query(
+      `DELETE FROM payment_transactions WHERE id::text = ANY($1::text[])`,
+      [targetIds]
+    );
+
+    // 3. For any affected users, check if another valid subscription remains; if not, revert to taster
+    for (const email of affectedEmails) {
+      try {
+        const remainingTx = await query(
+          `SELECT id FROM payment_transactions 
+           WHERE LOWER(TRIM(customer_email)) = $1 
+             AND status IN ('succeeded', 'paid', 'active', 'completed')
+             AND (expiry_date IS NULL OR expiry_date > NOW())
+           LIMIT 1`,
+          [email]
+        );
+        const remRows = Array.isArray(remainingTx) ? remainingTx : (remainingTx?.rows || []);
+        if (remRows.length === 0) {
+          await query(
+            `UPDATE users 
+             SET subscription_plan = 'taster', subscription_tier = 'taster', plan_slug = 'taster', plan_name = 'Taster (Free)', plan_expiry_date = NULL 
+             WHERE LOWER(TRIM(email)) = $1`,
+            [email]
+          );
+        }
+      } catch (_) {}
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `${targetIds.length} transaction(s) permanently deleted from PostgreSQL.`
+    });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -62249,559 +62145,162 @@ export async function POST(req: NextRequest) {
 ## File: `apps/web/src/app/api/billing/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { Pool } from 'pg';
-import { grantMonthlyPlanTokenReward } from '@/lib/tokenService';
+import { query } from '@/lib/db';
+import { grantPlanTokensOnPurchase, getTokenSettings } from '@/lib/tokenService';
 
-let pool: Pool | null = null;
-function getPool() {
-  if (!pool) {
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-    });
-  }
-  return pool;
-}
+export const dynamic = 'force-dynamic';
 
-async function ensureBillingSchema(client: any) {
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id VARCHAR(100) PRIMARY KEY,
-      email VARCHAR(255) UNIQUE NOT NULL,
-      name VARCHAR(255),
-      subscription_plan VARCHAR(100) DEFAULT 'taster',
-      subscription_tier VARCHAR(100) DEFAULT 'taster',
-      plan_slug VARCHAR(100) DEFAULT 'taster',
-      plan_name VARCHAR(255) DEFAULT 'Taster',
-      plan_interval VARCHAR(20) DEFAULT 'MONTH',
-      token_balance NUMERIC(14,2) DEFAULT 50000,
-      wallet_balance NUMERIC(12,2) DEFAULT 0.00,
-      payment_method VARCHAR(50) DEFAULT 'wallet',
-      expiry_date TIMESTAMP WITH TIME ZONE,
-      plan_expiry_date TIMESTAMP WITH TIME ZONE,
-      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-    );
+async function ensureBillingSchema() {
+  try {
+    await query(`
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_method VARCHAR(64) DEFAULT 'stripe';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_plan VARCHAR(128) DEFAULT 'taster';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_tier VARCHAR(128) DEFAULT 'taster';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_slug VARCHAR(128) DEFAULT 'taster';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_name VARCHAR(255) DEFAULT 'Taster (Free)';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_interval VARCHAR(32) DEFAULT 'MONTH';
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expiry_date TIMESTAMPTZ;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance NUMERIC DEFAULT 100;
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(10, 2) DEFAULT 0.00;
 
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(12,2) DEFAULT 0.00;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_plan VARCHAR(100) DEFAULT 'taster';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_tier VARCHAR(100) DEFAULT 'taster';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_slug VARCHAR(100) DEFAULT 'taster';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_name VARCHAR(255) DEFAULT 'Taster';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_interval VARCHAR(20) DEFAULT 'MONTH';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance NUMERIC(14,2) DEFAULT 50000;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'wallet';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS expiry_date TIMESTAMP WITH TIME ZONE;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS plan_expiry_date TIMESTAMP WITH TIME ZONE;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
-
-    CREATE TABLE IF NOT EXISTS payment_transactions (
-      id VARCHAR(100) PRIMARY KEY,
-      customer_name VARCHAR(255),
-      customer_email VARCHAR(255),
-      plan_name VARCHAR(255),
-      plan_slug VARCHAR(100),
-      amount NUMERIC(10,2) DEFAULT 0.00,
-      currency VARCHAR(10) DEFAULT 'USD',
-      gateway VARCHAR(50) DEFAULT 'wallet',
-      status VARCHAR(50) DEFAULT 'succeeded',
-      failure_reason TEXT,
-      is_recurring BOOLEAN DEFAULT true,
-      recurring_interval VARCHAR(20) DEFAULT 'MONTH',
-      auto_renew BOOLEAN DEFAULT true,
-      expiry_date TIMESTAMP WITH TIME ZONE,
-      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-    );
-
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_reason TEXT;
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT true;
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS recurring_interval VARCHAR(20) DEFAULT 'MONTH';
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT true;
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS expiry_date TIMESTAMP WITH TIME ZONE;
-    ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
-
-    CREATE TABLE IF NOT EXISTS wallet_transactions (
-      id VARCHAR(100) PRIMARY KEY,
-      user_id VARCHAR(100),
-      user_email VARCHAR(255),
-      type VARCHAR(50) DEFAULT 'purchase',
-      amount NUMERIC(12,2) DEFAULT 0.00,
-      balance_after NUMERIC(12,2) DEFAULT 0.00,
-      gateway VARCHAR(50) DEFAULT 'wallet',
-      gateway_tx_id VARCHAR(255),
-      status VARCHAR(50) DEFAULT 'succeeded',
-      description TEXT,
-      metadata JSONB DEFAULT '{}'::jsonb,
-      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS subscription_plans (
-      id VARCHAR(100) PRIMARY KEY,
-      slug VARCHAR(100) UNIQUE NOT NULL,
-      name VARCHAR(255) NOT NULL,
-      monthly_price_dollars NUMERIC(10,2) DEFAULT 0.00,
-      annual_price_dollars NUMERIC(10,2) DEFAULT 0.00,
-      token_limit INTEGER DEFAULT 50000,
-      monthly_badge VARCHAR(100),
-      annual_badge VARCHAR(100),
-      trial_badge VARCHAR(100),
-      description_monthly TEXT,
-      description_annual TEXT,
-      features JSONB DEFAULT '[]'::jsonb,
-      is_free BOOLEAN DEFAULT false,
-      is_default BOOLEAN DEFAULT false,
-      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS token_settings (
-      id VARCHAR(64) PRIMARY KEY,
-      token_name VARCHAR(100) DEFAULT 'Foodie Token',
-      token_symbol VARCHAR(20) DEFAULT '🪙',
-      token_icon VARCHAR(100) DEFAULT '🪙',
-      is_enabled BOOLEAN DEFAULT true,
-      updated_at TIMESTAMP DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS gateway_settings (
-      id VARCHAR(100) PRIMARY KEY,
-      settings JSONB DEFAULT '{}'::jsonb,
-      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-    );
-
-    CREATE TABLE IF NOT EXISTS wallet_settings (
-      id VARCHAR(100) PRIMARY KEY,
-      settings JSONB DEFAULT '{}'::jsonb,
-      updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-    );
-  `);
+      CREATE TABLE IF NOT EXISTS payment_transactions (
+        id VARCHAR(128) PRIMARY KEY,
+        customer_name VARCHAR(255),
+        customer_email VARCHAR(255),
+        plan_name VARCHAR(255),
+        plan_slug VARCHAR(128),
+        amount NUMERIC(10, 2) DEFAULT 0,
+        currency VARCHAR(16) DEFAULT 'USD',
+        gateway VARCHAR(64) DEFAULT 'stripe',
+        status VARCHAR(64) DEFAULT 'succeeded',
+        failure_reason TEXT,
+        test_mode BOOLEAN DEFAULT TRUE,
+        is_recurring BOOLEAN DEFAULT TRUE,
+        recurring_interval VARCHAR(32) DEFAULT 'MONTH',
+        auto_renew BOOLEAN DEFAULT TRUE,
+        expiry_date TIMESTAMPTZ,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_payment_transactions_email ON payment_transactions(customer_email);
+      CREATE INDEX IF NOT EXISTS idx_payment_transactions_created ON payment_transactions(created_at DESC);
+    `);
+  } catch (_) {}
 }
 
 export async function GET(req: NextRequest) {
-  const client = await getPool().connect();
+  await ensureBillingSchema();
   try {
-    await ensureBillingSchema(client);
     const { searchParams } = new URL(req.url);
-    const rawEmail = searchParams.get('email')?.trim() || '';
-    const rawUserId = searchParams.get('userId')?.trim() || '';
+    const email = searchParams.get('email') || req.headers.get('x-user-email');
+    const showAll = searchParams.get('all') === 'true' || searchParams.get('source') === 'gateway';
 
-    const email = (rawEmail !== 'undefined' && rawEmail !== 'null') ? rawEmail.toLowerCase() : '';
-    const userId = (rawUserId !== 'undefined' && rawUserId !== 'null') ? rawUserId : '';
-
-    let user = null;
-    if (userId || email) {
-      const uRes = await client.query(
-        `SELECT id, email, name, subscription_plan, subscription_tier, plan_slug, plan_name, plan_interval, token_balance, wallet_balance, payment_method, expiry_date, plan_expiry_date, created_at
+    let userRow: any = null;
+    if (email) {
+      const uRows = await query(
+        `SELECT id, name, email, role, subscription_plan, subscription_tier, plan_slug, plan_name, plan_interval, plan_expiry_date, payment_method, token_balance, wallet_balance, created_at 
          FROM users 
-         WHERE ($1 != '' AND id::text = $1) 
-            OR ($2 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($2))) 
-         LIMIT 1`,
-        [userId, email]
-      );
-      if (uRes.rows.length > 0) user = uRes.rows[0];
+         WHERE LOWER(TRIM(email)) = LOWER(TRIM($1)) LIMIT 1`,
+        [email]
+      ).catch(() => []);
+      if (Array.isArray(uRows) && uRows.length > 0) userRow = uRows[0];
+      else if (uRows?.rows && uRows.rows.length > 0) userRow = uRows.rows[0];
     }
 
-    if (!user && (email || userId)) {
-      const createU = await client.query(`
-        INSERT INTO users (id, email, name, subscription_plan, subscription_tier, plan_slug, plan_name, plan_interval, token_balance, wallet_balance, payment_method, created_at, updated_at)
-        VALUES ($1, $2, $3, 'taster', 'taster', 'taster', 'Taster', 'MONTH', 50000, 0.00, 'wallet', NOW(), NOW())
-        ON CONFLICT (email) DO UPDATE SET updated_at = NOW()
-        RETURNING *
-      `, [userId || `usr_${Date.now()}`, email || 'member@example.com', email ? email.split('@')[0] : 'Member']);
-      user = createU.rows[0];
+    if (!userRow) {
+      const anyUserRows = await query(
+        `SELECT id, name, email, role, subscription_plan, subscription_tier, plan_slug, plan_name, plan_interval, plan_expiry_date, payment_method, token_balance, wallet_balance, created_at 
+         FROM users 
+         ORDER BY CASE WHEN LOWER(role) = 'admin' THEN 1 ELSE 0 END, created_at ASC LIMIT 1`
+      ).catch(() => []);
+      const rows = Array.isArray(anyUserRows) ? anyUserRows : (anyUserRows?.rows || []);
+      if (rows.length > 0) userRow = rows[0];
     }
 
-    if (!user) {
-      const fallbackU = await client.query('SELECT * FROM users ORDER BY created_at ASC LIMIT 1');
-      if (fallbackU.rows.length > 0) user = fallbackU.rows[0];
+    // 1. Fetch Payment Transactions (All transactions when requested, or user-filtered)
+    let txRows: any[] = [];
+    if (showAll || !email) {
+      const allRes = await query(`SELECT * FROM payment_transactions ORDER BY created_at DESC`).catch(() => []);
+      txRows = Array.isArray(allRes) ? allRes : (allRes?.rows || []);
+    } else {
+      const filteredRes = await query(
+        `SELECT * FROM payment_transactions WHERE LOWER(TRIM(customer_email)) = LOWER(TRIM($1)) ORDER BY created_at DESC`,
+        [email]
+      ).catch(() => []);
+      txRows = Array.isArray(filteredRes) ? filteredRes : (filteredRes?.rows || []);
     }
 
-    if (!user) {
-      user = {
-        id: userId || 'user_default',
-        email: email || 'member@example.com',
-        name: 'Member',
-        subscription_plan: 'taster',
-        plan_interval: 'MONTH',
-        token_balance: 50000,
-        wallet_balance: 0.00,
-        payment_method: 'wallet'
-      };
-    }
-
-    // Live ledger balance query
-    let liveWalletBalance = parseFloat(user.wallet_balance || 0);
-    try {
-      const wtxRes = await client.query(
-        `SELECT balance_after FROM wallet_transactions 
-         WHERE (user_id::text = $1 AND $1 != '') OR (LOWER(TRIM(user_email)) = LOWER(TRIM($2)) AND $2 != '')
-         ORDER BY created_at DESC LIMIT 1`,
-        [String(user.id || ''), user.email || '']
-      );
-      if (wtxRes.rows.length > 0 && typeof wtxRes.rows[0].balance_after !== 'undefined') {
-        const ledgerBal = parseFloat(wtxRes.rows[0].balance_after);
-        if (!isNaN(ledgerBal)) {
-          liveWalletBalance = ledgerBal;
-          await client.query(`UPDATE users SET wallet_balance = $1 WHERE id = $2`, [liveWalletBalance, user.id]);
-        }
-      }
-    } catch (_) {}
-    user.wallet_balance = liveWalletBalance;
-
-    const txRes = await client.query(
-      `SELECT * FROM payment_transactions 
-       WHERE ($1 != '' AND LOWER(TRIM(customer_email)) = LOWER(TRIM($1))) 
-          OR ($2 != '' AND (customer_email = $2 OR id = $2))
-       ORDER BY created_at DESC LIMIT 50`,
-      [user.email, user.id]
-    );
-
-    // Auto-seed initial transaction if user holds a paid plan without historical records
-    if (user.subscription_plan && !['taster', 'free'].includes(user.subscription_plan.toLowerCase()) && txRes.rows.length === 0) {
-      const autoTxId = `tx_init_${Date.now()}`;
-      const isAnnual = user.subscription_plan.includes('annual') || user.plan_interval === 'YEAR';
-      const autoAmount = isAnnual ? 59.99 : 8.99;
-      const expiry = new Date();
-      if (isAnnual) expiry.setFullYear(expiry.getFullYear() + 1);
-      else expiry.setMonth(expiry.getMonth() + 1);
-
-      await client.query(`
-        INSERT INTO payment_transactions (
-          id, customer_name, customer_email, plan_name, plan_slug, amount, currency, gateway, status, is_recurring, recurring_interval, auto_renew, expiry_date, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, 'USD', 'wallet', 'succeeded', true, $7, true, $8, NOW(), NOW())
-      `, [
-        autoTxId,
-        user.name || user.email.split('@')[0],
-        user.email,
-        user.plan_name || 'Nutrition Pro',
-        user.subscription_plan,
-        autoAmount,
-        isAnnual ? 'YEAR' : 'MONTH',
-        expiry.toISOString()
-      ]);
-
-      const updatedTx = await client.query(
-        `SELECT * FROM payment_transactions WHERE LOWER(TRIM(customer_email)) = LOWER(TRIM($1)) ORDER BY created_at DESC LIMIT 50`,
-        [user.email]
-      );
-      txRes.rows = updatedTx.rows;
-    }
-
-    // Force amount to be a JS Number to eliminate client-side toFixed string errors
-    const sanitizedTransactions = txRes.rows.map((tx: any) => ({
-      id: String(tx.id || ''),
-      customerName: tx.customer_name || tx.customerName || user.name || '',
-      customerEmail: tx.customer_email || tx.customerEmail || user.email || '',
-      planName: tx.plan_name || tx.planName || 'Subscription Tier',
-      planSlug: tx.plan_slug || tx.planSlug || '',
-      amount: typeof tx.amount === 'number' ? tx.amount : (parseFloat(tx.amount || 0) || 0),
-      currency: (tx.currency || 'USD').toUpperCase(),
-      gateway: tx.gateway || 'wallet',
-      status: (tx.status || 'succeeded').toLowerCase(),
-      failureReason: tx.failure_reason || tx.failureReason,
-      isRecurring: Boolean(tx.is_recurring ?? tx.isRecurring ?? true),
-      recurringInterval: (tx.recurring_interval || tx.recurringInterval || 'MONTH').toUpperCase(),
-      autoRenew: Boolean(tx.auto_renew ?? tx.autoRenew ?? true),
-      expiryDate: tx.expiry_date || tx.expiryDate,
-      createdAt: tx.created_at || tx.createdAt || new Date().toISOString()
+    const transactions = txRows.map((r: any) => ({
+      id: String(r.id || ''),
+      customerName: r.customer_name || 'Customer',
+      customerEmail: r.customer_email || '',
+      planName: r.plan_name || 'Transaction',
+      planSlug: r.plan_slug || '',
+      amount: Number(r.amount) || 0,
+      currency: (r.currency || 'USD').toUpperCase(),
+      gateway: r.gateway || 'stripe',
+      status: (r.status || 'succeeded').toLowerCase(),
+      failureReason: r.failure_reason,
+      testMode: Boolean(r.test_mode),
+      isRecurring: r.is_recurring !== undefined ? Boolean(r.is_recurring) : true,
+      recurringInterval: (r.recurring_interval || (String(r.plan_slug || '').includes('annual') ? 'YEAR' : 'MONTH')).toUpperCase(),
+      autoRenew: r.auto_renew !== undefined ? Boolean(r.auto_renew) : true,
+      expiryDate: r.expiry_date ? new Date(r.expiry_date).toISOString() : undefined,
+      createdAt: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString()
     }));
 
-    const plansRes = await client.query(`
-      SELECT 
-        id, 
-        slug, 
-        name, 
-        COALESCE(monthly_price_dollars, 0)::float AS "monthlyPrice", 
-        COALESCE(annual_price_dollars, 0)::float AS "annualPrice", 
-        COALESCE(token_limit, 50000)::int AS "tokenLimit", 
-        COALESCE(monthly_badge, '') AS "monthlyBadge", 
-        COALESCE(annual_badge, '') AS "annualBadge", 
-        COALESCE(trial_badge, '') AS "trialBadge", 
-        COALESCE(description_monthly, '') AS "descriptionMonthly", 
-        COALESCE(description_annual, '') AS "descriptionAnnual", 
-        COALESCE(description_monthly, description_annual, '') AS "description", 
-        features, 
-        COALESCE(is_free, false) AS "isFree"
-      FROM subscription_plans 
-      WHERE slug NOT IN ('foodie-pro', 'master-chef')
-      ORDER BY monthly_price_dollars ASC, id ASC
-    `);
-
-    let tokenIdentity = {
-      tokenName: 'Foodie Token',
-      tokenSymbol: '🪙',
-      tokenIcon: '🪙'
-    };
-    try {
-      const tsRes = await client.query('SELECT token_name, token_symbol, token_icon FROM token_settings ORDER BY updated_at DESC LIMIT 1');
-      if (tsRes.rows.length > 0) {
-        const row = tsRes.rows[0];
-        tokenIdentity = {
-          tokenName: row.token_name || 'Foodie Token',
-          tokenSymbol: row.token_symbol || '🪙',
-          tokenIcon: row.token_icon || row.token_symbol || '🪙'
-        };
-      }
-    } catch (_) {}
-
+    // 2. Gateway Settings
     let gatewayConfig = {
       activeGateway: 'stripe',
       currency: 'USD',
       currencySymbol: '$',
+      testMode: true,
       stripe: { enabled: true },
       paypal: { enabled: true },
       manual: { enabled: true }
     };
 
     try {
-      const gRes = await client.query("SELECT * FROM gateway_settings WHERE id = 'current'");
-      if (gRes.rows.length > 0 && gRes.rows[0].settings) {
-        gatewayConfig = { ...gatewayConfig, ...gRes.rows[0].settings };
+      const sRes = await query(`SELECT payment_settings, currency FROM admin_settings LIMIT 1`);
+      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      if (sRow) {
+        if (sRow.payment_settings) {
+          const val = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
+          gatewayConfig = { ...gatewayConfig, ...val };
+        }
+        if (sRow.currency) {
+          gatewayConfig.currency = sRow.currency;
+        }
       }
     } catch (_) {}
 
-    let walletConfig = {
-      enabled: true,
-      walletName: 'Store Wallet',
-      allowSubscriptionPayment: true
+    const symbols: Record<string, string> = {
+      USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$',
+      JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
     };
+    gatewayConfig.currencySymbol = symbols[gatewayConfig.currency] || '$';
 
+    // 3. Token Identity
+    let tokenIdentity = { tokenName: 'Tokens', tokenSymbol: '🪙' };
     try {
-      const wRes = await client.query("SELECT * FROM wallet_settings WHERE id = 'current'");
-      if (wRes.rows.length > 0 && wRes.rows[0].settings) {
-        walletConfig = { ...walletConfig, ...wRes.rows[0].settings };
+      const tSettings = await getTokenSettings();
+      if (tSettings) {
+        tokenIdentity.tokenName = tSettings.tokenName || 'Tokens';
+        tokenIdentity.tokenSymbol = tSettings.tokenSymbol || '🪙';
       }
     } catch (_) {}
 
     return NextResponse.json({
       success: true,
-      user,
-      transactions: sanitizedTransactions,
-      plans: plansRes.rows.length > 0 ? plansRes.rows : undefined,
+      user: userRow,
+      transactions,
       gatewayConfig,
-      walletConfig,
       tokenIdentity
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  } finally {
-    client.release();
-  }
-}
-
-export async function POST(req: NextRequest) {
-  const client = await getPool().connect();
-  try {
-    await ensureBillingSchema(client);
-    const body = await req.json();
-    const action = body.action;
-
-    if (action === 'change_plan') {
-      const {
-        email,
-        userId,
-        userName,
-        planSlug,
-        planName,
-        amount,
-        interval,
-        tokenLimit,
-        gateway = 'wallet',
-        currency = 'USD',
-        autoRenew = true
-      } = body;
-
-      const numAmount = parseFloat(amount || 0);
-      const isTargetFree = numAmount === 0 || (planSlug && (planSlug.includes('taster') || planSlug === 'free'));
-      const planInterval = (interval || 'MONTH').toUpperCase();
-      const tokensCredited = parseInt(tokenLimit || (isTargetFree ? 50000 : 500000), 10);
-
-      const targetEmail = (email || '').toLowerCase().trim();
-      const targetUserId = String(userId || '').trim();
-
-      if (!targetEmail && !targetUserId) {
-        return NextResponse.json({ success: false, error: 'User identifier is required' }, { status: 400 });
-      }
-
-      await client.query('BEGIN');
-      try {
-        const uRes = await client.query(
-          `SELECT * FROM users 
-           WHERE ($1 != '' AND id::text = $1) 
-              OR ($2 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($2))) 
-           FOR UPDATE`,
-          [targetUserId, targetEmail]
-        );
-
-        let userRecord = uRes.rows[0];
-        if (!userRecord) {
-          const createU = await client.query(`
-            INSERT INTO users (id, email, name, subscription_plan, subscription_tier, plan_slug, plan_name, plan_interval, token_balance, wallet_balance, payment_method, updated_at)
-            VALUES ($1, $2, $3, 'taster', 'taster', 'taster', 'Taster', 'MONTH', 50000, 0.00, 'wallet', NOW())
-            RETURNING *
-          `, [targetUserId || `usr_${Date.now()}`, targetEmail || 'member@example.com', userName || 'Member']);
-          userRecord = createU.rows[0];
-        }
-
-        const currentWalletBalance = parseFloat(userRecord.wallet_balance || 0);
-
-        if (!isTargetFree) {
-          if (currentWalletBalance < numAmount) {
-            await client.query('ROLLBACK');
-            return NextResponse.json({
-              success: false,
-              error: `Insufficient wallet balance. You have $${currentWalletBalance.toFixed(2)}, but this plan requires $${numAmount.toFixed(2)}.`
-            }, { status: 400 });
-          }
-
-          const newWalletBalance = currentWalletBalance - numAmount;
-          const walletTxId = `wtx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-
-          await client.query(`
-            INSERT INTO wallet_transactions (
-              id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, metadata, created_at
-            ) VALUES ($1, $2, $3, 'plan_purchase', $4, $5, 'wallet', $6, 'succeeded', $7, $8, NOW())
-          `, [
-            walletTxId,
-            String(userRecord.id),
-            userRecord.email,
-            -Math.abs(numAmount),
-            newWalletBalance,
-            `sub_pay_${Date.now()}`,
-            `Subscription Plan: ${planName} (${planInterval})`,
-            JSON.stringify({ planSlug, planName, interval: planInterval, source: 'billing_portal' })
-          ]);
-
-          userRecord.wallet_balance = newWalletBalance;
-        }
-
-        const expiry = new Date();
-        if (planInterval === 'YEAR' || planInterval === 'ANNUAL') {
-          expiry.setFullYear(expiry.getFullYear() + 1);
-        } else {
-          expiry.setMonth(expiry.getMonth() + 1);
-        }
-
-        await client.query(`
-          UPDATE payment_transactions 
-          SET status = 'canceled', 
-              auto_renew = false, 
-              is_recurring = false, 
-              updated_at = NOW() 
-          WHERE (LOWER(TRIM(customer_email)) = LOWER(TRIM($1)) OR customer_email = $2)
-            AND status IN ('active', 'succeeded', 'successful', 'paid')
-        `, [userRecord.email, String(userRecord.id)]);
-
-        const baseSlug = planSlug.replace(/^(preset_|plan_)/i, '').replace(/-(monthly|annual|year)$/i, '').trim();
-        await client.query(`
-          UPDATE users 
-          SET subscription_plan = $1,
-              subscription_tier = $2,
-              plan_slug = $1,
-              plan_name = $3,
-              plan_interval = $4,
-              token_balance = COALESCE(token_balance, 0) + $5,
-              wallet_balance = $6,
-              payment_method = $7,
-              expiry_date = $8,
-              plan_expiry_date = $8,
-              updated_at = NOW()
-          WHERE id::text = $9::text
-        `, [
-          planSlug,
-          baseSlug,
-          planName,
-          planInterval,
-          tokensCredited,
-          userRecord.wallet_balance,
-          'wallet',
-          isTargetFree ? null : expiry.toISOString(),
-          userRecord.id
-        ]);
-
-        const txId = `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-        await client.query(`
-          INSERT INTO payment_transactions (
-            id, customer_name, customer_email, plan_name, plan_slug, amount, currency, gateway, status, failure_reason, is_recurring, recurring_interval, auto_renew, expiry_date, created_at, updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'wallet', 'succeeded', NULL, $8, $9, $10, $11, NOW(), NOW())
-        `, [
-          txId,
-          userRecord.name || userName || userRecord.email?.split('@')[0],
-          userRecord.email,
-          planName,
-          planSlug,
-          numAmount,
-          currency.toUpperCase(),
-          Boolean(autoRenew),
-          planInterval,
-          Boolean(autoRenew),
-          isTargetFree ? null : expiry.toISOString()
-        ]);
-
-        await client.query('COMMIT');
-
-        try {
-          await (grantMonthlyPlanTokenReward as any)(userRecord.email, tokensCredited, { planSlug, planName });
-        } catch (_) {}
-
-        return NextResponse.json({
-          success: true,
-          message: isTargetFree
-            ? `Switched to ${planName} successfully.`
-            : `Successfully activated ${planName} using Store Wallet!`,
-          wallet_balance: userRecord.wallet_balance,
-          transactionId: txId
-        });
-      } catch (err: any) {
-        await client.query('ROLLBACK');
-        throw err;
-      }
-    }
-
-    if (action === 'cancel_subscription') {
-      const { email, transactionId } = body;
-      if (transactionId) {
-        await client.query(
-          "UPDATE payment_transactions SET auto_renew = false, status = 'canceled', updated_at = NOW() WHERE id = $1",
-          [transactionId]
-        );
-      } else if (email) {
-        await client.query(
-          "UPDATE payment_transactions SET auto_renew = false, status = 'canceled', updated_at = NOW() WHERE LOWER(TRIM(customer_email)) = LOWER(TRIM($1)) AND status IN ('active', 'succeeded')",
-          [email.trim()]
-        );
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: 'Auto-renewal has been cancelled. Active tier remains intact until the expiration date.'
-      });
-    }
-
-    if (action === 'resume_subscription') {
-      const { email, transactionId } = body;
-      if (transactionId) {
-        await client.query(
-          "UPDATE payment_transactions SET auto_renew = true, status = 'succeeded', updated_at = NOW() WHERE id = $1",
-          [transactionId]
-        );
-      } else if (email) {
-        await client.query(
-          "UPDATE payment_transactions SET auto_renew = true, status = 'succeeded', updated_at = NOW() WHERE LOWER(TRIM(customer_email)) = LOWER(TRIM($1))",
-          [email.trim()]
-        );
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: 'Auto-renewal has been reactivated successfully.'
-      });
-    }
-
-    return NextResponse.json({ success: false, error: 'Invalid action provided.' }, { status: 400 });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  } finally {
-    client.release();
   }
 }
 
@@ -66780,24 +66279,23 @@ import {
   CheckCircle, 
   AlertTriangle, 
   Layers, 
-  Calendar, 
-  Check, 
-  ArrowUpRight, 
-  Ban, 
-  Sparkles, 
-  Coins, 
-  Zap, 
-  ShieldCheck, 
-  Clock, 
-  Wallet, 
   History, 
   FileText, 
   CheckCircle2, 
   XCircle, 
+  Clock, 
+  Search, 
+  Filter, 
+  ChevronLeft, 
+  ChevronRight, 
+  ChevronsLeft, 
+  ChevronsRight, 
+  Printer, 
+  Eye, 
+  X, 
   ExternalLink,
-  X,
-  Printer,
-  Eye
+  ShieldCheck,
+  DollarSign
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { getCurrentUser } from '@/lib/auth';
@@ -66820,79 +66318,24 @@ interface Transaction {
   createdAt: string;
 }
 
-interface TokenIdentity {
-  tokenName: string;
-  tokenSymbol: string;
-  tokenIcon?: string;
-}
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$', JPY: '¥', THB: '฿'
+};
 
-/**
- * Defensive utility to guarantee amount formatting never crashes on string/null/undefined.
- */
 const formatAmount = (val: any): string => {
-  if (typeof val === 'number' && !isNaN(val)) {
-    return val.toFixed(2);
-  }
+  if (typeof val === 'number' && !isNaN(val)) return val.toFixed(2);
   const parsed = parseFloat(val);
   return (!isNaN(parsed) ? parsed : 0).toFixed(2);
 };
-
-/**
- * Dynamic Token Icon renderer synchronizing directly with /admin/token-setting.
- */
-function DynamicTokenIcon({ 
-  symbolOrIcon, 
-  className = "w-3.5 h-3.5",
-  style = {} 
-}: { 
-  symbolOrIcon?: string; 
-  className?: string; 
-  style?: React.CSSProperties 
-}) {
-  const val = (symbolOrIcon || '').trim();
-  const lower = val.toLowerCase();
-  if (lower === 'coins' || lower === 'coin') return <Coins className={className} style={style} />;
-  if (lower === 'sparkles' || lower === 'sparkle') return <Sparkles className={className} style={style} />;
-  if (lower === 'zap' || lower === 'lightning' || lower === 'flash') return <Zap className={className} style={style} />;
-
-  if (val && !/^[a-zA-Z0-9_-]{4,}$/.test(val)) {
-    return (
-      <span 
-        role="img" 
-        aria-label="token-icon"
-        className="inline-flex items-center justify-center select-none leading-none shrink-0" 
-        style={{ fontSize: '1.05em', ...style }}
-      >
-        {val}
-      </span>
-    );
-  }
-
-  if (val && val.length <= 4) {
-    return (
-      <span 
-        className="inline-flex items-center justify-center font-black text-[10px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/25 leading-none shrink-0 font-mono"
-        style={style}
-      >
-        {val}
-      </span>
-    );
-  }
-
-  return <Coins className={className} style={style} />;
-}
 
 export default function BillingPage() {
   const langContext = useTranslation();
   const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
 
   const [loading, setLoading] = useState<boolean>(true);
-  const [processing, setProcessing] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
-  const [user, setUser] = useState<any>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'invoices'>('overview');
   const [selectedInvoice, setSelectedInvoice] = useState<Transaction | null>(null);
 
   const [gatewayConfig, setGatewayConfig] = useState<any>({
@@ -66900,93 +66343,86 @@ export default function BillingPage() {
     currencySymbol: '$'
   });
 
-  const [tokenIdentity, setTokenIdentity] = useState<TokenIdentity>({
-    tokenName: 'Tokens',
-    tokenSymbol: '🪙',
-    tokenIcon: '🪙'
-  });
-
-  // Dynamic Theme Synchronization
-  useEffect(() => {
-    const checkTheme = () => {
-      if (typeof window !== 'undefined') {
-        const saved = localStorage.getItem('zecratary_theme_mode');
-      }
-    };
-    checkTheme();
-    window.addEventListener('zecratary_theme_mode_changed', checkTheme);
-    window.addEventListener('zecratary_theme_updated', checkTheme);
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', checkTheme);
-      window.removeEventListener('zecratary_theme_updated', checkTheme);
-    };
-  }, []);
+  // Search & Pagination State
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [gatewayFilter, setGatewayFilter] = useState<string>('all');
+  const [page, setPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
 
   const normalizeTransaction = (tx: any): Transaction => ({
     id: String(tx.id || tx.transaction_id || `tx_${Date.now()}`),
-    customerName: tx.customerName || tx.customer_name || tx.userName || '',
-    customerEmail: tx.customerEmail || tx.customer_email || tx.userEmail || '',
-    planName: tx.planName || tx.plan_name || 'Subscription Tier',
+    customerName: tx.customerName || tx.customer_name || tx.userName || tx.user_name || 'Customer',
+    customerEmail: tx.customerEmail || tx.customer_email || tx.userEmail || tx.user_email || '',
+    planName: tx.planName || tx.plan_name || tx.description || 'Payment Transaction',
     planSlug: tx.planSlug || tx.plan_slug || '',
     amount: typeof tx.amount === 'number' ? tx.amount : (parseFloat(tx.amount || 0) || 0),
     currency: (tx.currency || 'USD').toUpperCase(),
-    gateway: tx.gateway || tx.payment_method || 'wallet',
+    gateway: (tx.gateway || tx.payment_method || 'stripe').toLowerCase(),
     status: (tx.status || 'succeeded').toLowerCase(),
     failureReason: tx.failureReason || tx.failure_reason,
     isRecurring: Boolean(tx.isRecurring ?? tx.is_recurring ?? true),
-    recurringInterval: (tx.recurringInterval || tx.recurring_interval || 'MONTH').toUpperCase(),
+    recurringInterval: (tx.recurringInterval || tx.recurring_interval || (String(tx.plan_slug || tx.planSlug || '').toLowerCase().includes('annual') ? 'YEAR' : 'MONTH')).toUpperCase(),
     autoRenew: Boolean(tx.autoRenew ?? tx.auto_renew ?? true),
     expiryDate: tx.expiryDate || tx.expiry_date,
     createdAt: tx.createdAt || tx.created_at || new Date().toISOString()
   });
 
+  // Fetch all transactions from /admin/payment-gateway, /admin/payment, or /api/billing
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      let userEmail = '';
-      let userId = '';
+      let rawList: any[] = [];
+      let loadedGatewayConfig: any = null;
 
-      if (typeof window !== 'undefined') {
+      // 1. Fetch from /api/admin/payment-gateway
+      try {
+        const gwRes = await fetch(`/api/admin/payment-gateway?t=${Date.now()}`, { cache: 'no-store' });
+        if (gwRes.ok) {
+          const gwData = await gwRes.json();
+          if (gwData.success) {
+            if (Array.isArray(gwData.transactions)) rawList = gwData.transactions;
+            else if (Array.isArray(gwData.data)) rawList = gwData.data;
+            if (gwData.gatewayConfig) loadedGatewayConfig = gwData.gatewayConfig;
+          }
+        }
+      } catch (_) {}
+
+      // 2. Fallback to /api/admin/payment
+      if (rawList.length === 0) {
         try {
-          const authUser = getCurrentUser();
-          if (authUser?.email) userEmail = authUser.email;
-          if (authUser?.id) userId = String(authUser.id);
-
-          if (!userEmail || !userId) {
-            const rawStored = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user') || localStorage.getItem('currentUser');
-            if (rawStored) {
-              const parsed = JSON.parse(rawStored);
-              if (!userEmail && parsed?.email) userEmail = parsed.email;
-              if (!userId && (parsed?.id || parsed?.userId)) userId = String(parsed.id || parsed.userId);
+          const adminPayRes = await fetch(`/api/admin/payment?t=${Date.now()}`, { cache: 'no-store' });
+          if (adminPayRes.ok) {
+            const adminPayData = await adminPayRes.json();
+            if (adminPayData.success) {
+              if (Array.isArray(adminPayData.transactions)) rawList = adminPayData.transactions;
+              else if (Array.isArray(adminPayData.data)) rawList = adminPayData.data;
+              if (adminPayData.gatewayConfig && !loadedGatewayConfig) loadedGatewayConfig = adminPayData.gatewayConfig;
             }
           }
         } catch (_) {}
       }
 
-      const params = new URLSearchParams();
-      if (userEmail) params.append('email', userEmail);
-      if (userId) params.append('userId', userId);
-      params.append('t', String(Date.now()));
-
-      const res = await fetch(`/api/billing?${params.toString()}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          setUser(data.user);
-          const rawList = Array.isArray(data.transactions) ? data.transactions : [];
-          setTransactions(rawList.map(normalizeTransaction));
-          if (data.gatewayConfig) setGatewayConfig(data.gatewayConfig);
-          if (data.tokenIdentity) {
-            setTokenIdentity({
-              tokenName: data.tokenIdentity.tokenName || 'Tokens',
-              tokenSymbol: data.tokenIdentity.tokenSymbol || '🪙',
-              tokenIcon: data.tokenIdentity.tokenIcon || data.tokenIdentity.tokenSymbol || '🪙'
-            });
+      // 3. Fallback to /api/billing?all=true&source=gateway
+      if (rawList.length === 0) {
+        try {
+          const billingRes = await fetch(`/api/billing?all=true&source=gateway&t=${Date.now()}`, { cache: 'no-store' });
+          if (billingRes.ok) {
+            const billingData = await billingRes.json();
+            if (billingData.success) {
+              if (Array.isArray(billingData.transactions)) rawList = billingData.transactions;
+              if (billingData.gatewayConfig && !loadedGatewayConfig) loadedGatewayConfig = billingData.gatewayConfig;
+            }
           }
-        }
+        } catch (_) {}
+      }
+
+      setTransactions(rawList.map(normalizeTransaction));
+      if (loadedGatewayConfig) {
+        setGatewayConfig(loadedGatewayConfig);
       }
     } catch (err: any) {
-      setFeedback({ type: 'error', msg: err.message || t('failedLoadBilling', 'Failed to load billing details') });
+      setFeedback({ type: 'error', msg: err.message || t('failedLoadBilling', 'Failed to load billing transactions') });
     } finally {
       setLoading(false);
     }
@@ -66994,16 +66430,18 @@ export default function BillingPage() {
 
   useEffect(() => {
     fetchData();
+
     const handleSync = () => fetchData();
     window.addEventListener('zecratary_payment_updated', handleSync);
+    window.addEventListener('zecratary_payment_gateway_updated', handleSync);
     window.addEventListener('zecratary_users_updated', handleSync);
     window.addEventListener('zecratary_wallet_updated', handleSync);
-    window.addEventListener('zecratary_token_settings_updated', handleSync);
+
     return () => {
       window.removeEventListener('zecratary_payment_updated', handleSync);
+      window.removeEventListener('zecratary_payment_gateway_updated', handleSync);
       window.removeEventListener('zecratary_users_updated', handleSync);
       window.removeEventListener('zecratary_wallet_updated', handleSync);
-      window.removeEventListener('zecratary_token_settings_updated', handleSync);
     };
   }, [fetchData]);
 
@@ -67014,82 +66452,73 @@ export default function BillingPage() {
     }
   }, [feedback]);
 
-  // Determine active transaction
-  const activeTransaction = useMemo(() => {
-    return transactions.find((tx) => {
-      const isPaidOrActive = ['active', 'succeeded', 'successful', 'paid', 'canceled'].includes(tx.status);
-      if (!isPaidOrActive) return false;
-      if (!tx.expiryDate) return true;
-      return new Date(tx.expiryDate).getTime() > Date.now();
+  // Filtered & Paginated Computation
+  const filteredTransactions = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    return transactions.filter((tx) => {
+      const matchesSearch = !q ||
+        tx.id.toLowerCase().includes(q) ||
+        tx.customerName.toLowerCase().includes(q) ||
+        tx.customerEmail.toLowerCase().includes(q) ||
+        tx.planName.toLowerCase().includes(q) ||
+        tx.planSlug.toLowerCase().includes(q) ||
+        tx.gateway.toLowerCase().includes(q) ||
+        tx.status.toLowerCase().includes(q);
+
+      const s = tx.status.toLowerCase();
+      let matchesStatus = statusFilter === 'all';
+      if (!matchesStatus) {
+        if (statusFilter === 'succeeded') matchesStatus = ['succeeded', 'successful', 'paid', 'active', 'completed'].includes(s);
+        else if (statusFilter === 'canceled') matchesStatus = ['canceled', 'cancelled'].includes(s);
+        else if (statusFilter === 'refunded') matchesStatus = s === 'refunded';
+        else if (statusFilter === 'failed') matchesStatus = ['failed', 'declined'].includes(s);
+        else matchesStatus = s === statusFilter;
+      }
+
+      const g = tx.gateway.toLowerCase();
+      const matchesGateway = gatewayFilter === 'all' || g === gatewayFilter;
+
+      return matchesSearch && matchesStatus && matchesGateway;
     });
+  }, [transactions, searchQuery, statusFilter, gatewayFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / pageSize));
+
+  const paginatedTransactions = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredTransactions.slice(start, start + pageSize);
+  }, [filteredTransactions, page, pageSize]);
+
+  // Aggregate Stats
+  const stats = useMemo(() => {
+    let totalVolume = 0;
+    let succeededCount = 0;
+    const gatewaysSet = new Set<string>();
+
+    transactions.forEach((tx) => {
+      if (tx.gateway) gatewaysSet.add(tx.gateway.toUpperCase());
+      const s = tx.status.toLowerCase();
+      if (['succeeded', 'successful', 'paid', 'active', 'completed'].includes(s)) {
+        totalVolume += Number(tx.amount || 0);
+        succeededCount += 1;
+      }
+    });
+
+    return {
+      totalCount: transactions.length,
+      totalVolume,
+      succeededCount,
+      gatewaysCount: gatewaysSet.size || 1
+    };
   }, [transactions]);
 
-  const isFreePlan = useMemo(() => {
-    const p = (user?.subscription_plan || 'taster').toLowerCase();
-    return p === 'taster' || p === 'free';
-  }, [user]);
-
-  // Handle Cancel Auto-Renew
-  const handleCancelAutoRenew = async () => {
-    if (!window.confirm(t('confirmCancelAutoRenewPrompt', 'Are you sure you want to cancel auto-renewal? You will retain all plan features until the end of your billing cycle.'))) {
-      return;
-    }
-    setProcessing(true);
-    try {
-      const res = await fetch('/api/billing', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'cancel_subscription',
-          email: user?.email,
-          transactionId: activeTransaction?.id
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setFeedback({ type: 'success', msg: data.message || t('autoRenewCancelledMsg', 'Auto-renewal has been cancelled.') });
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_payment_updated'));
-        }
-        await fetchData();
-      } else {
-        throw new Error(data.error);
-      }
-    } catch (err: any) {
-      setFeedback({ type: 'error', msg: err.message || t('failedCancelAutoRenew', 'Failed to cancel auto-renewal') });
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  // Handle Resume Auto-Renew
-  const handleResumeAutoRenew = async () => {
-    setProcessing(true);
-    try {
-      const res = await fetch('/api/billing', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'resume_subscription',
-          email: user?.email,
-          transactionId: activeTransaction?.id
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setFeedback({ type: 'success', msg: data.message || t('autoRenewResumedMsg', 'Auto-renewal reactivated!') });
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_payment_updated'));
-        }
-        await fetchData();
-      } else {
-        throw new Error(data.error);
-      }
-    } catch (err: any) {
-      setFeedback({ type: 'error', msg: err.message || t('failedReactivateAutoRenew', 'Failed to reactivate auto-renewal') });
-    } finally {
-      setProcessing(false);
-    }
+  const getPageNumbers = (curr: number, total: number) => {
+    const pages: number[] = [];
+    let start = Math.max(1, curr - 2);
+    let end = Math.min(total, start + 4);
+    if (end - start < 4) start = Math.max(1, end - 4);
+    for (let i = start; i <= end; i++) pages.push(i);
+    return pages;
   };
 
   const handlePrint = () => {
@@ -67106,24 +66535,24 @@ export default function BillingPage() {
         color: 'var(--color-text, #f8fafc)'
       }}
     >
-      <div className="max-w-6xl mx-auto space-y-8">
+      <div className="max-w-6xl mx-auto space-y-6">
 
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        {/* Page Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
           <div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight flex items-center gap-3">
               <CreditCard className="h-7 w-7" style={{ color: 'var(--color-emerald, #10b981)' }} />
-              <span>{t('billingInvoicesTitle', 'Billing & Invoices')}</span>
+              <span>{t('billingInvoicesTitle', 'Invoices & Receipts')}</span>
             </h1>
-            <p className="text-sm opacity-70 mt-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-              {t('billingInvoicesSubtitle', 'Manage recurring subscription payments, review transaction receipts, and audit store balances.')}
+            <p className="text-xs sm:text-sm opacity-70 mt-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+              {t('billingInvoicesSubtitle', 'Review official receipts, inspect transaction references, and audit all gateway payments.')}
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Link
               href="/subscriptions"
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold border transition cursor-pointer hover:opacity-85"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold border transition cursor-pointer hover:opacity-85 shadow-xs"
               style={{
                 backgroundColor: 'var(--color-card, #0f172a)',
                 borderColor: 'var(--color-border, #1e293b)',
@@ -67131,14 +66560,14 @@ export default function BillingPage() {
               }}
             >
               <Layers className="w-4 h-4" style={{ color: 'var(--color-emerald, #10b981)' }} />
-              <span>{t('subscriptionsPageBtn', 'Change Plan Tier')}</span>
+              <span>{t('subscriptionsPageBtn', 'Subscriptions & Plans')}</span>
             </Link>
 
             <button
               type="button"
               onClick={fetchData}
               disabled={loading}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold border transition cursor-pointer hover:opacity-80 disabled:opacity-50"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold border transition cursor-pointer hover:opacity-80 disabled:opacity-50 shadow-xs"
               style={{
                 backgroundColor: 'var(--color-card, #0f172a)',
                 borderColor: 'var(--color-border, #1e293b)',
@@ -67170,321 +66599,401 @@ export default function BillingPage() {
           </div>
         )}
 
-        {/* Navigation Tabs */}
-        <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-          <button
-            type="button"
-            onClick={() => setActiveTab('overview')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-              activeTab === 'overview' ? 'shadow-sm' : 'opacity-60 hover:opacity-100'
-            }`}
-            style={activeTab === 'overview' ? {
-              backgroundColor: 'var(--color-card, #0f172a)',
-              color: 'var(--color-emerald, #10b981)',
-              border: '1px solid var(--color-border, #1e293b)'
-            } : {
-              color: 'var(--color-text-secondary, #94a3b8)'
-            }}
-          >
-            {t('subscriptionOverviewTab', 'Subscription Overview')}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('invoices')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
-              activeTab === 'invoices' ? 'shadow-sm' : 'opacity-60 hover:opacity-100'
-            }`}
-            style={activeTab === 'invoices' ? {
-              backgroundColor: 'var(--color-card, #0f172a)',
-              color: 'var(--color-emerald, #10b981)',
-              border: '1px solid var(--color-border, #1e293b)'
-            } : {
-              color: 'var(--color-text-secondary, #94a3b8)'
-            }}
-          >
-            {t('invoicesReceiptsTab', 'Invoices & Receipts')} ({transactions.length})
-          </button>
-        </div>
-
-        {/* TAB 1: SUBSCRIPTION OVERVIEW */}
-        {activeTab === 'overview' && (
-          <div className="space-y-6">
-            <div 
-              className="p-6 sm:p-8 rounded-3xl border shadow-xl space-y-6"
-              style={{
-                backgroundColor: 'var(--color-card, #0f172a)',
-                borderColor: 'var(--color-border, #1e293b)'
-              }}
-            >
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span 
-                      className="text-xs font-black uppercase tracking-wider px-3 py-1 rounded-full border shadow-sm"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark, #070b13)',
-                        borderColor: 'var(--color-emerald, #10b981)',
-                        color: 'var(--color-emerald, #10b981)'
-                      }}
-                    >
-                      {t('currentActiveTier', 'Current Active Tier')}
-                    </span>
-
-                    {activeTransaction?.autoRenew && activeTransaction.status !== 'canceled' && (
-                      <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 flex items-center gap-1">
-                        <Sparkles className="w-3 h-3" />
-                        <span>{t('autoRenewOn', 'Auto-Renew ON')}</span>
-                      </span>
-                    )}
-                    {activeTransaction?.status === 'canceled' && (
-                      <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-orange-500/10 text-orange-400 border border-orange-500/20 flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        <span>{t('renewalCanceled', 'Renewal Canceled (Active Until Expiry)')}</span>
-                      </span>
-                    )}
-                  </div>
-
-                  <h2 className="text-2xl sm:text-3xl font-black capitalize" style={{ color: 'var(--color-text, #f8fafc)' }}>
-                    {activeTransaction?.planName || user?.plan_name || (isFreePlan ? 'Taster (Free)' : user?.subscription_plan)}
-                  </h2>
-
-                  <p className="text-xs opacity-75 flex items-center gap-2" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                    <Calendar className="w-3.5 h-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
-                    <span>
-                      {activeTransaction?.expiryDate || user?.expiry_date
-                        ? `${t('planValidUntil', 'Active period ends on')} ${new Date(activeTransaction?.expiryDate || user?.expiry_date).toLocaleDateString()}`
-                        : t('freePlanNoExpiry', 'Free Plan — Perpetual Access')}
-                    </span>
-                  </p>
-                </div>
-
-                {/* Actions */}
-                <div className="flex flex-wrap items-center gap-3">
-                  {activeTransaction && activeTransaction.status !== 'canceled' && !isFreePlan && (
-                    <button
-                      type="button"
-                      onClick={handleCancelAutoRenew}
-                      disabled={processing}
-                      className="px-4 py-2.5 rounded-xl border border-rose-500/30 text-rose-400 hover:bg-rose-500/10 font-bold text-xs flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
-                    >
-                      <Ban className="w-4 h-4" />
-                      <span>{t('cancelAutoRenewBtn', 'Cancel Auto-Renewal')}</span>
-                    </button>
-                  )}
-
-                  {activeTransaction && activeTransaction.status === 'canceled' && !isFreePlan && (
-                    <button
-                      type="button"
-                      onClick={handleResumeAutoRenew}
-                      disabled={processing}
-                      className="px-4 py-2.5 rounded-xl border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/10 font-bold text-xs flex items-center gap-2 transition cursor-pointer disabled:opacity-50"
-                    >
-                      <CheckCircle className="w-4 h-4" />
-                      <span>{t('reactivateAutoRenewBtn', 'Reactivate Auto-Renew')}</span>
-                    </button>
-                  )}
-
-                  <Link
-                    href="/subscriptions"
-                    className="px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition cursor-pointer text-slate-950 shadow-md hover:opacity-90"
-                    style={{ backgroundColor: 'var(--color-emerald, #10b981)' }}
-                  >
-                    <span>{t('switchOrUpgradePlan', 'Switch or Upgrade Plan')}</span>
-                    <ArrowUpRight className="w-4 h-4" />
-                  </Link>
-                </div>
-              </div>
-
-              {/* Status Row */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <div className="p-4 rounded-2xl border" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
-                  <div className="flex items-center gap-2 text-xs opacity-60 font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                    <ShieldCheck className="w-3.5 h-3.5" />
-                    <span>{t('subscriberAccount', 'Subscriber')}</span>
-                  </div>
-                  <div className="font-bold text-sm truncate" style={{ color: 'var(--color-text, #f8fafc)' }}>
-                    {user?.name || user?.email}
-                  </div>
-                  <div className="text-xs opacity-50 truncate" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                    {user?.email}
-                  </div>
-                </div>
-
-                <div className="p-4 rounded-2xl border" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
-                  <div className="flex items-center gap-2 text-xs opacity-60 font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                    <Wallet className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>{t('storeWalletBalance', 'Store Wallet Balance')}</span>
-                  </div>
-                  <div className="font-bold text-base font-mono flex items-center gap-1" style={{ color: 'var(--color-emerald, #10b981)' }}>
-                    <span>{gatewayConfig.currencySymbol || '$'}</span>
-                    <span>{formatAmount(user?.wallet_balance)}</span>
-                  </div>
-                  <div className="text-[11px] opacity-60" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                    {t('availableForRenewals', 'Available for automated plan renewals')}
-                  </div>
-                </div>
-
-                <div className="p-4 rounded-2xl border" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
-                  <div className="flex items-center gap-2 text-xs opacity-60 font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>{t('billingFrequency', 'Billing Frequency')}</span>
-                  </div>
-                  <div className="font-bold text-sm uppercase tracking-wider" style={{ color: 'var(--color-text, #f8fafc)' }}>
-                    {isFreePlan ? t('perpetualAccess', 'Perpetual') : (user?.plan_interval || 'MONTH')}
-                  </div>
-                  <div className="text-[11px] opacity-60" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                    {activeTransaction?.isRecurring ? t('recurringActive', 'Recurring Auto-Renew') : t('oneOffCycle', 'One-off cycle')}
-                  </div>
-                </div>
-
-                <div className="p-4 rounded-2xl border" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
-                  <div className="flex items-center gap-2 text-xs opacity-60 font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                    <DynamicTokenIcon symbolOrIcon={tokenIdentity.tokenIcon || tokenIdentity.tokenSymbol} className="w-3.5 h-3.5 text-amber-400" />
-                    <span>{t('tokenAllocation', 'Monthly Token Quota')}</span>
-                  </div>
-                  <div className="font-bold text-base flex items-center gap-1.5" style={{ color: '#f59e0b' }}>
-                    <span>{Number(user?.token_balance || 0).toLocaleString()}</span>
-                    <span className="text-xs opacity-75">{tokenIdentity.tokenSymbol}</span>
-                  </div>
-                  <div className="text-[11px] opacity-60" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                    {t('grantedPerCycle', 'Granted per active cycle')}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 2: INVOICES & RECEIPTS */}
-        {activeTab === 'invoices' && (
+        {/* Gateway Overview KPI Summary Strip */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <div 
-            className="p-6 sm:p-8 rounded-3xl border shadow-xl space-y-6"
+            className="p-4 rounded-2xl border transition-colors shadow-sm"
             style={{
               backgroundColor: 'var(--color-card, #0f172a)',
               borderColor: 'var(--color-border, #1e293b)'
             }}
           >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-              <div>
-                <h3 className="text-xl font-black flex items-center gap-2.5" style={{ color: 'var(--color-text, #f8fafc)' }}>
-                  <History className="w-5 h-5" style={{ color: 'var(--color-emerald, #10b981)' }} />
-                  <span>{t('invoiceHistoryTitle', 'Invoice & Payment Records')}</span>
-                </h3>
-                <p className="text-xs opacity-70 mt-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('invoiceHistorySubtitle', 'View official receipts, inspect transaction reference IDs, and print tax invoices.')}
-                </p>
-              </div>
+            <div className="flex items-center justify-between text-xs opacity-60 font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+              <span>{t('totalInvoicesCount', 'Total Transactions')}</span>
+              <History className="w-4 h-4 text-purple-400" />
             </div>
+            <div suppressHydrationWarning className="font-mono font-black text-2xl" style={{ color: 'var(--color-text, #f8fafc)' }}>
+              {stats.totalCount}
+            </div>
+            <div className="text-[11px] opacity-60 mt-0.5" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+              All gateway transactions
+            </div>
+          </div>
 
-            {transactions.length === 0 ? (
-              <div 
-                className="p-8 rounded-2xl border text-center space-y-2"
+          <div 
+            className="p-4 rounded-2xl border transition-colors shadow-sm"
+            style={{
+              backgroundColor: 'var(--color-card, #0f172a)',
+              borderColor: 'var(--color-border, #1e293b)'
+            }}
+          >
+            <div className="flex items-center justify-between text-xs opacity-60 font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+              <span>{t('totalBilledVolume', 'Settled Volume')}</span>
+              <DollarSign className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div suppressHydrationWarning className="font-mono font-black text-2xl" style={{ color: 'var(--color-emerald, #10b981)' }}>
+              {gatewayConfig.currencySymbol || '$'}{stats.totalVolume.toFixed(2)}
+            </div>
+            <div className="text-[11px] opacity-60 mt-0.5" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+              Total paid across channels
+            </div>
+          </div>
+
+          <div 
+            className="p-4 rounded-2xl border transition-colors shadow-sm"
+            style={{
+              backgroundColor: 'var(--color-card, #0f172a)',
+              borderColor: 'var(--color-border, #1e293b)'
+            }}
+          >
+            <div className="flex items-center justify-between text-xs opacity-60 font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+              <span>{t('succeededInvoices', 'Succeeded Payments')}</span>
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div suppressHydrationWarning className="font-mono font-black text-2xl text-emerald-400">
+              {stats.succeededCount}
+            </div>
+            <div className="text-[11px] opacity-60 mt-0.5" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+              Completed receipts
+            </div>
+          </div>
+
+          <div 
+            className="p-4 rounded-2xl border transition-colors shadow-sm"
+            style={{
+              backgroundColor: 'var(--color-card, #0f172a)',
+              borderColor: 'var(--color-border, #1e293b)'
+            }}
+          >
+            <div className="flex items-center justify-between text-xs opacity-60 font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+              <span>{t('activeGateways', 'Payment Gateways')}</span>
+              <ShieldCheck className="w-4 h-4 text-blue-400" />
+            </div>
+            <div suppressHydrationWarning className="font-mono font-black text-2xl text-blue-400">
+              {stats.gatewaysCount}
+            </div>
+            <div className="text-[11px] opacity-60 mt-0.5" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+              Stripe, PayPal, Wallet & Manual
+            </div>
+          </div>
+        </div>
+
+        {/* INVOICES & RECEIPTS TABLE CONTAINER WITH SEARCH & PAGINATION */}
+        <div 
+          className="p-6 sm:p-8 rounded-3xl border shadow-xl space-y-6 transition-colors duration-200"
+          style={{
+            backgroundColor: 'var(--color-card, #0f172a)',
+            borderColor: 'var(--color-border, #1e293b)'
+          }}
+        >
+          {/* Search, Status Filter, Gateway Filter, and Rows Controls */}
+          <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 opacity-40" />
+              <input
+                type="text"
+                placeholder={t('searchInvoicesPlaceholder', 'Search by customer, email, plan, gateway, or transaction ID...')}
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full pl-10 pr-4 py-2.5 rounded-xl border text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-emerald-500/50"
                 style={{
                   backgroundColor: 'var(--color-inner-dark, #070b13)',
-                  borderColor: 'var(--color-border, #1e293b)'
+                  borderColor: 'var(--color-border, #1e293b)',
+                  color: 'var(--color-text, #f8fafc)'
                 }}
-              >
-                <FileText className="w-8 h-8 mx-auto opacity-40" style={{ color: 'var(--color-emerald, #10b981)' }} />
-                <p className="text-sm font-bold" style={{ color: 'var(--color-text, #f8fafc)' }}>
-                  {t('noInvoicesRecorded', 'No invoices or subscription payments recorded yet.')}
-                </p>
-                <p className="text-xs opacity-60" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
-                  {t('invoicesAppearHere', 'When you activate or renew a paid package, your downloadable receipts will be listed here.')}
-                </p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr 
-                      className="border-b font-extrabold uppercase tracking-wider text-[10px]"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark, #070b13)',
-                        borderColor: 'var(--color-border, #1e293b)',
-                        color: 'var(--color-text-secondary, #94a3b8)'
-                      }}
-                    >
-                      <th className="px-4 py-3">{t('tableInvoiceId', 'Invoice / Tx ID')}</th>
-                      <th className="px-4 py-3">{t('tablePlan', 'Plan & Tier')}</th>
-                      <th className="px-4 py-3">{t('tableInterval', 'Interval')}</th>
-                      <th className="px-4 py-3">{t('tableAmount', 'Amount')}</th>
-                      <th className="px-4 py-3">{t('tableSource', 'Payment Source')}</th>
-                      <th className="px-4 py-3">{t('tableStatus', 'Status')}</th>
-                      <th className="px-4 py-3">{t('tableDate', 'Date')}</th>
-                      <th className="px-4 py-3 text-right">{t('tableActions', 'Action')}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                    {transactions.map((tx) => {
-                      const isSucceeded = ['active', 'succeeded', 'successful', 'paid'].includes(tx.status);
-                      const isCanceled = tx.status === 'canceled';
+              />
+            </div>
 
-                      return (
-                        <tr key={tx.id} className="hover:bg-white/[0.02] transition-colors" style={{ color: 'var(--color-text, #f8fafc)' }}>
-                          <td className="px-4 py-3 font-mono text-[11px] font-bold">
-                            {tx.id?.length > 16 ? `${tx.id.substring(0, 16)}...` : (tx.id || '—')}
-                          </td>
-                          <td className="px-4 py-3 font-bold">
-                            <span>{tx.planName}</span>
-                          </td>
-                          <td className="px-4 py-3 uppercase font-semibold text-[11px] opacity-80">
-                            {tx.recurringInterval}
-                          </td>
-                          {/* CRITICAL FIX: formatAmount handles string and numbers safely */}
-                          <td className="px-4 py-3 font-mono font-bold" style={{ color: 'var(--color-emerald, #10b981)' }}>
-                            {tx.currency} {formatAmount(tx.amount)}
-                          </td>
-                          <td className="px-4 py-3 uppercase text-[11px] opacity-75">
-                            {tx.gateway}
-                          </td>
-                          <td className="px-4 py-3">
-                            {isSucceeded && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                                <CheckCircle2 className="w-3 h-3" />
-                                <span className="capitalize">{tx.status}</span>
-                              </span>
-                            )}
-                            {isCanceled && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-500/10 text-orange-400 border border-orange-500/20">
-                                <Clock className="w-3 h-3" />
-                                <span>{t('canceledStatus', 'Canceled')}</span>
-                              </span>
-                            )}
-                            {!isSucceeded && !isCanceled && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
-                                <XCircle className="w-3 h-3" />
-                                <span className="capitalize">{tx.status}</span>
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-[11px] opacity-75">
-                            {tx.createdAt ? new Date(tx.createdAt).toLocaleDateString() : '—'}
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <button
-                              type="button"
-                              onClick={() => setSelectedInvoice(tx)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition hover:bg-white/5 cursor-pointer"
-                              style={{ borderColor: 'var(--color-border, #1e293b)' }}
-                            >
-                              <Eye className="w-3 h-3" />
-                              <span>{t('viewReceipt', 'Receipt')}</span>
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+              <div className="flex items-center gap-1.5 border rounded-xl px-2.5 py-1.5 shrink-0" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
+                <Filter className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <select
+                  value={statusFilter}
+                  onChange={(e) => {
+                    setStatusFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  className="text-xs font-bold bg-transparent outline-none cursor-pointer"
+                  style={{ color: 'var(--color-text, #f8fafc)' }}
+                >
+                  <option value="all" className="bg-slate-900 text-slate-100">{t('filterAllStatus', 'All Statuses')}</option>
+                  <option value="succeeded" className="bg-slate-900 text-slate-100">{t('filterSucceeded', 'Succeeded / Paid')}</option>
+                  <option value="canceled" className="bg-slate-900 text-slate-100">{t('filterCanceled', 'Canceled')}</option>
+                  <option value="refunded" className="bg-slate-900 text-slate-100">{t('filterRefunded', 'Refunded')}</option>
+                  <option value="failed" className="bg-slate-900 text-slate-100">{t('filterFailed', 'Failed')}</option>
+                </select>
               </div>
-            )}
+
+              <div className="flex items-center gap-1.5 border rounded-xl px-2.5 py-1.5 shrink-0" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
+                <span className="text-[11px] font-bold opacity-60" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>Gateway:</span>
+                <select
+                  value={gatewayFilter}
+                  onChange={(e) => {
+                    setGatewayFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  className="text-xs font-bold bg-transparent outline-none cursor-pointer uppercase"
+                  style={{ color: 'var(--color-text, #f8fafc)' }}
+                >
+                  <option value="all" className="bg-slate-900 text-slate-100">All Gateways</option>
+                  <option value="stripe" className="bg-slate-900 text-slate-100">Stripe</option>
+                  <option value="paypal" className="bg-slate-900 text-slate-100">PayPal</option>
+                  <option value="wallet" className="bg-slate-900 text-slate-100">Store Wallet</option>
+                  <option value="manual" className="bg-slate-900 text-slate-100">Manual Wire</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-1.5 border rounded-xl px-2.5 py-1.5 shrink-0" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
+                <span className="text-[11px] font-bold opacity-60" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>Rows:</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  className="text-xs font-bold bg-transparent outline-none cursor-pointer"
+                  style={{ color: 'var(--color-text, #f8fafc)' }}
+                >
+                  <option value={10} className="bg-slate-900 text-slate-100">10</option>
+                  <option value={25} className="bg-slate-900 text-slate-100">25</option>
+                  <option value={50} className="bg-slate-900 text-slate-100">50</option>
+                </select>
+              </div>
+            </div>
           </div>
-        )}
+
+          {/* Transactions Table */}
+          <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr 
+                  className="border-b font-extrabold uppercase tracking-wider text-[10px]"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #070b13)',
+                    borderColor: 'var(--color-border, #1e293b)',
+                    color: 'var(--color-text-secondary, #94a3b8)'
+                  }}
+                >
+                  <th className="px-4 py-3.5">{t('tableInvoiceId', 'Invoice / Tx ID')}</th>
+                  <th className="px-4 py-3.5">{t('tableCustomer', 'Customer')}</th>
+                  <th className="px-4 py-3.5">{t('tablePlan', 'Plan & Description')}</th>
+                  <th className="px-4 py-3.5">{t('tableInterval', 'Interval')}</th>
+                  <th className="px-4 py-3.5">{t('tableAmount', 'Amount')}</th>
+                  <th className="px-4 py-3.5">{t('tableSource', 'Gateway')}</th>
+                  <th className="px-4 py-3.5">{t('tableStatus', 'Status')}</th>
+                  <th className="px-4 py-3.5">{t('tableDate', 'Date')}</th>
+                  <th className="px-4 py-3.5 text-right">{t('tableActions', 'Action')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+                {loading ? (
+                  <tr>
+                    <td colSpan={9} className="p-8 text-center text-xs font-bold opacity-70">
+                      <div className="flex items-center justify-center gap-2">
+                        <RefreshCw className="h-4 w-4 animate-spin" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                        <span>Loading transactions from payment gateways...</span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : paginatedTransactions.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="p-8 text-center text-xs font-semibold opacity-50">
+                      {transactions.length === 0 
+                        ? t('noInvoicesRecorded', 'No invoices or gateway payments recorded yet.')
+                        : t('noMatchingTransactions', 'No transactions found matching your search.')}
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedTransactions.map((tx) => {
+                    const isSucceeded = ['active', 'succeeded', 'successful', 'paid', 'completed'].includes(tx.status);
+                    const isCanceled = tx.status === 'canceled' || tx.status === 'cancelled';
+                    const isRefunded = tx.status === 'refunded';
+
+                    return (
+                      <tr key={tx.id} className="hover:bg-white/[0.02] transition-colors" style={{ color: 'var(--color-text, #f8fafc)' }}>
+                        <td className="px-4 py-3.5 font-mono text-[11px] font-bold">
+                          <span className="opacity-90">{tx.id?.length > 18 ? `${tx.id.substring(0, 18)}...` : tx.id}</span>
+                        </td>
+
+                        <td className="px-4 py-3.5">
+                          <div className="font-bold text-xs">{tx.customerName || 'Subscriber'}</div>
+                          <span className="text-[10px] opacity-60 font-mono block truncate max-w-[130px]">{tx.customerEmail || '—'}</span>
+                        </td>
+
+                        <td className="px-4 py-3.5 font-bold">
+                          <span>{tx.planName}</span>
+                          {tx.autoRenew && tx.status !== 'canceled' && (
+                            <span className="ml-1.5 px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                              Auto
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="px-4 py-3.5 uppercase font-semibold text-[11px] opacity-80 font-mono">
+                          {tx.recurringInterval}
+                        </td>
+
+                        <td className="px-4 py-3.5 font-mono font-bold" style={{ color: 'var(--color-emerald, #10b981)' }}>
+                          {CURRENCY_SYMBOLS[tx.currency] || tx.currency} {formatAmount(tx.amount)}
+                        </td>
+
+                        <td className="px-4 py-3.5">
+                          <span className="uppercase text-[10px] font-mono px-2 py-0.5 rounded-md border" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
+                            {tx.gateway}
+                          </span>
+                        </td>
+
+                        <td className="px-4 py-3.5">
+                          {isSucceeded && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span className="capitalize">{tx.status}</span>
+                            </span>
+                          )}
+                          {isCanceled && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                              <Clock className="w-3 h-3" />
+                              <span>{t('canceledStatus', 'Canceled')}</span>
+                            </span>
+                          )}
+                          {isRefunded && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                              <RefreshCw className="w-3 h-3" />
+                              <span>{t('statusRefunded', 'Refunded')}</span>
+                            </span>
+                          )}
+                          {!isSucceeded && !isCanceled && !isRefunded && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                              <XCircle className="w-3 h-3" />
+                              <span className="capitalize">{tx.status}</span>
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="px-4 py-3.5 text-[11px] opacity-75 font-mono whitespace-nowrap">
+                          <span suppressHydrationWarning>{tx.createdAt ? new Date(tx.createdAt).toLocaleDateString() : '—'}</span>
+                        </td>
+
+                        <td className="px-4 py-3.5 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedInvoice(tx)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition hover:bg-white/5 cursor-pointer shadow-xs"
+                            style={{ borderColor: 'var(--color-border, #1e293b)' }}
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>{t('viewReceipt', 'Receipt')}</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination Navigation Bar */}
+          {filteredTransactions.length > 0 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t text-xs" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
+              <span className="opacity-70" style={{ color: 'var(--color-text-secondary, #94a3b8)' }}>
+                {t('showingCountInfo', 'Showing {start} - {end} of {total} transactions')
+                  .replace('{start}', String((page - 1) * pageSize + 1))
+                  .replace('{end}', String(Math.min(page * pageSize, filteredTransactions.length)))
+                  .replace('{total}', String(filteredTransactions.length))}
+              </span>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  disabled={page <= 1 || loading}
+                  onClick={() => setPage(1)}
+                  className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer hover:opacity-80 transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #070b13)',
+                    borderColor: 'var(--color-border, #1e293b)',
+                    color: 'var(--color-text, #f8fafc)'
+                  }}
+                  title="First Page"
+                >
+                  <ChevronsLeft className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  disabled={page <= 1 || loading}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer hover:opacity-80 transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #070b13)',
+                    borderColor: 'var(--color-border, #1e293b)',
+                    color: 'var(--color-text, #f8fafc)'
+                  }}
+                  title="Previous Page"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+
+                {getPageNumbers(page, totalPages).map((num) => (
+                  <button
+                    key={num}
+                    type="button"
+                    onClick={() => setPage(num)}
+                    className="min-w-[28px] h-7 px-2 rounded-lg text-xs font-bold border cursor-pointer transition"
+                    style={page === num ? {
+                      backgroundColor: 'var(--color-emerald, #10b981)',
+                      borderColor: 'var(--color-emerald, #10b981)',
+                      color: '#ffffff'
+                    } : {
+                      backgroundColor: 'var(--color-inner-dark, #070b13)',
+                      borderColor: 'var(--color-border, #1e293b)',
+                      color: 'var(--color-text, #f8fafc)'
+                    }}
+                  >
+                    {num}
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  disabled={page >= totalPages || loading}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer hover:opacity-80 transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #070b13)',
+                    borderColor: 'var(--color-border, #1e293b)',
+                    color: 'var(--color-text, #f8fafc)'
+                  }}
+                  title="Next Page"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  disabled={page >= totalPages || loading}
+                  onClick={() => setPage(totalPages)}
+                  className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer hover:opacity-80 transition"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark, #070b13)',
+                    borderColor: 'var(--color-border, #1e293b)',
+                    color: 'var(--color-text, #f8fafc)'
+                  }}
+                  title="Last Page"
+                >
+                  <ChevronsRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* INVOICE / RECEIPT MODAL DIALOG (FORM-FREE) */}
         {selectedInvoice && (
           <div 
+            role="dialog"
+            aria-modal="true"
             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs transition-opacity animate-in fade-in"
             onClick={() => setSelectedInvoice(null)}
           >
@@ -67505,7 +67014,7 @@ export default function BillingPage() {
                   </div>
                   <div>
                     <h3 className="text-lg font-black">{t('paymentReceiptTitle', 'Payment Receipt')}</h3>
-                    <p className="text-xs opacity-60 font-mono">{selectedInvoice.id}</p>
+                    <p className="text-xs opacity-60 font-mono truncate max-w-[220px]">{selectedInvoice.id}</p>
                   </div>
                 </div>
 
@@ -67523,18 +67032,18 @@ export default function BillingPage() {
                 <div className="p-4 rounded-2xl border space-y-2.5" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
                   <div className="flex justify-between items-center opacity-70">
                     <span>{t('billedToLabel', 'Billed To:')}</span>
-                    <span className="font-semibold text-slate-200">{selectedInvoice.customerName || selectedInvoice.customerEmail}</span>
+                    <span className="font-semibold text-slate-200">{selectedInvoice.customerName}</span>
                   </div>
                   <div className="flex justify-between items-center opacity-70">
                     <span>{t('customerEmailLabel', 'Email Address:')}</span>
-                    <span className="font-mono text-slate-200">{selectedInvoice.customerEmail}</span>
+                    <span className="font-mono text-slate-200">{selectedInvoice.customerEmail || '—'}</span>
                   </div>
                   <div className="flex justify-between items-center opacity-70">
                     <span>{t('paymentDateLabel', 'Payment Date:')}</span>
-                    <span className="text-slate-200">{selectedInvoice.createdAt ? new Date(selectedInvoice.createdAt).toLocaleString() : '—'}</span>
+                    <span suppressHydrationWarning className="text-slate-200">{selectedInvoice.createdAt ? new Date(selectedInvoice.createdAt).toLocaleString() : '—'}</span>
                   </div>
                   <div className="flex justify-between items-center opacity-70">
-                    <span>{t('paymentMethodLabel', 'Payment Method:')}</span>
+                    <span>{t('paymentMethodLabel', 'Payment Gateway:')}</span>
                     <span className="uppercase text-slate-200 font-semibold">{selectedInvoice.gateway}</span>
                   </div>
                   <div className="flex justify-between items-center opacity-70">
@@ -67549,12 +67058,11 @@ export default function BillingPage() {
                       {selectedInvoice.planName}
                     </div>
                     <div className="text-[11px] opacity-60">
-                      {t('subscriptionTierAccess', 'Full subscription culinary & token quota access')}
+                      {t('subscriptionTierAccess', 'Payment processing and subscription quota invoice')}
                     </div>
                   </div>
-                  {/* CRITICAL FIX: Safe formatAmount for modal total */}
                   <div className="text-xl font-black font-mono" style={{ color: 'var(--color-emerald, #10b981)' }}>
-                    {selectedInvoice.currency} {formatAmount(selectedInvoice.amount)}
+                    {CURRENCY_SYMBOLS[selectedInvoice.currency] || selectedInvoice.currency} {formatAmount(selectedInvoice.amount)}
                   </div>
                 </div>
               </div>

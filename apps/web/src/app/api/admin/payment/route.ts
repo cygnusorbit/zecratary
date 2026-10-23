@@ -8,12 +8,12 @@ export async function GET() {
     const txRes = await query(
       `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
     ).catch(() => ({ rows: [] }));
-    const transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
+    const transactions = ((Array.isArray(txRes) ? txRes : ((txRes as any)?.rows || [])));
 
     let settings = null;
     try {
       const sRes = await query(`SELECT payment_settings, currency FROM admin_settings LIMIT 1`);
-      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      const sRow = ((Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0]));
       if (sRow) {
         settings = sRow.payment_settings || sRow;
         if (sRow.currency && typeof settings === 'object') {
@@ -188,7 +188,7 @@ export async function DELETE(req: Request) {
         `SELECT DISTINCT customer_email FROM payment_transactions WHERE id::text = ANY($1::text[]) AND customer_email IS NOT NULL`,
         [targetIds]
       );
-      const rows = Array.isArray(emailRows) ? emailRows : (emailRows?.rows || []);
+      const rows = ((Array.isArray(emailRows) ? emailRows : ((emailRows as any)?.rows || [])));
       affectedEmails = rows.map((r: any) => String(r.customer_email || '').toLowerCase().trim()).filter(Boolean);
     } catch (_) {}
 
@@ -209,7 +209,7 @@ export async function DELETE(req: Request) {
            LIMIT 1`,
           [email]
         );
-        const remRows = Array.isArray(remainingTx) ? remainingTx : (remainingTx?.rows || []);
+        const remRows = ((Array.isArray(remainingTx) ? remainingTx : ((remainingTx as any)?.rows || [])));
         if (remRows.length === 0) {
           await query(
             `UPDATE users 

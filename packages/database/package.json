@@ -1,17 +1,17 @@
 {
   "name": "@zecratary/database",
   "version": "1.0.0",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
   "scripts": {
-    "db:generate": "prisma generate",
-    "db:push": "prisma db push"
+    "db:generate": "node -e \"process.env.PRISMA_GENERATE_SKIP_AUTOINSTALL='true'; require('child_process').execSync('npx prisma generate', { stdio: 'inherit', env: process.env })\"",
+    "db:push": "npx prisma db push"
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0"
+    "@prisma/client": "5.22.0"
   },
   "devDependencies": {
-    "prisma": "^5.22.0",
+    "prisma": "5.22.0",
     "typescript": "^5.7.3"
   }
 }

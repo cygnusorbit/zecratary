@@ -627,8 +627,7 @@ export default function ProfilePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: user.id, email: user.email.toLowerCase().trim() }),
       });
-      logoutUser();
-      router.replace('/login');
+      logoutUser('/');
     } catch (err: any) {
       alert(t('deleteAccountFailed', 'Failed to delete account: ') + (err?.message || 'Server error'));
     }
@@ -878,7 +877,7 @@ export default function ProfilePage() {
                 <div className="flex items-center gap-2 w-full sm:w-auto">
                   <button
                     type="button"
-                    onClick={() => { logoutUser(); router.replace('/login'); }}
+                    onClick={() => { logoutUser('/'); }}
                     className="w-full sm:w-auto px-4 py-2 border font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer text-red-400 border-red-900/40 hover:bg-red-950/20"
                   >
                     <LogOut className="h-4 w-4" /> {t('signOutBtn', 'Sign Out')}
