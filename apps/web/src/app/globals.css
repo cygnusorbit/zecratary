@@ -236,3 +236,25 @@ body:has(.is-auth-page) #zecratary-main-content {
               width 200ms cubic-bezier(0.4, 0, 0.2, 1),
               padding-top 200ms cubic-bezier(0.4, 0, 0.2, 1);
 }
+
+
+/* ==========================================================================
+   Day/Night Mode & Global Theme 200ms Smooth Transitions (Constraint 6)
+   ========================================================================== */
+html,
+body,
+#zecratary-homepage-root,
+#zecratary-homepage-canvas,
+.theme-harmonized-card {
+  transition: background-color 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              color 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html.light {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
