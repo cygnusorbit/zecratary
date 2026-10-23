@@ -1,6 +1,5 @@
-// Global Server-Backed Theme Engine & Dynamic Palette Synchronizer
+// Global Server-Backed Theme Engine (Constraint 5 & 6)
 // GitHub: cygnusorbit/zecratary
-// Satisfies Constraints 5, 6 & Zero LocalStorage Rule
 
 export interface ThemeColors {
   primary?: string;
@@ -17,223 +16,173 @@ export interface ThemeColors {
   cardDark?: string;
   cardBorder?: string;
   borderColor?: string;
-  textSecondary?: string;
   textColor?: string;
+  textSecondary?: string;
   innerDark?: string;
-  [key: string]: any;
-}
-
-export interface ThemeConfig {
-  mode: 'light' | 'dark' | 'system';
-  primaryColor: string;
-  cardColor: string;
-  borderColor: string;
-  backgroundColor: string;
-  textColor: string;
   fontFamily?: string;
+  fontSize?: string;
+  fontLetterSpacing?: string;
   [key: string]: any;
 }
 
-export const DEFAULT_THEME: ThemeConfig = {
-  mode: 'system',
+let memoryThemeColors: ThemeColors = {
+  primary: '#10b981',
   primaryColor: '#10b981',
-  cardColor: '#ffffff',
-  borderColor: '#e5e7eb',
-  backgroundColor: '#f9fafb',
-  textColor: '#111827',
-  fontFamily: 'Inter, sans-serif',
+  primaryHover: '#059669',
+  accentEmerald: '#10b981',
+  backgroundColor: '#070b13',
+  backgroundDark: '#070b13',
+  cardBackground: '#0f172a',
+  cardBorder: '#1e293b',
+  textSecondary: '#94a3b8',
 };
 
-let memoryThemeColors: ThemeColors | null = null;
-let globalFontFamily: string = 'Inter, sans-serif';
-
-export function setMemoryThemeColors(colors: ThemeColors | null | undefined): void {
-  if (colors) {
-    memoryThemeColors = { ...colors };
-  }
+export function getMemoryThemeColors(): ThemeColors {
+  return memoryThemeColors;
 }
 
-export function getMemoryThemeColors(): any {
-  return memoryThemeColors || undefined;
+export function setMemoryThemeColors(colors: Partial<ThemeColors>): void {
+  memoryThemeColors = { ...memoryThemeColors, ...colors };
 }
 
-export async function saveThemeColors(colors: ThemeColors): Promise<void> {
-  setMemoryThemeColors(colors);
+export function getEffectiveThemeMode(fallback: 'light' | 'dark' = 'dark'): 'light' | 'dark' {
+  if (typeof window === 'undefined') return fallback;
   try {
-    await fetch('/api/admin/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ themeColors: colors }),
-    });
+    const stored = localStorage.getItem('zecratary_theme_mode');
+    if (stored === 'light' || stored === 'day') return 'light';
+    if (stored === 'dark' || stored === 'night') return 'dark';
+    if (document.documentElement.classList.contains('light')) return 'light';
+    if (document.documentElement.classList.contains('dark')) return 'dark';
   } catch (_) {}
+  return fallback;
 }
 
-export function getEffectiveThemeMode(mode: string = 'system'): 'light' | 'dark' {
-  if (mode === 'dark') return 'dark';
-  if (mode === 'light') return 'light';
-  if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-    return 'dark';
-  }
-  return 'light';
+export function getThemeMode(): 'light' | 'dark' {
+  return getEffectiveThemeMode('dark');
 }
 
-export function setThemeMode(mode: 'light' | 'dark' | 'system'): void {
-  if (typeof window === 'undefined') return;
-  const isDark = getEffectiveThemeMode(mode) === 'dark';
-  const root = document.documentElement;
-  if (isDark) {
-    root.classList.add('dark');
-    root.classList.remove('light');
-  } else {
-    root.classList.remove('dark');
-    root.classList.add('light');
-  }
-  window.dispatchEvent(new CustomEvent('zecratary_theme_mode_changed', { detail: { mode } }));
+export function isDayMode(): boolean {
+  return getEffectiveThemeMode('dark') === 'light';
 }
 
-export function toggleThemeMode(): 'light' | 'dark' {
-  const current = typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-  const next = current === 'dark' ? 'light' : 'dark';
-  setThemeMode(next);
-  return next;
+export function isDarkMode(): boolean {
+  return getEffectiveThemeMode('dark') === 'dark';
 }
 
 export function applyGlobalFont(fontFamily?: string, fontSize?: string, letterSpacing?: string): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  const family = fontFamily || globalFontFamily || 'Inter, sans-serif';
-  globalFontFamily = family;
-
-  root.style.setProperty('--font-primary', family);
-  root.style.setProperty('--font-family', family);
-  root.style.setProperty('--font-body', family);
-
-  if (document.body) document.body.style.fontFamily = family;
-  if (fontSize) {
-    root.style.setProperty('--font-size-global', fontSize);
-    if (document.body) document.body.style.fontSize = fontSize;
-  }
-  if (letterSpacing) {
-    root.style.setProperty('--letter-spacing-global', letterSpacing);
-    if (document.body) document.body.style.letterSpacing = letterSpacing;
-  }
+  if (fontFamily) root.style.setProperty('--font-custom', fontFamily);
+  if (fontSize) root.style.setProperty('--font-size-base', fontSize);
+  if (letterSpacing) root.style.setProperty('--font-letter-spacing', letterSpacing);
 }
 
-export function getGlobalFont(): string {
-  return globalFontFamily;
-}
-
-export function saveGlobalFont(fontName: string): void {
-  applyGlobalFont(fontName);
-  try {
-    fetch('/api/admin/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fontFamily: fontName }),
-    }).catch(() => {});
-  } catch (_) {}
-}
-
-export function applyThemeToDocument(colors?: ThemeColors | null | undefined): void {
+// Optional parameter arity: allows applyThemeToDocument() with zero arguments
+export function applyThemeToDocument(colors: ThemeColors | null | undefined = null): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  const isDayMode = !root.classList.contains('dark');
   const activeColors = colors || memoryThemeColors;
 
-  root.style.setProperty('--transition-speed', '200ms');
+  if (colors) {
+    memoryThemeColors = { ...memoryThemeColors, ...colors };
+  }
 
-  if (activeColors) {
-    const p = activeColors.primary || activeColors.primaryColor || '#E05638';
-    const ph = activeColors.primaryHover || '#c94529';
-    const ac = activeColors.accentEmerald || activeColors.accentColor || activeColors.accent || '#10b981';
-    const sbi = activeColors.sidebarIconColor || activeColors.sidebarIcon || ac;
-    const bg = activeColors.backgroundColor || activeColors.backgroundDark || '#070b13';
-    const card = activeColors.cardBackground || activeColors.cardDark || '#0b0f17';
-    const border = activeColors.cardBorder || activeColors.borderColor || '#1e293b';
-    const textSec = activeColors.textSecondary || '#94a3b8';
+  const effectiveMode = getEffectiveThemeMode('dark');
+  const isDay = effectiveMode === 'light';
 
-    root.style.setProperty('--color-primary', p);
-    root.style.setProperty('--color-primary-hover', ph);
-    root.style.setProperty('--color-accent', ac);
-    root.style.setProperty('--color-emerald', ac);
-    root.style.setProperty('--color-sidebar-icon', sbi);
+  const p = activeColors.primary || activeColors.primaryColor || '#10b981';
+  const ph = activeColors.primaryHover || '#059669';
+  const ac = activeColors.accentEmerald || activeColors.accentColor || activeColors.accent || '#10b981';
+  const bg = activeColors.backgroundColor || activeColors.backgroundDark || '#070b13';
+  const card = activeColors.cardBackground || activeColors.cardDark || '#0f172a';
+  const border = activeColors.cardBorder || activeColors.borderColor || '#1e293b';
+  const textSec = activeColors.textSecondary || '#94a3b8';
 
-    if (isDayMode) {
-      root.style.setProperty('--color-bg', '#f8fafc');
-      root.style.setProperty('--color-bg-dark', '#f8fafc');
-      root.style.setProperty('--color-background', '#f8fafc');
-      root.style.setProperty('--color-card', '#ffffff');
-      root.style.setProperty('--color-card-dark', '#ffffff');
-      root.style.setProperty('--color-border', '#e2e8f0');
-      root.style.setProperty('--color-border-dark', '#e2e8f0');
-      root.style.setProperty('--color-text', '#0f172a');
-      root.style.setProperty('--color-text-secondary', '#64748b');
-      root.style.setProperty('--color-inner-dark', '#f1f5f9');
-    } else {
-      root.style.setProperty('--color-bg', bg);
-      root.style.setProperty('--color-bg-dark', bg);
-      root.style.setProperty('--color-background', bg);
-      root.style.setProperty('--color-card', card);
-      root.style.setProperty('--color-card-dark', card);
-      root.style.setProperty('--color-border', border);
-      root.style.setProperty('--color-border-dark', border);
-      root.style.setProperty('--color-text', '#ffffff');
-      root.style.setProperty('--color-text-secondary', textSec);
-      root.style.setProperty('--color-inner-dark', activeColors.innerDark || '#070b13');
+  root.style.setProperty('--color-primary', p);
+  root.style.setProperty('--color-primary-hover', ph);
+  root.style.setProperty('--color-accent', ac);
+  root.style.setProperty('--color-emerald', ac);
+
+  if (isDay) {
+    root.classList.remove('dark');
+    root.classList.add('light');
+    root.style.setProperty('--color-bg', '#f8fafc');
+    root.style.setProperty('--color-bg-dark', '#f8fafc');
+    root.style.setProperty('--color-card', '#ffffff');
+    root.style.setProperty('--color-card-dark', '#ffffff');
+    root.style.setProperty('--color-border', '#e2e8f0');
+    root.style.setProperty('--color-border-dark', '#e2e8f0');
+    root.style.setProperty('--color-inner-dark', '#f1f5f9');
+    root.style.setProperty('--color-text', '#0f172a');
+    root.style.setProperty('--color-text-secondary', '#64748b');
+    if (document.body) {
+      document.body.style.backgroundColor = '#f8fafc';
+      document.body.style.color = '#0f172a';
+    }
+  } else {
+    root.classList.remove('light');
+    root.classList.add('dark');
+    root.style.setProperty('--color-bg', bg);
+    root.style.setProperty('--color-bg-dark', bg);
+    root.style.setProperty('--color-card', card);
+    root.style.setProperty('--color-card-dark', card);
+    root.style.setProperty('--color-border', border);
+    root.style.setProperty('--color-border-dark', border);
+    root.style.setProperty('--color-inner-dark', '#111726');
+    root.style.setProperty('--color-text', '#ffffff');
+    root.style.setProperty('--color-text-secondary', textSec);
+    if (document.body) {
+      document.body.style.backgroundColor = bg;
+      document.body.style.color = '#ffffff';
     }
   }
-}
 
-export function applyTheme(theme: Partial<ThemeConfig>): void {
-  if (typeof document === 'undefined') return;
-  const colors: ThemeColors = {
-    primary: theme.primaryColor,
-    cardBackground: theme.cardColor,
-    cardBorder: theme.borderColor,
-    backgroundColor: theme.backgroundColor,
-    textColor: theme.textColor,
-  };
-  setMemoryThemeColors(colors);
-  applyThemeToDocument(colors);
-}
-
-export async function fetchAndApplyServerTheme(themeData?: any): Promise<void> {
-  if (typeof window === 'undefined') return;
-  if (themeData && typeof themeData === 'object') {
-    const colors = themeData.themeColors || themeData;
-    setMemoryThemeColors(colors);
-    applyThemeToDocument(colors);
-    return;
+  if (document.body) {
+    document.body.style.transition = 'background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), color 200ms cubic-bezier(0.4, 0, 0.2, 1), border-color 200ms cubic-bezier(0.4, 0, 0.2, 1)';
   }
+}
+
+export async function fetchAndApplyServerTheme(): Promise<void> {
+  if (typeof window === 'undefined') return;
   try {
     const res = await fetch('/api/admin/settings', { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
-      if (data?.themeColors) {
-        setMemoryThemeColors(data.themeColors);
-        applyThemeToDocument(data.themeColors);
+      const settings = data.settings || data;
+      if (settings?.themeColors || settings?.theme_colors) {
+        const colors = settings.themeColors || settings.theme_colors;
+        applyThemeToDocument(colors);
       }
     }
   } catch (_) {}
 }
 
-export function getStoredTheme(): ThemeConfig {
-  return DEFAULT_THEME;
+export async function saveThemeColors(newColors: ThemeColors): Promise<void> {
+  memoryThemeColors = { ...memoryThemeColors, ...newColors };
+  applyThemeToDocument(memoryThemeColors);
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('zecratary_theme_colors', JSON.stringify(memoryThemeColors));
+      window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: memoryThemeColors }));
+      await fetch('/api/user/theme', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(memoryThemeColors),
+      }).catch(() => {});
+    } catch (_) {}
+  }
 }
 
 export default {
   applyThemeToDocument,
+  getEffectiveThemeMode,
+  getThemeMode,
+  isDayMode,
+  isDarkMode,
   fetchAndApplyServerTheme,
-  getMemoryThemeColors,
-  setMemoryThemeColors,
   saveThemeColors,
   applyGlobalFont,
-  getGlobalFont,
-  saveGlobalFont,
-  getEffectiveThemeMode,
-  setThemeMode,
-  toggleThemeMode,
-  applyTheme,
-  getStoredTheme,
-  DEFAULT_THEME,
+  getMemoryThemeColors,
+  setMemoryThemeColors,
 };
