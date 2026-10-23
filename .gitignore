@@ -21,3 +21,6 @@ build
 
 # Hostinger deployment & build artifacts
 node_modules
+
+# Hostinger deployment artifacts & bridges
+*.local
