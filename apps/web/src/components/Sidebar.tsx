@@ -113,6 +113,47 @@ export default function Sidebar() {
 
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // Route Suppression Checks
+  const isAuthRoute = Boolean(
+    pathname === '/login' ||
+    pathname === '/register' ||
+    pathname === '/forgot-password' ||
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/register') ||
+    pathname.startsWith('/forgot-password')
+  );
+
+  const isHomePage = Boolean(
+    pathname === '/' ||
+    pathname === '' ||
+    pathname === '/index'
+  );
+
+  // Synchronize layout CSS custom properties with sidebar width and topbar height
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+
+    const updateLayoutMetrics = () => {
+      if (isAuthRoute || isHomePage) {
+        root.style.setProperty('--sidebar-width', '0px');
+        root.style.setProperty('--topbar-height', '0px');
+        return;
+      }
+      if (window.innerWidth < 768) {
+        root.style.setProperty('--sidebar-width', '0px');
+        root.style.setProperty('--topbar-height', '3.5rem');
+      } else {
+        root.style.setProperty('--sidebar-width', isCollapsed ? '5rem' : '16rem');
+        root.style.setProperty('--topbar-height', '4rem');
+      }
+    };
+
+    updateLayoutMetrics();
+    window.addEventListener('resize', updateLayoutMetrics);
+    return () => window.removeEventListener('resize', updateLayoutMetrics);
+  }, [isAuthRoute, isHomePage, isCollapsed]);
+
   const syncUserState = useCallback(() => {
     try {
       const u = getCurrentUser();
@@ -127,7 +168,11 @@ export default function Sidebar() {
         const cur = localStorage.getItem('zecratary_currency') || 'USD';
         setCurrencySymbol(CURRENCY_SYMBOLS[cur] || '$');
 
-        // Restore sidebar accordion preference
+        const storedCollapsed = localStorage.getItem('zecratary_sidebar_collapsed');
+        if (storedCollapsed !== null) {
+          setIsCollapsed(storedCollapsed === 'true');
+        }
+
         const storedSections = localStorage.getItem('zecratary_sidebar_sections');
         if (storedSections) {
           try {
@@ -184,7 +229,7 @@ export default function Sidebar() {
     };
   }, [syncUserState]);
 
-  // Click outside to close dropdowns
+  // Click outside listener for dropdowns
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -197,6 +242,18 @@ export default function Sidebar() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const toggleCollapse = () => {
+    setIsCollapsed(prev => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('zecratary_sidebar_collapsed', next ? 'true' : 'false');
+        } catch (_) {}
+      }
+      return next;
+    });
+  };
 
   const toggleSection = (sectionKey: keyof typeof openSections) => {
     setOpenSections(prev => {
@@ -231,22 +288,6 @@ export default function Sidebar() {
       window.dispatchEvent(new CustomEvent('zecratary_theme_mode_changed', { detail: { mode: modeStr } }));
     }
   };
-
-  // 2. ROUTE SUPPRESSION EVALUATED SAFELY AFTER ALL HOOKS
-  const isAuthRoute = Boolean(
-    pathname === '/login' ||
-    pathname === '/register' ||
-    pathname === '/forgot-password' ||
-    pathname.startsWith('/login') ||
-    pathname.startsWith('/register') ||
-    pathname.startsWith('/forgot-password')
-  );
-
-  const isHomePage = Boolean(
-    pathname === '/' ||
-    pathname === '' ||
-    pathname === '/index'
-  );
 
   if (!mounted || isAuthRoute || isHomePage) {
     return null;
@@ -290,7 +331,7 @@ export default function Sidebar() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => setIsCollapsed(!isCollapsed)}
+            onClick={toggleCollapse}
             className="p-1.5 rounded-lg border hover:bg-slate-800/20 cursor-pointer transition mr-1"
             style={{ borderColor: 'var(--color-border)' }}
             title={isCollapsed ? t('expandSidebar', 'Expand Menu') : t('collapseSidebar', 'Collapse Menu')}

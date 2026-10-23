@@ -202,3 +202,37 @@ html, body {
     height: 4rem !important;
   }
 }
+
+
+/* ==========================================================================
+   Zecratary Responsive Layout Clearance Engine
+   ========================================================================== */
+:root {
+  --sidebar-width: 16rem;
+  --topbar-height: 4rem;
+}
+
+@media (max-width: 767px) {
+  :root {
+    --sidebar-width: 0px;
+    --topbar-height: 3.5rem;
+  }
+}
+
+/* Exempt Homepage and Authentication Views from Sidebar Offsets */
+body.is-homepage-view #zecratary-main-content,
+body:has(#zecratary-homepage-root) #zecratary-main-content,
+body.is-auth-view #zecratary-main-content,
+body:has(.is-auth-page) #zecratary-main-content {
+  margin-left: 0px !important;
+  padding-top: 0px !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+/* Smooth layout transitions */
+#zecratary-main-content {
+  transition: margin-left 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              width 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              padding-top 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
