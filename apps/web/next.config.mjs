@@ -6,7 +6,8 @@ const __dirname = path.dirname(__filename);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'standalone',
+  // Only apply standalone output for production builds, avoiding dev watcher conflicts
+  output: process.env.NODE_ENV === 'production' ? 'standalone' : undefined,
   reactStrictMode: false,
   webpack: (config) => {
     config.resolve.alias = {

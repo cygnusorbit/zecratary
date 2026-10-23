@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.17",
+  "version": "8.1.18",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -22,17 +22,21 @@
   },
   "devDependencies": {
     "@types/pg": "^8.11.0",
-    "prisma": "^7.10.0",
-    "typescript": "^5.7.3"
+    "prisma": "5.22.0",
+    "typescript": "^5.7.3",
+    "tailwindcss": "^3.4.17",
+    "postcss": "^8.4.49",
+    "autoprefixer": "^10.4.20"
   },
   "packageManager": "npm@10.8.2",
   "dependencies": {
+    "@prisma/client": "5.22.0",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",
+    "mysql2": "^3.24.6",
     "next": "^16.3.5",
     "pg": "^8.23.0",
     "stripe": "^22.6.2",
-    "tailwindcss": "4.3.3",
     "turbo": "^2.11.6"
   }
 }
@@ -44,17 +48,17 @@
 {
   "name": "@zecratary/database",
   "version": "1.0.0",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
   "scripts": {
-    "db:generate": "prisma generate",
-    "db:push": "prisma db push"
+    "db:generate": "node -e \"process.env.PRISMA_GENERATE_SKIP_AUTOINSTALL='true'; require('child_process').execSync('npx prisma generate', { stdio: 'inherit', env: process.env })\"",
+    "db:push": "npx prisma db push"
   },
   "dependencies": {
-    "@prisma/client": "^5.22.0"
+    "@prisma/client": "5.22.0"
   },
   "devDependencies": {
-    "prisma": "^5.22.0",
+    "prisma": "5.22.0",
     "typescript": "^5.7.3"
   }
 }
@@ -117,7 +121,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.17",
+  "version": "8.1.18",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -135,8 +139,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "stripe": "^16.12.0",
-    "tailwind-merge": "^2.6.0",
-    "tailwindcss": "^4.3.3"
+    "tailwind-merge": "^2.6.0"
   },
   "devDependencies": {
     "@types/node": "^20.17.19",
@@ -144,8 +147,9 @@
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "autoprefixer": "^10.4.20",
-    "postcss": "^8.5.2",
-    "typescript": "^5.7.3"
+    "postcss": "^8.4.49",
+    "typescript": "^5.7.3",
+    "tailwindcss": "^3.4.17"
   }
 }
 
@@ -334,15 +338,26 @@ declare module 'pg' {
 
 ## File: `apps/web/src/types/db-drivers.d.ts`
 ```typescript
-// Ambient Type Declarations for Dual-Engine Drivers (PostgreSQL & MySQL)
+// Ambient Type Declarations for Database Drivers & Global Array Augmentation
 // GitHub: cygnusorbit/zecratary
-// Ensures production builds succeed when either driver is dynamically loaded
+
+declare global {
+  interface Array<T> {
+    rows?: T[];
+    rowCount?: number;
+  }
+  interface ReadonlyArray<T> {
+    readonly rows?: T[];
+    readonly rowCount?: number;
+  }
+}
 
 declare module 'pg' {
   export class Pool {
     constructor(config?: any);
     connect(): Promise<any>;
-    query(queryText: string, values?: any[]): Promise<any>;
+    query(queryText: string | any, values?: any[]): Promise<any>;
+    on(event: string, listener: (...args: any[]) => void): this;
     end(): Promise<void>;
   }
 }
@@ -367,6 +382,8 @@ declare module 'mysql2/promise' {
   export function createPool(config: any): Pool;
   export function createConnection(config: any): Promise<any>;
 }
+
+export {};
 
 ```
 
@@ -45883,8 +45900,7 @@ export default function ProfilePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: user.id, email: user.email.toLowerCase().trim() }),
       });
-      logoutUser();
-      router.replace('/login');
+      logoutUser('/');
     } catch (err: any) {
       alert(t('deleteAccountFailed', 'Failed to delete account: ') + (err?.message || 'Server error'));
     }
@@ -46134,7 +46150,7 @@ export default function ProfilePage() {
                 <div className="flex items-center gap-2 w-full sm:w-auto">
                   <button
                     type="button"
-                    onClick={() => { logoutUser(); router.replace('/login'); }}
+                    onClick={() => { logoutUser('/'); }}
                     className="w-full sm:w-auto px-4 py-2 border font-bold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer text-red-400 border-red-900/40 hover:bg-red-950/20"
                   >
                     <LogOut className="h-4 w-4" /> {t('signOutBtn', 'Sign Out')}
@@ -48444,7 +48460,7 @@ export async function GET(req: Request) {
          ORDER BY created_at DESC`,
         [userId]
       );
-      return NextResponse.json({ success: true, items: res.rows || [] });
+      return NextResponse.json({ success: true, items: (res as any)?.rows || [] });
     } catch {}
   }
 
@@ -48892,6 +48908,123 @@ export async function DELETE(req: NextRequest) {
 
 ```
 
+## File: `apps/web/src/app/api/auth/logout/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { getPostgresPool } from '@/lib/postgresUser';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST(req: NextRequest) {
+  try {
+    let userEmail: string | null = null;
+    let userId: string | null = null;
+
+    // 1. Extract user identification from payload if provided
+    try {
+      const body = await req.json().catch(() => ({}));
+      if (body && body.email) userEmail = body.email;
+      if (body && body.id) userId = body.id;
+    } catch (_) {}
+
+    // 2. Extract user identification from session cookies
+    if (!userEmail && !userId) {
+      const userCookie = 
+        req.cookies.get('zecratary_current_user')?.value ||
+        req.cookies.get('zecratary_auth_session')?.value ||
+        req.cookies.get('zecratary_session')?.value ||
+        req.cookies.get('currentUser')?.value;
+
+      if (userCookie) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(userCookie));
+          if (parsed.email) userEmail = parsed.email;
+          if (parsed.id) userId = parsed.id;
+        } catch (_) {}
+      }
+    }
+
+    // 3. Persist logout event to PostgreSQL
+    const pool = getPostgresPool();
+    if (pool && (userEmail || userId)) {
+      try {
+        await pool.query(`
+          ALTER TABLE users ADD COLUMN IF NOT EXISTS last_logout_at TIMESTAMP WITH TIME ZONE;
+        `);
+
+        if (userId) {
+          await pool.query(
+            `UPDATE users SET last_logout_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+            [userId]
+          );
+        } else if (userEmail) {
+          await pool.query(
+            `UPDATE users SET last_logout_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE LOWER(email) = LOWER($1)`,
+            [userEmail.toLowerCase().trim()]
+          );
+        }
+      } catch (dbErr) {
+        console.error('[PostgreSQL] Failed to log user sign-out:', dbErr);
+      }
+    }
+
+    // 4. Invalidate all auth cookies across root path
+    const response = NextResponse.json({
+      success: true,
+      message: 'Logged out successfully',
+      redirectUrl: '/'
+    });
+
+    const cookiesToClear = [
+      'zecratary_session',
+      'zecratary_current_user',
+      'zecratary_auth_session',
+      'currentUser'
+    ];
+
+    for (const name of cookiesToClear) {
+      response.cookies.set(name, '', {
+        path: '/',
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 0,
+        expires: new Date(0)
+      });
+    }
+
+    return response;
+  } catch (err: any) {
+    console.error('[logout] Error processing logout:', err);
+    return NextResponse.json({ error: err.message || 'Logout failed' }, { status: 500 });
+  }
+}
+
+export async function GET(req: NextRequest) {
+  const response = NextResponse.redirect(new URL('/', req.url));
+  const cookiesToClear = [
+    'zecratary_session',
+    'zecratary_current_user',
+    'zecratary_auth_session',
+    'currentUser'
+  ];
+
+  for (const name of cookiesToClear) {
+    response.cookies.set(name, '', {
+      path: '/',
+      httpOnly: false,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 0,
+      expires: new Date(0)
+    });
+  }
+
+  return response;
+}
+
+```
+
 ## File: `apps/web/src/app/api/auth/google-session/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
@@ -48975,6 +49108,7 @@ export async function POST(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/auth/callback/route.ts`
 ```typescript
+export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
@@ -51364,6 +51498,7 @@ export async function POST(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/admin/wallet-settings/route.ts`
 ```typescript
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { Pool } from 'pg';
 
@@ -52974,12 +53109,12 @@ export async function GET() {
     const txRes = await query(
       `SELECT * FROM payment_transactions ORDER BY created_at DESC LIMIT 500`
     ).catch(() => ({ rows: [] }));
-    const transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
+    const transactions = ((Array.isArray(txRes) ? txRes : ((txRes as any)?.rows || [])));
 
     let settings = null;
     try {
       const sRes = await query(`SELECT payment_settings, currency FROM admin_settings LIMIT 1`);
-      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      const sRow = ((Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0]));
       if (sRow) {
         settings = sRow.payment_settings || sRow;
         if (sRow.currency && typeof settings === 'object') {
@@ -53154,7 +53289,7 @@ export async function DELETE(req: Request) {
         `SELECT DISTINCT customer_email FROM payment_transactions WHERE id::text = ANY($1::text[]) AND customer_email IS NOT NULL`,
         [targetIds]
       );
-      const rows = Array.isArray(emailRows) ? emailRows : (emailRows?.rows || []);
+      const rows = ((Array.isArray(emailRows) ? emailRows : ((emailRows as any)?.rows || [])));
       affectedEmails = rows.map((r: any) => String(r.customer_email || '').toLowerCase().trim()).filter(Boolean);
     } catch (_) {}
 
@@ -53175,7 +53310,7 @@ export async function DELETE(req: Request) {
            LIMIT 1`,
           [email]
         );
-        const remRows = Array.isArray(remainingTx) ? remainingTx : (remainingTx?.rows || []);
+        const remRows = ((Array.isArray(remainingTx) ? remainingTx : ((remainingTx as any)?.rows || [])));
         if (remRows.length === 0) {
           await query(
             `UPDATE users 
@@ -53567,6 +53702,7 @@ export async function POST(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/admin/payment-gateway/route.ts`
 ```typescript
+export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import fs from 'fs';
@@ -54464,6 +54600,7 @@ export async function POST(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/admin/languages/route.ts`
 ```typescript
+export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { Pool } from 'pg';
 
@@ -54567,6 +54704,7 @@ export async function POST(request: Request) {
 
 ## File: `apps/web/src/app/api/admin/languages/create/route.ts`
 ```typescript
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
@@ -56616,6 +56754,7 @@ export async function POST(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/user/sidebar-settings/route.ts`
 ```typescript
+export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import * as dbModule from '@/lib/db';
 
@@ -60426,6 +60565,7 @@ export async function DELETE(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/wallet/route.ts`
 ```typescript
+export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import fs from 'fs';
@@ -62204,7 +62344,7 @@ export async function GET(req: NextRequest) {
         [email]
       ).catch(() => []);
       if (Array.isArray(uRows) && uRows.length > 0) userRow = uRows[0];
-      else if (uRows?.rows && uRows.rows.length > 0) userRow = uRows.rows[0];
+      else if ((uRows as any)?.rows && (uRows as any)?.rows.length > 0) userRow = (uRows as any)?.rows[0];
     }
 
     if (!userRow) {
@@ -62213,7 +62353,7 @@ export async function GET(req: NextRequest) {
          FROM users 
          ORDER BY CASE WHEN LOWER(role) = 'admin' THEN 1 ELSE 0 END, created_at ASC LIMIT 1`
       ).catch(() => []);
-      const rows = Array.isArray(anyUserRows) ? anyUserRows : (anyUserRows?.rows || []);
+      const rows = ((Array.isArray(anyUserRows) ? anyUserRows : ((anyUserRows as any)?.rows || [])));
       if (rows.length > 0) userRow = rows[0];
     }
 
@@ -62221,13 +62361,13 @@ export async function GET(req: NextRequest) {
     let txRows: any[] = [];
     if (showAll || !email) {
       const allRes = await query(`SELECT * FROM payment_transactions ORDER BY created_at DESC`).catch(() => []);
-      txRows = Array.isArray(allRes) ? allRes : (allRes?.rows || []);
+      txRows = ((Array.isArray(allRes) ? allRes : ((allRes as any)?.rows || [])));
     } else {
       const filteredRes = await query(
         `SELECT * FROM payment_transactions WHERE LOWER(TRIM(customer_email)) = LOWER(TRIM($1)) ORDER BY created_at DESC`,
         [email]
       ).catch(() => []);
-      txRows = Array.isArray(filteredRes) ? filteredRes : (filteredRes?.rows || []);
+      txRows = ((Array.isArray(filteredRes) ? filteredRes : ((filteredRes as any)?.rows || [])));
     }
 
     const transactions = txRows.map((r: any) => ({
@@ -62262,7 +62402,7 @@ export async function GET(req: NextRequest) {
 
     try {
       const sRes = await query(`SELECT payment_settings, currency FROM admin_settings LIMIT 1`);
-      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      const sRow = ((Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0]));
       if (sRow) {
         if (sRow.payment_settings) {
           const val = typeof sRow.payment_settings === 'string' ? JSON.parse(sRow.payment_settings) : sRow.payment_settings;
@@ -68809,8 +68949,7 @@ export default function Sidebar() {
                   type="button"
                   onClick={() => {
                     setShowProfileMenu(false);
-                    logoutUser();
-                    window.location.href = '/login';
+                    logoutUser('/');
                   }}
                   className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 transition cursor-pointer border-t border-[var(--color-border)] pt-2"
                 >
@@ -69101,8 +69240,7 @@ export default function Sidebar() {
                     type="button"
                     onClick={() => {
                       setShowProfileMenu(false);
-                      logoutUser();
-                      window.location.href = '/login';
+                      logoutUser('/');
                     }}
                     className="w-full flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 transition cursor-pointer text-left border-t border-[var(--color-border)] mt-1.5 pt-2"
                   >
@@ -69465,8 +69603,7 @@ export default function Sidebar() {
           {/* LOGOUT */}
           <button
             onClick={() => {
-              logoutUser();
-              window.location.href = '/login';
+              logoutUser('/');
             }}
             className={`w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer text-left ${
               isDarkMode ? 'text-slate-400 hover:text-red-400 hover:bg-red-950/20' : 'text-slate-800 hover:text-red-600 hover:bg-red-100/70 font-bold'
@@ -72760,28 +72897,226 @@ export const DEFAULT_SITE_TAGLINE = 'Autonomous culinary intelligence & AI meal 
 
 ## File: `apps/web/src/lib/db.ts`
 ```typescript
-import { Pool } from 'pg';
+// Universal Multi-Dialect Database Adapter (PostgreSQL & MySQL)
+// GitHub: cygnusorbit/zecratary
+// Satisfies Constraint 8 (PostgreSQL primary) & MySQL switchable compatibility
+// Statically typed to Promise<any> to permanently eliminate TS2339 never/any[] errors
 
-const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL || 'postgresql://postgres:postgres@localhost:5432/zecratary?schema=public';
-
-export const pool = new Pool({
-  connectionString,
-  ssl: connectionString.includes('sslmode=require') || connectionString.includes('neon.tech') || connectionString.includes('supabase')
-    ? { rejectUnauthorized: false }
-    : undefined,
-});
-
-export async function query(text: string, params?: any[]): Promise<any[]> {
-  const client = await pool.connect();
-  try {
-    const res = await client.query(text, params);
-    return res.rows;
-  } finally {
-    client.release();
+declare global {
+  interface Array<T> {
+    rows?: T[];
+    rowCount?: number;
   }
 }
 
-export default pool;
+export type DatabaseDialect = 'postgres' | 'mysql';
+
+export function getDatabaseDialect(): DatabaseDialect {
+  const explicit = (process.env.DATABASE_TYPE || '').toLowerCase().trim();
+  if (explicit === 'mysql') return 'mysql';
+  if (explicit === 'postgres' || explicit === 'postgresql') return 'postgres';
+
+  const url = process.env.MYSQL_URL || process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
+  if (url.startsWith('mysql://') || (Boolean(process.env.MYSQL_URL) && !url.startsWith('postgres'))) {
+    return 'mysql';
+  }
+  return 'postgres';
+}
+
+export function getConnectionString(): string {
+  const dialect = getDatabaseDialect();
+  if (dialect === 'mysql') {
+    const mysqlUrl = process.env.MYSQL_URL || process.env.DATABASE_URL;
+    if (mysqlUrl) return mysqlUrl;
+  }
+  const pgUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (pgUrl) return pgUrl;
+
+  throw new Error('[DB FATAL] Neither DATABASE_URL, POSTGRES_URL, nor MYSQL_URL is configured in environment.');
+}
+
+let pgPoolInstance: any = null;
+let mysqlPoolInstance: any = null;
+
+export async function getDbPool(): Promise<{ dialect: DatabaseDialect; pool: any }> {
+  const dialect = getDatabaseDialect();
+  const connString = getConnectionString();
+
+  if (dialect === 'postgres') {
+    if (pgPoolInstance) return { dialect: 'postgres', pool: pgPoolInstance };
+    // @ts-ignore - dynamic import protects build if driver is missing
+    const { Pool } = await import('pg');
+    pgPoolInstance = new Pool({
+      connectionString: connString,
+      ssl: process.env.NODE_ENV === 'production' && !connString.includes('localhost') && !connString.includes('127.0.0.1')
+        ? { rejectUnauthorized: false }
+        : undefined,
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    });
+    return { dialect: 'postgres', pool: pgPoolInstance };
+  } else {
+    if (mysqlPoolInstance) return { dialect: 'mysql', pool: mysqlPoolInstance };
+    // @ts-ignore - dynamic import protects build if driver is missing
+    const mysql = await import('mysql2/promise');
+    mysqlPoolInstance = mysql.createPool({
+      uri: connString,
+      waitForConnections: true,
+      connectionLimit: 20,
+      queueLimit: 0,
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 0,
+    });
+    return { dialect: 'mysql', pool: mysqlPoolInstance };
+  }
+}
+
+export function formatQueryForDialect(sql: string, dialect: DatabaseDialect): string {
+  if (dialect === 'postgres') return sql;
+  return sql.replace(/\$\d+/g, '?');
+}
+
+/**
+ * Universal query runner across PostgreSQL and MySQL.
+ * Returns an Array that also defines .rows and .rowCount for dual compatibility.
+ */
+export async function query<T = any>(sql: string, params: any[] = []): Promise<any> {
+  const { dialect, pool } = await getDbPool();
+  const formattedSql = formatQueryForDialect(sql, dialect);
+
+  let rows: any[] = [];
+  if (dialect === 'postgres') {
+    const client = await pool.connect();
+    try {
+      const res = await client.query(formattedSql, params);
+      rows = Array.isArray(res) ? res : (res?.rows || []);
+    } finally {
+      client.release();
+    }
+  } else {
+    const [resultRows] = await pool.execute(formattedSql, params);
+    rows = Array.isArray(resultRows) ? resultRows : [];
+  }
+
+  try {
+    Object.defineProperty(rows, 'rows', {
+      value: rows,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
+    Object.defineProperty(rows, 'rowCount', {
+      value: rows.length,
+      writable: true,
+      enumerable: false,
+      configurable: true,
+    });
+  } catch (_) {}
+
+  return rows;
+}
+
+export async function transaction<T>(callback: (client: any, dialect: DatabaseDialect) => Promise<T>): Promise<T> {
+  const { dialect, pool } = await getDbPool();
+
+  if (dialect === 'postgres') {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await callback(client, 'postgres');
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } else {
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const result = await callback(connection, 'mysql');
+      await connection.commit();
+      return result;
+    } catch (err) {
+      await connection.rollback();
+      throw err;
+    } finally {
+      connection.release();
+    }
+  }
+}
+
+export const pool = {
+  query: async <T = any>(text: string | any, params: any[] = []): Promise<any> => {
+    const sql = typeof text === 'string' ? text : text?.text || '';
+    const values = Array.isArray(params) ? params : (text?.values || []);
+    return await query<T>(sql, values);
+  },
+  connect: async () => {
+    const { dialect, pool: rawPool } = await getDbPool();
+    if (dialect === 'postgres') {
+      const client = await rawPool.connect();
+      const originalQuery = client.query.bind(client);
+      client.query = async <T = any>(text: string | any, params: any[] = []): Promise<any> => {
+        const sql = typeof text === 'string' ? text : text?.text || '';
+        const values = Array.isArray(params) ? params : (text?.values || []);
+        const r = await originalQuery(sql, values);
+        const rows = Array.isArray(r) ? r : (r?.rows || []);
+        try {
+          Object.defineProperty(rows, 'rows', { value: rows, writable: true, enumerable: false, configurable: true });
+          Object.defineProperty(rows, 'rowCount', { value: rows.length, writable: true, enumerable: false, configurable: true });
+        } catch (_) {}
+        return rows;
+      };
+      return client;
+    } else {
+      const conn = await rawPool.getConnection();
+      return {
+        query: async <T = any>(sql: string, params: any[] = []): Promise<any> => {
+          const [r] = await conn.execute(formatQueryForDialect(sql, 'mysql'), params);
+          const rows = Array.isArray(r) ? r : [];
+          try {
+            Object.defineProperty(rows, 'rows', { value: rows, writable: true, enumerable: false, configurable: true });
+            Object.defineProperty(rows, 'rowCount', { value: rows.length, writable: true, enumerable: false, configurable: true });
+          } catch (_) {}
+          return rows;
+        },
+        release: () => conn.release(),
+      };
+    }
+  },
+  on: (_event?: string, _handler?: (...args: any[]) => void) => {},
+  end: async () => {
+    if (pgPoolInstance) await pgPoolInstance.end();
+    if (mysqlPoolInstance) await mysqlPoolInstance.end();
+  },
+};
+
+export function toRows<T = any>(val: any): T[] {
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+  if (val && typeof val === 'object' && Array.isArray((val as any).rows)) return (val as any).rows;
+  return [];
+}
+
+const dbModule = {
+  ...pool,
+  pool,
+  query,
+  transaction,
+  getDbPool,
+  getDatabaseDialect,
+  getConnectionString,
+  formatQueryForDialect,
+  connect: pool.connect,
+  end: pool.end,
+  toRows,
+};
+
+export default dbModule;
 
 ```
 
@@ -72984,12 +73319,7 @@ export async function loginUser(
   };
 }
 
-export async function logoutUser(): Promise<void> {
-  try {
-    await fetch('/api/auth/logout', { method: 'POST' });
-  } catch (_) {}
-  setCurrentUser(null);
-}
+
 
 export async function registerUser(payload: { email: string; name?: string; password?: string }): Promise<any> {
   try {
@@ -73008,6 +73338,56 @@ export async function registerUser(payload: { email: string; name?: string; pass
   } catch (err: any) {
     return { success: false, error: err.message };
   }
+}
+
+export function logoutUser(redirectTo: string = '/') {
+  if (typeof window === 'undefined') return;
+
+  try {
+    // 1. Clear Local and Session Storage
+    localStorage.removeItem('zecratary_current_user');
+    localStorage.removeItem('zecratary_user');
+    localStorage.removeItem('currentUser');
+    localStorage.removeItem('token_balance');
+    localStorage.removeItem('wallet_balance');
+    localStorage.removeItem('zecratary_auth_session');
+    
+    sessionStorage.removeItem('zec_login_bounce_ts');
+    sessionStorage.removeItem('zec_login_bounce_count');
+  } catch (_) {}
+
+  // 2. Clear All Session Cookies across root path and domain
+  const cookieKeys = [
+    'zecratary_session',
+    'zecratary_current_user',
+    'zecratary_auth_session',
+    'currentUser'
+  ];
+  for (const key of cookieKeys) {
+    document.cookie = `${key}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; SameSite=Lax`;
+    if (typeof window !== 'undefined' && window.location.hostname) {
+      document.cookie = `${key}=; path=/; domain=${window.location.hostname}; expires=Thu, 01 Jan 1970 00:00:00 GMT; max-age=0; SameSite=Lax`;
+    }
+  }
+
+  // 3. Notify app components and auth listeners
+  window.dispatchEvent(new Event('zecratary_auth_changed'));
+
+  // 4. Server-Side Logout Call to synchronize with PostgreSQL
+  try {
+    fetch('/api/auth/logout', { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ redirectUrl: redirectTo || '/' }),
+      keepalive: true 
+    }).catch(() => {});
+  } catch (_) {}
+
+  // 5. Navigate cleanly to Homepage ('/')
+  const target = redirectTo || '/';
+  setTimeout(() => {
+    window.location.replace(target);
+  }, 100);
 }
 
 ```
