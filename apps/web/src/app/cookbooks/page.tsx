@@ -1,245 +1,322 @@
 'use client';
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import {
-  Book, Plus, Trash2, Edit3, X, Save, Sparkles,
-  Utensils, ChefHat, Cake, Flame, Coffee, Palette
-} from 'lucide-react';
 
-interface Cookbook {
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import Link from 'next/link';
+import { 
+  Book, Plus, Trash2, Edit3, Search, Clock, Users, Star, 
+  ArrowRight, X, BookOpen, Utensils, Check 
+} from 'lucide-react';
+import { useTranslation } from '@/components/LanguageProvider';
+import { getCurrentUser, User } from '@/lib/auth';
+
+interface RecipeBook {
   id: string;
+  userId?: string;
+  user_id?: string;
   title: string;
   description: string;
-  recipeCount: number;
-  gradient: string;
-  iconName?: string;
+  coverImage?: string;
+  cover_image?: string;
+  coverColor?: string;
+  cover_color?: string;
+  recipeCount?: number;
+  recipeIds?: string[];
+  recipe_ids?: string[];
+  created_at?: string;
 }
 
-const GRADIENT_PRESETS = [
-  { label: 'Crimson Rose', value: 'from-pink-500 to-rose-600' },
-  { label: 'Sunset Amber', value: 'from-amber-500 to-orange-600' },
-  { label: 'Emerald Jade', value: 'from-emerald-500 to-teal-600' },
-  { label: 'Royal Violet', value: 'from-purple-500 to-indigo-600' },
-  { label: 'Ocean Blue', value: 'from-cyan-500 to-blue-600' },
-];
-
-const ICONS: Record<string, any> = {
-  Book,
-  ChefHat,
-  Cake,
-  Flame,
-  Coffee,
-  Utensils,
+const isRecipeInBook = (rec: any, bookId: string, book?: any): boolean => {
+  if (!rec || !bookId) return false;
+  if (rec.bookId === bookId || rec.book_id === bookId) return true;
+  if (book) {
+    const ids = book.recipe_ids || book.recipeIds;
+    if (Array.isArray(ids) && ids.includes(rec.id)) return true;
+  }
+  return false;
 };
 
-export default function CookbooksPage() {
-  const [cookbooks, setCookbooks] = useState<Cookbook[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function BooksPage() {
+  const { t } = useTranslation();
 
-  // Edit / Create Modal State
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingCookbook, setEditingCookbook] = useState<Cookbook | null>(null);
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    gradient: GRADIENT_PRESETS[0].value,
-    iconName: 'Book',
-  });
+  const [mounted, setMounted] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [books, setBooks] = useState<RecipeBook[]>([]);
+  const [recipes, setRecipes] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedBook, setSelectedBook] = useState<RecipeBook | null>(null);
 
-  const defaultCookbooks: Cookbook[] = [
-    {
-      id: 'cb_1',
-      title: 'test',
-      description: 'Custom recipe collection',
-      recipeCount: 1,
-      gradient: 'from-pink-600 via-rose-500 to-rose-600',
-      iconName: 'Book',
-    },
-    {
-      id: 'cb_2',
-      title: 'Baking & Desserts',
-      description: 'Cakes, pastries, sweet treats, and weekend baking projects.',
-      recipeCount: 1,
-      gradient: 'from-pink-600 via-rose-500 to-rose-600',
-      iconName: 'Book',
-    },
-  ];
+  // Modal States
+  const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
+  const [editingBookId, setEditingBookId] = useState<string | null>(null);
+  const [modalTitle, setModalTitle] = useState<string>('');
+  const [modalDescription, setModalDescription] = useState<string>('');
+  const [modalCover, setModalCover] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  const fetchCookbooks = () => {
+  // Pure Database Hydration: Queries PostgreSQL Directly (NO LocalStorage)
+  const loadData = useCallback(async (user?: User | null) => {
+    const targetUserId = user?.id || 'usr_admin_1';
+
     try {
-      const saved = localStorage.getItem('zecratary_cookbooks');
-      if (saved) {
-        setCookbooks(JSON.parse(saved));
-      } else {
-        setCookbooks(defaultCookbooks);
-        localStorage.setItem('zecratary_cookbooks', JSON.stringify(defaultCookbooks));
+      // 1. Fetch live recipes directly from PostgreSQL
+      const recRes = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
+      let loadedRecipes: any[] = [];
+      if (recRes.ok) {
+        const recData = await recRes.json();
+        if (Array.isArray(recData.recipes)) {
+          loadedRecipes = recData.recipes;
+          setRecipes(loadedRecipes);
+        }
       }
-    } catch (e) {
-      console.error('Failed to load cookbooks:', e);
-      setCookbooks(defaultCookbooks);
+
+      // 2. Fetch live cookbooks directly from PostgreSQL
+      const bRes = await fetch(`/api/books?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
+      if (bRes.ok) {
+        const bData = await bRes.json();
+        if (Array.isArray(bData.books)) {
+          const syncedBooks = bData.books.map((b: RecipeBook) => ({
+            ...b,
+            recipeCount: loadedRecipes.filter((r: any) => isRecipeInBook(r, b.id, b)).length,
+          }));
+          setBooks(syncedBooks);
+
+          if (selectedBook) {
+            const refreshed = syncedBooks.find((sb: RecipeBook) => sb.id === selectedBook.id);
+            if (refreshed) setSelectedBook(refreshed);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[Books] Database fetch error:', err);
+    }
+  }, [selectedBook]);
+
+  useEffect(() => {
+    setMounted(true);
+    const u = getCurrentUser();
+    setCurrentUser(u);
+    loadData(u);
+
+    const handleSync = () => loadData(getCurrentUser());
+    window.addEventListener('zecratary_recipe_books_updated', handleSync);
+    window.addEventListener('zecratary_recipes_updated', handleSync);
+    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
+    window.addEventListener('focus', handleSync);
+
+    return () => {
+      window.removeEventListener('zecratary_recipe_books_updated', handleSync);
+      window.removeEventListener('zecratary_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
+      window.removeEventListener('focus', handleSync);
+    };
+  }, [loadData]);
+
+  // Save / Update Cookbook directly in PostgreSQL
+  const handleSaveBook = async () => {
+    if (!modalTitle.trim()) return;
+    setIsSubmitting(true);
+
+    const targetUserId = currentUser?.id || 'usr_admin_1';
+    const bookId = editingBookId || ('book_' + Date.now().toString(36));
+
+    const payload = {
+      id: bookId,
+      userId: targetUserId,
+      user_id: targetUserId,
+      title: modalTitle.trim(),
+      description: modalDescription.trim(),
+      cover_image: modalCover.trim() || 'https://images.unsplash.com/photo-1556910103-1c02745aae4d?auto=format&fit=crop&w=800&q=80',
+      createdBy: currentUser?.email || 'admin@zecratary.com',
+      creatorName: currentUser?.name || 'Chef',
+    };
+
+    try {
+      const res = await fetch('/api/books', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        setShowCreateModal(false);
+        setEditingBookId(null);
+        setModalTitle('');
+        setModalDescription('');
+        setModalCover('');
+        await loadData(currentUser);
+        window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
+      }
+    } catch (err) {
+      console.error('Failed to save cookbook to PostgreSQL:', err);
     } finally {
-      setLoading(false);
+      setIsSubmitting(false);
     }
   };
 
-  useEffect(() => {
-    fetchCookbooks();
-  }, []);
-
-  const saveCookbooks = (updated: Cookbook[]) => {
-    setCookbooks(updated);
-    localStorage.setItem('zecratary_cookbooks', JSON.stringify(updated));
-  };
-
-  const handleOpenCreate = () => {
-    setEditingCookbook(null);
-    setFormData({
-      title: '',
-      description: '',
-      gradient: GRADIENT_PRESETS[0].value,
-      iconName: 'Book',
-    });
-    setIsModalOpen(true);
-  };
-
-  const handleOpenEdit = (e: React.MouseEvent, cb: Cookbook) => {
+  // Delete Cookbook directly from PostgreSQL
+  const handleDeleteBook = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    setEditingCookbook(cb);
-    setFormData({
-      title: cb.title,
-      description: cb.description || '',
-      gradient: cb.gradient || GRADIENT_PRESETS[0].value,
-      iconName: cb.iconName || 'Book',
-    });
-    setIsModalOpen(true);
-  };
-
-  const handleDelete = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    if (!confirm('Are you sure you want to delete this cookbook?')) return;
-    const updated = cookbooks.filter((c) => c.id !== id);
-    saveCookbooks(updated);
-  };
-
-  const handleSave = () => {
-    if (!formData.title.trim()) {
-      alert('Please enter a cookbook title.');
+    if (!confirm(t('confirmDeleteBook', 'Are you sure you want to delete this cookbook? Assigned recipes will remain in your saved library.'))) {
       return;
     }
 
-    if (editingCookbook) {
-      // Update existing
-      const updated = cookbooks.map((c) =>
-        c.id === editingCookbook.id
-          ? {
-              ...c,
-              title: formData.title,
-              description: formData.description,
-              gradient: formData.gradient,
-              iconName: formData.iconName,
-            }
-          : c
-      );
-      saveCookbooks(updated);
-    } else {
-      // Create new
-      const newBook: Cookbook = {
-        id: 'cb_' + Date.now(),
-        title: formData.title,
-        description: formData.description,
-        recipeCount: 0,
-        gradient: formData.gradient,
-        iconName: formData.iconName,
-      };
-      saveCookbooks([...cookbooks, newBook]);
+    try {
+      const res = await fetch(`/api/books?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (res.ok) {
+        if (selectedBook?.id === id) setSelectedBook(null);
+        await loadData(currentUser);
+        window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
+        window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+      }
+    } catch (err) {
+      console.error('Error deleting cookbook from PostgreSQL:', err);
     }
-
-    setIsModalOpen(false);
   };
 
+  const filteredBooks = useMemo(() => {
+    if (!searchQuery.trim()) return books;
+    const q = searchQuery.toLowerCase();
+    return books.filter((b) => b.title.toLowerCase().includes(q) || b.description.toLowerCase().includes(q));
+  }, [books, searchQuery]);
+
+  const currentBookRecipes = useMemo(() => {
+    if (!selectedBook) return [];
+    return recipes.filter((r) => isRecipeInBook(r, selectedBook.id, selectedBook));
+  }, [recipes, selectedBook]);
+
+  if (!mounted) return null;
+
   return (
-    <div className="max-w-6xl mx-auto space-y-6 text-slate-100 px-4 pb-16">
-      
-      {/* Header */}
-      <div className="flex items-center justify-between pt-2">
+    <div className="space-y-8 max-w-7xl mx-auto w-full min-w-0" style={{ color: 'var(--color-text)' }}>
+      {/* HEADER & CONTROLS */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b" style={{ borderColor: 'var(--color-border)' }}>
         <div>
-          <h1 className="text-3xl font-black text-[#E05638] tracking-tight">Cookbooks</h1>
-          <p className="text-emerald-400 text-xs mt-1 font-semibold">
-            Organize and manage your custom recipe collections ({cookbooks.length})
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[var(--color-primary)]">
+            <Book className="h-4 w-4" />
+            <span>{t('culinaryCollections', 'Culinary Collections')}</span>
+          </div>
+          <h1 className="text-3xl font-black tracking-tight pt-1">
+            {t('cookbooks', 'Cookbooks')}
+          </h1>
+          <p className="text-xs pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('cookbooksSubtitle', 'Curate, organize, and categorize your saved recipes into dedicated digital books permanently stored in PostgreSQL.')}
           </p>
         </div>
-        <button
-          onClick={handleOpenCreate}
-          className="bg-[#E05638] hover:bg-[#c94529] text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg shadow-[#E05638]/20"
-        >
-          <Plus className="h-4 w-4" /> Create Cookbook
-        </button>
+
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-50" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t('searchCookbooks', 'Search books...')}
+              className="pl-9 pr-4 py-2 rounded-xl border text-xs font-medium focus:outline-hidden"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)',
+              }}
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setEditingBookId(null);
+              setModalTitle('');
+              setModalDescription('');
+              setModalCover('https://images.unsplash.com/photo-1556910103-1c02745aae4d?auto=format&fit=crop&w=800&q=80');
+              setShowCreateModal(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition cursor-pointer"
+            style={{ backgroundColor: 'var(--color-primary)' }}
+          >
+            <Plus className="h-4 w-4" />
+            <span>{t('newCookbook', 'New Cookbook')}</span>
+          </button>
+        </div>
       </div>
 
-      {/* Grid of Cookbooks matching reference UI */}
-      {loading ? (
-        <div className="text-slate-500 text-xs py-12 text-center">Loading cookbooks...</div>
-      ) : cookbooks.length === 0 ? (
-        <div className="p-16 border border-slate-800 bg-[#111726] rounded-3xl text-center space-y-3">
-          <Book className="h-10 w-10 text-slate-600 mx-auto" />
-          <h3 className="text-base font-bold text-white">No cookbooks created yet</h3>
-          <p className="text-xs text-slate-400">Click "Create Cookbook" to organize your recipes into collections.</p>
+      {/* COOKBOOKS GRID */}
+      {filteredBooks.length === 0 ? (
+        <div className="p-12 text-center rounded-3xl border space-y-4" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+          <BookOpen className="h-12 w-12 mx-auto text-[var(--color-primary)] opacity-70" />
+          <div className="space-y-1">
+            <h3 className="text-base font-bold">{t('noCookbooksFound', 'No Cookbooks Found')}</h3>
+            <p className="text-xs max-w-sm mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('emptyCookbooksHint', 'Create your first themed cookbook collection to group and organize your dishes.')}
+            </p>
+          </div>
         </div>
       ) : (
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {cookbooks.map((cb) => {
-            const IconComponent = ICONS[cb.iconName || 'Book'] || Book;
-
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredBooks.map((book: RecipeBook, idx: number) => {
+            const count = book.recipeCount !== undefined ? book.recipeCount : (Array.isArray(book.recipe_ids) ? book.recipe_ids.length : 0);
             return (
               <div
-                key={cb.id}
-                className="bg-[#111726] border border-slate-800 rounded-3xl overflow-hidden shadow-xl flex flex-col justify-between group hover:border-slate-700 transition"
+                key={book.id || `book_${idx}`}
+                onClick={() => setSelectedBook(book)}
+                className="rounded-3xl border overflow-hidden cursor-pointer hover:shadow-lg transition flex flex-col justify-between group"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                }}
               >
-                {/* Header Gradient Card */}
-                <div
-                  className={`bg-gradient-to-r ${cb.gradient || 'from-pink-600 to-rose-600'} p-6 rounded-3xl flex flex-col justify-between min-h-[145px] relative shadow-md`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="bg-black/30 backdrop-blur-md text-white text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-full">
-                      COOKBOOK
-                    </span>
-                    <div className="w-9 h-9 rounded-xl bg-black/25 backdrop-blur-md flex items-center justify-center text-white">
-                      <IconComponent className="h-5 w-5" />
-                    </div>
-                  </div>
+                <div className="relative h-48 w-full bg-slate-800 overflow-hidden">
+                  {book.cover_image || book.coverImage ? (
+                    <img
+                      src={book.cover_image || book.coverImage}
+                      alt={book.title}
+                      className="w-full h-full object-cover transition duration-300 group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-4xl">📚</div>
+                  )}
 
-                  <h3 className="text-xl font-black text-white leading-tight drop-shadow-sm pt-4">
-                    {cb.title}
-                  </h3>
+                  <div className="absolute bottom-3 left-3 px-3 py-1 rounded-full text-[11px] font-black text-white bg-black/60 backdrop-blur-md flex items-center gap-1.5">
+                    <Utensils className="h-3 w-3 text-[var(--color-primary)]" />
+                    <span>{count} {count === 1 ? 'Dish' : 'Dishes'}</span>
+                  </div>
                 </div>
 
-                {/* Body Details */}
-                <div className="p-6 flex-1 flex flex-col justify-between space-y-5">
-                  <p className="text-xs text-slate-300 leading-relaxed line-clamp-3">
-                    {cb.description || 'Custom recipe collection'}
-                  </p>
+                <div className="p-5 flex-1 flex flex-col justify-between space-y-3">
+                  <div>
+                    <h3 className="text-base font-extrabold line-clamp-1">{book.title}</h3>
+                    <p className="text-xs line-clamp-2 pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                      {book.description || t('noDescription', 'Curated culinary collection.')}
+                    </p>
+                  </div>
 
-                  <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-1.5 font-bold text-slate-300">
-                      <Utensils className="h-3.5 w-3.5 text-[#E05638]" />
-                      {cb.recipeCount || 0} recipes inside
+                  <div className="pt-3 border-t flex items-center justify-between text-xs" style={{ borderColor: 'var(--color-border)' }}>
+                    <span className="font-semibold text-[11px]" style={{ color: 'var(--color-primary)' }}>
+                      {count} recipes
                     </span>
-
-                    {/* Action Buttons: Edit & Delete */}
                     <div className="flex items-center gap-1">
                       <button
-                        onClick={(e) => handleOpenEdit(e, cb)}
-                        className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                        title="Edit Cookbook"
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingBookId(book.id);
+                          setModalTitle(book.title);
+                          setModalDescription(book.description || '');
+                          setModalCover(book.cover_image || book.coverImage || '');
+                          setShowCreateModal(true);
+                        }}
+                        className="p-1.5 rounded-lg border hover:bg-slate-800/20 cursor-pointer"
+                        style={{ borderColor: 'var(--color-border)' }}
+                        title={t('edit', 'Edit')}
                       >
-                        <Edit3 className="h-4 w-4" />
+                        <Edit3 className="h-3.5 w-3.5" />
                       </button>
                       <button
-                        onClick={(e) => handleDelete(e, cb.id)}
-                        className="p-2 rounded-xl text-slate-400 hover:text-red-400 hover:bg-slate-800 transition"
-                        title="Delete Cookbook"
+                        type="button"
+                        onClick={(e) => handleDeleteBook(e, book.id)}
+                        className="p-1.5 rounded-lg border hover:bg-red-500/10 text-red-400 cursor-pointer"
+                        style={{ borderColor: 'var(--color-border)' }}
+                        title={t('delete', 'Delete')}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </div>
@@ -250,121 +327,196 @@ export default function CookbooksPage() {
         </div>
       )}
 
-      {/* EDIT / CREATE COOKBOOK MODAL */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-[#111726] border border-slate-800 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl relative">
-            
-            {/* Modal Header */}
-            <div className="p-6 border-b border-slate-800 flex items-center justify-between">
-              <h2 className="text-lg font-black text-white flex items-center gap-2">
-                <Edit3 className="h-5 w-5 text-[#E05638]" />
-                {editingCookbook ? 'Edit Cookbook' : 'Create Cookbook'}
-              </h2>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition"
-              >
-                <X className="h-5 w-5" />
+      {/* ACCESSIBLE MODAL: CREATE / EDIT COOKBOOK (ZERO <form> TAGS) */}
+      {showCreateModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs"
+          onClick={() => setShowCreateModal(false)}
+        >
+          <div
+            className="w-full max-w-lg rounded-3xl border p-6 space-y-5 shadow-2xl"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setShowCreateModal(false);
+              if (e.key === 'Enter' && e.ctrlKey) handleSaveBook();
+            }}
+          >
+            <div className="flex items-center justify-between pb-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 className="font-extrabold text-lg flex items-center gap-2">
+                <Book className="h-5 w-5 text-[var(--color-primary)]" />
+                <span>{editingBookId ? t('editCookbook', 'Edit Cookbook') : t('createCookbook', 'New Cookbook')}</span>
+              </h3>
+              <button type="button" onClick={() => setShowCreateModal(false)} className="p-1 rounded-lg">
+                <X className="h-4 w-4" />
               </button>
             </div>
 
-            {/* Modal Form */}
-            <div className="p-6 space-y-5 text-xs">
-              
-              {/* Cookbook Title */}
+            <div className="space-y-4 text-xs">
               <div>
-                <label className="block font-bold text-[#E05638] uppercase mb-1.5">Cookbook Title</label>
+                <label className="block font-bold mb-1">{t('cookbookTitle', 'Cookbook Title')} *</label>
                 <input
                   type="text"
-                  placeholder="e.g. Baking & Desserts"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  className="w-full bg-[#0B101D] border border-slate-800 rounded-xl p-3 text-sm text-white placeholder-slate-500 outline-none focus:border-[#E05638]"
+                  value={modalTitle}
+                  onChange={(e) => setModalTitle(e.target.value)}
+                  placeholder="e.g., Weekend Baking & Desserts"
+                  className="w-full px-3 py-2 rounded-xl border outline-hidden"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
 
-              {/* Description */}
               <div>
-                <label className="block font-bold text-[#E05638] uppercase mb-1.5">Description</label>
+                <label className="block font-bold mb-1">{t('description', 'Description')}</label>
                 <textarea
-                  rows={3}
-                  placeholder="e.g. Cakes, pastries, sweet treats, and weekend baking projects."
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full bg-[#0B101D] border border-slate-800 rounded-xl p-3 text-xs text-white placeholder-slate-500 outline-none focus:border-[#E05638] resize-none"
+                  rows={2}
+                  value={modalDescription}
+                  onChange={(e) => setModalDescription(e.target.value)}
+                  placeholder="Overview of the dishes in this collection..."
+                  className="w-full px-3 py-2 rounded-xl border outline-hidden resize-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
 
-              {/* Theme Gradient Selector */}
               <div>
-                <label className="block font-bold text-[#E05638] uppercase mb-2 flex items-center gap-1.5">
-                  <Palette className="h-3.5 w-3.5" /> Header Theme
-                </label>
-                <div className="grid grid-cols-5 gap-2">
-                  {GRADIENT_PRESETS.map((preset) => (
-                    <button
-                      key={preset.value}
-                      type="button"
-                      onClick={() => setFormData({ ...formData, gradient: preset.value })}
-                      className={`h-9 rounded-xl bg-gradient-to-r ${preset.value} transition ${
-                        formData.gradient === preset.value
-                          ? 'ring-2 ring-white ring-offset-2 ring-offset-[#111726] scale-105'
-                          : 'opacity-70 hover:opacity-100'
-                      }`}
-                      title={preset.label}
-                    />
-                  ))}
-                </div>
+                <label className="block font-bold mb-1">{t('coverImageURL', 'Cover Image URL')}</label>
+                <input
+                  type="text"
+                  value={modalCover}
+                  onChange={(e) => setModalCover(e.target.value)}
+                  placeholder="https://images.unsplash.com/..."
+                  className="w-full px-3 py-2 rounded-xl border outline-hidden"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
               </div>
+            </div>
 
-              {/* Icon Selector */}
-              <div>
-                <label className="block font-bold text-[#E05638] uppercase mb-2">Cover Icon</label>
-                <div className="flex gap-2">
-                  {Object.keys(ICONS).map((iconKey) => {
-                    const IconComp = ICONS[iconKey];
-                    return (
-                      <button
-                        key={iconKey}
-                        type="button"
-                        onClick={() => setFormData({ ...formData, iconName: iconKey })}
-                        className={`p-2.5 rounded-xl border transition ${
-                          formData.iconName === iconKey
-                            ? 'bg-[#E05638] border-[#E05638] text-white shadow-md'
-                            : 'bg-[#0B101D] border-slate-800 text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        <IconComp className="h-4 w-4" />
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="pt-3 border-t border-slate-800 flex justify-end gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  className="px-5 py-2.5 rounded-xl bg-[#E05638] hover:bg-[#c94529] text-white font-bold transition flex items-center gap-1.5 shadow-lg shadow-[#E05638]/20"
-                >
-                  <Save className="h-3.5 w-3.5" /> Save Cookbook
-                </button>
-              </div>
-
+            <div className="pt-3 border-t flex items-center justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setShowCreateModal(false)}
+                className="px-4 py-2 rounded-xl border text-xs font-bold"
+                style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)' }}
+              >
+                {t('cancel', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveBook}
+                disabled={!modalTitle.trim() || isSubmitting}
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition"
+                style={{ backgroundColor: 'var(--color-primary)', opacity: modalTitle.trim() ? 1 : 0.5 }}
+              >
+                {t('saveCookbook', 'Save to PostgreSQL')}
+              </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* COOKBOOK RECIPE DRAWER / DETAILS MODAL */}
+      {selectedBook && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs"
+          onClick={() => setSelectedBook(null)}
+        >
+          <div
+            className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-3xl border p-6 space-y-6 shadow-2xl"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between pb-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h3 className="font-black text-xl flex items-center gap-2">
+                  <BookOpen className="h-5 w-5 text-[var(--color-primary)]" />
+                  <span>{selectedBook.title}</span>
+                </h3>
+                <p className="text-xs pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {selectedBook.description || 'Collection of saved dishes'}
+                </p>
+              </div>
+              <button type="button" onClick={() => setSelectedBook(null)} className="p-1.5 rounded-lg border">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-extrabold uppercase tracking-wider text-[var(--color-primary)]">
+                  {t('assignedRecipes', 'Assigned Recipes')} ({currentBookRecipes.length})
+                </span>
+                <Link href="/saved" className="text-[var(--color-primary)] font-bold hover:underline flex items-center gap-1">
+                  <span>{t('browseMoreInSaved', 'Add More from Saved')}</span>
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
+              </div>
+
+              <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                {currentBookRecipes.length === 0 ? (
+                  <div className="text-center py-8 text-xs opacity-60">
+                    {t('noRecipesInBook', 'No recipes assigned to this cookbook yet. Assign them from the Saved Recipes page.')}
+                  </div>
+                ) : (
+                  currentBookRecipes.map((rec: any, rIdx: number) => (
+                    <div
+                      key={rec.id || `rec_item_${rIdx}`}
+                      className="flex items-center justify-between p-3 rounded-2xl border"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                      }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-xl bg-slate-800 overflow-hidden shrink-0">
+                          {rec.image || rec.image_url ? (
+                            <img src={rec.image || rec.image_url} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-sm">🍳</div>
+                          )}
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-xs line-clamp-1">{rec.title}</h4>
+                          <p className="text-[11px] opacity-70 flex items-center gap-2 pt-0.5">
+                            <span>⏱️ {rec.prep_time || '15m'}</span>
+                            <span>•</span>
+                            <span>👥 {rec.servings || 4} servings</span>
+                          </p>
+                        </div>
+                      </div>
+
+                      <Link
+                        href="/saved"
+                        className="px-3 py-1.5 rounded-xl text-[11px] font-bold border hover:bg-slate-800/20"
+                        style={{ borderColor: 'var(--color-border)' }}
+                      >
+                        {t('view', 'View')}
+                      </Link>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div className="pt-3 border-t flex justify-end" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setSelectedBook(null)}
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white shadow-xs"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {t('done', 'Done')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

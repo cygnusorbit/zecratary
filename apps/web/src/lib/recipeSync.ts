@@ -126,3 +126,14 @@ export async function deleteSavedRecipe(userId: string, recipeId: string): Promi
 export function getLocalRecipes(userId: string = 'guest'): any[] {
   return [];
 }
+
+
+export const isRecipeInBook = (rec: any, bookId: string, book?: any): boolean => {
+  if (!rec || !bookId) return false;
+  if (rec.bookId === bookId || rec.book_id === bookId) return true;
+  if (book) {
+    const ids = book.recipe_ids || book.recipeIds;
+    if (Array.isArray(ids) && ids.includes(rec.id)) return true;
+  }
+  return false;
+};
