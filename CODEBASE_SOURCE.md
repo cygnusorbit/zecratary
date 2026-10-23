@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.20",
+  "version": "8.1.21",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -17,7 +17,7 @@
     "db:generate": "turbo run db:generate",
     "db:push": "turbo run db:push",
     "worker:dev": "turbo run worker:dev",
-    "postbuild": "node -e \"const fs=require('fs'),path=require('path');const src=path.join('apps','web','.next');if(fs.existsSync(src)){  ['.next','dist','build'].forEach(d=>{    if(!fs.existsSync(d)){      try{fs.symlinkSync(src,d,'junction');}catch(e){fs.cpSync(src,d,{recursive:true});}    }  });  const saStatic=path.join(src,'standalone','apps','web','.next','static');  const srcStatic=path.join(src,'static');  if(fs.existsSync(srcStatic)&&!fs.existsSync(saStatic)){    try{fs.mkdirSync(path.dirname(saStatic),{recursive:true});fs.cpSync(srcStatic,saStatic,{recursive:true});}catch(e){}  }  const saPublic=path.join(src,'standalone','apps','web','public');  const srcPublic=path.join('apps','web','public');  if(fs.existsSync(srcPublic)&&!fs.existsSync(saPublic)){    try{fs.mkdirSync(path.dirname(saPublic),{recursive:true});fs.cpSync(srcPublic,saPublic,{recursive:true});}catch(e){}  }  console.log('\u2713 Hostinger deployment artifacts bridged successfully.');}\"",
+    "postbuild": "node -e \"const fs=require('fs'),path=require('path');const src=path.join('apps','web','.next');if(fs.existsSync(src)){  const sa=path.join(src,'standalone');  const rootServer=path.join(process.cwd(),'server.js');  if(fs.existsSync(sa)&&fs.existsSync(rootServer)){    try{fs.cpSync(rootServer,path.join(sa,'server.js'));}catch(_){}    try{fs.cpSync(rootServer,path.join(sa,'apps','web','server_launcher.js'));}catch(_){}  }  const saStatic=path.join(sa,'apps','web','.next','static');  const srcStatic=path.join(src,'static');  if(fs.existsSync(srcStatic)){    try{fs.mkdirSync(path.dirname(saStatic),{recursive:true});fs.cpSync(srcStatic,saStatic,{recursive:true});}catch(_){}    try{const rStatic=path.join(sa,'.next','static');fs.mkdirSync(path.dirname(rStatic),{recursive:true});fs.cpSync(srcStatic,rStatic,{recursive:true});}catch(_){}  }  const saPublic=path.join(sa,'apps','web','public');  const srcPublic=path.join('apps','web','public');  if(fs.existsSync(srcPublic)){    try{fs.mkdirSync(path.dirname(saPublic),{recursive:true});fs.cpSync(srcPublic,saPublic,{recursive:true});}catch(_){}    try{const rPublic=path.join(sa,'public');fs.mkdirSync(path.dirname(rPublic),{recursive:true});fs.cpSync(srcPublic,rPublic,{recursive:true});}catch(_){}  }  ['.next','dist','build'].forEach(d=>{    try{      if(fs.existsSync(d)||fs.lstatSync?.(d,{throwIfNoEntry:false})){        if(fs.lstatSync(d).isSymbolicLink()){fs.unlinkSync(d);}else{fs.rmSync(d,{recursive:true,force:true});}      }      fs.cpSync(src,d,{recursive:true,dereference:true});      if(fs.existsSync(rootServer)){        try{fs.cpSync(rootServer,path.join(d,'standalone','server.js'));}catch(_){}      }    }catch(err){console.warn('Artifact copy notice for '+d+':',err.message);}  });  console.log('\u2713 Hostinger production standalone artifacts physically bridged with root server.js.');}\"",
     "start:web": "npm run start --workspace=web"
   },
   "devDependencies": {},
@@ -120,7 +120,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.20",
+  "version": "8.1.21",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -339,52 +339,29 @@ declare module 'pg' {
 
 ## File: `apps/web/src/types/db-drivers.d.ts`
 ```typescript
-// Ambient Type Declarations for Database Drivers & Global Array Augmentation
-// GitHub: cygnusorbit/zecratary
-
-declare global {
-  interface Array<T> {
-    rows?: T[];
-    rowCount?: number;
-  }
-  interface ReadonlyArray<T> {
-    readonly rows?: T[];
-    readonly rowCount?: number;
-  }
-}
-
+// Ambient Type Declarations for Database Drivers
 declare module 'pg' {
+  export interface PoolConfig {
+    connectionString?: string;
+    ssl?: boolean | { rejectUnauthorized?: boolean };
+    connectionTimeoutMillis?: number;
+    idleTimeoutMillis?: number;
+    max?: number;
+    [key: string]: any;
+  }
   export class Pool {
-    constructor(config?: any);
+    constructor(config?: PoolConfig);
     connect(): Promise<any>;
-    query(queryText: string | any, values?: any[]): Promise<any>;
-    on(event: string, listener: (...args: any[]) => void): this;
+    query(text: string, values?: any[]): Promise<any>;
     end(): Promise<void>;
+    on(event: string, listener: (...args: any[]) => void): this;
   }
 }
 
 declare module 'mysql2/promise' {
-  export interface PoolConnection {
-    beginTransaction(): Promise<void>;
-    commit(): Promise<void>;
-    rollback(): Promise<void>;
-    release(): void;
-    query(sql: string, values?: any[]): Promise<[any, any]>;
-    execute(sql: string, values?: any[]): Promise<[any, any]>;
-  }
-
-  export interface Pool {
-    query(sql: string, values?: any[]): Promise<[any, any]>;
-    execute(sql: string, values?: any[]): Promise<[any, any]>;
-    getConnection(): Promise<PoolConnection>;
-    end(): Promise<void>;
-  }
-
-  export function createPool(config: any): Pool;
-  export function createConnection(config: any): Promise<any>;
+  export function createConnection(connectionUri: string): Promise<any>;
+  export function createPool(config: any): any;
 }
-
-export {};
 
 ```
 
@@ -429,15 +406,25 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
-      <body className="min-h-screen flex flex-col md:flex-row bg-[var(--color-bg)] text-slate-100 font-sans antialiased">
+    <html lang="en" className="dark" suppressHydrationWarning>
+      <body className="min-h-screen flex flex-col bg-[var(--color-bg)] text-slate-100 font-sans antialiased overflow-x-hidden">
         <GlobalThemeSync />
         <LanguageProvider>
           <ThemeInitializer />
-        <Sidebar />
-        <main className="md:pt-20 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 w-full min-w-0">
-          {children}
-        </main>
+          <Sidebar />
+          <main
+            id="zecratary-main-content"
+            className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 min-w-0"
+            style={{
+              marginLeft: 'var(--sidebar-width, 16rem)',
+              paddingTop: 'calc(var(--topbar-height, 4rem) + 1.25rem)',
+              width: 'calc(100% - var(--sidebar-width, 16rem))',
+              minHeight: '100vh',
+              boxSizing: 'border-box',
+            }}
+          >
+            {children}
+          </main>
         </LanguageProvider>
       </body>
     </html>
@@ -450,604 +437,424 @@ export default function RootLayout({
 ```typescript
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
 import { 
-  ChefHat, 
-  Sparkles, 
-  Clock, 
-  Flame, 
-  Utensils, 
-  ChevronRight, 
-  ChevronLeft, 
-  Check, 
-  Bookmark, 
-  Users, 
-  Star, 
-  X, 
-  Heart, 
-  Coins, 
-  ExternalLink, 
-  Menu, 
-  Sun, 
-  Moon, 
-  Globe, 
-  ArrowRight,
-  Shield,
-  Layers,
-  CheckCircle2,
-  Sliders,
-  PanelBottom
+  Sun, Moon, Globe, Shield, Zap, Sparkles, ChefHat, BookOpen, 
+  Clock, Users, Star, ArrowRight, Check, ExternalLink, ChevronDown, 
+  Utensils, Calendar, Layers, ShoppingCart, Heart, Minus, Plus, X 
 } from 'lucide-react';
-import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
-import { getSiteConfig, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON } from '@/lib/siteConfig';
 import { useTranslation } from '@/components/LanguageProvider';
+import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON } from '@/lib/siteConfig';
+import { getCurrentUser, User } from '@/lib/auth';
+import { applyThemeToDocument } from '@/lib/themeConfig';
 
-export type ElementType = 'title' | 'content' | 'column' | 'picture' | 'box' | 'recipe' | 'subscription';
-
-export interface PagePaddingSettings {
+interface PagePaddingSettings {
   top?: string;
   bottom?: string;
   left?: string;
   right?: string;
   x?: string;
-  maxWidth?: 'max-w-5xl' | 'max-w-6xl' | 'max-w-7xl' | 'max-w-full';
+  maxWidth?: string;
 }
 
-export interface FooterLink {
-  id: string;
-  label: string;
-  url: string;
-}
-
-export interface FooterColumn {
-  id: string;
-  title: string;
-  links: FooterLink[];
-}
-
-export interface PageFooterSettings {
+interface FooterSettings {
   enabled?: boolean;
   aboutText?: string;
   copyrightText?: string;
-  columns?: FooterColumn[];
-  socials?: {
-    twitter?: string;
-    github?: string;
-    discord?: string;
-    instagram?: string;
-    youtube?: string;
-  };
   bgColor?: string;
   textColor?: string;
   borderColor?: string;
   accentColor?: string;
+  columns?: Array<{
+    title: string;
+    links: Array<{ label: string; url: string }>;
+  }>;
+  socials?: Record<string, string>;
 }
 
-export interface SavedRecipeRecord {
+interface DynamicPageRecord {
   id: string;
   title: string;
-  name?: string;
+  slug: string;
   description?: string;
-  image?: string;
-  imageUrl?: string;
-  image_url?: string;
-  prepTime?: string;
-  cookTime?: string;
-  prepTimeMinutes?: number;
-  cookTimeMinutes?: number;
-  calories?: string | number;
-  servings?: string | number;
-  category?: string;
-  recipeType?: string;
-  ingredients?: any;
-  instructions?: any;
-  directions?: any;
-  sourceUrl?: string;
-  source_url?: string;
-  rating?: number;
-  isFavorite?: boolean;
-  isCooked?: boolean;
-  creatorName?: string;
-}
-
-export interface PageElement {
-  id: string;
-  type: ElementType;
-  title?: string;
-  subtitle?: string;
   content?: string;
-  level?: 'h1' | 'h2' | 'h3';
-  alignment?: 'left' | 'center' | 'right';
-  boxStyle?: 'highlight' | 'border' | 'subtle';
-  badge?: string;
-  buttonText?: string;
-  buttonUrl?: string;
-  imageUrl?: string;
-  altText?: string;
-  caption?: string;
-  layout?: 'full' | 'card' | 'contained';
-  columnsCount?: number;
-  columns?: Array<{ id: string; title: string; content: string }>;
-  bgColor?: string;
-  textColor?: string;
-  accentColor?: string;
-  borderColor?: string;
-  recipeGridDensity?: number;
-  recipeLimit?: number;
-  recipeCategoryFilter?: string;
-  planSlug?: string;
-  planBillingInterval?: 'MONTH' | 'YEAR';
-  planShowTokens?: boolean;
-  planShowAiModels?: boolean;
-  planCtaText?: string;
-  planCtaUrl?: string;
-}
-
-export interface FrontendPage {
-  id: string;
-  title: string;
-  slug: string;
-  description: string;
+  status: string;
   is_default: boolean;
-  is_published: boolean;
-  elements: PageElement[];
+  show_in_nav: boolean;
+  show_in_footer: boolean;
+  order_index: number;
+  elements: any[];
   padding?: PagePaddingSettings;
-  footer?: PageFooterSettings;
+  footer?: FooterSettings;
 }
 
-interface PlanCatalog {
-  id: string;
-  slug: string;
-  name: string;
-  monthlyPrice: number;
-  annualPrice: number;
-  tokenLimit: number;
-  tokenReimburseFrequency?: string;
-  monthlyBadge?: string;
-  annualBadge?: string;
-  trialBadge?: string;
-  descriptionMonthly?: string;
-  descriptionAnnual?: string;
-  allowedAiModels?: string[];
-  features: string[];
-  isFree?: boolean;
-}
 
-const DEFAULT_FALLBACK_PLANS: PlanCatalog[] = [
+const DEFAULT_FOOTER: FooterSettings = {
+  enabled: true,
+  aboutText: 'Zecratary is an autonomous culinary intelligence platform designed for intelligent recipe management, meal planning, and nutrition telemetry.',
+  copyrightText: '© 2026 Zecratary Inc. All rights reserved.',
+  columns: [
+    {
+      title: 'Platform',
+      links: [
+        { label: 'AI Assistant', url: '/chef' },
+        { label: 'Recipe Library', url: '/saved' },
+        { label: 'Cookbooks', url: '/books' },
+        { label: 'Meal Planner', url: '/planner' },
+      ],
+    },
+    {
+      title: 'Finance & Quotas',
+      links: [
+        { label: 'Token Portal', url: '/token' },
+        { label: 'Store Wallet', url: '/wallet' },
+        { label: 'Subscription Plans', url: '/subscriptions' },
+        { label: 'Billing History', url: '/billing' },
+      ],
+    },
+  ],
+  socials: {
+    twitter: 'https://twitter.com',
+    github: 'https://github.com/cygnusorbit/zecratary',
+    discord: 'https://discord.com',
+  },
+};
+
+const DEFAULT_HOMEPAGE_FALLBACK: DynamicPageRecord = {
+  id: 'page_home',
+  title: 'Home',
+  slug: 'home',
+  description: 'Zecratary Autonomous Culinary Planning Platform',
+  status: 'published',
+  is_default: true,
+  show_in_nav: true,
+  show_in_footer: true,
+  order_index: 1,
+  padding: {
+    top: '2.5rem',
+    bottom: '4rem',
+    left: '1.5rem',
+    right: '1.5rem',
+    maxWidth: 'max-w-7xl',
+  },
+  footer: {
+    enabled: true,
+    aboutText: 'Zecratary is an autonomous culinary intelligence platform designed for intelligent recipe management, meal planning, and nutrition telemetry.',
+    copyrightText: '© 2026 Zecratary Inc. All rights reserved.',
+  },
+  elements: [
+    {
+      id: 'elem_hero',
+      type: 'title',
+      title: 'Autonomous Culinary Planning & Intelligence',
+      subtitle: 'Plan gourmet meals, track pantry macros, scale recipes, and command Chef AI with production-grade telemetry.',
+      level: 'h1',
+      align: 'center',
+    },
+    {
+      id: 'elem_recipes',
+      type: 'recipe',
+      title: 'Featured Culinary Dishes',
+      subtitle: 'Explore community-tested dishes with dynamic serving scaling and nutritional breakdowns.',
+      gridDensity: '3x3',
+      itemsPerPage: 6,
+    },
+    {
+      id: 'elem_plans',
+      type: 'subscription',
+      title: 'Subscription Tiers & AI Quotas',
+      subtitle: 'Choose the ideal culinary quota for home cooks, meal prep pros, and commercial kitchens.',
+      planBillingInterval: 'monthly',
+    },
+  ],
+};
+
+const DEFAULT_COMMUNITY_RECIPES = [
   {
-    id: 'preset_taster',
-    slug: 'taster',
-    name: 'Taster',
-    monthlyPrice: 0,
-    annualPrice: 0,
-    tokenLimit: 50000,
-    tokenReimburseFrequency: 'monthly',
-    trialBadge: 'Free Tier',
-    descriptionMonthly: 'Essential AI cooking quota and pantry tracking for home cooks.',
-    descriptionAnnual: 'Essential AI cooking quota and pantry tracking for home cooks.',
-    allowedAiModels: ['gemini-3.5-flash-lite', 'gpt-3.5-turbo'],
-    features: ['5 AI-powered recipes per month', 'Personal recipe library', 'Automated shopping list creation'],
-    isFree: true
+    id: 'rec_pasta',
+    title: 'Truffle Mushroom Risotto',
+    description: 'Arborio rice slow-simmered in rich vegetable broth with wild mushrooms, shaved parmesan, and white truffle glaze.',
+    prep_time: '15m',
+    cook_time: '25m',
+    servings: '4',
+    is_favorite: true,
+    image: 'https://images.unsplash.com/photo-1633964913295-ceb43826e7c9?auto=format&fit=crop&w=800&q=80',
+    tags: ['Italian', 'Gourmet', 'Vegetarian'],
+    ingredients: ['1.5 cups Arborio rice', '4 cups Vegetable broth', '200g Wild mushrooms', '2 tbsp Truffle oil', '50g Parmesan'],
+    instructions: ['Sauté wild mushrooms until golden.', 'Gradually add warm broth to rice while stirring continuously.', 'Fold in truffle oil and parmesan.'],
   },
   {
-    id: 'preset_nutrition_pro',
-    slug: 'nutrition-pro',
+    id: 'rec_salmon',
+    title: 'Pan-Seared Citrus Salmon',
+    description: 'Crisp Atlantic salmon fillet glazed with honey-lime marinade, served over fragrant jasmine rice and grilled asparagus.',
+    prep_time: '10m',
+    cook_time: '15m',
+    servings: '2',
+    is_favorite: true,
+    image: 'https://images.unsplash.com/photo-1467003909585-2f8a72700288?auto=format&fit=crop&w=800&q=80',
+    tags: ['Seafood', 'High Protein', 'Keto'],
+    ingredients: ['2 Salmon fillets', '1 tbsp Honey', '1 Lime, juiced', '1 bunch Asparagus', '1 tbsp Olive oil'],
+    instructions: ['Season salmon with salt and pepper.', 'Sear skin-side down for 5 minutes, flip and glaze with lime-honey.', 'Serve hot with asparagus.'],
+  },
+  {
+    id: 'rec_salad',
+    title: 'Mediterranean Quinoa Bowl',
+    description: 'Organic rainbow quinoa tossed with English cucumbers, Kalamata olives, cherry tomatoes, and crumbled feta with lemon vinaigrette.',
+    prep_time: '12m',
+    cook_time: '0m',
+    servings: '3',
+    is_favorite: false,
+    image: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=800&q=80',
+    tags: ['Mediterranean', 'Healthy', 'Gluten-Free'],
+    ingredients: ['2 cups Cooked quinoa', '1 cup Cherry tomatoes', '1/2 cup Kalamata olives', '100g Feta cheese', '2 tbsp Lemon vinaigrette'],
+    instructions: ['Combine cooked quinoa with chopped vegetables.', 'Toss thoroughly with vinaigrette.', 'Top with crumbled feta cheese.'],
+  },
+];
+
+const DEFAULT_SUBSCRIPTION_PLANS = [
+  {
+    slug: 'taster',
+    name: 'Taster',
+    monthly_price: 0,
+    annual_price: 0,
+    tokens: '50,000',
+    features: ['5 Daily AI Recipe Ingests', 'Standard Meal Planner', 'Basic Shopping List', 'Community Recipe Access'],
+    is_free: true,
+  },
+  {
+    slug: 'starter',
+    name: 'Starter Chef',
+    monthly_price: 9.99,
+    annual_price: 89.99,
+    tokens: '100,000',
+    features: ['Unlimited AI Recipe Ingests', 'Automated Nutrition Tracking', 'Smart Pantry Inventory', 'Export to PDF & Markdown'],
+    is_free: false,
+  },
+  {
+    slug: 'pro',
     name: 'Nutrition Pro',
-    monthlyPrice: 8.99,
-    annualPrice: 59.99,
-    tokenLimit: 1000000,
-    tokenReimburseFrequency: 'monthly',
-    monthlyBadge: 'Most Popular',
-    annualBadge: 'Save 44%',
-    trialBadge: '7-Day Free Trial',
-    descriptionMonthly: 'Complete culinary intelligence suite with unlimited AI recipes and deep macro telemetry.',
-    descriptionAnnual: 'Best value - all premium culinary features, billed annually.',
-    allowedAiModels: ['gemini-3.6-flash', 'gpt-4o'],
-    features: ['Unlimited AI-powered recipe generation', 'Macro & vitamin nutrition breakdown', 'Priority Chef processing & cloud sync'],
-    isFree: false
-  }
+    monthly_price: 19.99,
+    annual_price: 189.99,
+    tokens: '250,000',
+    features: ['Deep Nutritional Macro Analytics', 'Multi-Cookbook Collections', 'Autonomous AI Meal Blueprints', 'Priority Cloud Ingestion'],
+    is_free: false,
+    is_popular: true,
+  },
+  {
+    slug: 'master',
+    name: 'Master Culinary',
+    monthly_price: 39.99,
+    annual_price: 349.99,
+    tokens: '600,000',
+    features: ['Unlimited High-Performance Tokens', 'Commercial Multi-Kitchen Quotas', 'Custom AI Prompt Engine', 'Dedicated VIP Concierge'],
+    is_free: false,
+  },
 ];
 
 export default function DynamicHomePage() {
-  const { t, locale, setLanguage } = useTranslation();
   const params = useParams();
-  const rawSlug = params?.slug ? (typeof params.slug === 'string' ? params.slug : params.slug[0]) : '';
-  const routeSlug = rawSlug ? (rawSlug.startsWith('/') ? rawSlug : `/${rawSlug}`) : '/';
+  const router = useRouter();
+  const { t } = useTranslation();
 
+  const [mounted, setMounted] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [siteBranding, setSiteBranding] = useState<{
-    siteName: string;
-    titlebarEmoji: string;
-    titlebarImage: string;
-    tagline: string;
-  }>({
-    
-    siteName: 'Zecratary',
-    titlebarEmoji: '🍳',
-    titlebarImage: '',
-    tagline: 'Culinary AI',
-  });
-
-  const fetchSiteBranding = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/settings', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        const payload = data.settings || data;
-        setSiteBranding({
-          siteName: payload.siteName || payload.site_name || 'Zecratary',
-          titlebarEmoji: payload.titlebarEmoji || payload.titlebar_emoji || '🍳',
-          titlebarImage: payload.titlebarImage || payload.titlebar_image || '',
-          tagline: payload.tagline || payload.siteTagline || payload.site_tagline || 'Culinary AI',
-        });
-        return;
-      }
-    } catch (_) {}
-
-    try {
-      const cfg = getSiteConfig();
-      if (cfg) {
-        setSiteBranding({
-          siteName: cfg.siteName || 'Zecratary',
-          titlebarEmoji: cfg.titlebarEmoji || '🍳',
-          titlebarImage: cfg.titlebarImage || '',
-          tagline: (cfg as any).tagline || (cfg as any).siteTagline || 'Culinary AI',
-        });
-      }
-    } catch (_) {}
-  }, []);
-  const [allPages, setAllPages] = useState<FrontendPage[]>([]);
-  const [activePage, setActivePage] = useState<FrontendPage | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
+  const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
+  const [siteIcon, setSiteIcon] = useState<string>(DEFAULT_SITE_ICON);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
 
-  // Dynamic Catalogs
-  const [availablePlans, setAvailablePlans] = useState<PlanCatalog[]>(DEFAULT_FALLBACK_PLANS);
-  const [allRecipesList, setAllRecipesList] = useState<SavedRecipeRecord[]>([]);
-  const [planBillingInterval, setPlanBillingInterval] = useState<'MONTH' | 'YEAR'>('MONTH');
-  const [recipeElementPages, setRecipeElementPages] = useState<Record<string, number>>({});
+  // Dynamic CMS Page State
+  const [allPages, setAllPages] = useState<DynamicPageRecord[]>([]);
+  const [activePage, setActivePage] = useState<DynamicPageRecord>(DEFAULT_HOMEPAGE_FALLBACK);
+  const [allRecipes, setAllRecipes] = useState<any[]>(DEFAULT_COMMUNITY_RECIPES);
+  const [plans, setPlans] = useState<any[]>(DEFAULT_SUBSCRIPTION_PLANS);
 
-  // Recipe Modal
-  const [activeRecipeModal, setActiveRecipeModal] = useState<SavedRecipeRecord | null>(null);
-  const [modalServingsMultiplier, setModalServingsMultiplier] = useState<number>(1);
-  const [modalCompletedSteps, setModalCompletedSteps] = useState<number[]>([]);
-  const [modalFontSizeScale, setModalFontSizeScale] = useState<number>(100);
+  // Element UI States
+  const [planBillingInterval, setPlanBillingInterval] = useState<'monthly' | 'annual'>('monthly');
+  const [activeRecipeModal, setActiveRecipeModal] = useState<any | null>(null);
+  const [modalServings, setModalServings] = useState<number>(4);
+  const [modalFontZoom, setModalFontZoom] = useState<number>(100);
 
-  // Sync Theme State & Body Class
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const mode = localStorage.getItem('zecratary_theme_mode');
-      const dark = mode !== 'light';
-      setIsDarkMode(dark);
-      document.documentElement.classList.toggle('dark', dark);
-      document.body.classList.add('is-homepage-view');
-      return () => {
-        document.body.classList.remove('is-homepage-view');
-      };
-    }
+  // Determine active route slug
+  const rawSlug = params?.slug ? (typeof params.slug === 'string' ? params.slug : params.slug[0]) : '';
+  const currentSlug = rawSlug ? rawSlug.replace(/^\/+/, '') : 'home';
+
+  // 1. Synchronize Day/Night Theme State
+  const syncThemeState = useCallback(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const storedMode = localStorage.getItem('zecratary_theme_mode');
+        const isDark = storedMode !== 'light' && storedMode !== 'day';
+        setIsDarkMode(isDark);
+        if (isDark) {
+          document.documentElement.classList.add('dark');
+          document.documentElement.classList.remove('light');
+        } else {
+          document.documentElement.classList.remove('dark');
+          document.documentElement.classList.add('light');
+        }
+      }
+    } catch (_) {}
   }, []);
 
   const toggleTheme = () => {
     const nextDark = !isDarkMode;
     setIsDarkMode(nextDark);
     if (typeof window !== 'undefined') {
-      localStorage.setItem('zecratary_theme_mode', nextDark ? 'dark' : 'light');
-      document.documentElement.classList.toggle('dark', nextDark);
-      window.dispatchEvent(new Event('zecratary_theme_mode_changed'));
+      const modeStr = nextDark ? 'dark' : 'light';
+      localStorage.setItem('zecratary_theme_mode', modeStr);
+      if (nextDark) {
+        document.documentElement.classList.add('dark');
+        document.documentElement.classList.remove('light');
+      } else {
+        document.documentElement.classList.remove('dark');
+        document.documentElement.classList.add('light');
+      }
+      applyThemeToDocument(null);
+      window.dispatchEvent(new CustomEvent('zecratary_theme_mode_changed', { detail: { mode: modeStr } }));
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
     }
   };
 
-  // 1. Fetch Dynamic Pages from /api/admin/frontend
-  const fetchFrontendSettings = useCallback(async () => {
+  // 2. Fetch Dynamic Pages and Recipes
+  const fetchPageData = useCallback(async () => {
     try {
-      setLoading(true);
-      const res = await fetch('/api/admin/frontend', { cache: 'no-store' });
+      const res = await fetch(`/api/admin/frontend?t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        if (data.success && Array.isArray(data.pages)) {
+        if (Array.isArray(data.pages) && data.pages.length > 0) {
           setAllPages(data.pages);
-
-          let targetPage: FrontendPage | null = null;
-          if (routeSlug && routeSlug !== '/') {
-            targetPage = data.pages.find((p: FrontendPage) => p.slug === routeSlug) || null;
-          }
-          if (!targetPage) {
-            targetPage = data.pages.find((p: FrontendPage) => p.is_default) || 
-                         data.pages.find((p: FrontendPage) => p.slug === '/') || 
-                         data.pages[0] || null;
-          }
-          setActivePage(targetPage);
-          if (targetPage && typeof document !== 'undefined') {
-            document.title = `${targetPage.title} - Zecratary`;
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Failed to load frontend settings:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [routeSlug]);
-
-  // 2. Fetch Subscription Plans
-  const fetchLivePlans = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/plans', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        const list = Array.isArray(data) ? data : (data?.packages || data?.plans || data?.configs);
-        if (Array.isArray(list) && list.length > 0) {
-          const parsed: PlanCatalog[] = list.map((p: any) => ({
-            id: String(p.id || p.slug || 'plan'),
-            slug: String(p.slug || p.id || 'plan').toLowerCase().trim(),
-            name: String(p.name || 'Subscription Plan'),
-            monthlyPrice: Number(p.monthlyPriceDollars ?? p.monthlyPrice ?? 0),
-            annualPrice: Number(p.annualPriceDollars ?? p.annualPrice ?? 0),
-            tokenLimit: Number(p.tokenLimit ?? 500000),
-            tokenReimburseFrequency: p.tokenReimburseFrequency || 'monthly',
-            monthlyBadge: p.monthlyBadge || '',
-            annualBadge: p.annualBadge || '',
-            trialBadge: p.trialBadge || (p.isFree ? 'Free Tier' : ''),
-            descriptionMonthly: p.descriptionMonthly || p.description || 'Full kitchen intelligence access',
-            descriptionAnnual: p.descriptionAnnual || 'Best value, billed annually',
-            allowedAiModels: Array.isArray(p.allowedAiModels) ? p.allowedAiModels : ['gemini-3.6-flash', 'gpt-4o'],
-            features: Array.isArray(p.features) ? p.features : ['AI-Powered Recipe Generation', 'Pantry Sync'],
-            isFree: Boolean(p.isFree || (Number(p.monthlyPriceDollars) === 0 && Number(p.annualPriceDollars) === 0))
-          }));
-          setAvailablePlans(parsed);
-        }
-      }
-    } catch (_) {}
-  }, []);
-
-  // 3. Fetch Recipes from PostgreSQL
-  const fetchAllRecipes = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/frontend?all_recipes=true', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && Array.isArray(data.recipes)) {
-          setAllRecipesList(data.recipes);
-          return;
+          const found = data.pages.find((p: DynamicPageRecord) => p.slug === currentSlug) ||
+                        data.pages.find((p: DynamicPageRecord) => p.is_default) ||
+                        data.pages[0];
+          if (found) setActivePage(found);
         }
       }
     } catch (_) {}
 
-    // Fallback to /api/recipes/saved
     try {
-      const res2 = await fetch('/api/recipes/saved', { cache: 'no-store' });
-      if (res2.ok) {
-        const data2 = await res2.json();
-        const list2 = Array.isArray(data2) ? data2 : (data2?.recipes || []);
-        if (Array.isArray(list2) && list2.length > 0) {
-          setAllRecipesList(list2);
+      const recRes = await fetch('/api/admin/frontend?all_recipes=true', { cache: 'no-store' });
+      if (recRes.ok) {
+        const recData = await recRes.json();
+        if (Array.isArray(recData.recipes) && recData.recipes.length > 0) {
+          setAllRecipes(recData.recipes);
         }
       }
     } catch (_) {}
-  }, []);
 
-  // Hydration & Event Listeners
+    try {
+      const planRes = await fetch('/api/admin/plans', { cache: 'no-store' });
+      if (planRes.ok) {
+        const planData = await planRes.json();
+        const pList = Array.isArray(planData.plans) ? planData.plans : (planData || []);
+        if (Array.isArray(pList) && pList.length > 0) {
+          setPlans(pList);
+        }
+      }
+    } catch (_) {}
+  }, [currentSlug]);
+
   useEffect(() => {
-    initAuthStorage();
+    setMounted(true);
     setCurrentUser(getCurrentUser());
-    fetchSiteBranding();
-    fetchFrontendSettings();
-    fetchLivePlans();
-    fetchAllRecipes();
+    setSiteName(getSiteName());
+    setSiteIcon(getSiteIcon());
+    syncThemeState();
+    fetchPageData();
 
-    const handleSync = (e?: any) => {
-      if (e?.detail) {
-        const detail = e.detail;
-        if (detail.siteName || detail.titlebarEmoji || detail.titlebarImage !== undefined || detail.tagline !== undefined || detail.siteTagline !== undefined) {
-          setSiteBranding((prev) => ({
-            ...prev,
-            siteName: detail.siteName || detail.site_name || prev.siteName,
-            titlebarEmoji: detail.titlebarEmoji || detail.titlebar_emoji || prev.titlebarEmoji,
-            titlebarImage: detail.titlebarImage !== undefined ? detail.titlebarImage : prev.titlebarImage,
-            tagline: detail.tagline !== undefined ? detail.tagline : (detail.siteTagline !== undefined ? detail.siteTagline : prev.tagline)
-          }));
-        }
-      }
-      fetchSiteBranding();
-      fetchFrontendSettings();
-      fetchAllRecipes();
-      fetchLivePlans();
-      setCurrentUser(getCurrentUser());
-    };
+    // Bind homepage layout classes to document body
+    if (typeof document !== 'undefined' && document.body) {
+      document.body.classList.add('is-homepage-view');
+    }
 
-    window.addEventListener('zecratary_frontend_pages_updated', handleSync);
-    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
-    window.addEventListener('zecratary_theme_updated', handleSync);
-    window.addEventListener('zecratary_site_config_updated', handleSync);
-    window.addEventListener('zecratary_site_settings_changed', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
-    window.addEventListener('storage', handleSync);
+    const handleThemeSync = () => syncThemeState();
+    const handlePageSync = () => fetchPageData();
+
+    window.addEventListener('zecratary_theme_mode_changed', handleThemeSync);
+    window.addEventListener('zecratary_theme_updated', handleThemeSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleThemeSync);
+    window.addEventListener('zecratary_frontend_pages_updated', handlePageSync);
+    window.addEventListener('storage', handleThemeSync);
+    window.addEventListener('focus', handlePageSync);
 
     return () => {
-      window.removeEventListener('zecratary_frontend_pages_updated', handleSync);
-      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_theme_updated', handleSync);
-      window.removeEventListener('zecratary_site_config_updated', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
-      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('zecratary_theme_mode_changed', handleThemeSync);
+      window.removeEventListener('zecratary_theme_updated', handleThemeSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleThemeSync);
+      window.removeEventListener('zecratary_frontend_pages_updated', handlePageSync);
+      window.removeEventListener('storage', handleThemeSync);
+      window.removeEventListener('focus', handlePageSync);
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.classList.remove('is-homepage-view');
+      }
     };
-  }, [fetchFrontendSettings, fetchLivePlans, fetchAllRecipes]);
+  }, [syncThemeState, fetchPageData]);
 
-  // Scaled Recipe Amount Helper
-  const calculateScaledAmount = (rawAmt: any, baseServings: number, currentServings: number) => {
-    if (!rawAmt || isNaN(Number(rawAmt))) return rawAmt;
-    const num = Number(rawAmt);
-    const scaled = (num / (baseServings || 2)) * currentServings;
-    return Number.isInteger(scaled) ? scaled : Number(scaled.toFixed(2));
-  };
-
-  const getSafeHostname = (urlStr?: string | null) => {
-    if (!urlStr || typeof urlStr !== 'string') return 'source link';
+  const getSafeHostname = (urlStr?: string | null): string => {
+    if (!urlStr) return 'source link';
     try {
-      const normalized = urlStr.startsWith('http://') || urlStr.startsWith('https://') ? urlStr : `https://${urlStr}`;
-      return new URL(normalized).hostname.replace('www.', '');
-    } catch {
-      return urlStr.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0] || 'source link';
+      return new URL(urlStr).hostname.replace(/^www\./, '');
+    } catch (_) {
+      return urlStr;
     }
   };
 
-  const renderDynamicBrandLogo = (sizeCls = 'w-10 h-10', iconCls = 'w-5 h-5') => {
-    if (siteBranding.titlebarImage) {
-      return (
-        <img 
-          src={siteBranding.titlebarImage} 
-          alt={siteBranding.siteName} 
-          className={`${sizeCls} rounded-2xl object-contain shadow-md`}
-        />
-      );
-    }
-    if (siteBranding.titlebarEmoji) {
-      return (
-        <div 
-          className={`${sizeCls} rounded-2xl flex items-center justify-center text-white shadow-md text-xl`}
-          style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-        >
-          <span>{siteBranding.titlebarEmoji}</span>
-        </div>
-      );
-    }
-    return (
-      <div 
-        className={`${sizeCls} rounded-2xl flex items-center justify-center text-white shadow-md`}
-        style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-      >
-        <ChefHat className={iconCls} />
-      </div>
-    );
-  };
+  const navPages = useMemo(() => {
+    return allPages.filter((p: DynamicPageRecord) => p.show_in_nav && p.status === 'published');
+  }, [allPages]);
 
-  const menuPages = allPages.filter((p) => p.is_published);
+  const elementsList = useMemo(() => {
+    return Array.isArray(activePage?.elements) && activePage.elements.length > 0
+      ? activePage.elements
+      : DEFAULT_HOMEPAGE_FALLBACK.elements;
+  }, [activePage]);
 
-  // Resolved Page Padding & Margin Values from /admin/frontend
   const padTop = activePage?.padding?.top || '2.5rem';
   const padBottom = activePage?.padding?.bottom || '4rem';
   const padLeft = activePage?.padding?.left || activePage?.padding?.x || '1.5rem';
   const padRight = activePage?.padding?.right || activePage?.padding?.x || '1.5rem';
-  const maxWCls = activePage?.padding?.maxWidth || 'max-w-7xl';
+  const maxWidthClass = activePage?.padding?.maxWidth || 'max-w-7xl';
 
   return (
-    <div 
+    <div
       id="zecratary-homepage-root"
-      className="min-h-screen w-full transition-colors duration-200 flex flex-col justify-between"
+      className="min-h-screen flex flex-col font-sans antialiased theme-harmonized-card"
       style={{
-        backgroundColor: 'var(--color-bg, #070b13)',
-        color: 'var(--color-text, #f1f5f9)'
+        backgroundColor: 'var(--color-bg)',
+        color: 'var(--color-text)',
       }}
     >
-      {/* Global CSS Reset for Homepage: Remove sidebar offsets & top clearance from layout shell */}
-      <style dangerouslySetInnerHTML={{ __html: `
-        body.is-homepage-view,
-        body:has(#zecratary-homepage-root) {
-          margin: 0 !important;
-          padding: 0 !important;
-          overflow-x: hidden !important;
-        }
-
-        /* Strip outer layout shell classes so sidebar & topbar clearance don't push the homepage */
-        body.is-homepage-view .md\:pl-64,
-        body.is-homepage-view .md\:pl-20,
-        body.is-homepage-view [class*="pl-64"],
-        body.is-homepage-view [class*="pl-20"],
-        body.is-homepage-view [class*="ml-64"],
-        body.is-homepage-view [class*="ml-20"],
-        body.is-homepage-view .md\:pt-16,
-        body.is-homepage-view .md\:pt-20,
-        body.is-homepage-view [class*="pt-16"],
-        body.is-homepage-view [class*="pt-20"],
-        body:has(#zecratary-homepage-root) .md\:pl-64,
-        body:has(#zecratary-homepage-root) .md\:pl-20,
-        body:has(#zecratary-homepage-root) [class*="pl-64"],
-        body:has(#zecratary-homepage-root) [class*="pl-20"],
-        body:has(#zecratary-homepage-root) [class*="ml-64"],
-        body:has(#zecratary-homepage-root) [class*="ml-20"],
-        body:has(#zecratary-homepage-root) .md\:pt-16,
-        body:has(#zecratary-homepage-root) .md\:pt-20,
-        body:has(#zecratary-homepage-root) [class*="pt-16"],
-        body:has(#zecratary-homepage-root) [class*="pt-20"] {
-          padding-left: 0 !important;
-          padding-top: 0 !important;
-          margin-left: 0 !important;
-        }
-
-        /* Outer layout wrapper reset - ONLY the outer layout wrapper, NOT the inner homepage canvas */
-        body.is-homepage-view > div > main,
-        body.is-homepage-view > div > div > main,
-        body.is-homepage-view main:not(#zecratary-homepage-canvas),
-        body.is-homepage-view [role="main"]:not(#zecratary-homepage-canvas),
-        body:has(#zecratary-homepage-root) > div > main,
-        body:has(#zecratary-homepage-root) > div > div > main,
-        body:has(#zecratary-homepage-root) main:not(#zecratary-homepage-canvas),
-        body:has(#zecratary-homepage-root) [role="main"]:not(#zecratary-homepage-canvas) {
-          padding-top: 0 !important;
-          padding-left: 0 !important;
-          padding-right: 0 !important;
-          margin-left: 0 !important;
-          margin-right: 0 !important;
-          width: 100% !important;
-          max-width: 100% !important;
-        }
-
-        /* Suppress dashboard sidebar and topbars on homepage */
-        body.is-homepage-view aside,
-        body.is-homepage-view #zecratary-desktop-topbar,
-        body.is-homepage-view .zecratary-mobile-topbar,
-        body:has(#zecratary-homepage-root) aside,
-        body:has(#zecratary-homepage-root) #zecratary-desktop-topbar,
-        body:has(#zecratary-homepage-root) .zecratary-mobile-topbar {
-          display: none !important;
-        }
-
-        /* Enforce side margins & container width centering on the Homepage Canvas */
-        #zecratary-homepage-canvas {
-          margin-left: auto !important;
-          margin-right: auto !important;
-          box-sizing: border-box !important;
-          width: 100% !important;
-        }
-      ` }} />
-
-      {/* DYNAMIC TOP NAVIGATION MENU */}
-      <header 
-        className="sticky top-0 z-40 backdrop-blur-md border-b transition-colors"
+      {/* 1. PUBLIC HOMEPAGE HEADER NAVIGATION */}
+      <header
+        className="sticky top-0 z-40 border-b backdrop-blur-md theme-harmonized-card"
         style={{
-          backgroundColor: isDarkMode ? 'rgba(11, 15, 23, 0.85)' : 'rgba(255, 255, 255, 0.85)',
-          borderColor: 'var(--color-border, #1e293b)'
+          backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.9)',
+          borderColor: 'var(--color-border)',
+          color: 'var(--color-text)',
         }}
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
-          <Link href="/" className="flex items-center gap-2.5 cursor-pointer">
-            {renderDynamicBrandLogo('w-10 h-10', 'h-5 w-5')}
-            <div>
-              <span className="text-lg font-black tracking-tight" style={{ color: 'var(--color-text, #f1f5f9)' }}>
-                {siteBranding.siteName || 'Zecratary'}
-              </span>
-              <span className="block text-[9px] font-bold uppercase tracking-widest text-[var(--color-primary)] truncate max-w-[200px] sm:max-w-xs">
-                {siteBranding.tagline || t('common.tagline', 'Culinary AI')}
-              </span>
-            </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          {/* BRAND */}
+          <Link href="/" className="flex items-center gap-2.5 font-black text-xl text-[var(--color-primary)]">
+            <span className="text-2xl">{siteIcon || '🍳'}</span>
+            <span>{siteName || 'Zecratary'}</span>
           </Link>
 
-          {/* Dynamic Menu items from /admin/frontend */}
-          <nav className="hidden md:flex items-center gap-1.5">
-            {menuPages.map((page) => {
-              const isCurrent = (activePage?.slug === page.slug) || (page.is_default && activePage?.is_default);
+          {/* DYNAMIC CMS NAVIGATION TABS */}
+          <nav className="hidden md:flex items-center gap-1">
+            {navPages.map((page: DynamicPageRecord) => {
+              const isActive = (currentSlug === 'home' && page.is_default) || currentSlug === page.slug;
               return (
                 <Link
                   key={page.id}
-                  href={page.is_default ? '/' : page.slug}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition ${
-                    isCurrent ? 'text-[var(--color-primary)] shadow-xs' : 'opacity-70 hover:opacity-100 hover:bg-white/5'
-                  }`}
-                  style={{ backgroundColor: isCurrent ? 'var(--color-inner-dark, #0e1422)' : 'transparent' }}
+                  href={page.is_default ? '/' : `/${page.slug}`}
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-bold transition"
+                  style={
+                    isActive
+                      ? { backgroundColor: 'var(--color-primary)', color: '#ffffff' }
+                      : { color: 'var(--color-text-secondary)', backgroundColor: 'transparent' }
+                  }
                 >
                   {page.title}
                 </Link>
@@ -1055,432 +862,384 @@ export default function DynamicHomePage() {
             })}
           </nav>
 
-          <div className="hidden sm:flex items-center gap-2.5">
-            {/* Language Picker */}
-            <div className="relative group">
-              <button
-                type="button"
-                className="px-2.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 cursor-pointer hover:bg-white/5"
-                style={{ borderColor: 'var(--color-border, #1e293b)' }}
-              >
-                <Globe className="h-3.5 w-3.5 opacity-70" />
-                <span className="uppercase">{locale || 'en'}</span>
-              </button>
-              <div 
-                className="absolute right-0 mt-1 w-32 border rounded-2xl p-1.5 shadow-2xl hidden group-hover:block z-50 animate-in fade-in"
-                style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}
-              >
-                {[
-                  { code: 'en', label: 'English', flag: '🇺🇸' },
-                  { code: 'es', label: 'Español', flag: '🇪🇸' },
-                  { code: 'fr', label: 'Français', flag: '🇫🇷' },
-                  { code: 'th', label: 'ไทย', flag: '🇹🇭' }
-                ].map((l) => (
-                  <button
-                    key={l.code}
-                    type="button"
-                    onClick={() => setLanguage && setLanguage(l.code as any)}
-                    className="w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-white/10 cursor-pointer"
-                  >
-                    <span>{l.flag}</span>
-                    <span>{l.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Day / Dark Theme Switcher */}
+          {/* ACTIONS: THEME TOGGLE & AUTH */}
+          <div className="flex items-center gap-3">
+            {/* DAY/NIGHT SWITCHER */}
             <button
               type="button"
               onClick={toggleTheme}
-              className="p-2 rounded-xl border transition cursor-pointer hover:bg-white/5"
-              style={{ borderColor: 'var(--color-border, #1e293b)' }}
-              title="Toggle Theme"
+              className="p-2 rounded-xl border transition cursor-pointer shadow-xs"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)',
+              }}
+              title={isDarkMode ? t('switchToDayMode', 'Switch to Day Mode') : t('switchToDarkMode', 'Switch to Dark Mode')}
             >
               {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-700" />}
             </button>
 
-            {/* Auth status action */}
+            {/* CONTEXTUAL AUTH BUTTON */}
             {currentUser ? (
-              <div className="flex items-center gap-2">
-                <Link
-                  href="/dashboard"
-                  className="px-4 py-2 rounded-xl text-xs font-black text-white shadow-md transition hover:opacity-90 flex items-center gap-1.5"
-                  style={{ backgroundColor: 'var(--color-primary, #E05638)' }}
-                >
-                  <Sparkles className="h-3.5 w-3.5" />
-                  <span>{t('dashboard') || 'Dashboard'}</span>
-                </Link>
-                {currentUser.role === 'admin' && (
-                  <Link
-                    href="/admin/frontend"
-                    className="p-2 rounded-xl border text-xs font-bold transition hover:bg-white/10 text-amber-400 border-amber-500/30"
-                    title="Edit in Admin Frontend Builder"
-                  >
-                    <Shield className="h-4 w-4" />
-                  </Link>
-                )}
-              </div>
+              <Link
+                href="/dashboard"
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                <span>{t('dashboard', 'Dashboard')}</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
             ) : (
               <div className="flex items-center gap-2">
-                <Link href="/login" className="px-3.5 py-2 rounded-xl text-xs font-bold border hover:bg-white/5" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-                  {t('signIn') || 'Sign In'}
+                <Link
+                  href="/login"
+                  className="px-3.5 py-2 rounded-xl border text-xs font-bold transition shadow-xs"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)',
+                  }}
+                >
+                  {t('signIn', 'Sign In')}
                 </Link>
-                <Link href="/register" className="px-4 py-2 rounded-xl text-xs font-black text-white shadow-md hover:opacity-90" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
-                  {t('getStarted') || 'Get Started'}
+                <Link
+                  href="/register"
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                >
+                  {t('getStarted', 'Get Started')}
                 </Link>
               </div>
             )}
           </div>
-
-          {/* Mobile Hamburger */}
-          <div className="flex items-center gap-2 md:hidden">
-            <button type="button" onClick={toggleTheme} className="p-2 rounded-xl border" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-              {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-700" />}
-            </button>
-            <button type="button" onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="p-2 rounded-xl border" style={{ borderColor: 'var(--color-border, #1e293b)' }}>
-              {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-            </button>
-          </div>
         </div>
-
-        {mobileMenuOpen && (
-          <div className="md:hidden border-b p-4 space-y-3" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}>
-            <div className="space-y-1">
-              {menuPages.map((p) => (
-                <Link key={p.id} href={p.is_default ? '/' : p.slug} onClick={() => setMobileMenuOpen(false)} className="block px-3 py-2 rounded-xl text-xs font-bold hover:bg-white/10">
-                  {p.title}
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
       </header>
 
-      {/* DYNAMIC CONTENT CANVAS (Applying Page Padding Settings) */}
-      <div 
+      {/* 2. DYNAMIC CONTENT CANVAS */}
+      <main
         id="zecratary-homepage-canvas"
-        role="region"
-        aria-label="Homepage Content"
-        className={`${maxWCls} mx-auto w-full space-y-12 sm:space-y-16 flex-1`}
+        className="flex-1 w-full mx-auto"
         style={{
           paddingTop: padTop,
           paddingBottom: padBottom,
           paddingLeft: padLeft,
           paddingRight: padRight,
-          boxSizing: 'border-box'
+          boxSizing: 'border-box',
         }}
       >
-        {loading ? (
-          <div className="min-h-[50vh] flex flex-col items-center justify-center space-y-3">
-            <div className="w-10 h-10 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--color-primary, #E05638)', borderTopColor: 'transparent' }} />
-            <p className="text-xs opacity-60">Synchronizing settings from PostgreSQL...</p>
-          </div>
-        ) : !activePage || (activePage.elements && activePage.elements.length === 0) ? (
-          <div className="py-24 text-center space-y-4">
-            <ChefHat className="h-12 w-12 mx-auto text-[var(--color-primary)]" />
-            <h2 className="text-2xl font-black">Welcome to Zecratary</h2>
-            <p className="text-xs max-w-md mx-auto opacity-70">
-              Customize this page layout, padding, and elements dynamically at <code className="font-mono text-amber-400">/admin/frontend</code>.
-            </p>
-          </div>
-        ) : (
-          activePage.elements.map((elem) => {
-            const elemBg = elem.bgColor || 'transparent';
-            const elemText = elem.textColor || 'inherit';
-            const elemBorder = elem.borderColor || 'var(--color-border, #1e293b)';
-            const elemAccent = elem.accentColor || 'var(--color-primary, #E05638)';
-
-            // 1. TITLE
+        <div className={`w-full mx-auto ${maxWidthClass} space-y-12`}>
+          {elementsList.map((elem: any, elemIdx: number) => {
+            // A. TITLE / HEADING ELEMENT
             if (elem.type === 'title') {
-              const alignCls = elem.alignment === 'center' ? 'text-center' : elem.alignment === 'right' ? 'text-right' : 'text-left';
+              const alignClass = elem.align === 'center' ? 'text-center' : elem.align === 'right' ? 'text-right' : 'text-left';
               return (
-                <div key={elem.id} className={`space-y-3 py-6 px-4 rounded-3xl transition ${alignCls}`} style={{ backgroundColor: elemBg, color: elemText }}>
+                <div key={elem.id || `title_${elemIdx}`} className={`space-y-3 ${alignClass}`}>
                   {elem.level === 'h1' ? (
-                    <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight leading-tight" style={{ color: elemAccent }}>{elem.title}</h1>
+                    <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight" style={{ color: elem.color || 'var(--color-text)' }}>
+                      {elem.title || 'Autonomous Culinary Intelligence'}
+                    </h1>
                   ) : elem.level === 'h3' ? (
-                    <h3 className="text-xl sm:text-2xl font-bold tracking-tight">{elem.title}</h3>
+                    <h3 className="text-xl sm:text-2xl font-bold" style={{ color: elem.color || 'var(--color-text)' }}>
+                      {elem.title}
+                    </h3>
                   ) : (
-                    <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight">{elem.title}</h2>
+                    <h2 className="text-2xl sm:text-4xl font-extrabold" style={{ color: elem.color || 'var(--color-text)' }}>
+                      {elem.title}
+                    </h2>
                   )}
-                  {elem.subtitle && <p className="text-sm sm:text-base max-w-3xl mx-auto opacity-80 leading-relaxed">{elem.subtitle}</p>}
+                  {elem.subtitle && (
+                    <p className="text-sm sm:text-base max-w-3xl mx-auto leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                      {elem.subtitle}
+                    </p>
+                  )}
                 </div>
               );
             }
 
-            // 2. TEXT CONTENT
+            // B. CONTENT / TEXT ELEMENT
             if (elem.type === 'content') {
-              const alignCls = elem.alignment === 'center' ? 'text-center' : elem.alignment === 'right' ? 'text-right' : 'text-left';
               return (
-                <div key={elem.id} className={`p-6 sm:p-8 rounded-3xl border space-y-3 shadow-lg ${alignCls}`} style={{ backgroundColor: elem.bgColor || 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: elemText }}>
-                  {elem.title && <h3 className="text-xl font-black" style={{ color: elemAccent }}>{elem.title}</h3>}
-                  <p className="text-xs sm:text-sm leading-relaxed opacity-90 whitespace-pre-line">{elem.content}</p>
+                <div
+                  key={elem.id || `content_${elemIdx}`}
+                  className="p-6 rounded-2xl border leading-relaxed text-sm sm:text-base theme-harmonized-card"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: elem.color || 'var(--color-text)',
+                  }}
+                >
+                  <p className="whitespace-pre-line">{elem.content || elem.body || ''}</p>
                 </div>
               );
             }
 
-            // 3. MULTI-COLUMN GRID
+            // C. MULTI-COLUMN ELEMENT
             if (elem.type === 'column') {
-              const gridCols = elem.columnsCount === 2 ? 'sm:grid-cols-2' : elem.columnsCount === 4 ? 'sm:grid-cols-2 md:grid-cols-4' : 'sm:grid-cols-3';
+              const cols = Array.isArray(elem.columns) ? elem.columns : (Array.isArray(elem.cols) ? elem.cols : []);
+              const gridCols = cols.length === 2 ? 'grid-cols-1 md:grid-cols-2' : cols.length === 4 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 md:grid-cols-3';
               return (
-                <div key={elem.id} className="space-y-6 py-2">
-                  {elem.title && <h3 className="text-2xl font-black text-center tracking-tight" style={{ color: elemAccent }}>{elem.title}</h3>}
-                  <div className={`grid grid-cols-1 ${gridCols} gap-5 sm:gap-6`}>
-                    {(elem.columns || []).map((col) => (
-                      <div key={col.id} className="p-6 rounded-3xl border space-y-2.5 shadow-md transition hover:-translate-y-1" style={{ backgroundColor: elem.bgColor || 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: elemText }}>
-                        <h4 className="text-base font-bold" style={{ color: elemAccent }}>{col.title}</h4>
-                        <p className="text-xs sm:text-sm leading-relaxed opacity-80">{col.content}</p>
-                      </div>
-                    ))}
-                  </div>
+                <div key={elem.id || `col_${elemIdx}`} className={`grid ${gridCols} gap-6`}>
+                  {cols.map((col: any, colIdx: number) => (
+                    <div
+                      key={col.id || `col_item_${colIdx}`}
+                      className="p-6 rounded-2xl border space-y-3 theme-harmonized-card shadow-xs"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)',
+                      }}
+                    >
+                      {col.icon && <span className="text-3xl block">{col.icon}</span>}
+                      <h3 className="font-bold text-base">{col.title || 'Feature'}</h3>
+                      <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                        {col.content || col.description || ''}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               );
             }
 
-            // 4. PICTURE
+            // D. PICTURE / MEDIA ELEMENT
             if (elem.type === 'picture') {
               return (
-                <div key={elem.id} className="space-y-3 py-2 p-2 rounded-3xl" style={{ backgroundColor: elemBg }}>
-                  {elem.title && <h4 className="text-lg font-bold text-center mb-2" style={{ color: elemAccent }}>{elem.title}</h4>}
-                  <div className="rounded-3xl overflow-hidden border max-h-[500px] w-full flex items-center justify-center bg-black/40 shadow-2xl" style={{ borderColor: elemBorder }}>
-                    {elem.imageUrl ? <img src={elem.imageUrl} alt={elem.altText || 'Media'} className="w-full h-auto object-cover max-h-[500px]" /> : null}
-                  </div>
-                  {elem.caption && <p className="text-center text-xs italic opacity-75">{elem.caption}</p>}
-                </div>
-              );
-            }
-
-            // 5. CALLOUT BOX / CARD
-            if (elem.type === 'box') {
-              return (
-                <div key={elem.id} className="p-7 sm:p-9 rounded-3xl border shadow-xl space-y-4 transition" style={{ backgroundColor: elem.bgColor || (elem.boxStyle === 'highlight' ? 'rgba(224, 86, 56, 0.08)' : 'var(--color-inner-dark, #0e1422)'), borderColor: elemBorder, color: elemText }}>
-                  <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-xl sm:text-2xl font-black tracking-tight" style={{ color: elemAccent }}>{elem.title}</h3>
-                    {elem.badge && (
-                      <span className="px-3 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                        {elem.badge}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs sm:text-sm leading-relaxed opacity-90 max-w-3xl">{elem.content}</p>
-                  {elem.buttonText && (
-                    <Link href={elem.buttonUrl || '#'} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black text-white shadow-md transition hover:opacity-90" style={{ backgroundColor: elemAccent }}>
-                      <span>{elem.buttonText}</span>
-                      <ChevronRight className="h-4 w-4" />
-                    </Link>
+                <div
+                  key={elem.id || `pic_${elemIdx}`}
+                  className="rounded-3xl border overflow-hidden p-2 theme-harmonized-card shadow-xs"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                  }}
+                >
+                  {elem.url ? (
+                    <img src={elem.url} alt={elem.alt || 'Visual'} className="w-full h-80 object-cover rounded-2xl" />
+                  ) : (
+                    <div className="w-full h-64 flex items-center justify-center rounded-2xl text-xs" style={{ backgroundColor: 'var(--color-inner-dark)' }}>
+                      <span>{t('noImageAvailable', 'Image Display Area')}</span>
+                    </div>
+                  )}
+                  {elem.caption && (
+                    <div className="p-3 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                      {elem.caption}
+                    </div>
                   )}
                 </div>
               );
             }
 
-            // 6. RECIPE GRID WITH POPUP MODAL
-            if (elem.type === 'recipe') {
-              let list = allRecipesList;
-              if (elem.recipeCategoryFilter && elem.recipeCategoryFilter !== 'all') {
-                const cat = elem.recipeCategoryFilter.toLowerCase().trim();
-                list = list.filter((r) => (r.category || r.recipeType || '').toLowerCase().includes(cat));
-              }
-
-              const totalCount = list.length;
-              const itemsPerPage = elem.recipeLimit ? Number(elem.recipeLimit) : 6;
-              const totalPages = Math.max(1, Math.ceil(totalCount / itemsPerPage));
-              const currentPage = Math.min(Math.max(1, recipeElementPages[elem.id] || 1), totalPages);
-              const startIndex = (currentPage - 1) * itemsPerPage;
-              const endIndex = Math.min(startIndex + itemsPerPage, totalCount);
-              const paginatedSlice = list.slice(startIndex, endIndex);
-
-              const density = elem.recipeGridDensity || 3;
-              const gridColsCls = density === 2 ? 'grid-cols-1 sm:grid-cols-2' : density === 4 ? 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3';
-
+            // E. BOX / CALLOUT ELEMENT
+            if (elem.type === 'box') {
               return (
-                <div key={elem.id} className="p-6 sm:p-8 rounded-3xl border shadow-xl space-y-6 transition" style={{ backgroundColor: elem.bgColor || 'var(--color-card, #0b0f17)', borderColor: elemBorder, color: elemText }}>
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: elemBorder }}>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border inline-flex items-center gap-1.5" style={{ borderColor: elemAccent, color: elemAccent }}>
-                          <Bookmark className="h-3 w-3" />
-                          Community Recipes
-                        </span>
-                        <span className="text-xs font-bold opacity-60">({totalCount} dishes)</span>
-                      </div>
-                      <h3 className="text-2xl font-black tracking-tight mt-1.5" style={{ color: elemAccent }}>
-                        {elem.title || 'Community Recipes Gallery'}
-                      </h3>
-                      {elem.subtitle && <p className="text-xs opacity-75 mt-0.5 max-w-2xl">{elem.subtitle}</p>}
-                    </div>
-
-                    {elem.buttonText && (
-                      <Link href={elem.buttonUrl || '/chef'} className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-md transition hover:opacity-90 flex items-center gap-1.5 w-fit" style={{ backgroundColor: elemAccent }}>
-                        <Sparkles className="h-3.5 w-3.5" />
+                <div
+                  key={elem.id || `box_${elemIdx}`}
+                  className="p-8 rounded-3xl border text-center space-y-4 theme-harmonized-card shadow-md"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)',
+                  }}
+                >
+                  {elem.badge && (
+                    <span
+                      className="inline-block px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider text-white"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                    >
+                      {elem.badge}
+                    </span>
+                  )}
+                  <h3 className="text-2xl font-black">{elem.title || 'Gourmet Culinary Workspace'}</h3>
+                  <p className="text-sm max-w-2xl mx-auto leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                    {elem.description || elem.content || ''}
+                  </p>
+                  {elem.buttonText && (
+                    <div className="pt-2">
+                      <Link
+                        href={elem.buttonUrl || '/chef'}
+                        className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-xs text-white shadow-xs transition"
+                        style={{ backgroundColor: 'var(--color-primary)' }}
+                      >
                         <span>{elem.buttonText}</span>
-                        <ChevronRight className="h-3.5 w-3.5" />
+                        <ArrowRight className="h-4 w-4" />
                       </Link>
-                    )}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            // F. COMMUNITY RECIPE GALLERY ELEMENT
+            if (elem.type === 'recipe') {
+              const displayList = allRecipes.slice(0, elem.itemsPerPage || 6);
+              return (
+                <div key={elem.id || `recipe_${elemIdx}`} className="space-y-6">
+                  <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
+                    <div>
+                      <h2 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                        {elem.title || 'Community Tested Recipes'}
+                      </h2>
+                      {elem.subtitle && (
+                        <p className="text-xs pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                          {elem.subtitle}
+                        </p>
+                      )}
+                    </div>
+                    <Link
+                      href="/saved"
+                      className="text-xs font-bold flex items-center gap-1 hover:underline"
+                      style={{ color: 'var(--color-primary)' }}
+                    >
+                      <span>{t('exploreAllRecipes', 'Browse All Recipes')}</span>
+                      <ArrowRight className="h-3 w-3" />
+                    </Link>
                   </div>
 
-                  <div className={`grid ${gridColsCls} gap-4 sm:gap-5`}>
-                    {paginatedSlice.map((r) => (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {displayList.map((rec: any, recIdx: number) => (
                       <div
-                        key={r.id}
+                        key={rec.id || `rec_${recIdx}`}
                         onClick={() => {
-                          setActiveRecipeModal(r);
-                          setModalServingsMultiplier(1);
-                          setModalCompletedSteps([]);
-                          setModalFontSizeScale(100);
+                          setActiveRecipeModal(rec);
+                          setModalServings(Number(rec.servings) || 4);
                         }}
-                        className="border rounded-2xl overflow-hidden transition cursor-pointer group shadow-sm hover:shadow-md relative flex flex-col justify-between"
-                        style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder }}
+                        className="rounded-2xl border overflow-hidden cursor-pointer hover:shadow-lg transition flex flex-col theme-harmonized-card"
+                        style={{
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)',
+                        }}
                       >
-                        <div>
-                          <div className="relative h-44 w-full overflow-hidden bg-black/20">
-                            <img src={r.imageUrl || r.image || r.image_url || '/uploads/recipes/default.jpg'} alt={r.title || r.name} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition duration-300" />
-                            <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10">
-                              {r.isCooked && <span className="p-1.5 rounded-full backdrop-blur-md shadow-md border text-white bg-emerald-500 border-emerald-400"><CheckCircle2 className="h-3.5 w-3.5" /></span>}
-                              {r.isFavorite && <span className="p-1.5 rounded-full backdrop-blur-md shadow-md border" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: elemAccent, color: elemAccent }}><Heart className="h-3.5 w-3.5 fill-current" /></span>}
-                            </div>
-                          </div>
-                          <div className="p-3.5 space-y-1.5">
-                            <h4 className="font-bold text-sm leading-snug line-clamp-2" style={{ color: 'var(--color-text, #f1f5f9)' }}>{r.title || r.name}</h4>
-                            {r.description && <p className="text-[11px] line-clamp-2 opacity-75 leading-relaxed" style={{ color: 'var(--color-subtext, #94a3b8)' }}>{r.description}</p>}
-                          </div>
-                        </div>
-
-                        <div className="px-3.5 pb-3.5 pt-0 flex items-center justify-between gap-1 border-t mt-2 pt-2.5" style={{ borderColor: elemBorder }}>
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: elemAccent }}>
-                              {r.category || r.recipeType || 'Main Dish'}
+                        <div className="relative h-44 w-full overflow-hidden bg-slate-800">
+                          {rec.image ? (
+                            <img src={rec.image} alt={rec.title} className="w-full h-full object-cover transition duration-300 hover:scale-105" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-4xl">🍳</div>
+                          )}
+                          {rec.is_favorite && (
+                            <span className="absolute top-2.5 right-2.5 p-1.5 rounded-full bg-black/60 text-amber-400">
+                              <Star className="h-3.5 w-3.5 fill-current" />
                             </span>
-                            {r.creatorName && (
-                              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 border" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: elemBorder, color: 'var(--color-subtext, #94a3b8)' }}>
-                                By {r.creatorName}
-                              </span>
-                            )}
-                            {(r.rating || 0) > 0 && (
-                              <span className="flex items-center gap-0.5 text-amber-500 text-[11px] font-bold bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/20 shadow-xs">
-                                <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-500"/> {r.rating}
-                              </span>
-                            )}
+                          )}
+                        </div>
+                        <div className="p-4 flex-1 flex flex-col justify-between space-y-2">
+                          <div>
+                            <h3 className="font-bold text-sm line-clamp-1">{rec.title}</h3>
+                            <p className="text-xs line-clamp-2 pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                              {rec.description || 'Delicious culinary creation crafted with fresh ingredients.'}
+                            </p>
                           </div>
-                          <span className="text-[11px] flex items-center gap-1 shrink-0 font-semibold" style={{ color: 'var(--color-text, #f1f5f9)' }}>
-                            <Clock className="h-3 w-3" style={{ color: elemAccent }}/> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
-                          </span>
+                          <div className="flex items-center justify-between text-[11px] pt-2 border-t" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-3 w-3" />
+                              <span>{rec.cook_time || rec.prep_time || '20m'}</span>
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Users className="h-3 w-3" />
+                              <span>{rec.servings || 4} servings</span>
+                            </span>
+                          </div>
                         </div>
                       </div>
                     ))}
                   </div>
-
-                  {/* Pagination Bar */}
-                  {totalPages > 1 && (
-                    <div className="pt-4 border-t flex flex-wrap items-center justify-between gap-3 text-xs" style={{ borderColor: elemBorder }}>
-                      <span style={{ color: 'var(--color-subtext, #94a3b8)' }}>
-                        Showing {startIndex + 1} - {endIndex} of {totalCount} recipes
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <button type="button" disabled={currentPage <= 1} onClick={() => setRecipeElementPages((prev) => ({ ...prev, [elem.id]: Math.max(1, currentPage - 1) }))} className="p-2 rounded-xl border disabled:opacity-30 transition cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: 'var(--color-text, #f1f5f9)' }}>
-                          <ChevronLeft className="h-4 w-4" />
-                        </button>
-                        {Array.from({ length: totalPages }, (_, i) => i + 1).map((num) => (
-                          <button key={num} type="button" onClick={() => setRecipeElementPages((prev) => ({ ...prev, [elem.id]: num }))} className="min-w-[32px] h-8 rounded-xl text-xs font-bold transition flex items-center justify-center border cursor-pointer" style={currentPage === num ? { backgroundColor: elemAccent, borderColor: elemAccent, color: '#ffffff' } : { backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: 'var(--color-text, #f1f5f9)' }}>
-                            {num}
-                          </button>
-                        ))}
-                        <button type="button" disabled={currentPage >= totalPages} onClick={() => setRecipeElementPages((prev) => ({ ...prev, [elem.id]: Math.min(totalPages, currentPage + 1) }))} className="p-2 rounded-xl border disabled:opacity-30 transition cursor-pointer" style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: 'var(--color-text, #f1f5f9)' }}>
-                          <ChevronRight className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  )}
                 </div>
               );
             }
 
-            // 7. SUBSCRIPTION PLANS
+            // G. SUBSCRIPTION PLAN SHOWCASE ELEMENT
             if (elem.type === 'subscription') {
-              const filteredPlans = elem.planSlug && elem.planSlug !== 'all' ? availablePlans.filter((p) => p.slug === elem.planSlug) : availablePlans;
-              const interval = planBillingInterval;
-
               return (
-                <div key={elem.id} className="p-6 sm:p-8 rounded-3xl border shadow-xl space-y-6 transition" style={{ backgroundColor: elem.bgColor || 'var(--color-card, #0b0f17)', borderColor: elemBorder, color: elemText }}>
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: elemBorder }}>
-                    <div>
-                      <h3 className="text-2xl font-black tracking-tight" style={{ color: elemAccent }}>{elem.title || 'Choose Your Culinary Plan'}</h3>
-                      {elem.subtitle && <p className="text-xs opacity-75 mt-0.5">{elem.subtitle}</p>}
-                    </div>
-                    <div className="rounded-full p-1 border shadow-xs flex items-center self-start sm:self-auto" style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder }}>
-                      <button type="button" onClick={() => setPlanBillingInterval('MONTH')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${interval === 'MONTH' ? 'bg-[var(--color-primary,#E05638)] text-white shadow-sm' : 'opacity-70 hover:opacity-100'}`}>Monthly</button>
-                      <button type="button" onClick={() => setPlanBillingInterval('YEAR')} className={`px-4 py-1.5 rounded-full text-xs font-bold transition cursor-pointer ${interval === 'YEAR' ? 'bg-[var(--color-primary,#E05638)] text-white shadow-sm' : 'opacity-70 hover:opacity-100'}`}>Annual</button>
+                <div key={elem.id || `plan_${elemIdx}`} className="space-y-6 pt-4">
+                  <div className="text-center space-y-3">
+                    <h2 className="text-3xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                      {elem.title || 'Subscription Tiers & AI Quotas'}
+                    </h2>
+                    {elem.subtitle && (
+                      <p className="text-xs sm:text-sm max-w-2xl mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
+                        {elem.subtitle}
+                      </p>
+                    )}
+
+                    {/* MONTHLY / ANNUAL TOGGLE PILL */}
+                    <div className="inline-flex items-center p-1 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                      <button
+                        type="button"
+                        onClick={() => setPlanBillingInterval('monthly')}
+                        className="px-4 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer"
+                        style={
+                          planBillingInterval === 'monthly'
+                            ? { backgroundColor: 'var(--color-primary)', color: '#ffffff' }
+                            : { color: 'var(--color-text-secondary)' }
+                        }
+                      >
+                        {t('monthlyBilling', 'Monthly')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPlanBillingInterval('annual')}
+                        className="px-4 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
+                        style={
+                          planBillingInterval === 'annual'
+                            ? { backgroundColor: 'var(--color-primary)', color: '#ffffff' }
+                            : { color: 'var(--color-text-secondary)' }
+                        }
+                      >
+                        <span>{t('annualBilling', 'Annual')}</span>
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-full font-black">SAVE 20%</span>
+                      </button>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6 max-w-4xl mx-auto pt-2">
-                    {filteredPlans.map((plan) => {
-                      const isAnnual = interval === 'YEAR';
-                      const price = isAnnual ? plan.annualPrice : plan.monthlyPrice;
-                      const badge = isAnnual ? (plan.annualBadge || plan.trialBadge) : (plan.monthlyBadge || plan.trialBadge);
-                      const annualMonthlyEq = plan.annualPrice > 0 ? (plan.annualPrice / 12).toFixed(2) : '0.00';
-                      const calculatedSavings = plan.monthlyPrice > 0 && plan.annualPrice > 0 ? Math.max(0, Math.round((1 - (plan.annualPrice / (plan.monthlyPrice * 12))) * 100)) : 0;
-
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 pt-4">
+                    {plans.map((p: any, pIdx: number) => {
+                      const price = planBillingInterval === 'annual' ? (p.annual_price || p.price_annual || 0) : (p.monthly_price || p.price_monthly || 0);
+                      const featuresList = Array.isArray(p.features) ? p.features : ['AI Assistant Access', 'Personal Recipe Database', 'Pantry Manager'];
                       return (
-                        <div key={plan.id} className="rounded-3xl border-2 p-6 sm:p-7 relative flex flex-col justify-between space-y-5 shadow-md transition hover:shadow-xl" style={{ backgroundColor: 'var(--color-inner-dark, #0e1422)', borderColor: plan.isFree ? elemBorder : elemAccent }}>
-                          {badge && <div className="absolute -top-3.5 right-6 px-3.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider text-white shadow-md" style={{ backgroundColor: plan.isFree ? '#10b981' : elemAccent }}>{badge}</div>}
+                        <div
+                          key={p.slug || `tier_${pIdx}`}
+                          className="p-6 rounded-3xl border flex flex-col justify-between space-y-6 theme-harmonized-card shadow-xs relative"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: p.is_popular ? 'var(--color-primary)' : 'var(--color-border)',
+                            color: 'var(--color-text)',
+                          }}
+                        >
+                          {p.is_popular && (
+                            <span
+                              className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-[10px] font-black uppercase text-white shadow-xs"
+                              style={{ backgroundColor: 'var(--color-primary)' }}
+                            >
+                              Most Popular
+                            </span>
+                          )}
+
                           <div className="space-y-4">
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <h4 className="text-2xl font-black tracking-tight" style={{ color: elemAccent }}>{plan.name}</h4>
-                                <span className="text-[10px] font-mono opacity-50 block mt-0.5 font-bold">ID: {plan.id || plan.slug}</span>
-                              </div>
-                              {elem.planShowTokens !== false && (
-                                <span className="text-[11px] font-mono font-bold px-3 py-1 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center gap-1 shadow-xs">
-                                  <Coins className="h-3.5 w-3.5" />
-                                  <span>+{(plan.tokenLimit || 500000).toLocaleString()} 🪙 / {plan.tokenReimburseFrequency || 'cycle'}</span>
+                            <div>
+                              <h3 className="font-extrabold text-base">{p.name}</h3>
+                              <div className="pt-2 flex items-baseline gap-1">
+                                <span className="text-3xl font-black">${Number(price).toFixed(2)}</span>
+                                <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                                  /{planBillingInterval === 'annual' ? 'yr' : 'mo'}
                                 </span>
-                              )}
-                            </div>
-
-                            <div className="py-2 border-y" style={{ borderColor: elemBorder }}>
-                              {plan.isFree ? (
-                                <div><div className="text-4xl font-black" style={{ color: elemAccent }}>Free</div><p className="text-xs opacity-70 mt-1">{plan.descriptionMonthly}</p></div>
-                              ) : isAnnual ? (
-                                <div>
-                                  <div className="flex items-baseline gap-1"><span className="text-4xl font-black" style={{ color: elemAccent }}>${plan.annualPrice.toFixed(2)}</span><span className="text-xs opacity-60 font-semibold">/year</span></div>
-                                  <div className="flex items-center gap-2 text-xs font-bold mt-1"><span className="text-emerald-400">${annualMonthlyEq}/mo eq.</span>{calculatedSavings > 0 && <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Save {calculatedSavings}%</span>}</div>
-                                  <p className="text-xs opacity-70 mt-2">{plan.descriptionAnnual}</p>
-                                </div>
-                              ) : (
-                                <div>
-                                  <div className="flex items-baseline gap-1"><span className="text-4xl font-black" style={{ color: elemAccent }}>${plan.monthlyPrice.toFixed(2)}</span><span className="text-xs opacity-60 font-semibold">/month</span></div>
-                                  <p className="text-xs opacity-70 mt-2">{plan.descriptionMonthly}</p>
-                                </div>
-                              )}
-                            </div>
-
-                            {elem.planShowAiModels !== false && plan.allowedAiModels && (
-                              <div className="space-y-1">
-                                <span className="text-[10px] font-bold uppercase tracking-wider opacity-60 block">Allowed AI Models:</span>
-                                <div className="flex flex-wrap gap-1">
-                                  {plan.allowedAiModels.map((m, mIdx) => (
-                                    <span key={mIdx} className="text-[9px] font-mono px-2 py-0.5 rounded-full border border-slate-700 bg-black/40 text-slate-300 font-bold">{m}</span>
-                                  ))}
-                                </div>
                               </div>
-                            )}
+                            </div>
 
-                            <div className="space-y-2 pt-1 text-xs">
-                              {plan.features.map((feat, fIdx) => (
-                                <div key={fIdx} className="flex items-start gap-2 opacity-90">
-                                  <Check className="h-4 w-4 shrink-0 mt-0.5 text-emerald-400" />
-                                  <span className="leading-snug">{feat}</span>
+                            <div className="space-y-2 text-xs pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                              {featuresList.map((feat: any, fIdx: number) => (
+                                <div key={fIdx} className="flex items-center gap-2">
+                                  <Check className="h-3.5 w-3.5 text-[var(--color-primary)] shrink-0" />
+                                  <span style={{ color: 'var(--color-text-secondary)' }}>{feat}</span>
                                 </div>
                               ))}
                             </div>
                           </div>
 
-                          <div className="pt-2">
-                            <Link href={elem.planCtaUrl || '/subscriptions'} className="w-full py-3 rounded-2xl text-xs font-black flex items-center justify-center gap-2 text-white shadow-lg transition hover:opacity-90 cursor-pointer" style={{ backgroundColor: plan.isFree ? '#10b981' : elemAccent }}>
-                              <span>{elem.planCtaText || (plan.isFree ? 'Manage Plan' : 'Choose Plan')}</span>
-                              <ChevronRight className="h-4 w-4" />
-                            </Link>
-                          </div>
+                          <Link
+                            href="/subscriptions"
+                            className="w-full py-2.5 text-center rounded-xl font-bold text-xs text-white shadow-xs transition"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                          >
+                            {p.is_free ? t('getStartedFree', 'Get Started Free') : t('upgradeToPlan', 'Select Tier')}
+                          </Link>
                         </div>
                       );
                     })}
@@ -1490,69 +1249,41 @@ export default function DynamicHomePage() {
             }
 
             return null;
-          })
-        )}
-      </div>
+          })}
+        </div>
+      </main>
 
-      {/* DYNAMIC FOOTER (Rendered with active page footer settings) */}
+      {/* 3. DYNAMIC MULTI-COLUMN FOOTER */}
       {activePage?.footer?.enabled !== false && (
-        <footer 
-          className="border-t transition-colors mt-16"
+        <footer
+          className="border-t theme-harmonized-card"
           style={{
-            backgroundColor: activePage?.footer?.bgColor || 'var(--color-inner-dark, #0b0f17)',
-            borderColor: activePage?.footer?.borderColor || 'var(--color-border, #1e293b)',
-            color: activePage?.footer?.textColor || 'var(--color-text, #f1f5f9)'
+            backgroundColor: activePage?.footer?.bgColor || 'var(--color-card)',
+            borderColor: activePage?.footer?.borderColor || 'var(--color-border)',
+            color: activePage?.footer?.textColor || 'var(--color-text)',
           }}
         >
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-              {/* Brand and Description */}
-              <div className="md:col-span-2 space-y-3">
-                <div className="flex items-center gap-2.5">
-                  {renderDynamicBrandLogo('w-9 h-9', 'h-4 w-4')}
-                  <span className="text-lg font-black tracking-tight">
-                    {siteBranding.siteName || 'Zecratary'}
-                  </span>
+              {/* BRAND MISSION */}
+              <div className="space-y-3 md:col-span-2">
+                <div className="flex items-center gap-2 text-[var(--color-primary)] font-black text-lg">
+                  <span>{siteIcon || '🍳'}</span>
+                  <span>{siteName || 'Zecratary'}</span>
                 </div>
-                <p className="text-xs sm:text-sm leading-relaxed opacity-75 max-w-md">
-                  {activePage?.footer?.aboutText || siteBranding.tagline || t('admin.defaultTagline', 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.')}
+                <p className="text-xs leading-relaxed max-w-md" style={{ color: 'var(--color-text-secondary)' }}>
+                  {activePage?.footer?.aboutText || DEFAULT_HOMEPAGE_FALLBACK.footer?.aboutText}
                 </p>
-
-                {/* Social Links */}
-                {activePage?.footer?.socials && Object.values(activePage.footer.socials).some(Boolean) && (
-                  <div className="flex items-center gap-3 pt-2">
-                    {activePage.footer.socials.twitter && (
-                      <a href={activePage.footer.socials.twitter} target="_blank" rel="noreferrer" className="p-2 rounded-xl border hover:opacity-80 transition" style={{ borderColor: activePage.footer.borderColor || 'var(--color-border, #1e293b)' }} title="X / Twitter">
-                        <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-                      </a>
-                    )}
-                    {activePage.footer.socials.github && (
-                      <a href={activePage.footer.socials.github} target="_blank" rel="noreferrer" className="p-2 rounded-xl border hover:opacity-80 transition" style={{ borderColor: activePage.footer.borderColor || 'var(--color-border, #1e293b)' }} title="GitHub">
-                        <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-                      </a>
-                    )}
-                    {activePage.footer.socials.discord && (
-                      <a href={activePage.footer.socials.discord} target="_blank" rel="noreferrer" className="p-2 rounded-xl border hover:opacity-80 transition" style={{ borderColor: activePage.footer.borderColor || 'var(--color-border, #1e293b)' }} title="Discord">
-                        <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M20.317 4.37a19.791 19.791 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 003.677 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128 10.2 10.2 0 00.372-.292.074.074 0 01.077-.01c3.929 1.793 8.18 1.793 12.061 0a.074.074 0 01.078.01c.12.098.246.198.373.292a.077.077 0 01-.006.127 12.299 12.299 0 01-1.873.894.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.839 19.839 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>
-                      </a>
-                    )}
-                  </div>
-                )}
               </div>
 
-              {/* Dynamic Footer Link Columns */}
-              {(activePage?.footer?.columns || []).map((col) => (
-                <div key={col.id} className="space-y-3">
-                  <h4 
-                    className="text-xs font-black uppercase tracking-wider"
-                    style={{ color: activePage?.footer?.accentColor || 'var(--color-primary, #E05638)' }}
-                  >
-                    {col.title}
-                  </h4>
-                  <ul className="space-y-2 text-xs opacity-75">
-                    {col.links.map((link) => (
-                      <li key={link.id}>
-                        <Link href={link.url} className="hover:underline transition hover:opacity-100">
+              {/* NAVIGATION COLUMNS */}
+              {(activePage?.footer?.columns || DEFAULT_FOOTER.columns || []).map((col: any, colIdx: number) => (
+                <div key={colIdx} className="space-y-3">
+                  <h4 className="text-xs font-black uppercase tracking-wider">{col.title}</h4>
+                  <ul className="space-y-2 text-xs">
+                    {(col.links || []).map((link: any, linkIdx: number) => (
+                      <li key={linkIdx}>
+                        <Link href={link.url} className="hover:underline transition" style={{ color: 'var(--color-text-secondary)' }}>
                           {link.label}
                         </Link>
                       </li>
@@ -1562,211 +1293,131 @@ export default function DynamicHomePage() {
               ))}
             </div>
 
-            {/* Bottom Copyright & PostgreSQL Status Bar */}
-            <div 
-              className="border-t pt-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs opacity-60"
-              style={{ borderColor: activePage?.footer?.borderColor || 'var(--color-border, #1e293b)' }}
-            >
-              <span>{activePage?.footer?.copyrightText || '© 2026 Zecratary. All rights reserved.'}</span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse" />
-                <span>PostgreSQL Synced & Active</span>
-              </span>
+            {/* COPYRIGHT NOTICE */}
+            <div className="pt-8 border-t flex flex-col sm:flex-row items-center justify-between text-xs" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
+              <span>{activePage?.footer?.copyrightText || DEFAULT_HOMEPAGE_FALLBACK.footer?.copyrightText}</span>
+              <div className="flex items-center gap-4 pt-2 sm:pt-0">
+                <Link href="/privacy" className="hover:underline">Privacy</Link>
+                <Link href="/terms" className="hover:underline">Terms</Link>
+                <Link href="/contact" className="hover:underline">Contact</Link>
+              </div>
             </div>
           </div>
         </footer>
       )}
 
-      {/* FULL RECIPE POPUP MODAL (Exact /saved consistency, read-only on frontend) */}
+      {/* 4. FULL RECIPE MODAL POPUP */}
       {activeRecipeModal && (
-        <div 
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs"
           onClick={() => setActiveRecipeModal(null)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer animate-in fade-in"
         >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative cursor-default transition-colors duration-200"
+          <div
+            className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl border p-6 space-y-6 theme-harmonized-card shadow-2xl"
             style={{
-              backgroundColor: 'var(--color-card, #0b0f17)',
-              borderColor: 'var(--color-border, #1e293b)',
-              color: 'var(--color-text, #f1f5f9)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)',
             }}
+            onClick={(e) => e.stopPropagation()}
           >
-            <button
-              type="button"
-              onClick={() => setActiveRecipeModal(null)}
-              className="absolute top-4 right-4 z-30 p-2 rounded-xl border transition cursor-pointer shadow-md hover:opacity-80"
-              style={{
-                backgroundColor: 'var(--color-card, #0b0f17)',
-                borderColor: 'var(--color-border, #1e293b)',
-                color: 'var(--color-text, #f1f5f9)'
-              }}
-            >
-              <X className="h-5 w-5"/>
-            </button>
-
-            <div className="overflow-y-auto flex-1 space-y-5 pb-6">
-              <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
-                <img
-                  src={activeRecipeModal.imageUrl || activeRecipeModal.image || activeRecipeModal.image_url || '/uploads/recipes/default.jpg'}
-                  alt={activeRecipeModal.title || activeRecipeModal.name}
-                  referrerPolicy="no-referrer"
-                  className="absolute inset-0 w-full h-full object-cover"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
-
-                <div className="relative z-10 space-y-3">
-                  <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
-                    {activeRecipeModal.title || activeRecipeModal.name}
-                  </h2>
-
-                  <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-                    <span className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 backdrop-blur-md" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}>
-                      <Clock className="h-3.5 w-3.5 text-emerald-400" />
-                      <span className="font-bold">Cook: {activeRecipeModal.cookTime || `${activeRecipeModal.cookTimeMinutes || 20}m`}</span>
-                    </span>
-                    <span className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 backdrop-blur-md" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}>
-                      <Clock className="h-3.5 w-3.5 text-blue-400" />
-                      <span className="font-bold">Prep: {activeRecipeModal.prepTime || `${activeRecipeModal.prepTimeMinutes || 15}m`}</span>
-                    </span>
-                    <span className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 backdrop-blur-md" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}>
-                      <Utensils className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                      <span className="font-bold">{activeRecipeModal.category || activeRecipeModal.recipeType || 'Main Dish'}</span>
-                    </span>
-                    {activeRecipeModal.calories && (
-                      <span className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 backdrop-blur-md bg-amber-500/15 border-amber-500/30 text-amber-400">
-                        <Flame className="h-3.5 w-3.5" />
-                        <span className="font-bold">{activeRecipeModal.calories}</span>
-                      </span>
-                    )}
-                    <span className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 backdrop-blur-md" style={{ backgroundColor: 'var(--color-card, #0b0f17)', borderColor: 'var(--color-border, #1e293b)' }}>
-                      <Users className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                      <span className="font-bold">By {activeRecipeModal.creatorName || 'Community Chef'}</span>
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Servings Stepper */}
-              <div className="px-6 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-bold flex items-center gap-1.5 text-[var(--color-primary)]">
-                    <Users className="h-4 w-4"/> {t('servingsLabel') || 'Servings'}
-                  </span>
-                  <div className="flex items-center border rounded-lg overflow-hidden shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
-                    <button type="button" onClick={() => setModalServingsMultiplier(Math.max(1, modalServingsMultiplier - 1))} className="px-2.5 py-1 font-bold cursor-pointer hover:bg-white/10">-</button>
-                    <span className="px-3 py-1 text-xs font-bold min-w-[32px] text-center">
-                      {Number(activeRecipeModal.servings || 2) * modalServingsMultiplier}
-                    </span>
-                    <button type="button" onClick={() => setModalServingsMultiplier(modalServingsMultiplier + 1)} className="px-2.5 py-1 font-bold cursor-pointer hover:bg-white/10">+</button>
-                  </div>
-                </div>
-
-                {(activeRecipeModal.rating || 0) > 0 && (
-                  <div className="flex items-center gap-1">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <Star key={star} className="h-4 w-4" style={{ color: (activeRecipeModal.rating || 0) >= star ? 'var(--color-primary, #E05638)' : 'var(--color-border, #1e293b)', fill: (activeRecipeModal.rating || 0) >= star ? 'var(--color-primary, #E05638)' : 'transparent' }} />
-                    ))}
-                  </div>
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="text-xl font-black">{activeRecipeModal.title}</h2>
+                {activeRecipeModal.source_url && (
+                  <a
+                    href={activeRecipeModal.source_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] flex items-center gap-1 hover:underline pt-1 text-[var(--color-primary)]"
+                  >
+                    <span>{getSafeHostname(activeRecipeModal.source_url)}</span>
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
                 )}
               </div>
+              <button
+                type="button"
+                onClick={() => setActiveRecipeModal(null)}
+                className="p-1.5 rounded-lg border hover:bg-slate-800/20 cursor-pointer"
+                style={{ borderColor: 'var(--color-border)' }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
 
-              {activeRecipeModal.description && (
-                <div className="px-6 text-xs leading-relaxed opacity-80" style={{ color: 'var(--color-subtext, #94a3b8)' }}>
-                  {activeRecipeModal.description}
-                </div>
-              )}
+            {activeRecipeModal.image && (
+              <img src={activeRecipeModal.image} alt={activeRecipeModal.title} className="w-full h-56 object-cover rounded-2xl" />
+            )}
 
-              <div className="border-t mx-6" style={{ borderColor: 'var(--color-border, #1e293b)' }} />
-
-              {/* Ingredients */}
-              <div className="px-6 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-black">{t('ingredientsHeading') || 'Ingredients'}</h3>
-                  <div className="flex items-center border rounded-lg overflow-hidden text-xs shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
-                    <button type="button" onClick={() => setModalFontSizeScale(Math.max(70, modalFontSizeScale - 10))} className="px-2.5 py-1 font-bold cursor-pointer hover:bg-white/10">-</button>
-                    <span className="px-2.5 py-1 font-bold min-w-[42px] text-center">{modalFontSizeScale}%</span>
-                    <button type="button" onClick={() => setModalFontSizeScale(Math.min(130, modalFontSizeScale + 10))} className="px-2.5 py-1 font-bold cursor-pointer hover:bg-white/10">+</button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2.5" style={{ fontSize: `${modalFontSizeScale}%` }}>
-                  {Array.isArray(activeRecipeModal.ingredients) && activeRecipeModal.ingredients.map((ing: any, idx: number) => {
-                    const rawAmt = typeof ing === 'string' ? '' : ing.amount || ing.quantity || '';
-                    const scaledAmt = calculateScaledAmount(rawAmt, Number(activeRecipeModal.servings || 2), Number(activeRecipeModal.servings || 2) * modalServingsMultiplier);
-                    const unit = typeof ing === 'string' ? '' : ing.unit || '';
-                    const name = typeof ing === 'string' ? ing : ing.item || ing.name || '';
-                    return (
-                      <div key={idx} className="flex items-start gap-2.5 leading-snug">
-                        <span className="w-2 h-2 rounded-full inline-block shrink-0 mt-1.5" style={{ backgroundColor: 'var(--color-primary, #E05638)' }} />
-                        <span>
-                          {(scaledAmt !== '' || unit) && (
-                            <strong className="font-semibold">{scaledAmt} {unit && unit !== 'unit' && unit !== 'Unit' ? unit : ''}{' '}</strong>
-                          )}
-                          <span>{name}</span>
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
+            {/* CONTROLS: SERVINGS & ZOOM */}
+            <div className="flex items-center justify-between p-3 rounded-2xl border text-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-[var(--color-primary)]" />
+                <span className="font-bold">Servings:</span>
+                <button
+                  type="button"
+                  onClick={() => setModalServings(Math.max(1, modalServings - 1))}
+                  className="p-1 rounded-md border"
+                  style={{ borderColor: 'var(--color-border)' }}
+                >
+                  <Minus className="h-3 w-3" />
+                </button>
+                <span className="font-black px-1">{modalServings}</span>
+                <button
+                  type="button"
+                  onClick={() => setModalServings(modalServings + 1)}
+                  className="p-1 rounded-md border"
+                  style={{ borderColor: 'var(--color-border)' }}
+                >
+                  <Plus className="h-3 w-3" />
+                </button>
               </div>
 
-              <div className="border-t mx-6" style={{ borderColor: 'var(--color-border, #1e293b)' }} />
-
-              {/* Instructions */}
-              <div className="px-6 space-y-4">
-                <h3 className="text-lg font-black">{t('instructionsHeading') || 'Instructions'}</h3>
-                <div className="space-y-3.5" style={{ fontSize: `${modalFontSizeScale}%` }}>
-                  {Array.isArray(activeRecipeModal.instructions || activeRecipeModal.directions) && 
-                   (activeRecipeModal.instructions || activeRecipeModal.directions).map((step: string, idx: number) => {
-                    const isDone = modalCompletedSteps.includes(idx);
-                    return (
-                      <div
-                        key={idx}
-                        onClick={() => {
-                          if (modalCompletedSteps.includes(idx)) {
-                            setModalCompletedSteps(modalCompletedSteps.filter(i => i !== idx));
-                          } else {
-                            setModalCompletedSteps([...modalCompletedSteps, idx]);
-                          }
-                        }}
-                        className={`flex items-start gap-3 p-3.5 rounded-2xl border cursor-pointer transition select-none shadow-xs ${isDone ? 'opacity-50' : ''}`}
-                        style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}
-                      >
-                        <div className="w-4 h-4 rounded border flex items-center justify-center shrink-0 mt-0.5 transition" style={isDone ? { backgroundColor: 'var(--color-primary, #E05638)', borderColor: 'var(--color-primary, #E05638)', color: '#ffffff' } : { borderColor: 'var(--color-primary, #E05638)', backgroundColor: 'transparent' }}>
-                          {isDone && <Check className="h-3.5 w-3.5 stroke-[3]"/>}
-                        </div>
-                        <span className="font-extrabold shrink-0 text-sm" style={{ color: 'var(--color-primary, #E05638)' }}>{idx + 1}.</span>
-                        <span className={`leading-relaxed flex-1 ${isDone ? 'line-through opacity-50' : ''}`}>{step}</span>
-                      </div>
-                    );
-                  })}
-                </div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold">Text:</span>
+                <button
+                  type="button"
+                  onClick={() => setModalFontZoom(Math.max(80, modalFontZoom - 10))}
+                  className="px-2 py-0.5 rounded border"
+                  style={{ borderColor: 'var(--color-border)' }}
+                >
+                  A-
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalFontZoom(Math.min(150, modalFontZoom + 10))}
+                  className="px-2 py-0.5 rounded border"
+                  style={{ borderColor: 'var(--color-border)' }}
+                >
+                  A+
+                </button>
               </div>
+            </div>
 
-              <div className="border-t mx-6" style={{ borderColor: 'var(--color-border, #1e293b)' }} />
+            {/* INGREDIENTS */}
+            <div className="space-y-2">
+              <h3 className="font-extrabold text-sm uppercase tracking-wider text-[var(--color-primary)]">Ingredients</h3>
+              <ul className="space-y-1.5 text-xs" style={{ fontSize: `${modalFontZoom}%` }}>
+                {(Array.isArray(activeRecipeModal.ingredients) ? activeRecipeModal.ingredients : []).map((ing: any, iIdx: number) => (
+                  <li key={iIdx} className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-primary)] shrink-0" />
+                    <span>{typeof ing === 'string' ? ing : ing.name || JSON.stringify(ing)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
 
-              {/* Modal Footer */}
-              <div className="px-6 flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
-                <Link href="/chef" className="px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 text-white transition shadow-md hover:opacity-90" style={{ backgroundColor: 'var(--color-primary, #E05638)' }}>
-                  <Sparkles className="h-4 w-4" />
-                  <span>{t('cookWithChef') || 'Cook with AI Chef'}</span>
-                </Link>
-
-                <div className="flex items-center gap-2 ml-auto text-xs">
-                  <span className="font-semibold" style={{ color: 'var(--color-subtext, #94a3b8)' }}>Source:</span>
-                  {activeRecipeModal.sourceUrl || activeRecipeModal.source_url ? (
-                    <a href={activeRecipeModal.sourceUrl || activeRecipeModal.source_url || '#'} target="_blank" rel="noreferrer" className="font-bold text-xs hover:underline inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition shadow-xs text-[var(--color-primary)]" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)' }}>
-                      <span>{getSafeHostname(activeRecipeModal.sourceUrl || activeRecipeModal.source_url || '')}</span>
-                      <ExternalLink className="h-3.5 w-3.5" />
-                    </a>
-                  ) : (
-                    <span className="px-3 py-1.5 rounded-xl border text-xs font-medium" style={{ backgroundColor: 'var(--color-inner-dark, #070b13)', borderColor: 'var(--color-border, #1e293b)', color: 'var(--color-subtext, #94a3b8)' }}>
-                      Created manually
-                    </span>
-                  )}
-                </div>
-              </div>
+            {/* INSTRUCTIONS */}
+            <div className="space-y-2">
+              <h3 className="font-extrabold text-sm uppercase tracking-wider text-[var(--color-primary)]">Instructions</h3>
+              <ol className="space-y-2 text-xs list-decimal list-inside" style={{ fontSize: `${modalFontZoom}%` }}>
+                {(Array.isArray(activeRecipeModal.instructions) ? activeRecipeModal.instructions : []).map((ins: any, insIdx: number) => (
+                  <li key={insIdx} className="leading-relaxed">
+                    <span>{typeof ins === 'string' ? ins : ins.text || JSON.stringify(ins)}</span>
+                  </li>
+                ))}
+              </ol>
             </div>
           </div>
         </div>
@@ -1982,6 +1633,62 @@ html, body {
     padding-bottom: 0 !important;
     height: 4rem !important;
   }
+}
+
+
+/* ==========================================================================
+   Zecratary Responsive Layout Clearance Engine
+   ========================================================================== */
+:root {
+  --sidebar-width: 16rem;
+  --topbar-height: 4rem;
+}
+
+@media (max-width: 767px) {
+  :root {
+    --sidebar-width: 0px;
+    --topbar-height: 3.5rem;
+  }
+}
+
+/* Exempt Homepage and Authentication Views from Sidebar Offsets */
+body.is-homepage-view #zecratary-main-content,
+body:has(#zecratary-homepage-root) #zecratary-main-content,
+body.is-auth-view #zecratary-main-content,
+body:has(.is-auth-page) #zecratary-main-content {
+  margin-left: 0px !important;
+  padding-top: 0px !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+/* Smooth layout transitions */
+#zecratary-main-content {
+  transition: margin-left 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              width 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              padding-top 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+
+/* ==========================================================================
+   Day/Night Mode & Global Theme 200ms Smooth Transitions (Constraint 6)
+   ========================================================================== */
+html,
+body,
+#zecratary-homepage-root,
+#zecratary-homepage-canvas,
+.theme-harmonized-card {
+  transition: background-color 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              color 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html.light {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
 }
 
 ```
@@ -39148,923 +38855,497 @@ export async function GET(
 
 ## File: `apps/web/src/app/books/page.tsx`
 ```typescript
-// Generated / Updated by AI Collaborator
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { 
-  Book, Plus, Trash2, Edit3, Search, X, Check, BookOpen,
-  FolderPlus, ChevronRight, Utensils, Save, Sparkles, RefreshCw
+  Book, Plus, Trash2, Edit3, Search, Utensils, X, 
+  BookOpen, ArrowRight 
 } from 'lucide-react';
-import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+import { getCurrentUser, User } from '@/lib/auth';
 
-const COVER_GRADIENTS = [
-  { id: 'rose', label: 'Rose Pink', className: 'from-pink-600 via-rose-500 to-rose-600' },
-  { id: 'orange', label: 'Sunset Orange', className: 'from-amber-500 via-orange-500 to-red-500' },
-  { id: 'emerald', label: 'Fresh Emerald', className: 'from-emerald-500 via-teal-500 to-cyan-500' },
-  { id: 'blue', label: 'Ocean Blue', className: 'from-blue-600 via-indigo-500 to-violet-600' },
-  { id: 'purple', label: 'Royal Purple', className: 'from-purple-600 via-fuchsia-500 to-pink-500' },
-  { id: 'slate', label: 'Dark Charcoal', className: 'from-slate-700 via-slate-800 to-slate-900' }
-];
+interface RecipeBook {
+  id: string;
+  userId?: string;
+  user_id?: string;
+  title: string;
+  description: string;
+  recipeCount?: number;
+  recipeIds?: string[];
+  recipe_ids?: string[];
+  created_at?: string;
+}
 
-const isRecipeInBook = (rec: any, bookId: string): boolean => {
+// Local helper (satisfies Next.js App Router export contract - no named export)
+const isRecipeInBook = (rec: any, bookId: string, book?: any): boolean => {
   if (!rec || !bookId) return false;
-  return rec.bookId === bookId || rec.book_id === bookId;
+  if (rec.bookId === bookId || rec.book_id === bookId) return true;
+  if (book) {
+    const ids = book.recipe_ids || book.recipeIds;
+    if (Array.isArray(ids) && ids.includes(rec.id)) return true;
+  }
+  return false;
 };
 
 export default function BooksPage() {
-  const router = useRouter();
   const { t } = useTranslation();
+
+  const [mounted, setMounted] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [books, setBooks] = useState<any[]>([]);
+  const [books, setBooks] = useState<RecipeBook[]>([]);
   const [recipes, setRecipes] = useState<any[]>([]);
-  const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedBook, setSelectedBook] = useState<RecipeBook | null>(null);
 
-  // Modals state
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
-  const [newDescription, setNewDescription] = useState('');
-  const [newCoverGradient, setNewCoverGradient] = useState(COVER_GRADIENTS[0].className);
-
-  const [showEditModal, setShowEditModal] = useState(false);
+  // Original Modal States: ONLY Title and Description (NO Color Selector)
+  const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
-  const [editTitle, setEditTitle] = useState('');
-  const [editDescription, setEditDescription] = useState('');
-  const [editCoverGradient, setEditCoverGradient] = useState(COVER_GRADIENTS[0].className);
+  const [modalTitle, setModalTitle] = useState<string>('');
+  const [modalDescription, setModalDescription] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  const [selectedBook, setSelectedBook] = useState<any | null>(null);
-
-  const applyGlobalTheme = useCallback(() => {
-    try {
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
-    } catch (_) {}
-  }, []);
-
-  useEffect(() => {
-    applyGlobalTheme();
-    window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_updated', applyGlobalTheme);
-    window.addEventListener('storage', applyGlobalTheme);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
-      window.removeEventListener('storage', applyGlobalTheme);
-    };
-  }, [applyGlobalTheme]);
-
-  const loadData = useCallback(async (user: User | null) => {
-    if (!user) return;
-    const activeUserId = user.id || user.email || 'usr_admin_1';
-    setLoading(true);
+  // Pure Database Hydration: Queries PostgreSQL Directly (NO LocalStorage)
+  const loadData = useCallback(async (user?: User | null) => {
+    const targetUserId = user?.id || 'usr_admin_1';
 
     try {
-      // 1. Fetch recipes to calculate real-time book recipe counts
+      // 1. Fetch live recipes directly from PostgreSQL
+      const recRes = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
       let loadedRecipes: any[] = [];
-      try {
-        const rRes = await fetch(`/api/recipes?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
-        if (rRes.ok) {
-          const rData = await rRes.json();
-          if (Array.isArray(rData.recipes)) loadedRecipes = rData.recipes;
-          else if (Array.isArray(rData)) loadedRecipes = rData;
+      if (recRes.ok) {
+        const recData = await recRes.json();
+        if (Array.isArray(recData.recipes)) {
+          loadedRecipes = recData.recipes;
+          setRecipes(loadedRecipes);
         }
-      } catch (_) {}
-
-      if (loadedRecipes.length === 0 && typeof window !== 'undefined') {
-        try {
-          const localR = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
-          if (localR) {
-            const arrR = JSON.parse(localR);
-            if (Array.isArray(arrR)) loadedRecipes = arrR;
-          }
-        } catch (_) {}
-      }
-      setRecipes(loadedRecipes);
-
-      // 2. Fetch live books from PostgreSQL
-      let loadedBooks: any[] = [];
-      let fetchSuccess = false;
-      try {
-        const bRes = await fetch(`/api/books?userId=${encodeURIComponent(activeUserId)}`, { cache: 'no-store' });
-        if (bRes.ok) {
-          const bData = await bRes.json();
-          if (Array.isArray(bData.books)) {
-            loadedBooks = bData.books;
-            fetchSuccess = true;
-          }
-        }
-      } catch (_) {}
-
-      // Fallback ONLY if network request failed (do not resurrect deleted books)
-      if (!fetchSuccess && typeof window !== 'undefined') {
-        try {
-          const localB = localStorage.getItem('zecratary_recipe_books');
-          if (localB) {
-            const arrB = JSON.parse(localB);
-            if (Array.isArray(arrB)) loadedBooks = arrB;
-          }
-        } catch (_) {}
       }
 
-      // Recalculate recipe counts dynamically based on loadedRecipes
-      const syncdBooks = loadedBooks.map((b: any) => ({
-        ...b,
-        recipeCount: loadedRecipes.filter((r: any) => isRecipeInBook(r, b.id)).length
-      }));
+      // 2. Fetch live cookbooks directly from PostgreSQL
+      const bRes = await fetch(`/api/books?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
+      if (bRes.ok) {
+        const bData = await bRes.json();
+        if (Array.isArray(bData.books)) {
+          const syncedBooks = bData.books.map((b: RecipeBook) => ({
+            ...b,
+            recipeCount: loadedRecipes.filter((r: any) => isRecipeInBook(r, b.id, b)).length,
+          }));
+          setBooks(syncedBooks);
 
-      setBooks(syncdBooks);
-    } catch (e) {
-      console.error('[BooksPage] Error loading data:', e);
-    } finally {
-      setLoading(false);
+          if (selectedBook) {
+            const refreshed = syncedBooks.find((sb: RecipeBook) => sb.id === selectedBook.id);
+            if (refreshed) setSelectedBook(refreshed);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[Books] Database fetch error:', err);
     }
-  }, []);
+  }, [selectedBook]);
 
   useEffect(() => {
-    document.title = `${t('cookbooksTitle') || 'Recipe Cookbooks'} - FoodiePrep`;
-    initAuthStorage();
-    const user = getCurrentUser();
-    if (!user) {
-      router.replace('/login');
-      return;
-    }
-    setCurrentUser(user);
-    loadData(user);
+    setMounted(true);
+    const u = getCurrentUser();
+    setCurrentUser(u);
+    loadData(u);
 
-    const handleSync = () => {
-      const activeUser = getCurrentUser();
-      if (activeUser) {
-        setCurrentUser(activeUser);
-        loadData(activeUser);
-      }
-    };
-
-    window.addEventListener('storage', handleSync);
+    const handleSync = () => loadData(getCurrentUser());
     window.addEventListener('zecratary_recipe_books_updated', handleSync);
     window.addEventListener('zecratary_recipes_updated', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
+    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
+    window.addEventListener('focus', handleSync);
 
     return () => {
-      window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_recipe_books_updated', handleSync);
       window.removeEventListener('zecratary_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
+      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
+      window.removeEventListener('focus', handleSync);
     };
-  }, [loadData, router, t]);
+  }, [loadData]);
 
-  const handleCreateBook = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
-    if (e && 'preventDefault' in e) e.preventDefault();
-    if (!newTitle.trim() || !currentUser) return;
+  // Save / Update Cookbook directly in PostgreSQL
+  const handleSaveBook = async () => {
+    if (!modalTitle.trim()) return;
+    setIsSubmitting(true);
 
-    const newBook = {
-      id: 'book_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
-      userId: currentUser.id || 'usr_admin_1',
-      createdBy: currentUser.email || 'admin@zecratary.com',
-      creatorName: currentUser.name || 'Chef',
-      title: newTitle.trim(),
-      description: newDescription.trim(),
-      coverColor: newCoverGradient,
-      recipeCount: 0,
-      createdAt: new Date().toISOString()
+    const targetUserId = currentUser?.id || 'usr_admin_1';
+    const bookId = editingBookId || ('book_' + Date.now().toString(36));
+
+    const payload = {
+      id: bookId,
+      userId: targetUserId,
+      user_id: targetUserId,
+      title: modalTitle.trim(),
+      description: modalDescription.trim(),
+      createdBy: currentUser?.email || 'admin@zecratary.com',
+      creatorName: currentUser?.name || 'Chef',
     };
-
-    const updated = [...books, newBook];
-    setBooks(updated);
 
     try {
-      localStorage.setItem('zecratary_recipe_books', JSON.stringify(updated));
-      await fetch('/api/books', {
+      const res = await fetch('/api/books', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newBook)
+        body: JSON.stringify(payload),
       });
-      window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
-      window.dispatchEvent(new Event('storage'));
+
+      if (res.ok) {
+        setShowCreateModal(false);
+        setEditingBookId(null);
+        setModalTitle('');
+        setModalDescription('');
+        await loadData(currentUser);
+        window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
+      }
     } catch (err) {
-      console.error('Failed to create book in PostgreSQL:', err);
+      console.error('Failed to save cookbook to PostgreSQL:', err);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setNewTitle('');
-    setNewDescription('');
-    setNewCoverGradient(COVER_GRADIENTS[0].className);
-    setShowAddModal(false);
   };
 
-  const handleOpenEdit = (e: React.MouseEvent, book: any) => {
-    e.stopPropagation();
-    setEditingBookId(book.id);
-    setEditTitle(book.title || '');
-    setEditDescription(book.description || '');
-    setEditCoverGradient(book.coverColor || COVER_GRADIENTS[0].className);
-    setShowEditModal(true);
-  };
-
-  const handleUpdateBook = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
-    if (e && 'preventDefault' in e) e.preventDefault();
-    if (!editingBookId || !editTitle.trim() || !currentUser) return;
-
-    const target = books.find(b => b.id === editingBookId);
-    if (!target) return;
-
-    const updatedBook = {
-      ...target,
-      title: editTitle.trim(),
-      description: editDescription.trim(),
-      coverColor: editCoverGradient,
-      userId: currentUser.id || target.userId,
-      createdBy: currentUser.email || target.createdBy
-    };
-
-    const updated = books.map(b => b.id === editingBookId ? updatedBook : b);
-    setBooks(updated);
-
-    if (selectedBook?.id === editingBookId) {
-      setSelectedBook(updatedBook);
-    }
-
-    try {
-      localStorage.setItem('zecratary_recipe_books', JSON.stringify(updated));
-      await fetch('/api/books', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedBook)
-      });
-      window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
-      window.dispatchEvent(new Event('storage'));
-    } catch (err) {
-      console.error('Failed to update book in PostgreSQL:', err);
-    }
-
-    setShowEditModal(false);
-    setEditingBookId(null);
-  };
-
+  // Delete Cookbook directly from PostgreSQL
   const handleDeleteBook = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (!confirm(t('confirmDeleteBook') || 'Are you sure you want to delete this recipe book?')) return;
-    
+    if (!confirm(t('confirmDeleteBook', 'Are you sure you want to delete this cookbook? Assigned recipes will remain in your saved library.'))) {
+      return;
+    }
+
     try {
       const res = await fetch(`/api/books?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-      if (!res.ok) {
-        console.error('Failed to delete book from server, status:', res.status);
+      if (res.ok) {
+        if (selectedBook?.id === id) setSelectedBook(null);
+        await loadData(currentUser);
+        window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
+        window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
       }
-
-      const updated = books.filter((b) => b.id !== id);
-      setBooks(updated);
-
-      if (typeof window !== 'undefined') {
-        try {
-          const raw = localStorage.getItem('zecratary_recipe_books');
-          if (raw) {
-            const arr = JSON.parse(raw);
-            const filtered = Array.isArray(arr) ? arr.filter((b: any) => b.id !== id) : [];
-            localStorage.setItem('zecratary_recipe_books', JSON.stringify(filtered));
-          }
-        } catch (_) {}
-      }
-
-      const cleanedRecipes = recipes.map(r => (isRecipeInBook(r, id) ? { ...r, bookId: null, book_id: null } : r));
-      setRecipes(cleanedRecipes);
-
-      if (selectedBook?.id === id) setSelectedBook(null);
-      
-      window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-      window.dispatchEvent(new Event('storage'));
     } catch (err) {
-      console.error('Error deleting book:', err);
+      console.error('Error deleting cookbook from PostgreSQL:', err);
     }
   };
 
   const filteredBooks = useMemo(() => {
-    const q = search.toLowerCase().trim();
-    if (!q) return books;
-    return books.filter(b => 
-      (b.title || '').toLowerCase().includes(q) || 
-      (b.description || '').toLowerCase().includes(q)
-    );
-  }, [books, search]);
+    if (!searchQuery.trim()) return books;
+    const q = searchQuery.toLowerCase();
+    return books.filter((b) => b.title.toLowerCase().includes(q) || b.description.toLowerCase().includes(q));
+  }, [books, searchQuery]);
 
-  const selectedBookRecipes = useMemo(() => {
+  const currentBookRecipes = useMemo(() => {
     if (!selectedBook) return [];
-    return recipes.filter(r => isRecipeInBook(r, selectedBook.id));
+    return recipes.filter((r) => isRecipeInBook(r, selectedBook.id, selectedBook));
   }, [recipes, selectedBook]);
 
+  if (!mounted) return null;
+
   return (
-    <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
-    >
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-            {t('cookbooksTitle') || 'Recipe Cookbooks'}
-          </h1>
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {(t('cookbooksSubtitle') || 'Organize and group your saved recipes into custom collections ({count})').replace('{count}', String(books.length))}
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => loadData(currentUser)}
-            disabled={loading}
-            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-            title="Reload cookbooks from server"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
-            <span>Reload</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setShowAddModal(true)}
-            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-lg cursor-pointer"
-            style={{ backgroundColor: 'var(--color-primary)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-          >
-            <FolderPlus className="h-4 w-4" /> {t('newCookbookBtn') || 'New Cookbook'}
-          </button>
-        </div>
-      </div>
-
-      {/* Search Bar with Full Day/Dark Mode Theme Bindings */}
-      <div className="relative">
-        <Search 
-          className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none" 
-          style={{ color: 'var(--color-text-secondary)' }}
-        />
-        <input
-          type="text"
-          placeholder={t('searchCookbooksPlaceholder') || 'Search cookbooks by title or description...'}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full border rounded-2xl pl-11 pr-4 py-2.5 text-sm outline-none transition shadow-xs"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)',
-            color: 'var(--color-text)'
-          }}
-          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-        />
-      </div>
-
-      {/* Cookbook Grid */}
-      {loading ? (
-        <div className="text-center py-12 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-          {t('loadingCookbooks') || 'Loading cookbooks...'}
-        </div>
-      ) : filteredBooks.length === 0 ? (
-        <div 
-          className="text-center py-16 px-4 border border-dashed rounded-3xl space-y-3"
-          style={{
-            backgroundColor: 'var(--color-inner-dark)',
-            borderColor: 'var(--color-border)'
-          }}
-        >
-          <div 
-            className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto shadow-sm border"
-            style={{ 
-              backgroundColor: 'var(--color-card)', 
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-primary)' 
-            }}
-          >
-            <Book className="h-6 w-6"/>
+    <div className="space-y-8 max-w-7xl mx-auto w-full min-w-0" style={{ color: 'var(--color-text)' }}>
+      {/* HEADER & CONTROLS */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div>
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[var(--color-primary)]">
+            <Book className="h-4 w-4" />
+            <span>{t('culinaryCollections', 'Culinary Collections')}</span>
           </div>
-          <h3 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>
-            {t('noCookbooksFound') || 'No Cookbooks Found'}
-          </h3>
-          <p className="text-xs max-w-sm mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('noCookbooksDesc') || 'Create your first cookbook collection to organize and categorize recipes.'}
+          <h1 className="text-3xl font-black tracking-tight pt-1">
+            {t('cookbooks', 'Cookbooks')}
+          </h1>
+          <p className="text-xs pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('cookbooksSubtitle', 'Curate, organize, and categorize your saved recipes into dedicated digital books permanently stored in PostgreSQL.')}
           </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 opacity-50" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t('searchCookbooks', 'Search books...')}
+              className="pl-9 pr-4 py-2 rounded-xl border text-xs font-medium focus:outline-hidden"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)',
+              }}
+            />
+          </div>
+
           <button
             type="button"
-            onClick={() => setShowAddModal(true)}
-            className="text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow-sm inline-flex items-center gap-1.5 cursor-pointer"
+            onClick={() => {
+              setEditingBookId(null);
+              setModalTitle('');
+              setModalDescription('');
+              setShowCreateModal(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition cursor-pointer"
             style={{ backgroundColor: 'var(--color-primary)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
-            <Plus className="h-4 w-4" /> {t('createFirstCookbook') || 'Create First Cookbook'}
+            <Plus className="h-4 w-4" />
+            <span>{t('newCookbook', 'New Cookbook')}</span>
           </button>
+        </div>
+      </div>
+
+      {/* ORIGINAL COOKBOOKS GRID (AUTHENTIC CARD DESIGN) */}
+      {filteredBooks.length === 0 ? (
+        <div className="p-12 text-center rounded-3xl border space-y-4" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+          <BookOpen className="h-12 w-12 mx-auto text-[var(--color-primary)] opacity-70" />
+          <div className="space-y-1">
+            <h3 className="text-base font-bold">{t('noCookbooksFound', 'No Cookbooks Found')}</h3>
+            <p className="text-xs max-w-sm mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('emptyCookbooksHint', 'Create your first cookbook collection to group and organize your dishes.')}
+            </p>
+          </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredBooks.map((b) => (
-            <div
-              key={b.id}
-              onClick={() => setSelectedBook(b)}
-              className="border rounded-2xl overflow-hidden transition cursor-pointer group shadow-sm hover:shadow-md flex flex-col justify-between"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
-            >
-              <div>
-                <div className={`h-28 w-full bg-gradient-to-r ${b.coverColor || COVER_GRADIENTS[0].className} p-4 flex flex-col justify-between relative`}>
-                  <div className="flex items-center justify-between">
-                    {/* High-Contrast Dynamic Badge for Day Mode */}
-                    <span 
-                      className="text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full flex items-center gap-1.5 border shadow-sm backdrop-blur-md transition"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      <BookOpen className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> 
-                      {(t('recipesCountSuffix') || '{count} Recipes').replace('{count}', String(b.recipeCount || 0))}
-                    </span>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredBooks.map((book: RecipeBook, idx: number) => {
+            // FIXED SCOPE: Correctly reference book.recipe_ids instead of undeclared b
+            const count = book.recipeCount !== undefined 
+              ? book.recipeCount 
+              : (Array.isArray(book.recipe_ids) ? book.recipe_ids.length : 0);
 
-                    {/* High-Contrast Action Buttons for Day Mode */}
-                    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        onClick={(e) => handleOpenEdit(e, b)}
-                        className="p-1.5 rounded-lg border backdrop-blur-md transition cursor-pointer shadow-sm"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                        title={t('editCookbookTooltip') || 'Edit Cookbook'}
-                      >
-                        <Edit3 className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => handleDeleteBook(e, b.id)}
-                        className="p-1.5 rounded-lg border backdrop-blur-md transition cursor-pointer shadow-sm"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.color = '#ef4444';
-                          e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.4)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.color = 'var(--color-text)';
-                          e.currentTarget.style.borderColor = 'var(--color-border)';
-                        }}
-                        title={t('deleteCookbookTooltip') || 'Delete Cookbook'}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <h3 className="text-white font-black text-lg truncate drop-shadow-md">
-                    {b.title}
-                  </h3>
-                </div>
-
-                <div className="p-4 space-y-2">
-                  <p className="text-xs line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                    {b.description || t('noDescriptionProvided') || 'No description provided.'}
-                  </p>
-                </div>
-              </div>
-
-              <div 
-                className="px-4 py-2.5 border-t flex items-center justify-between text-xs font-bold"
-                style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
-              >
-                <span>{t('viewRecipesInBook') || 'View Collection'}</span>
-                <ChevronRight className="h-4 w-4 transition transform group-hover:translate-x-1" />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* SELECTED BOOK DRAWER / MODAL */}
-      {selectedBook && (
-        <div 
-          onClick={() => setSelectedBook(null)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl relative cursor-default transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <div className={`p-6 bg-gradient-to-r ${selectedBook.coverColor || COVER_GRADIENTS[0].className} text-white space-y-2 relative`}>
-              <button 
-                type="button"
-                onClick={() => setSelectedBook(null)} 
-                className="absolute top-4 right-4 p-2 rounded-xl border backdrop-blur-md transition cursor-pointer shadow-md"
+            return (
+              <div
+                key={book.id || `book_${idx}`}
+                onClick={() => setSelectedBook(book)}
+                className="p-6 rounded-3xl border cursor-pointer hover:shadow-lg transition flex flex-col justify-between space-y-4 group"
                 style={{
                   backgroundColor: 'var(--color-card)',
                   borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
                 }}
               >
-                <X className="h-4 w-4" />
-              </button>
-
-              <div className="flex items-center gap-2">
-                <span 
-                  className="text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border shadow-sm backdrop-blur-md flex items-center gap-1.5"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  <BookOpen className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
-                  {(t('recipesCountSuffix') || '{count} Recipes').replace('{count}', String(selectedBookRecipes.length))}
-                </span>
-              </div>
-              <h2 className="text-2xl font-black tracking-tight drop-shadow-md">{selectedBook.title}</h2>
-              {selectedBook.description && (
-                <p className="text-xs text-white/90 leading-relaxed max-w-lg drop-shadow-sm">{selectedBook.description}</p>
-              )}
-            </div>
-
-            <div className="overflow-y-auto flex-1 p-5 space-y-3">
-              {selectedBookRecipes.length === 0 ? (
-                <div className="py-12 text-center text-xs space-y-2" style={{ color: 'var(--color-text-secondary)' }}>
-                  <Utensils className="h-8 w-8 mx-auto opacity-30" />
-                  <p>{t('noRecipesInBookYet') || 'No recipes added to this cookbook yet.'}</p>
-                  <Link 
-                    href="/saved"
-                    className="inline-block font-bold text-xs hover:underline pt-1"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    {t('browseSavedToAssign') || 'Browse Saved Recipes to assign'}
-                  </Link>
-                </div>
-              ) : (
-                selectedBookRecipes.map((r) => (
-                  <div
-                    key={r.id}
-                    onClick={() => router.push('/saved')}
-                    className="p-3 rounded-xl border flex items-center justify-between gap-3 transition cursor-pointer hover:scale-[1.01] shadow-xs"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)'
-                    }}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <img 
-                        src={r.imageUrl || r.image || '/uploads/recipes/default.jpg'} 
-                        alt={r.title || r.name}
-                        className="w-12 h-12 rounded-lg object-cover border shrink-0"
-                        style={{ borderColor: 'var(--color-border)' }}
-                      />
-                      <div className="min-w-0 space-y-0.5">
-                        <h4 className="text-xs font-bold truncate" style={{ color: 'var(--color-text)' }}>
-                          {r.title || r.name}
-                        </h4>
-                        <span className="text-[10px] block" style={{ color: 'var(--color-text-secondary)' }}>
-                          {r.tags?.[0] || r.recipeType || 'Main Dish'}
-                        </span>
-                      </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="p-2.5 rounded-2xl bg-[var(--color-inner-dark)] text-[var(--color-primary)]">
+                      <Book className="h-6 w-6" />
                     </div>
+                    <span className="px-3 py-1 rounded-full text-xs font-bold border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text-secondary)' }}>
+                      {count} {count === 1 ? 'recipe' : 'recipes'}
+                    </span>
+                  </div>
 
+                  <h3 className="text-lg font-black pt-2 line-clamp-1">{book.title}</h3>
+                  <p className="text-xs line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                    {book.description || t('noDescription', 'Curated culinary collection.')}
+                  </p>
+                </div>
+
+                <div className="pt-4 border-t flex items-center justify-between text-xs" style={{ borderColor: 'var(--color-border)' }}>
+                  <span className="font-bold text-[11px] text-[var(--color-primary)] flex items-center gap-1 group-hover:underline">
+                    <span>{t('viewCollection', 'View Collection')}</span>
+                    <ArrowRight className="h-3 w-3" />
+                  </span>
+
+                  <div className="flex items-center gap-1">
                     <button
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        router.push('/saved');
+                        setEditingBookId(book.id);
+                        setModalTitle(book.title);
+                        setModalDescription(book.description || '');
+                        setShowCreateModal(true);
                       }}
-                      className="px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-primary)'
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.backgroundColor = 'var(--color-primary)';
-                        e.currentTarget.style.borderColor = 'var(--color-primary)';
-                        e.currentTarget.style.color = '#ffffff';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.backgroundColor = 'var(--color-card)';
-                        e.currentTarget.style.borderColor = 'var(--color-border)';
-                        e.currentTarget.style.color = 'var(--color-primary)';
-                      }}
+                      className="p-1.5 rounded-lg border hover:bg-slate-800/20 cursor-pointer"
+                      style={{ borderColor: 'var(--color-border)' }}
+                      title={t('edit', 'Edit')}
                     >
-                      {t('openRecipeBtn') || 'Open'}
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteBook(e, book.id)}
+                      className="p-1.5 rounded-lg border hover:bg-red-500/10 text-red-400 cursor-pointer"
+                      style={{ borderColor: 'var(--color-border)' }}
+                      title={t('delete', 'Delete')}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
-                ))
-              )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ORIGINAL MODAL: CREATE / EDIT COOKBOOK (ZERO <form> TAGS, NO COLOR SELECTOR) */}
+      {showCreateModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs"
+          onClick={() => setShowCreateModal(false)}
+        >
+          <div
+            className="w-full max-w-lg rounded-3xl border p-6 space-y-5 shadow-2xl"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setShowCreateModal(false);
+              if (e.key === 'Enter' && e.ctrlKey) handleSaveBook();
+            }}
+          >
+            <div className="flex items-center justify-between pb-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 className="font-extrabold text-lg flex items-center gap-2">
+                <Book className="h-5 w-5 text-[var(--color-primary)]" />
+                <span>{editingBookId ? t('editCookbook', 'Edit Cookbook') : t('createCookbook', 'New Cookbook')}</span>
+              </h3>
+              <button type="button" onClick={() => setShowCreateModal(false)} className="p-1 rounded-lg">
+                <X className="h-4 w-4" />
+              </button>
             </div>
 
-            <div className="p-4 border-t flex justify-end" style={{ borderColor: 'var(--color-border)' }}>
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold mb-1">{t('cookbookTitle', 'Cookbook Title')} *</label>
+                <input
+                  type="text"
+                  value={modalTitle}
+                  onChange={(e) => setModalTitle(e.target.value)}
+                  placeholder="e.g., Weekend Baking & Desserts"
+                  className="w-full px-3 py-2 rounded-xl border outline-hidden"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">{t('description', 'Description')}</label>
+                <textarea
+                  rows={3}
+                  value={modalDescription}
+                  onChange={(e) => setModalDescription(e.target.value)}
+                  placeholder="Overview of the dishes in this collection..."
+                  className="w-full px-3 py-2 rounded-xl border outline-hidden resize-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+            </div>
+
+            <div className="pt-3 border-t flex items-center justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
               <button
                 type="button"
-                onClick={() => setSelectedBook(null)}
-                className="px-5 py-2 rounded-xl border font-bold text-xs transition cursor-pointer shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
+                onClick={() => setShowCreateModal(false)}
+                className="px-4 py-2 rounded-xl border text-xs font-bold"
+                style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)' }}
               >
-                {t('close') || 'Close'}
+                {t('cancel', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveBook}
+                disabled={!modalTitle.trim() || isSubmitting}
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition"
+                style={{ backgroundColor: 'var(--color-primary)', opacity: modalTitle.trim() ? 1 : 0.5 }}
+              >
+                {t('saveCookbook', 'Save to PostgreSQL')}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* CREATE COOKBOOK MODAL (NO NATIVE FORM - AUTOFILL SAFE) */}
-      {showAddModal && (
-        <div 
-          onClick={() => setShowAddModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
-          role="dialog"
-          aria-modal="true"
+      {/* ORIGINAL COOKBOOK RECIPE DRAWER / DETAILS MODAL */}
+      {selectedBook && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs"
+          onClick={() => setSelectedBook(null)}
         >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
+          <div
+            className="w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-3xl border p-6 space-y-6 shadow-2xl"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
+              color: 'var(--color-text)',
             }}
-          >
-            <button 
-              type="button"
-              onClick={() => setShowAddModal(false)} 
-              className="absolute top-4 right-4 p-2 rounded-xl border transition cursor-pointer shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            <div className="space-y-1">
-              <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                <FolderPlus className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> 
-                {t('createCookbookTitle') || 'Create New Cookbook'}
-              </h2>
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('createCookbookSubtitle') || 'Add a customized recipe collection to categorize recipes'}
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  {t('cookbookTitleLabel') || 'Cookbook Title *'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder={t('cookbookTitlePlaceholder') || 'e.g. Weeknight Dinners, Healthy Salads...'}
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleCreateBook();
-                    }
-                  }}
-                  className="w-full border rounded-xl p-3 text-sm outline-none transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  {t('descriptionLabel') || 'Description'}
-                </label>
-                <textarea
-                  rows={3}
-                  placeholder={t('cookbookDescPlaceholder') || 'Short summary of recipes in this collection...'}
-                  value={newDescription}
-                  onChange={(e) => setNewDescription(e.target.value)}
-                  className="w-full border rounded-xl p-3 text-xs outline-none transition resize-none"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold mb-2" style={{ color: 'var(--color-text)' }}>
-                  {t('coverGradientLabel') || 'Cover Theme'}
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {COVER_GRADIENTS.map((g) => (
-                    <button
-                      key={g.id}
-                      type="button"
-                      onClick={() => setNewCoverGradient(g.className)}
-                      className={`h-10 rounded-xl bg-gradient-to-r ${g.className} transition flex items-center justify-center border-2 cursor-pointer shadow-xs`}
-                      style={{
-                        borderColor: newCoverGradient === g.className ? 'var(--color-primary)' : 'var(--color-border)'
-                      }}
-                      title={g.label}
-                    >
-                      {newCoverGradient === g.className && <Check className="h-4 w-4 text-white stroke-[3] drop-shadow-md" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  {t('cancel') || 'Cancel'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleCreateBook()}
-                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-lg cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-                >
-                  {t('createCookbookBtn') || 'Create Cookbook'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* EDIT COOKBOOK MODAL (NO NATIVE FORM - AUTOFILL SAFE) */}
-      {showEditModal && (
-        <div 
-          onClick={() => setShowEditModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div 
             onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
           >
-            <button 
-              type="button"
-              onClick={() => setShowEditModal(false)} 
-              className="absolute top-4 right-4 p-2 rounded-xl border transition cursor-pointer shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            <div className="space-y-1">
-              <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> 
-                {t('editCookbookTitle') || 'Edit Cookbook'}
-              </h2>
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('editCookbookSubtitle') || 'Update title, description, and cover theme'}
-              </p>
+            <div className="flex items-start justify-between pb-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h3 className="font-black text-xl flex items-center gap-2">
+                  <BookOpen className="h-5 w-5 text-[var(--color-primary)]" />
+                  <span>{selectedBook.title}</span>
+                </h3>
+                <p className="text-xs pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  {selectedBook.description || 'Collection of saved dishes'}
+                </p>
+              </div>
+              <button type="button" onClick={() => setSelectedBook(null)} className="p-1.5 rounded-lg border">
+                <X className="h-4 w-4" />
+              </button>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  {t('cookbookTitleLabel') || 'Cookbook Title *'}
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleUpdateBook();
-                    }
-                  }}
-                  className="w-full border rounded-xl p-3 text-sm outline-none transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                />
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-extrabold uppercase tracking-wider text-[var(--color-primary)]">
+                  {t('assignedRecipes', 'Assigned Recipes')} ({currentBookRecipes.length})
+                </span>
+                <Link href="/saved" className="text-[var(--color-primary)] font-bold hover:underline flex items-center gap-1">
+                  <span>{t('browseMoreInSaved', 'Add More from Saved')}</span>
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
               </div>
 
-              <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  {t('descriptionLabel') || 'Description'}
-                </label>
-                <textarea
-                  rows={3}
-                  value={editDescription}
-                  onChange={(e) => setEditDescription(e.target.value)}
-                  className="w-full border rounded-xl p-3 text-xs outline-none transition resize-none"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold mb-2" style={{ color: 'var(--color-text)' }}>
-                  {t('coverGradientLabel') || 'Cover Theme'}
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {COVER_GRADIENTS.map((g) => (
-                    <button
-                      key={g.id}
-                      type="button"
-                      onClick={() => setEditCoverGradient(g.className)}
-                      className={`h-10 rounded-xl bg-gradient-to-r ${g.className} transition flex items-center justify-center border-2 cursor-pointer shadow-xs`}
+              <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+                {currentBookRecipes.length === 0 ? (
+                  <div className="text-center py-8 text-xs opacity-60">
+                    {t('noRecipesInBook', 'No recipes assigned to this cookbook yet. Assign them from the Saved Recipes page.')}
+                  </div>
+                ) : (
+                  currentBookRecipes.map((rec: any, rIdx: number) => (
+                    <div
+                      key={rec.id || `rec_item_${rIdx}`}
+                      className="flex items-center justify-between p-3 rounded-2xl border"
                       style={{
-                        borderColor: editCoverGradient === g.className ? 'var(--color-primary)' : 'var(--color-border)'
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
                       }}
-                      title={g.label}
                     >
-                      {editCoverGradient === g.className && <Check className="h-4 w-4 text-white stroke-[3] drop-shadow-md" />}
-                    </button>
-                  ))}
-                </div>
-              </div>
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-xl bg-slate-800 overflow-hidden shrink-0">
+                          {rec.image || rec.image_url ? (
+                            <img src={rec.image || rec.image_url} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-sm">🍳</div>
+                          )}
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-xs line-clamp-1">{rec.title}</h4>
+                          <p className="text-[11px] opacity-70 flex items-center gap-2 pt-0.5">
+                            <span>⏱️ {rec.prep_time || '15m'}</span>
+                            <span>•</span>
+                            <span>👥 {rec.servings || 4} servings</span>
+                          </p>
+                        </div>
+                      </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowEditModal(false)}
-                  className="px-4 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  {t('cancel') || 'Cancel'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleUpdateBook()}
-                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-lg flex items-center gap-1.5 cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-                >
-                  <Save className="h-4 w-4" /> {t('saveChanges') || 'Save Changes'}
-                </button>
+                      <Link
+                        href="/saved"
+                        className="px-3 py-1.5 rounded-xl text-[11px] font-bold border hover:bg-slate-800/20"
+                        style={{ borderColor: 'var(--color-border)' }}
+                      >
+                        {t('view', 'View')}
+                      </Link>
+                    </div>
+                  ))
+                )}
               </div>
+            </div>
+
+            <div className="pt-3 border-t flex justify-end" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setSelectedBook(null)}
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white shadow-xs"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {t('done', 'Done')}
+              </button>
             </div>
           </div>
         </div>
@@ -46838,7 +46119,7 @@ export default function UsersRedirectPage() {
 ```typescript
 import { redirect } from 'next/navigation';
 
-export default function BookRedirectPage() {
+export default function BooksRedirectPage() {
   redirect('/books');
 }
 
@@ -48762,25 +48043,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 async function ensureBooksTable() {
   try {
     await query(`
       CREATE TABLE IF NOT EXISTS recipe_books (
         id VARCHAR(128) PRIMARY KEY,
-        user_id VARCHAR(64),
-        created_by VARCHAR(255),
-        creator_name VARCHAR(255),
+        user_id VARCHAR(64) DEFAULT 'usr_admin_1',
+        created_by VARCHAR(255) DEFAULT 'admin@zecratary.com',
+        creator_name VARCHAR(255) DEFAULT 'Chef',
         title VARCHAR(255) NOT NULL,
         description TEXT DEFAULT '',
-        cover_color VARCHAR(255) DEFAULT '',
         recipe_ids JSONB DEFAULT '[]'::jsonb,
-        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
       );
-      CREATE INDEX IF NOT EXISTS idx_recipe_books_user_id ON recipe_books(user_id);
-    `);
-    await query(`
       ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS book_id VARCHAR(128);
     `);
   } catch (_) {}
@@ -48790,51 +48068,64 @@ export async function GET(req: NextRequest) {
   await ensureBooksTable();
   try {
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId');
+    const userId = searchParams.get('userId') || searchParams.get('user_id');
 
     let sql = 'SELECT * FROM recipe_books';
     const params: any[] = [];
 
-    if (userId) {
+    if (userId && userId !== 'all') {
+      sql += ' WHERE user_id = $1 OR created_by = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL OR user_id = \'\'';
       params.push(userId);
-      sql += ' WHERE user_id = $1 OR created_by = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL';
     }
-
-    sql += ' ORDER BY created_at ASC';
+    sql += ' ORDER BY created_at ASC;';
 
     const books = await query(sql, params);
 
-    // Dynamic count calculation from saved_recipes
-    let countMap: Record<string, number> = {};
+    // Compute live recipe counts from saved_recipes
+    const countMap: Record<string, number> = {};
     try {
       const countRows = await query(`
         SELECT book_id, COUNT(*) as count 
         FROM saved_recipes 
-        WHERE book_id IS NOT NULL 
-        GROUP BY book_id
+        WHERE book_id IS NOT NULL AND book_id != ''
+        GROUP BY book_id;
       `);
       countRows.forEach((r: any) => {
         countMap[r.book_id] = Number(r.count) || 0;
       });
     } catch (_) {}
 
-    const formatted = books.map((b: any) => ({
-      id: b.id,
-      userId: b.user_id || 'usr_admin_1',
-      createdBy: b.created_by || '',
-      creatorName: b.creator_name || 'Chef',
-      title: b.title || 'Untitled Cookbook',
-      description: b.description || '',
-      coverColor: b.cover_color || 'bg-gradient-to-r from-pink-600 via-rose-500 to-rose-600',
-      recipeCount: countMap[b.id] !== undefined ? countMap[b.id] : (Array.isArray(b.recipe_ids) ? b.recipe_ids.length : 0),
-      createdAt: b.created_at || new Date().toISOString()
-    }));
+    const formatted = books.map((b: any) => {
+      const recipeIdsArray = Array.isArray(b.recipe_ids)
+        ? b.recipe_ids
+        : (typeof b.recipe_ids === 'string' ? JSON.parse(b.recipe_ids || '[]') : []);
+
+      const actualCount = countMap[b.id] !== undefined ? countMap[b.id] : recipeIdsArray.length;
+
+      return {
+        id: b.id,
+        userId: b.user_id || 'usr_admin_1',
+        user_id: b.user_id || 'usr_admin_1',
+        createdBy: b.created_by || '',
+        creatorName: b.creator_name || 'Chef',
+        title: b.title || 'Untitled Cookbook',
+        name: b.title || 'Untitled Cookbook',
+        description: b.description || '',
+        recipeIds: recipeIdsArray,
+        recipe_ids: recipeIdsArray,
+        recipeCount: actualCount,
+        recipes_count: actualCount,
+        created_at: b.created_at,
+        updated_at: b.updated_at,
+      };
+    });
 
     return NextResponse.json(
-      { success: true, books: formatted },
+      { success: true, books: formatted, cookbooks: formatted },
       { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
     );
   } catch (err: any) {
+    console.error('Error in GET /api/books:', err.message);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -48843,36 +48134,93 @@ export async function POST(req: NextRequest) {
   await ensureBooksTable();
   try {
     const body = await req.json();
+    const action = body.action;
+
+    // Toggle recipe in book
+    if (action === 'toggle_recipe' || action === 'add_recipe' || action === 'remove_recipe') {
+      const bookId = body.bookId || body.book_id || body.id;
+      const recipeId = body.recipeId || body.recipe_id;
+
+      if (!bookId || !recipeId) {
+        return NextResponse.json({ success: false, error: 'bookId and recipeId required' }, { status: 400 });
+      }
+
+      const bookRows: any = await query('SELECT recipe_ids FROM recipe_books WHERE id = $1;', [bookId]);
+      const currentBook = Array.isArray(bookRows) ? bookRows[0] : bookRows?.rows?.[0];
+
+      if (!currentBook) {
+        return NextResponse.json({ success: false, error: 'Cookbook not found' }, { status: 404 });
+      }
+
+      let rList: string[] = Array.isArray(currentBook.recipe_ids)
+        ? currentBook.recipe_ids
+        : (typeof currentBook.recipe_ids === 'string' ? JSON.parse(currentBook.recipe_ids || '[]') : []);
+
+      if (action === 'remove_recipe' || rList.includes(recipeId)) {
+        rList = rList.filter((id: string) => id !== recipeId);
+        await query('UPDATE saved_recipes SET book_id = NULL WHERE id = $1;', [recipeId]);
+      } else {
+        rList.push(recipeId);
+        await query('UPDATE saved_recipes SET book_id = $1 WHERE id = $2;', [bookId, recipeId]);
+      }
+
+      const updatedJson = JSON.stringify(rList);
+      await query('UPDATE recipe_books SET recipe_ids = $1::jsonb, updated_at = NOW() WHERE id = $2;', [updatedJson, bookId]);
+      await query('UPDATE cookbooks SET recipe_ids = $1::jsonb, updated_at = NOW() WHERE id = $2;', [updatedJson, bookId]).catch(() => {});
+
+      return NextResponse.json({ success: true, recipe_ids: rList, recipes_count: rList.length });
+    }
+
+    // Standard Create or Update (Single-statement executions)
     const items = Array.isArray(body) ? body : (body.books || [body.book || body]);
 
     for (const b of items) {
       if (!b || !b.id || !b.title) continue;
       const targetUserId = b.userId || b.user_id || 'usr_admin_1';
+      const title = b.title.trim();
+      const desc = b.description || '';
+      const recipeIds = JSON.stringify(Array.isArray(b.recipeIds) ? b.recipeIds : (Array.isArray(b.recipe_ids) ? b.recipe_ids : []));
 
       await query(`
         INSERT INTO recipe_books (
-          id, user_id, created_by, creator_name, title, description, cover_color, recipe_ids, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
+          id, user_id, created_by, creator_name, title, description, recipe_ids, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, NOW())
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           description = EXCLUDED.description,
-          cover_color = EXCLUDED.cover_color,
-          recipe_ids = COALESCE(EXCLUDED.recipe_ids, recipe_books.recipe_ids),
+          recipe_ids = EXCLUDED.recipe_ids,
           updated_at = NOW();
       `, [
         b.id,
         targetUserId,
-        b.createdBy || '',
-        b.creatorName || '',
-        b.title.trim(),
-        b.description || '',
-        b.coverColor || '',
-        JSON.stringify(b.recipeIds || b.recipe_ids || [])
+        b.createdBy || b.created_by || 'admin@zecratary.com',
+        b.creatorName || b.creator_name || 'Chef',
+        title,
+        desc,
+        recipeIds
+      ]);
+
+      await query(`
+        INSERT INTO cookbooks (
+          id, user_id, title, description, recipe_ids, updated_at
+        ) VALUES ($1, $2, $3, $4, $5::jsonb, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          recipe_ids = EXCLUDED.recipe_ids,
+          updated_at = NOW();
+      `, [
+        b.id,
+        targetUserId,
+        title,
+        desc,
+        recipeIds
       ]);
     }
 
-    return NextResponse.json({ success: true, message: 'Cookbook(s) saved in PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Cookbook saved in PostgreSQL' });
   } catch (err: any) {
+    console.error('Error in POST /api/books:', err.message);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -48881,7 +48229,7 @@ export async function DELETE(req: NextRequest) {
   await ensureBooksTable();
   try {
     const { searchParams } = new URL(req.url);
-    let id = searchParams.get('id');
+    let id = searchParams.get('id') || searchParams.get('bookId');
 
     if (!id) {
       try {
@@ -48895,14 +48243,13 @@ export async function DELETE(req: NextRequest) {
     }
 
     const cleanId = id.trim();
-    await query('DELETE FROM recipe_books WHERE id = $1', [cleanId]);
-    
-    try {
-      await query('UPDATE saved_recipes SET book_id = NULL WHERE book_id = $1', [cleanId]);
-    } catch (_) {}
+    await query('DELETE FROM recipe_books WHERE id = $1;', [cleanId]);
+    await query('DELETE FROM cookbooks WHERE id = $1;', [cleanId]).catch(() => {});
+    await query('UPDATE saved_recipes SET book_id = NULL WHERE book_id = $1;', [cleanId]);
 
-    return NextResponse.json({ success: true, message: 'Book deleted from PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Cookbook deleted from PostgreSQL' });
   } catch (err: any) {
+    console.error('Error in DELETE /api/books:', err.message);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -52337,261 +51684,247 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
-async function ensureFrontendPagesTable() {
-  try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS frontend_pages (
-        id VARCHAR(64) PRIMARY KEY,
-        title VARCHAR(255) NOT NULL,
-        slug VARCHAR(255) NOT NULL UNIQUE,
-        description TEXT DEFAULT '',
-        is_default BOOLEAN DEFAULT FALSE,
-        is_published BOOLEAN DEFAULT TRUE,
-        elements JSONB DEFAULT '[]'::jsonb,
-        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-    await query(`
-      ALTER TABLE frontend_pages 
-      ADD COLUMN IF NOT EXISTS padding JSONB DEFAULT '{"top": "2.5rem", "bottom": "4rem", "x": "1.5rem", "maxWidth": "max-w-7xl"}'::jsonb;
-    `);
-    await query(`
-      ALTER TABLE frontend_pages 
-      ADD COLUMN IF NOT EXISTS footer JSONB DEFAULT '{"enabled": true, "aboutText": "Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.", "copyrightText": "© 2026 Zecratary. All rights reserved.", "columns": [{"id": "col_platform", "title": "Platform", "links": [{"id": "l_1", "label": "AI Chef", "url": "/chef"}, {"id": "l_2", "label": "Saved Recipes", "url": "/saved"}, {"id": "l_3", "label": "Meal Planner", "url": "/planner"}]}, {"id": "col_company", "title": "Company", "links": [{"id": "l_4", "label": "About Us", "url": "/about"}, {"id": "l_5", "label": "Subscription Plans", "url": "/subscriptions"}, {"id": "l_6", "label": "Privacy Policy", "url": "/privacy"}, {"id": "l_7", "label": "Terms of Service", "url": "/terms"}]}], "socials": {"twitter": "https://x.com", "github": "https://github.com", "discord": "https://discord.com"}}'::jsonb;
-    `);
-  } catch (err) {
-    console.error('Error ensuring frontend_pages table schema:', err);
-  }
-}
+let isFrontendPagesTableEnsured = false;
 
-const defaultPadding = {
+const DEFAULT_PADDING = {
   top: '2.5rem',
   bottom: '4rem',
   left: '1.5rem',
   right: '1.5rem',
   x: '1.5rem',
-  maxWidth: 'max-w-7xl'
+  maxWidth: 'max-w-7xl',
 };
 
-const defaultFooter = {
+const DEFAULT_FOOTER = {
   enabled: true,
-  aboutText: 'Autonomous culinary intelligence, precision meal planning, and pantry inventory tracking.',
-  copyrightText: '© 2026 Zecratary. All rights reserved.',
+  aboutText: 'Zecratary is an autonomous culinary intelligence platform designed for intelligent recipe management, meal planning, and nutrition telemetry.',
+  copyrightText: '© 2026 Zecratary Inc. All rights reserved.',
   columns: [
     {
-      id: 'col_platform',
       title: 'Platform',
       links: [
-        { id: 'l_1', label: 'AI Chef', url: '/chef' },
-        { id: 'l_2', label: 'Saved Recipes', url: '/saved' },
-        { id: 'l_3', label: 'Meal Planner', url: '/planner' }
-      ]
+        { label: 'AI Assistant', url: '/chef' },
+        { label: 'Recipe Library', url: '/saved' },
+        { label: 'Cookbooks', url: '/books' },
+        { label: 'Meal Planner', url: '/planner' },
+      ],
     },
     {
-      id: 'col_company',
-      title: 'Company',
+      title: 'Finance & Quotas',
       links: [
-        { id: 'l_4', label: 'About Us', url: '/about' },
-        { id: 'l_5', label: 'Subscription Plans', url: '/subscriptions' },
-        { id: 'l_6', label: 'Privacy Policy', url: '/privacy' },
-        { id: 'l_7', label: 'Terms of Service', url: '/terms' }
-      ]
-    }
+        { label: 'Token Portal', url: '/token' },
+        { label: 'Store Wallet', url: '/wallet' },
+        { label: 'Subscription Plans', url: '/subscriptions' },
+        { label: 'Billing History', url: '/billing' },
+      ],
+    },
   ],
   socials: {
-    twitter: 'https://x.com',
-    github: 'https://github.com',
-    discord: 'https://discord.com'
-  }
+    twitter: 'https://twitter.com',
+    github: 'https://github.com/cygnusorbit/zecratary',
+    discord: 'https://discord.com',
+  },
 };
 
-const defaultElements = [
+const DEFAULT_HOME_ELEMENTS = [
   {
     id: 'elem_hero_title',
     type: 'title',
-    title: 'Autonomous Culinary Intelligence & Precision Meal Planning',
-    subtitle: 'Discover hyper-personalized recipes, pantry inventory management, and automated nutritional balancing.',
+    title: 'Autonomous Culinary Planning & Intelligence',
+    subtitle: 'Plan gourmet meals, track pantry macros, scale recipes, and command Chef AI with production-grade telemetry.',
     level: 'h1',
-    alignment: 'center',
-    accentColor: 'var(--color-primary, #E05638)'
+    align: 'center',
   },
   {
-    id: 'elem_recipes_grid',
+    id: 'elem_community_recipes',
     type: 'recipe',
-    title: 'Community Recipes Gallery',
-    subtitle: 'Explore recipes synchronized directly from your saved library. Click any card to view detailed ingredients and cooking steps.',
-    recipeGridDensity: 3,
-    recipeLimit: 6,
-    recipeCategoryFilter: 'all',
-    buttonText: 'Cook with AI Chef',
-    buttonUrl: '/chef',
-    bgColor: 'transparent',
-    borderColor: 'var(--color-border, #1e293b)',
-    accentColor: 'var(--color-primary, #E05638)'
+    title: 'Featured Culinary Dishes',
+    subtitle: 'Explore community-tested dishes with dynamic serving scaling and nutritional breakdowns.',
+    gridDensity: '3x3',
+    itemsPerPage: 6,
+    showServings: true,
+    showPrepTime: true,
   },
   {
-    id: 'elem_features_grid',
-    type: 'column',
-    title: 'Engineered for Peak Nutrition',
-    columnsCount: 3,
-    columns: [
-      { id: 'col_1', title: 'Smart AI Chef', content: 'Generate tailored culinary creations based exclusively on ingredients currently available in your pantry.' },
-      { id: 'col_2', title: 'Real-time Macro Breakdown', content: 'Track calories, protein, carbs, and micronutrient ratios seamlessly across all scheduled meals.' },
-      { id: 'col_3', title: 'Zero Food Waste', content: 'Intelligent shelf-life monitors proactively notify you when stored groceries approach expiration.' }
-    ],
-    accentColor: 'var(--color-primary, #E05638)'
-  },
-  {
-    id: 'elem_plans_catalog',
+    id: 'elem_plans_showcase',
     type: 'subscription',
-    title: 'Flexible Membership & Culinary AI Plans',
-    subtitle: 'Select between monthly or annual membership to power your personal kitchen assistant.',
-    planSlug: 'all',
-    planBillingInterval: 'MONTH',
-    planShowTokens: true,
-    planShowAiModels: true,
-    planCtaText: 'Choose Plan',
-    planCtaUrl: '/subscriptions',
-    bgColor: 'var(--color-card, #0b0f17)',
-    borderColor: 'var(--color-border, #1e293b)',
-    accentColor: 'var(--color-primary, #E05638)'
-  }
+    title: 'Subscription Tiers & AI Quotas',
+    subtitle: 'Choose the ideal culinary quota for home cooks, meal prep pros, and commercial kitchens.',
+    planBillingInterval: 'monthly',
+  },
 ];
+
+async function ensureFrontendPagesTable() {
+  if (isFrontendPagesTableEnsured) return;
+
+  try {
+    // 1. Execute DDL without parameters (Simple Query Protocol executes all commands cleanly)
+    await query(`
+      CREATE TABLE IF NOT EXISTS frontend_pages (
+        id VARCHAR(255) PRIMARY KEY,
+        title VARCHAR(255) NOT NULL,
+        slug VARCHAR(255) UNIQUE NOT NULL,
+        description TEXT DEFAULT '',
+        content TEXT DEFAULT '',
+        status VARCHAR(50) DEFAULT 'published',
+        is_default BOOLEAN DEFAULT false,
+        show_in_nav BOOLEAN DEFAULT true,
+        show_in_footer BOOLEAN DEFAULT true,
+        order_index INT DEFAULT 0,
+        elements JSONB DEFAULT '[]'::jsonb,
+        padding JSONB DEFAULT '{"top":"2.5rem","bottom":"4rem","left":"1.5rem","right":"1.5rem","maxWidth":"max-w-7xl"}'::jsonb,
+        footer JSONB DEFAULT '{"enabled":true}'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';
+      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS elements JSONB DEFAULT '[]'::jsonb;
+      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS padding JSONB DEFAULT '{"top":"2.5rem","bottom":"4rem","left":"1.5rem","right":"1.5rem","maxWidth":"max-w-7xl"}'::jsonb;
+      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS footer JSONB DEFAULT '{"enabled":true}'::jsonb;
+      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT false;
+      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS show_in_nav BOOLEAN DEFAULT true;
+      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS show_in_footer BOOLEAN DEFAULT true;
+      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS order_index INT DEFAULT 0;
+      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'published';
+      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS content TEXT DEFAULT '';
+    `);
+
+    // 2. Execute Parameterized Seed as a SINGLE SQL command
+    await query(`
+      INSERT INTO frontend_pages (
+        id, title, slug, description, content, status, is_default, show_in_nav, show_in_footer, order_index, elements, padding, footer
+      )
+      VALUES (
+        'page_home',
+        'Home',
+        'home',
+        'Zecratary Autonomous Culinary Planning Platform',
+        'Welcome to Zecratary Culinary Intelligence',
+        'published',
+        true,
+        true,
+        true,
+        1,
+        $1::jsonb,
+        $2::jsonb,
+        $3::jsonb
+      )
+      ON CONFLICT (slug) DO UPDATE SET
+        is_default = true,
+        elements = CASE WHEN frontend_pages.elements IS NULL OR frontend_pages.elements = '[]'::jsonb THEN EXCLUDED.elements ELSE frontend_pages.elements END,
+        padding = CASE WHEN frontend_pages.padding IS NULL THEN EXCLUDED.padding ELSE frontend_pages.padding END,
+        footer = CASE WHEN frontend_pages.footer IS NULL THEN EXCLUDED.footer ELSE frontend_pages.footer END;
+    `, [JSON.stringify(DEFAULT_HOME_ELEMENTS), JSON.stringify(DEFAULT_PADDING), JSON.stringify(DEFAULT_FOOTER)]);
+
+    isFrontendPagesTableEnsured = true;
+  } catch (err: any) {
+    console.warn('[frontend_pages schema notice]:', err.message);
+  }
+}
 
 export async function GET(req: NextRequest) {
   await ensureFrontendPagesTable();
-  const { searchParams } = new URL(req.url);
+  const url = new URL(req.url);
 
-  // Return all authentic saved recipes from PostgreSQL saved_recipes
-  if (searchParams.get('all_recipes') === 'true' || searchParams.get('recipes') === 'true') {
+  // Return community recipes for the Recipe Grid element
+  if (url.searchParams.get('all_recipes') === 'true') {
     try {
-      const rawRecipes: any = await query(`
-        SELECT * FROM saved_recipes ORDER BY created_at DESC;
-      `);
-      const rows = Array.isArray(rawRecipes) ? rawRecipes : (rawRecipes?.rows || []);
-
-      const formatted = rows.map((r: any) => {
-        let ingredients = r.ingredients;
-        if (typeof ingredients === 'string') {
-          try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = []; }
-        }
-
-        let directions = r.directions || r.instructions || r.steps;
-        if (typeof directions === 'string') {
-          try { directions = JSON.parse(directions); } catch (_) { directions = []; }
-        }
-
-        let nutrition = r.nutrition;
-        if (typeof nutrition === 'string') {
-          try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
-        }
-
-        const prepNum = parseInt(String(r.prep_time || r.prepTime || '15'), 10) || 15;
-        const cookNum = parseInt(String(r.cook_time || r.cookTime || '20'), 10) || 20;
-
-        return {
-          id: String(r.id),
-          userId: r.user_id || r.userId || 'usr_admin_1',
-          user_id: r.user_id || r.userId || 'usr_admin_1',
-          title: r.title || r.name || 'Saved Recipe',
-          name: r.title || r.name || 'Saved Recipe',
-          description: r.description || '',
-          recipeType: r.recipe_type || r.category || 'Main Dish',
-          category: r.recipe_type || r.category || 'Main Dish',
-          recipe_type: r.recipe_type || r.category || 'Main Dish',
-          cuisine: r.cuisine || '',
-          prepTime: r.prep_time ? `${r.prep_time} mins` : '15 mins',
-          cookTime: r.cook_time ? `${r.cook_time} mins` : '20 mins',
-          prepTimeMinutes: prepNum,
-          cookTimeMinutes: cookNum,
-          calories: r.calories || nutrition?.calories || '450 kcal',
-          servings: Number(r.servings) || 2,
-          difficulty: r.difficulty || 'Medium',
-          ingredients: Array.isArray(ingredients) ? ingredients : [],
-          directions: Array.isArray(directions) ? directions : [],
-          instructions: Array.isArray(directions) ? directions : [],
-          steps: Array.isArray(directions) ? directions : [],
-          imageUrl: r.image_url || r.imageUrl || r.image || '',
-          image: r.image_url || r.imageUrl || r.image || '',
-          image_url: r.image_url || r.imageUrl || r.image || '',
-          sourceUrl: r.source_url || r.sourceUrl || '',
-          source_url: r.source_url || r.sourceUrl || '',
-          rating: Number(r.rating) || 5,
-          isFavorite: Boolean(r.is_favorite || r.isFavorite),
-          is_favorite: Boolean(r.is_favorite || r.isFavorite),
-          isCooked: Boolean(r.is_cooked || r.isCooked),
-          is_cooked: Boolean(r.is_cooked || r.isCooked),
-          creatorName: r.creator_name || r.creatorName || (r.created_by ? r.created_by.split('@')[0] : 'Chef AI'),
-          created_at: r.created_at || new Date().toISOString()
-        };
-      });
-
+      const recipes: any = await query(`
+        SELECT id, title, description, image, prep_time, cook_time, servings, is_favorite, tags 
+        FROM saved_recipes 
+        ORDER BY created_at DESC 
+        LIMIT 50;
+      `).catch(() => []);
+      const list = Array.isArray(recipes) ? recipes : (recipes?.rows || []);
       return NextResponse.json(
-        { success: true, recipes: formatted },
+        { success: true, recipes: list },
         { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
       );
-    } catch (err: any) {
-      console.warn('Could not query saved_recipes table:', err.message);
-      return NextResponse.json({ success: true, recipes: [] });
+    } catch (_) {
+      return NextResponse.json(
+        { success: true, recipes: [] },
+        { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+      );
     }
   }
 
   try {
-    const rawResult: any = await query(`
-      SELECT * FROM frontend_pages ORDER BY is_default DESC, created_at ASC;
-    `);
-    let rows = Array.isArray(rawResult) ? rawResult : (rawResult?.rows || []);
+    const rows: any = await query('SELECT * FROM frontend_pages ORDER BY order_index ASC, created_at ASC;');
+    const pages = Array.isArray(rows) ? rows : (rows?.rows || []);
 
-    if (!rows || rows.length === 0) {
-      await query(`
-        INSERT INTO frontend_pages (
-          id, title, slug, description, is_default, is_published, elements, padding, footer, created_at, updated_at
-        ) VALUES (
-          'page_home',
-          'Homepage',
-          '/',
-          'Default landing and home experience for visitors and members.',
-          true,
-          true,
-          $1::jsonb,
-          $2::jsonb,
-          $3::jsonb,
-          NOW(),
-          NOW()
-        ) ON CONFLICT (id) DO NOTHING;
-      `, [JSON.stringify(defaultElements), JSON.stringify(defaultPadding), JSON.stringify(defaultFooter)]);
+    const sanitizedPages = pages.map((p: any) => {
+      let elementsArray: any[] = [];
+      if (Array.isArray(p.elements)) {
+        elementsArray = p.elements;
+      } else if (typeof p.elements === 'string' && p.elements.trim()) {
+        try { elementsArray = JSON.parse(p.elements); } catch (_) {}
+      }
 
-      const fresh: any = await query(`SELECT * FROM frontend_pages ORDER BY is_default DESC;`);
-      rows = Array.isArray(fresh) ? fresh : (fresh?.rows || []);
-    }
+      let paddingObj: any = DEFAULT_PADDING;
+      if (p.padding && typeof p.padding === 'object' && !Array.isArray(p.padding)) {
+        paddingObj = { ...DEFAULT_PADDING, ...p.padding };
+      } else if (typeof p.padding === 'string' && p.padding.trim()) {
+        try { paddingObj = { ...DEFAULT_PADDING, ...JSON.parse(p.padding) }; } catch (_) {}
+      }
 
-    const pages = rows.map((r: any) => ({
-      id: r.id,
-      title: r.title,
-      slug: r.slug,
-      description: r.description || '',
-      is_default: Boolean(r.is_default),
-      is_published: Boolean(r.is_published),
-      elements: typeof r.elements === 'string' ? JSON.parse(r.elements) : (r.elements || []),
-      padding: (() => {
-        const p = typeof r.padding === 'string' ? JSON.parse(r.padding) : (r.padding || defaultPadding);
-        if (!p.left && p.x) p.left = p.x;
-        if (!p.right && p.x) p.right = p.x;
-        return p;
-      })(),
-      footer: typeof r.footer === 'string' ? JSON.parse(r.footer) : (r.footer || defaultFooter),
-      created_at: r.created_at,
-      updated_at: r.updated_at
-    }));
+      let footerObj: any = DEFAULT_FOOTER;
+      if (p.footer && typeof p.footer === 'object' && !Array.isArray(p.footer)) {
+        footerObj = { ...DEFAULT_FOOTER, ...p.footer };
+      } else if (typeof p.footer === 'string' && p.footer.trim()) {
+        try { footerObj = { ...DEFAULT_FOOTER, ...JSON.parse(p.footer) }; } catch (_) {}
+      }
+
+      return {
+        id: p.id,
+        title: p.title || 'Untitled Page',
+        slug: p.slug || 'untitled',
+        description: p.description || '',
+        content: p.content || '',
+        status: p.status || 'published',
+        is_default: Boolean(p.is_default),
+        show_in_nav: p.show_in_nav !== false,
+        show_in_footer: p.show_in_footer !== false,
+        order_index: p.order_index || 0,
+        elements: Array.isArray(elementsArray) ? elementsArray : [],
+        padding: paddingObj,
+        footer: footerObj,
+        created_at: p.created_at,
+        updated_at: p.updated_at,
+      };
+    });
 
     return NextResponse.json(
-      { success: true, pages },
+      { success: true, pages: sanitizedPages },
       { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
     );
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    console.error('Error fetching frontend pages:', err.message);
+    return NextResponse.json(
+      {
+        success: true,
+        pages: [
+          {
+            id: 'page_home',
+            title: 'Home',
+            slug: 'home',
+            description: 'Zecratary Autonomous Culinary Planning',
+            content: '',
+            status: 'published',
+            is_default: true,
+            show_in_nav: true,
+            show_in_footer: true,
+            order_index: 1,
+            elements: DEFAULT_HOME_ELEMENTS,
+            padding: DEFAULT_PADDING,
+            footer: DEFAULT_FOOTER,
+          },
+        ],
+      },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
   }
 }
 
@@ -52599,63 +51932,106 @@ export async function POST(req: NextRequest) {
   await ensureFrontendPagesTable();
   try {
     const body = await req.json();
-    const { action, page, id, newDefaultId } = body;
+    const action = body.action;
 
-    if (action === 'save_page' && page) {
-      const pageId = page.id || `page_${Date.now()}`;
-      const title = page.title || 'Untitled Page';
-      let slug = page.slug ? page.slug.trim() : '/';
-      if (!slug.startsWith('/')) slug = `/${slug}`;
-      const description = page.description || '';
-      const isDefault = Boolean(page.is_default);
-      const isPublished = page.is_published !== undefined ? Boolean(page.is_published) : true;
-      const elementsJson = JSON.stringify(page.elements || []);
-      const paddingJson = JSON.stringify(page.padding || defaultPadding);
-      const footerJson = JSON.stringify(page.footer || defaultFooter);
-
-      if (isDefault) {
-        await query(`UPDATE frontend_pages SET is_default = FALSE WHERE id != $1;`, [pageId]);
+    // 1. Action: set_default (Designate Homepage)
+    if (action === 'set_default' || action === 'set_default_page') {
+      const pageId = body.id || body.pageId;
+      const slug = body.slug;
+      if (!pageId && !slug) {
+        return NextResponse.json({ success: false, error: 'Page ID or slug required' }, { status: 400 });
       }
 
-      await query(`
-        INSERT INTO frontend_pages (
-          id, title, slug, description, is_default, is_published, elements, padding, footer, updated_at
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, NOW()
-        ) ON CONFLICT (id) DO UPDATE SET
-          title = EXCLUDED.title,
-          slug = EXCLUDED.slug,
-          description = EXCLUDED.description,
-          is_default = EXCLUDED.is_default,
-          is_published = EXCLUDED.is_published,
-          elements = EXCLUDED.elements,
-          padding = EXCLUDED.padding,
-          footer = EXCLUDED.footer,
-          updated_at = NOW();
-      `, [pageId, title, slug, description, isDefault, isPublished, elementsJson, paddingJson, footerJson]);
-
-      return NextResponse.json({ success: true, message: 'Page configuration, padding, and footer saved successfully.' });
-    }
-
-    if (action === 'delete_page' && id) {
-      const check: any = await query(`SELECT is_default FROM frontend_pages WHERE id = $1;`, [id]);
-      const rows = Array.isArray(check) ? check : (check?.rows || []);
-      if (rows.length > 0 && rows[0].is_default) {
-        return NextResponse.json({ success: false, error: 'Cannot delete the default homepage.' }, { status: 400 });
+      await query('UPDATE frontend_pages SET is_default = false;');
+      if (pageId) {
+        await query('UPDATE frontend_pages SET is_default = true, updated_at = NOW() WHERE id = $1;', [pageId]);
+      } else {
+        await query('UPDATE frontend_pages SET is_default = true, updated_at = NOW() WHERE slug = $1;', [slug]);
       }
-
-      await query(`DELETE FROM frontend_pages WHERE id = $1;`, [id]);
-      return NextResponse.json({ success: true, message: 'Page deleted successfully.' });
+      return NextResponse.json({ success: true, message: 'Default homepage set successfully' });
     }
 
-    if (action === 'set_default' && newDefaultId) {
-      await query(`UPDATE frontend_pages SET is_default = FALSE;`);
-      await query(`UPDATE frontend_pages SET is_default = TRUE WHERE id = $1;`, [newDefaultId]);
-      return NextResponse.json({ success: true, message: 'Default homepage updated.' });
+    // 2. Action: delete_page
+    if (action === 'delete_page') {
+      const pageId = body.id || body.pageId;
+      if (!pageId) {
+        return NextResponse.json({ success: false, error: 'Page ID required' }, { status: 400 });
+      }
+      const check = await query('SELECT is_default, slug FROM frontend_pages WHERE id = $1;', [pageId]);
+      const target = Array.isArray(check) ? check[0] : check?.rows?.[0];
+      if (target?.is_default || target?.slug === 'home') {
+        return NextResponse.json({ success: false, error: 'Cannot delete the active default homepage' }, { status: 400 });
+      }
+      await query('DELETE FROM frontend_pages WHERE id = $1;', [pageId]);
+      return NextResponse.json({ success: true, message: 'Page deleted successfully' });
     }
 
-    return NextResponse.json({ success: false, error: 'Invalid action specified.' }, { status: 400 });
+    // 3. Action: save_page (or direct upsert)
+    const pageData = body.page || body;
+    const id = pageData.id || ('page_' + Date.now().toString(36));
+    const title = pageData.title || 'Untitled Page';
+    const slug = (pageData.slug || title.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
+    const description = pageData.description || '';
+    const content = pageData.content || '';
+    const status = pageData.status || 'published';
+    const isDefault = Boolean(pageData.is_default);
+    const showInNav = pageData.show_in_nav !== false;
+    const showInFooter = pageData.show_in_footer !== false;
+    const orderIndex = Number(pageData.order_index) || 0;
+
+    const elementsJson = JSON.stringify(Array.isArray(pageData.elements) ? pageData.elements : []);
+    const paddingJson = JSON.stringify(pageData.padding || DEFAULT_PADDING);
+    const footerJson = JSON.stringify(pageData.footer || DEFAULT_FOOTER);
+
+    if (isDefault) {
+      await query('UPDATE frontend_pages SET is_default = false WHERE id != $1 AND slug != $2;', [id, slug]);
+    }
+
+    await query(`
+      INSERT INTO frontend_pages (
+        id, title, slug, description, content, status, is_default, show_in_nav, show_in_footer, order_index, elements, padding, footer, updated_at
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, NOW()
+      )
+      ON CONFLICT (slug) DO UPDATE SET
+        title = EXCLUDED.title,
+        description = EXCLUDED.description,
+        content = EXCLUDED.content,
+        status = EXCLUDED.status,
+        is_default = EXCLUDED.is_default,
+        show_in_nav = EXCLUDED.show_in_nav,
+        show_in_footer = EXCLUDED.show_in_footer,
+        order_index = EXCLUDED.order_index,
+        elements = EXCLUDED.elements,
+        padding = EXCLUDED.padding,
+        footer = EXCLUDED.footer,
+        updated_at = NOW();
+    `, [
+      id, title, slug, description, content, status, isDefault, 
+      showInNav, showInFooter, orderIndex, elementsJson, paddingJson, footerJson
+    ]);
+
+    return NextResponse.json({
+      success: true,
+      page: {
+        id,
+        title,
+        slug,
+        description,
+        content,
+        status,
+        is_default: isDefault,
+        show_in_nav: showInNav,
+        show_in_footer: showInFooter,
+        order_index: orderIndex,
+        elements: pageData.elements || [],
+        padding: pageData.padding || DEFAULT_PADDING,
+        footer: pageData.footer || DEFAULT_FOOTER,
+      },
+    });
   } catch (err: any) {
+    console.error('Error in POST /api/admin/frontend:', err.message);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -54328,30 +53704,93 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+const DEFAULT_LANGUAGES = [
+  { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸', isDefault: true },
+  { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸', isDefault: false },
+  { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷', isDefault: false },
+  { code: 'de', name: 'German', nativeName: 'Deutsch', flag: '🇩🇪', isDefault: false },
+  { code: 'it', name: 'Italian', nativeName: 'Italiano', flag: '🇮🇹', isDefault: false },
+  { code: 'pt', name: 'Portuguese', nativeName: 'Português', flag: '🇵🇹', isDefault: false },
+  { code: 'zh', name: 'Chinese', nativeName: '中文', flag: '🇨🇳', isDefault: false },
+  { code: 'ja', name: 'Japanese', nativeName: '日本語', flag: '🇯🇵', isDefault: false },
+  { code: 'ko', name: 'Korean', nativeName: '한국어', flag: '🇰🇷', isDefault: false },
+  { code: 'th', name: 'Thai', nativeName: 'ไทย', flag: '🇹🇭', isDefault: false },
+];
+
+async function ensureLanguageSchema() {
+  try {
+    await query(`
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS supported_languages JSONB DEFAULT '["en", "es", "fr", "de", "it", "pt", "zh", "ja", "ko", "th"]'::jsonb;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS translations JSONB DEFAULT '{}'::jsonb;
+      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS default_language VARCHAR(50) DEFAULT 'en';
+    `);
+  } catch (err: any) {
+    console.warn('[admin_settings language schema notice]:', err.message);
+  }
+}
 
 export async function GET() {
+  await ensureLanguageSchema();
   try {
-    const rows = await query('SELECT supported_languages FROM admin_settings WHERE id = $1 LIMIT 1', ['primary_settings']);
-    const languages = rows[0]?.supported_languages || [];
-    return NextResponse.json({ success: true, languages }, { headers: { 'Cache-Control': 'no-store' } });
+    const rows: any = await query('SELECT * FROM admin_settings LIMIT 1;').catch(() => []);
+    const row = Array.isArray(rows) ? rows[0] : (rows?.rows?.[0] || null);
+
+    let activeLangs: any[] = DEFAULT_LANGUAGES;
+    let translations: Record<string, string> = {};
+    let defaultLang = 'en';
+
+    if (row) {
+      if (row.supported_languages) {
+        const raw = Array.isArray(row.supported_languages) ? row.supported_languages : (typeof row.supported_languages === 'string' ? JSON.parse(row.supported_languages) : null);
+        if (Array.isArray(raw)) {
+          activeLangs = raw.map((c: any) => typeof c === 'string' ? (DEFAULT_LANGUAGES.find(d => d.code === c) || { code: c, name: c }) : c);
+        }
+      }
+      if (row.translations && typeof row.translations === 'object') {
+        translations = row.translations;
+      }
+      if (row.default_language) {
+        defaultLang = row.default_language;
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      languages: activeLangs,
+      defaultLanguage: defaultLang,
+      translations,
+    });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    console.warn('Fallback language response:', err.message);
+    return NextResponse.json({
+      success: true,
+      languages: DEFAULT_LANGUAGES,
+      defaultLanguage: 'en',
+      translations: {},
+    });
   }
 }
 
 export async function POST(req: NextRequest) {
+  await ensureLanguageSchema();
   try {
     const body = await req.json();
-    const languages = body.languages || body;
+    const languages = body.languages || body.supported_languages || body.supportedLanguages;
+    const defaultLanguage = body.defaultLanguage || body.default_language || 'en';
+    const translations = body.translations || {};
 
     await query(`
-      UPDATE admin_settings SET
-        supported_languages = $1::jsonb,
-        updated_at = NOW()
-      WHERE id = 'primary_settings'
-    `, [JSON.stringify(languages)]);
+      UPDATE admin_settings 
+      SET 
+        supported_languages = $1,
+        default_language = $2,
+        translations = $3,
+        updated_at = NOW();
+    `, [JSON.stringify(languages || DEFAULT_LANGUAGES), defaultLanguage, JSON.stringify(translations)]);
 
-    return NextResponse.json({ success: true, message: 'Languages updated in PostgreSQL.' });
+    return NextResponse.json({ success: true });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -56941,25 +56380,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 async function ensureBooksTable() {
   try {
     await query(`
       CREATE TABLE IF NOT EXISTS recipe_books (
         id VARCHAR(128) PRIMARY KEY,
-        user_id VARCHAR(64),
-        created_by VARCHAR(255),
-        creator_name VARCHAR(255),
+        user_id VARCHAR(64) DEFAULT 'usr_admin_1',
+        created_by VARCHAR(255) DEFAULT 'admin@zecratary.com',
+        creator_name VARCHAR(255) DEFAULT 'Chef',
         title VARCHAR(255) NOT NULL,
         description TEXT DEFAULT '',
-        cover_color VARCHAR(255) DEFAULT '',
         recipe_ids JSONB DEFAULT '[]'::jsonb,
-        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
       );
-      CREATE INDEX IF NOT EXISTS idx_recipe_books_user_id ON recipe_books(user_id);
-    `);
-    await query(`
       ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS book_id VARCHAR(128);
     `);
   } catch (_) {}
@@ -56969,51 +56405,64 @@ export async function GET(req: NextRequest) {
   await ensureBooksTable();
   try {
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId');
+    const userId = searchParams.get('userId') || searchParams.get('user_id');
 
     let sql = 'SELECT * FROM recipe_books';
     const params: any[] = [];
 
-    if (userId) {
+    if (userId && userId !== 'all') {
+      sql += ' WHERE user_id = $1 OR created_by = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL OR user_id = \'\'';
       params.push(userId);
-      sql += ' WHERE user_id = $1 OR created_by = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL';
     }
-
-    sql += ' ORDER BY created_at ASC';
+    sql += ' ORDER BY created_at ASC;';
 
     const books = await query(sql, params);
 
-    // Dynamic count calculation from saved_recipes
-    let countMap: Record<string, number> = {};
+    // Compute live recipe counts from saved_recipes
+    const countMap: Record<string, number> = {};
     try {
       const countRows = await query(`
         SELECT book_id, COUNT(*) as count 
         FROM saved_recipes 
-        WHERE book_id IS NOT NULL 
-        GROUP BY book_id
+        WHERE book_id IS NOT NULL AND book_id != ''
+        GROUP BY book_id;
       `);
       countRows.forEach((r: any) => {
         countMap[r.book_id] = Number(r.count) || 0;
       });
     } catch (_) {}
 
-    const formatted = books.map((b: any) => ({
-      id: b.id,
-      userId: b.user_id || 'usr_admin_1',
-      createdBy: b.created_by || '',
-      creatorName: b.creator_name || 'Chef',
-      title: b.title || 'Untitled Cookbook',
-      description: b.description || '',
-      coverColor: b.cover_color || 'bg-gradient-to-r from-pink-600 via-rose-500 to-rose-600',
-      recipeCount: countMap[b.id] !== undefined ? countMap[b.id] : (Array.isArray(b.recipe_ids) ? b.recipe_ids.length : 0),
-      createdAt: b.created_at || new Date().toISOString()
-    }));
+    const formatted = books.map((b: any) => {
+      const recipeIdsArray = Array.isArray(b.recipe_ids)
+        ? b.recipe_ids
+        : (typeof b.recipe_ids === 'string' ? JSON.parse(b.recipe_ids || '[]') : []);
+
+      const actualCount = countMap[b.id] !== undefined ? countMap[b.id] : recipeIdsArray.length;
+
+      return {
+        id: b.id,
+        userId: b.user_id || 'usr_admin_1',
+        user_id: b.user_id || 'usr_admin_1',
+        createdBy: b.created_by || '',
+        creatorName: b.creator_name || 'Chef',
+        title: b.title || 'Untitled Cookbook',
+        name: b.title || 'Untitled Cookbook',
+        description: b.description || '',
+        recipeIds: recipeIdsArray,
+        recipe_ids: recipeIdsArray,
+        recipeCount: actualCount,
+        recipes_count: actualCount,
+        created_at: b.created_at,
+        updated_at: b.updated_at,
+      };
+    });
 
     return NextResponse.json(
-      { success: true, books: formatted },
+      { success: true, books: formatted, cookbooks: formatted },
       { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
     );
   } catch (err: any) {
+    console.error('Error in GET /api/books:', err.message);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -57022,36 +56471,93 @@ export async function POST(req: NextRequest) {
   await ensureBooksTable();
   try {
     const body = await req.json();
+    const action = body.action;
+
+    // Toggle recipe in book
+    if (action === 'toggle_recipe' || action === 'add_recipe' || action === 'remove_recipe') {
+      const bookId = body.bookId || body.book_id || body.id;
+      const recipeId = body.recipeId || body.recipe_id;
+
+      if (!bookId || !recipeId) {
+        return NextResponse.json({ success: false, error: 'bookId and recipeId required' }, { status: 400 });
+      }
+
+      const bookRows: any = await query('SELECT recipe_ids FROM recipe_books WHERE id = $1;', [bookId]);
+      const currentBook = Array.isArray(bookRows) ? bookRows[0] : bookRows?.rows?.[0];
+
+      if (!currentBook) {
+        return NextResponse.json({ success: false, error: 'Cookbook not found' }, { status: 404 });
+      }
+
+      let rList: string[] = Array.isArray(currentBook.recipe_ids)
+        ? currentBook.recipe_ids
+        : (typeof currentBook.recipe_ids === 'string' ? JSON.parse(currentBook.recipe_ids || '[]') : []);
+
+      if (action === 'remove_recipe' || rList.includes(recipeId)) {
+        rList = rList.filter((id: string) => id !== recipeId);
+        await query('UPDATE saved_recipes SET book_id = NULL WHERE id = $1;', [recipeId]);
+      } else {
+        rList.push(recipeId);
+        await query('UPDATE saved_recipes SET book_id = $1 WHERE id = $2;', [bookId, recipeId]);
+      }
+
+      const updatedJson = JSON.stringify(rList);
+      await query('UPDATE recipe_books SET recipe_ids = $1::jsonb, updated_at = NOW() WHERE id = $2;', [updatedJson, bookId]);
+      await query('UPDATE cookbooks SET recipe_ids = $1::jsonb, updated_at = NOW() WHERE id = $2;', [updatedJson, bookId]).catch(() => {});
+
+      return NextResponse.json({ success: true, recipe_ids: rList, recipes_count: rList.length });
+    }
+
+    // Standard Create or Update (Single-statement executions)
     const items = Array.isArray(body) ? body : (body.books || [body.book || body]);
 
     for (const b of items) {
       if (!b || !b.id || !b.title) continue;
       const targetUserId = b.userId || b.user_id || 'usr_admin_1';
+      const title = b.title.trim();
+      const desc = b.description || '';
+      const recipeIds = JSON.stringify(Array.isArray(b.recipeIds) ? b.recipeIds : (Array.isArray(b.recipe_ids) ? b.recipe_ids : []));
 
       await query(`
         INSERT INTO recipe_books (
-          id, user_id, created_by, creator_name, title, description, cover_color, recipe_ids, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
+          id, user_id, created_by, creator_name, title, description, recipe_ids, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, NOW())
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           description = EXCLUDED.description,
-          cover_color = EXCLUDED.cover_color,
-          recipe_ids = COALESCE(EXCLUDED.recipe_ids, recipe_books.recipe_ids),
+          recipe_ids = EXCLUDED.recipe_ids,
           updated_at = NOW();
       `, [
         b.id,
         targetUserId,
-        b.createdBy || '',
-        b.creatorName || '',
-        b.title.trim(),
-        b.description || '',
-        b.coverColor || '',
-        JSON.stringify(b.recipeIds || b.recipe_ids || [])
+        b.createdBy || b.created_by || 'admin@zecratary.com',
+        b.creatorName || b.creator_name || 'Chef',
+        title,
+        desc,
+        recipeIds
+      ]);
+
+      await query(`
+        INSERT INTO cookbooks (
+          id, user_id, title, description, recipe_ids, updated_at
+        ) VALUES ($1, $2, $3, $4, $5::jsonb, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          recipe_ids = EXCLUDED.recipe_ids,
+          updated_at = NOW();
+      `, [
+        b.id,
+        targetUserId,
+        title,
+        desc,
+        recipeIds
       ]);
     }
 
-    return NextResponse.json({ success: true, message: 'Cookbook(s) saved in PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Cookbook saved in PostgreSQL' });
   } catch (err: any) {
+    console.error('Error in POST /api/books:', err.message);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -57060,7 +56566,7 @@ export async function DELETE(req: NextRequest) {
   await ensureBooksTable();
   try {
     const { searchParams } = new URL(req.url);
-    let id = searchParams.get('id');
+    let id = searchParams.get('id') || searchParams.get('bookId');
 
     if (!id) {
       try {
@@ -57074,14 +56580,13 @@ export async function DELETE(req: NextRequest) {
     }
 
     const cleanId = id.trim();
-    await query('DELETE FROM recipe_books WHERE id = $1', [cleanId]);
-    
-    try {
-      await query('UPDATE saved_recipes SET book_id = NULL WHERE book_id = $1', [cleanId]);
-    } catch (_) {}
+    await query('DELETE FROM recipe_books WHERE id = $1;', [cleanId]);
+    await query('DELETE FROM cookbooks WHERE id = $1;', [cleanId]).catch(() => {});
+    await query('UPDATE saved_recipes SET book_id = NULL WHERE book_id = $1;', [cleanId]);
 
-    return NextResponse.json({ success: true, message: 'Book deleted from PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Cookbook deleted from PostgreSQL' });
   } catch (err: any) {
+    console.error('Error in DELETE /api/books:', err.message);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -57991,22 +57496,120 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const userId = url.searchParams.get('userId') || url.searchParams.get('user_id');
+
   try {
-    const rows: any = await query('SELECT * FROM saved_recipes ORDER BY created_at DESC LIMIT 50;');
+    let sql = `
+      SELECT * FROM saved_recipes 
+      ORDER BY created_at DESC;
+    `;
+    let params: any[] = [];
+
+    // If a specific userId is requested, include their recipes AND admin/seeded recipes
+    if (userId && userId !== 'all') {
+      sql = `
+        SELECT * FROM saved_recipes 
+        WHERE user_id = $1 OR user_id = 'usr_admin_1' OR user_id IS NULL OR user_id = ''
+        ORDER BY created_at DESC;
+      `;
+      params = [userId];
+    }
+
+    const rows: any = await query(sql, params);
     const list = Array.isArray(rows) ? rows : (rows?.rows || []);
-    return NextResponse.json({ success: true, recipes: list });
-  } catch (_) {
-    return NextResponse.json({ success: true, recipes: [] });
+
+    const sanitized = list.map((r: any) => ({
+      id: r.id,
+      userId: r.user_id,
+      user_id: r.user_id,
+      title: r.title,
+      description: r.description || '',
+      ingredients: Array.isArray(r.ingredients) ? r.ingredients : (typeof r.ingredients === 'string' ? JSON.parse(r.ingredients || '[]') : []),
+      instructions: Array.isArray(r.directions) ? r.directions : (Array.isArray(r.instructions) ? r.instructions : (typeof r.instructions === 'string' ? JSON.parse(r.instructions || '[]') : [])),
+      directions: Array.isArray(r.directions) ? r.directions : (Array.isArray(r.instructions) ? r.instructions : []),
+      prep_time: r.prep_time || '15m',
+      cook_time: r.cook_time || '20m',
+      servings: r.servings || '4',
+      image: r.image || r.image_url || '',
+      imageUrl: r.image || r.image_url || '',
+      is_favorite: Boolean(r.is_favorite),
+      isFavorite: Boolean(r.is_favorite),
+      is_cooked: Boolean(r.is_cooked),
+      isCooked: Boolean(r.is_cooked),
+      tags: Array.isArray(r.tags) ? r.tags : (typeof r.tags === 'string' ? JSON.parse(r.tags || '[]') : []),
+      source_url: r.source_url || '',
+      sourceUrl: r.source_url || '',
+      created_at: r.created_at,
+    }));
+
+    return NextResponse.json(
+      { success: true, recipes: sanitized },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
+  } catch (err: any) {
+    console.error('Error in GET /api/recipes/saved:', err.message);
+    return NextResponse.json(
+      { success: true, recipes: [] },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    return NextResponse.json({ success: true, recipe: body });
+    const items = Array.isArray(body) ? body : [body];
+
+    for (const r of items) {
+      const recId = r.id || ('rec_' + Date.now().toString(36));
+      const userId = r.userId || r.user_id || 'usr_admin_1';
+      const title = r.title || 'Untitled Recipe';
+      const desc = r.description || '';
+      const ingredients = JSON.stringify(Array.isArray(r.ingredients) ? r.ingredients : []);
+      const directions = JSON.stringify(Array.isArray(r.directions) ? r.directions : (Array.isArray(r.instructions) ? r.instructions : []));
+      const prepTime = r.prep_time || r.prepTime || '15m';
+      const cookTime = r.cook_time || r.cookTime || '20m';
+      const servings = String(r.servings || '4');
+      const img = r.image || r.imageUrl || r.image_url || '';
+      const isFav = Boolean(r.is_favorite ?? r.isFavorite);
+      const isCooked = Boolean(r.is_cooked ?? r.isCooked);
+      const tags = JSON.stringify(Array.isArray(r.tags) ? r.tags : []);
+      const sourceUrl = r.source_url || r.sourceUrl || '';
+
+      await query(`
+        INSERT INTO saved_recipes (
+          id, user_id, title, description, ingredients, instructions, directions,
+          prep_time, cook_time, servings, image, image_url, is_favorite, is_cooked,
+          tags, source_url, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          ingredients = EXCLUDED.ingredients,
+          instructions = EXCLUDED.instructions,
+          directions = EXCLUDED.directions,
+          prep_time = EXCLUDED.prep_time,
+          cook_time = EXCLUDED.cook_time,
+          servings = EXCLUDED.servings,
+          image = EXCLUDED.image,
+          image_url = EXCLUDED.image_url,
+          is_favorite = EXCLUDED.is_favorite,
+          tags = EXCLUDED.tags,
+          updated_at = NOW();
+      `, [
+        recId, userId, title, desc, ingredients, directions, directions,
+        prepTime, cookTime, servings, img, img, isFav, isCooked, tags, sourceUrl
+      ]);
+    }
+
+    return NextResponse.json({ success: true });
   } catch (err: any) {
+    console.error('Error in POST /api/recipes/saved:', err.message);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -60027,330 +59630,120 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
-
-async function ensureTableAndColumns() {
-  try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS saved_recipes (
-        id TEXT PRIMARY KEY,
-        user_id TEXT,
-        title TEXT NOT NULL,
-        description TEXT,
-        recipe_type TEXT DEFAULT 'Main Dish',
-        cuisine TEXT,
-        prep_time TEXT DEFAULT '15',
-        cook_time TEXT DEFAULT '25',
-        servings INT DEFAULT 4,
-        difficulty TEXT DEFAULT 'Medium',
-        ingredients JSONB DEFAULT '[]'::jsonb,
-        directions JSONB DEFAULT '[]'::jsonb,
-        nutrition JSONB DEFAULT '{}'::jsonb,
-        tags JSONB DEFAULT '[]'::jsonb,
-        image_url TEXT,
-        is_public BOOLEAN DEFAULT FALSE,
-        is_favorite BOOLEAN DEFAULT FALSE,
-        is_cooked BOOLEAN DEFAULT FALSE,
-        rating INT DEFAULT 0,
-        note TEXT DEFAULT '',
-        book_id TEXT,
-        source_url TEXT,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-    `);
-    await query(`
-      ALTER TABLE saved_recipes 
-      ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS rating INT DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '',
-      ADD COLUMN IF NOT EXISTS book_id TEXT,
-      ADD COLUMN IF NOT EXISTS source_url TEXT;
-    `);
-  } catch (err) {
-    console.warn('[saved_recipes route] ensureTable warning:', err);
-  }
-}
+export const revalidate = 0;
 
 export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const userId = url.searchParams.get('userId') || url.searchParams.get('user_id');
+
   try {
-    await ensureTableAndColumns();
-    const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId');
-    const category = searchParams.get('category');
+    let sql = `
+      SELECT * FROM saved_recipes 
+      ORDER BY created_at DESC;
+    `;
+    let params: any[] = [];
 
-    let sql = `SELECT * FROM saved_recipes WHERE 1=1`;
-    const params: any[] = [];
-
-    if (userId) {
-      params.push(userId);
-      sql += ` AND (user_id = $${params.length} OR user_id = 'usr_admin_1' OR user_id IS NULL OR is_public = TRUE)`;
+    // If a specific userId is requested, include their recipes AND admin/seeded recipes
+    if (userId && userId !== 'all') {
+      sql = `
+        SELECT * FROM saved_recipes 
+        WHERE user_id = $1 OR user_id = 'usr_admin_1' OR user_id IS NULL OR user_id = ''
+        ORDER BY created_at DESC;
+      `;
+      params = [userId];
     }
 
-    if (category && category !== 'all' && category !== 'All Types') {
-      params.push(category);
-      sql += ` AND LOWER(recipe_type) = LOWER($${params.length})`;
-    }
+    const rows: any = await query(sql, params);
+    const list = Array.isArray(rows) ? rows : (rows?.rows || []);
 
-    sql += ' ORDER BY created_at DESC';
-
-    const rows = await query(sql, params);
-
-    const formatted = rows.map((r: any) => {
-      let ingredients = r.ingredients;
-      if (typeof ingredients === 'string') {
-        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = []; }
-      }
-
-      let directions = r.directions;
-      if (typeof directions === 'string') {
-        try { directions = JSON.parse(directions); } catch (_) { directions = []; }
-      }
-
-      let nutrition = r.nutrition;
-      if (typeof nutrition === 'string') {
-        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
-      }
-
-      let tags = r.tags;
-      if (typeof tags === 'string') {
-        try { tags = JSON.parse(tags); } catch (_) { tags = []; }
-      }
-
-      const prepMins = Number(r.prep_time) || 15;
-      const cookMins = Number(r.cook_time) || 25;
-
-      return {
-        ...r,
-        id: r.id,
-        userId: r.user_id || r.userId || 'usr_admin_1',
-        user_id: r.user_id || r.userId || 'usr_admin_1',
-        title: r.title || r.name || 'Untitled Recipe',
-        name: r.title || r.name || 'Untitled Recipe',
-        description: r.description || '',
-        recipeType: r.recipe_type || 'Main Dish',
-        category: r.recipe_type || 'Main Dish',
-        recipe_type: r.recipe_type || 'Main Dish',
-        cuisine: r.cuisine || '',
-        prepTime: String(prepMins),
-        cookTime: String(cookMins),
-        prepTimeMinutes: prepMins,
-        cookTimeMinutes: cookMins,
-        servings: Number(r.servings) || 4,
-        difficulty: r.difficulty || 'Medium',
-        ingredients: Array.isArray(ingredients) ? ingredients : [],
-        directions: Array.isArray(directions) ? directions : [],
-        instructions: Array.isArray(directions) ? directions : [],
-        steps: Array.isArray(directions) ? directions : [],
-        nutrition: nutrition || {},
-        tags: Array.isArray(tags) ? tags : [],
-        imageUrl: r.image_url || r.imageUrl || r.image || '',
-        image: r.image_url || r.imageUrl || r.image || '',
-        image_url: r.image_url || r.imageUrl || r.image || '',
-        sourceUrl: r.source_url || r.sourceUrl || '',
-        source_url: r.source_url || r.sourceUrl || '',
-        isFavorite: Boolean(r.is_favorite || r.isFavorite),
-        is_favorite: Boolean(r.is_favorite || r.isFavorite),
-        isCooked: Boolean(r.is_cooked || r.isCooked),
-        is_cooked: Boolean(r.is_cooked || r.isCooked),
-        rating: Number(r.rating) || 0,
-        note: r.note || '',
-        bookId: r.book_id || r.bookId || null,
-        book_id: r.book_id || r.bookId || null,
-        isPublic: Boolean(r.is_public),
-        is_public: Boolean(r.is_public),
-        createdAt: r.created_at || new Date().toISOString(),
-        updatedAt: r.updated_at || new Date().toISOString()
-      };
-    });
+    const sanitized = list.map((r: any) => ({
+      id: r.id,
+      userId: r.user_id,
+      user_id: r.user_id,
+      title: r.title,
+      description: r.description || '',
+      ingredients: Array.isArray(r.ingredients) ? r.ingredients : (typeof r.ingredients === 'string' ? JSON.parse(r.ingredients || '[]') : []),
+      instructions: Array.isArray(r.directions) ? r.directions : (Array.isArray(r.instructions) ? r.instructions : (typeof r.instructions === 'string' ? JSON.parse(r.instructions || '[]') : [])),
+      directions: Array.isArray(r.directions) ? r.directions : (Array.isArray(r.instructions) ? r.instructions : []),
+      prep_time: r.prep_time || '15m',
+      cook_time: r.cook_time || '20m',
+      servings: r.servings || '4',
+      image: r.image || r.image_url || '',
+      imageUrl: r.image || r.image_url || '',
+      is_favorite: Boolean(r.is_favorite),
+      isFavorite: Boolean(r.is_favorite),
+      is_cooked: Boolean(r.is_cooked),
+      isCooked: Boolean(r.is_cooked),
+      tags: Array.isArray(r.tags) ? r.tags : (typeof r.tags === 'string' ? JSON.parse(r.tags || '[]') : []),
+      source_url: r.source_url || '',
+      sourceUrl: r.source_url || '',
+      created_at: r.created_at,
+    }));
 
     return NextResponse.json(
-      { success: true, recipes: formatted },
+      { success: true, recipes: sanitized },
       { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
     );
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    console.error('Error in GET /api/recipes/saved:', err.message);
+    return NextResponse.json(
+      { success: true, recipes: [] },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureTableAndColumns();
     const body = await req.json();
-    const items = Array.isArray(body) ? body : (body.recipes || [body.recipe || body]);
+    const items = Array.isArray(body) ? body : [body];
 
-    for (const item of items) {
-      if (!item) continue;
-      const id = item.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
-      const targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
-
-      try {
-        const userCheck = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
-        if (userCheck.length === 0) {
-          await query(`
-            INSERT INTO users (id, name, email, role, subscription_plan)
-            VALUES ($1, 'User', $2, 'user', 'taster')
-            ON CONFLICT (id) DO NOTHING;
-          `, [targetUserId, targetUserId.includes('@') ? targetUserId : `${targetUserId}@zecratary.local`]);
-        }
-      } catch (_) {}
-
-      let ingredients = item.ingredients;
-      if (typeof ingredients === 'string') {
-        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = [ingredients]; }
-      }
-      if (!Array.isArray(ingredients)) ingredients = [];
-
-      let directions = item.directions || item.instructions || item.steps;
-      if (typeof directions === 'string') {
-        try { directions = JSON.parse(directions); } catch (_) { directions = [directions]; }
-      }
-      if (!Array.isArray(directions)) directions = [];
-
-      let tags = item.tags;
-      if (typeof tags === 'string') {
-        try { tags = JSON.parse(tags); } catch (_) { tags = [tags]; }
-      }
-      if (!Array.isArray(tags)) tags = [];
-
-      let nutrition = item.nutrition || item.macros || {};
-      if (typeof nutrition === 'string') {
-        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
-      }
+    for (const r of items) {
+      const recId = r.id || ('rec_' + Date.now().toString(36));
+      const userId = r.userId || r.user_id || 'usr_admin_1';
+      const title = r.title || 'Untitled Recipe';
+      const desc = r.description || '';
+      const ingredients = JSON.stringify(Array.isArray(r.ingredients) ? r.ingredients : []);
+      const directions = JSON.stringify(Array.isArray(r.directions) ? r.directions : (Array.isArray(r.instructions) ? r.instructions : []));
+      const prepTime = r.prep_time || r.prepTime || '15m';
+      const cookTime = r.cook_time || r.cookTime || '20m';
+      const servings = String(r.servings || '4');
+      const img = r.image || r.imageUrl || r.image_url || '';
+      const isFav = Boolean(r.is_favorite ?? r.isFavorite);
+      const isCooked = Boolean(r.is_cooked ?? r.isCooked);
+      const tags = JSON.stringify(Array.isArray(r.tags) ? r.tags : []);
+      const sourceUrl = r.source_url || r.sourceUrl || '';
 
       await query(`
         INSERT INTO saved_recipes (
-          id, user_id, title, description, recipe_type, cuisine, prep_time, cook_time,
-          servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public,
-          is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-          $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16,
-          $17, $18, $19, $20, $21, $22, NOW()
+          id, user_id, title, description, ingredients, instructions, directions,
+          prep_time, cook_time, servings, image, image_url, is_favorite, is_cooked,
+          tags, source_url, updated_at
         )
+        VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, NOW())
         ON CONFLICT (id) DO UPDATE SET
-          user_id = COALESCE(EXCLUDED.user_id, saved_recipes.user_id),
           title = EXCLUDED.title,
           description = EXCLUDED.description,
-          recipe_type = EXCLUDED.recipe_type,
-          cuisine = EXCLUDED.cuisine,
+          ingredients = EXCLUDED.ingredients,
+          instructions = EXCLUDED.instructions,
+          directions = EXCLUDED.directions,
           prep_time = EXCLUDED.prep_time,
           cook_time = EXCLUDED.cook_time,
           servings = EXCLUDED.servings,
-          difficulty = EXCLUDED.difficulty,
-          ingredients = EXCLUDED.ingredients,
-          directions = EXCLUDED.directions,
-          nutrition = EXCLUDED.nutrition,
-          tags = EXCLUDED.tags,
+          image = EXCLUDED.image,
           image_url = EXCLUDED.image_url,
-          is_public = EXCLUDED.is_public,
           is_favorite = EXCLUDED.is_favorite,
-          is_cooked = EXCLUDED.is_cooked,
-          rating = EXCLUDED.rating,
-          note = EXCLUDED.note,
-          book_id = EXCLUDED.book_id,
-          source_url = EXCLUDED.source_url,
+          tags = EXCLUDED.tags,
           updated_at = NOW();
       `, [
-        id,
-        targetUserId,
-        item.title || item.name || 'Untitled Recipe',
-        item.description || '',
-        item.recipeType || item.category || item.recipe_type || 'Main Dish',
-        item.cuisine || '',
-        String(item.prepTime || item.prepTimeMinutes || item.prep_time || '15'),
-        String(item.cookTime || item.cookTimeMinutes || item.cook_time || '25'),
-        Number(item.servings || item.servingsCount) || 4,
-        item.difficulty || 'Medium',
-        JSON.stringify(ingredients),
-        JSON.stringify(directions),
-        JSON.stringify(nutrition),
-        JSON.stringify(tags),
-        item.imageUrl || item.image || item.image_url || '',
-        Boolean(item.isPublic || item.is_public),
-        Boolean(item.isFavorite || item.is_favorite),
-        Boolean(item.isCooked || item.is_cooked),
-        Number(item.rating) || 0,
-        item.note || '',
-        item.bookId || item.book_id || null,
-        item.sourceUrl || item.source_url || ''
+        recId, userId, title, desc, ingredients, directions, directions,
+        prepTime, cookTime, servings, img, img, isFav, isCooked, tags, sourceUrl
       ]);
     }
 
-    return NextResponse.json({ success: true, message: 'Recipe(s) synchronized with PostgreSQL.' });
+    return NextResponse.json({ success: true });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
-
-export async function PATCH(req: NextRequest) {
-  try {
-    await ensureTableAndColumns();
-    const body = await req.json();
-    const { id, isFavorite, is_favorite, isCooked, is_cooked, rating, note, bookId, book_id, sourceUrl, source_url } = body;
-
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
-    }
-
-    const updates: string[] = [];
-    const params: any[] = [id];
-
-    if (isFavorite !== undefined || is_favorite !== undefined) {
-      params.push(Boolean(isFavorite !== undefined ? isFavorite : is_favorite));
-      updates.push(`is_favorite = $${params.length}`);
-    }
-    if (isCooked !== undefined || is_cooked !== undefined) {
-      params.push(Boolean(isCooked !== undefined ? isCooked : is_cooked));
-      updates.push(`is_cooked = $${params.length}`);
-    }
-    if (rating !== undefined) {
-      params.push(Number(rating));
-      updates.push(`rating = $${params.length}`);
-    }
-    if (note !== undefined) {
-      params.push(String(note));
-      updates.push(`note = $${params.length}`);
-    }
-    if (bookId !== undefined || book_id !== undefined) {
-      params.push(bookId !== undefined ? bookId : book_id);
-      updates.push(`book_id = $${params.length}`);
-    }
-    if (sourceUrl !== undefined || source_url !== undefined) {
-      params.push(sourceUrl !== undefined ? sourceUrl : source_url);
-      updates.push(`source_url = $${params.length}`);
-    }
-
-    if (updates.length > 0) {
-      updates.push('updated_at = NOW()');
-      await query(`UPDATE saved_recipes SET ${updates.join(', ')} WHERE id = $1`, params);
-    }
-
-    return NextResponse.json({ success: true, message: 'Recipe updated in PostgreSQL.' });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
-
-export async function DELETE(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    let id = searchParams.get('id');
-
-    if (!id) {
-      try {
-        const body = await req.json();
-        id = body?.id || id;
-      } catch (_) {}
-    }
-
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
-    }
-
-    await query('DELETE FROM saved_recipes WHERE id = $1', [id.trim()]);
-    return NextResponse.json({ success: true, message: 'Recipe removed from PostgreSQL.' });
-  } catch (err: any) {
+    console.error('Error in POST /api/recipes/saved:', err.message);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -65018,375 +64411,10 @@ export default function DynamicCustomSlugPage() {
 
 ## File: `apps/web/src/app/cookbooks/page.tsx`
 ```typescript
-'use client';
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import {
-  Book, Plus, Trash2, Edit3, X, Save, Sparkles,
-  Utensils, ChefHat, Cake, Flame, Coffee, Palette
-} from 'lucide-react';
+import { redirect } from 'next/navigation';
 
-interface Cookbook {
-  id: string;
-  title: string;
-  description: string;
-  recipeCount: number;
-  gradient: string;
-  iconName?: string;
-}
-
-const GRADIENT_PRESETS = [
-  { label: 'Crimson Rose', value: 'from-pink-500 to-rose-600' },
-  { label: 'Sunset Amber', value: 'from-amber-500 to-orange-600' },
-  { label: 'Emerald Jade', value: 'from-emerald-500 to-teal-600' },
-  { label: 'Royal Violet', value: 'from-purple-500 to-indigo-600' },
-  { label: 'Ocean Blue', value: 'from-cyan-500 to-blue-600' },
-];
-
-const ICONS: Record<string, any> = {
-  Book,
-  ChefHat,
-  Cake,
-  Flame,
-  Coffee,
-  Utensils,
-};
-
-export default function CookbooksPage() {
-  const [cookbooks, setCookbooks] = useState<Cookbook[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // Edit / Create Modal State
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingCookbook, setEditingCookbook] = useState<Cookbook | null>(null);
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    gradient: GRADIENT_PRESETS[0].value,
-    iconName: 'Book',
-  });
-
-  const defaultCookbooks: Cookbook[] = [
-    {
-      id: 'cb_1',
-      title: 'test',
-      description: 'Custom recipe collection',
-      recipeCount: 1,
-      gradient: 'from-pink-600 via-rose-500 to-rose-600',
-      iconName: 'Book',
-    },
-    {
-      id: 'cb_2',
-      title: 'Baking & Desserts',
-      description: 'Cakes, pastries, sweet treats, and weekend baking projects.',
-      recipeCount: 1,
-      gradient: 'from-pink-600 via-rose-500 to-rose-600',
-      iconName: 'Book',
-    },
-  ];
-
-  const fetchCookbooks = () => {
-    try {
-      const saved = localStorage.getItem('zecratary_cookbooks');
-      if (saved) {
-        setCookbooks(JSON.parse(saved));
-      } else {
-        setCookbooks(defaultCookbooks);
-        localStorage.setItem('zecratary_cookbooks', JSON.stringify(defaultCookbooks));
-      }
-    } catch (e) {
-      console.error('Failed to load cookbooks:', e);
-      setCookbooks(defaultCookbooks);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchCookbooks();
-  }, []);
-
-  const saveCookbooks = (updated: Cookbook[]) => {
-    setCookbooks(updated);
-    localStorage.setItem('zecratary_cookbooks', JSON.stringify(updated));
-  };
-
-  const handleOpenCreate = () => {
-    setEditingCookbook(null);
-    setFormData({
-      title: '',
-      description: '',
-      gradient: GRADIENT_PRESETS[0].value,
-      iconName: 'Book',
-    });
-    setIsModalOpen(true);
-  };
-
-  const handleOpenEdit = (e: React.MouseEvent, cb: Cookbook) => {
-    e.stopPropagation();
-    setEditingCookbook(cb);
-    setFormData({
-      title: cb.title,
-      description: cb.description || '',
-      gradient: cb.gradient || GRADIENT_PRESETS[0].value,
-      iconName: cb.iconName || 'Book',
-    });
-    setIsModalOpen(true);
-  };
-
-  const handleDelete = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    if (!confirm('Are you sure you want to delete this cookbook?')) return;
-    const updated = cookbooks.filter((c) => c.id !== id);
-    saveCookbooks(updated);
-  };
-
-  const handleSave = () => {
-    if (!formData.title.trim()) {
-      alert('Please enter a cookbook title.');
-      return;
-    }
-
-    if (editingCookbook) {
-      // Update existing
-      const updated = cookbooks.map((c) =>
-        c.id === editingCookbook.id
-          ? {
-              ...c,
-              title: formData.title,
-              description: formData.description,
-              gradient: formData.gradient,
-              iconName: formData.iconName,
-            }
-          : c
-      );
-      saveCookbooks(updated);
-    } else {
-      // Create new
-      const newBook: Cookbook = {
-        id: 'cb_' + Date.now(),
-        title: formData.title,
-        description: formData.description,
-        recipeCount: 0,
-        gradient: formData.gradient,
-        iconName: formData.iconName,
-      };
-      saveCookbooks([...cookbooks, newBook]);
-    }
-
-    setIsModalOpen(false);
-  };
-
-  return (
-    <div className="max-w-6xl mx-auto space-y-6 text-slate-100 px-4 pb-16">
-      
-      {/* Header */}
-      <div className="flex items-center justify-between pt-2">
-        <div>
-          <h1 className="text-3xl font-black text-[#E05638] tracking-tight">Cookbooks</h1>
-          <p className="text-emerald-400 text-xs mt-1 font-semibold">
-            Organize and manage your custom recipe collections ({cookbooks.length})
-          </p>
-        </div>
-        <button
-          onClick={handleOpenCreate}
-          className="bg-[#E05638] hover:bg-[#c94529] text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg shadow-[#E05638]/20"
-        >
-          <Plus className="h-4 w-4" /> Create Cookbook
-        </button>
-      </div>
-
-      {/* Grid of Cookbooks matching reference UI */}
-      {loading ? (
-        <div className="text-slate-500 text-xs py-12 text-center">Loading cookbooks...</div>
-      ) : cookbooks.length === 0 ? (
-        <div className="p-16 border border-slate-800 bg-[#111726] rounded-3xl text-center space-y-3">
-          <Book className="h-10 w-10 text-slate-600 mx-auto" />
-          <h3 className="text-base font-bold text-white">No cookbooks created yet</h3>
-          <p className="text-xs text-slate-400">Click "Create Cookbook" to organize your recipes into collections.</p>
-        </div>
-      ) : (
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {cookbooks.map((cb) => {
-            const IconComponent = ICONS[cb.iconName || 'Book'] || Book;
-
-            return (
-              <div
-                key={cb.id}
-                className="bg-[#111726] border border-slate-800 rounded-3xl overflow-hidden shadow-xl flex flex-col justify-between group hover:border-slate-700 transition"
-              >
-                {/* Header Gradient Card */}
-                <div
-                  className={`bg-gradient-to-r ${cb.gradient || 'from-pink-600 to-rose-600'} p-6 rounded-3xl flex flex-col justify-between min-h-[145px] relative shadow-md`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="bg-black/30 backdrop-blur-md text-white text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-full">
-                      COOKBOOK
-                    </span>
-                    <div className="w-9 h-9 rounded-xl bg-black/25 backdrop-blur-md flex items-center justify-center text-white">
-                      <IconComponent className="h-5 w-5" />
-                    </div>
-                  </div>
-
-                  <h3 className="text-xl font-black text-white leading-tight drop-shadow-sm pt-4">
-                    {cb.title}
-                  </h3>
-                </div>
-
-                {/* Body Details */}
-                <div className="p-6 flex-1 flex flex-col justify-between space-y-5">
-                  <p className="text-xs text-slate-300 leading-relaxed line-clamp-3">
-                    {cb.description || 'Custom recipe collection'}
-                  </p>
-
-                  <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-1.5 font-bold text-slate-300">
-                      <Utensils className="h-3.5 w-3.5 text-[#E05638]" />
-                      {cb.recipeCount || 0} recipes inside
-                    </span>
-
-                    {/* Action Buttons: Edit & Delete */}
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={(e) => handleOpenEdit(e, cb)}
-                        className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                        title="Edit Cookbook"
-                      >
-                        <Edit3 className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={(e) => handleDelete(e, cb.id)}
-                        className="p-2 rounded-xl text-slate-400 hover:text-red-400 hover:bg-slate-800 transition"
-                        title="Delete Cookbook"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* EDIT / CREATE COOKBOOK MODAL */}
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-[#111726] border border-slate-800 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl relative">
-            
-            {/* Modal Header */}
-            <div className="p-6 border-b border-slate-800 flex items-center justify-between">
-              <h2 className="text-lg font-black text-white flex items-center gap-2">
-                <Edit3 className="h-5 w-5 text-[#E05638]" />
-                {editingCookbook ? 'Edit Cookbook' : 'Create Cookbook'}
-              </h2>
-              <button
-                onClick={() => setIsModalOpen(false)}
-                className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {/* Modal Form */}
-            <div className="p-6 space-y-5 text-xs">
-              
-              {/* Cookbook Title */}
-              <div>
-                <label className="block font-bold text-[#E05638] uppercase mb-1.5">Cookbook Title</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Baking & Desserts"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  className="w-full bg-[#0B101D] border border-slate-800 rounded-xl p-3 text-sm text-white placeholder-slate-500 outline-none focus:border-[#E05638]"
-                />
-              </div>
-
-              {/* Description */}
-              <div>
-                <label className="block font-bold text-[#E05638] uppercase mb-1.5">Description</label>
-                <textarea
-                  rows={3}
-                  placeholder="e.g. Cakes, pastries, sweet treats, and weekend baking projects."
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="w-full bg-[#0B101D] border border-slate-800 rounded-xl p-3 text-xs text-white placeholder-slate-500 outline-none focus:border-[#E05638] resize-none"
-                />
-              </div>
-
-              {/* Theme Gradient Selector */}
-              <div>
-                <label className="block font-bold text-[#E05638] uppercase mb-2 flex items-center gap-1.5">
-                  <Palette className="h-3.5 w-3.5" /> Header Theme
-                </label>
-                <div className="grid grid-cols-5 gap-2">
-                  {GRADIENT_PRESETS.map((preset) => (
-                    <button
-                      key={preset.value}
-                      type="button"
-                      onClick={() => setFormData({ ...formData, gradient: preset.value })}
-                      className={`h-9 rounded-xl bg-gradient-to-r ${preset.value} transition ${
-                        formData.gradient === preset.value
-                          ? 'ring-2 ring-white ring-offset-2 ring-offset-[#111726] scale-105'
-                          : 'opacity-70 hover:opacity-100'
-                      }`}
-                      title={preset.label}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {/* Icon Selector */}
-              <div>
-                <label className="block font-bold text-[#E05638] uppercase mb-2">Cover Icon</label>
-                <div className="flex gap-2">
-                  {Object.keys(ICONS).map((iconKey) => {
-                    const IconComp = ICONS[iconKey];
-                    return (
-                      <button
-                        key={iconKey}
-                        type="button"
-                        onClick={() => setFormData({ ...formData, iconName: iconKey })}
-                        className={`p-2.5 rounded-xl border transition ${
-                          formData.iconName === iconKey
-                            ? 'bg-[#E05638] border-[#E05638] text-white shadow-md'
-                            : 'bg-[#0B101D] border-slate-800 text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        <IconComp className="h-4 w-4" />
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="pt-3 border-t border-slate-800 flex justify-end gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2.5 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700 transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  className="px-5 py-2.5 rounded-xl bg-[#E05638] hover:bg-[#c94529] text-white font-bold transition flex items-center gap-1.5 shadow-lg shadow-[#E05638]/20"
-                >
-                  <Save className="h-3.5 w-3.5" /> Save Cookbook
-                </button>
-              </div>
-
-            </div>
-          </div>
-        </div>
-      )}
-
-    </div>
-  );
+export default function BooksRedirectPage() {
+  redirect('/books');
 }
 
 ```
@@ -67714,55 +66742,21 @@ export function useTheme() {
 
 ## File: `apps/web/src/components/Sidebar.tsx`
 ```typescript
-// Generated / Updated by AI Collaborator
 'use client';
 
-import packageInfo from '../../package.json';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
-  Home, 
-  MessageSquare, 
-  UploadCloud, 
-  SquarePen, 
-  BookOpen, 
-  Book, 
-  Package, 
-  ShoppingCart, 
-  Calendar, 
-  LayoutTemplate, 
-  UserPlus, 
-  ShieldCheck, 
-  CreditCard, 
-  Tag, 
-  Utensils, 
-  Settings, 
-  Mail, 
-  LogOut, 
-  Menu, 
-  X, 
-  Wallet, 
-  Languages,
-  Cpu,
-  Moon,
-  Sun,
-  Key,
-  Coins,
-  Bell,
-  BellRing,
-  User as UserIcon,
-  Plus,
-  ChevronDown,
-  Sparkles,
-  CheckCircle2,
-  AlertCircle,
-  AlertTriangle,
-  ExternalLink,
-  Layers
+  LayoutDashboard, MessageSquare, UploadCloud, SquarePen, BookOpen, 
+  Book, Package, ShoppingCart, Calendar, LayoutTemplate, UserPlus, 
+  ShieldCheck, CreditCard, Tag, Utensils, Settings, LogOut, 
+  Menu, X, Wallet, Languages, Cpu, Moon, Sun, Key, Coins, 
+  Bell, BellRing, User as UserIcon, Plus, ChevronDown, ChevronRight, 
+  Layers, Check, Database, Receipt, Globe
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
-import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
+import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON } from '@/lib/siteConfig';
 import { useTranslation } from '@/components/LanguageProvider';
 
 interface InAppNotification {
@@ -67773,7 +66767,7 @@ interface InAppNotification {
   isRead: boolean;
   actionUrl?: string;
   actionLabel?: string;
-  timestamp: string;
+  timestamp?: string;
 }
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
@@ -67802,14 +66796,7 @@ const LANGUAGE_FLAG_MAP: Record<string, string> = {
   hi: '🇮🇳',
   vi: '🇻🇳',
   id: '🇮🇩',
-  tr: '🇹🇷',
-  sv: '🇸🇪',
-  no: '🇳🇴',
-  da: '🇩🇰',
-  fi: '🇫🇮',
-  pl: '🇵🇱',
-  el: '🇬🇷',
-  he: '🇮🇱'
+  tr: '🇹🇷'
 };
 
 const getLanguageFlag = (code: string): string => {
@@ -67825,1642 +66812,920 @@ const isImageIcon = (icon?: unknown): icon is string =>
     icon.startsWith('data:image')
   );
 
-function isQuietHours(startStr?: string, endStr?: string): boolean {
-  if (!startStr || !endStr) return false;
-  try {
-    const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    const [sH, sM] = startStr.split(':').map(Number);
-    const [eH, eM] = endStr.split(':').map(Number);
-    const startMinutes = (sH || 0) * 60 + (sM || 0);
-    const endMinutes = (eH || 0) * 60 + (eM || 0);
-
-    if (startMinutes <= endMinutes) {
-      return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
-    } else {
-      return currentMinutes >= startMinutes || currentMinutes <= endMinutes;
-    }
-  } catch (_) {
-    return false;
-  }
-}
-
-function playNotificationChime(): void {
-  if (typeof window === 'undefined') return;
-  try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(587.33, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12);
-
-    gain.gain.setValueAtTime(0.08, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.3);
-  } catch (_) {}
-}
-
-function formatNotificationTime(timestampStr: string): string {
-  try {
-    const d = new Date(timestampStr);
-    if (isNaN(d.getTime())) return '';
-    const diffMs = Date.now() - d.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    const diffDays = Math.floor(diffHours / 24);
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  } catch (_) {
-    return '';
-  }
-}
-
 export default function Sidebar() {
-  const pathname = usePathname();
-  const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
-  const isHomePage = pathname === '/' || pathname === '' || pathname === '/index';
-  if (isAuthRoute || isHomePage) return null;
-  const { t, locale, setLocale } = useTranslation();
-  const [user, setUser] = useState<User | null>(null);
+  // 1. ALL REACT HOOKS UNCONDITIONALLY AT THE TOP LEVEL (REACT 19 COMPLIANT)
+  const pathname = usePathname() || '';
+  const langContext = useTranslation();
+  const t = langContext?.t || ((k: string, fb?: string) => fb || k);
+  const currentLanguage = (langContext as any)?.currentLanguage || (langContext as any)?.locale || (langContext as any)?.language || 'en';
+  const changeLanguage = (langContext as any)?.changeLanguage || (langContext as any)?.setLocale || (langContext as any)?.setLanguage || (() => {});
+
+  const [mounted, setMounted] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
   const [siteIcon, setSiteIcon] = useState<string>(DEFAULT_SITE_ICON);
-  const [isOpen, setIsOpen] = useState<boolean>(false);
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
-  const [mounted, setMounted] = useState<boolean>(false);
 
-  // SSR-deterministic token & wallet states
-  const [tokenBalance, setTokenBalance] = useState<number>(() => {
-    try {
-      const u = getCurrentUser();
-      const val = Number(u?.token_balance ?? u?.tokenBalance ?? u?.tokens ?? 100);
-      return isNaN(val) ? 100 : val;
-    } catch (_) { return 100; }
-  });
-  const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
-
-  const [walletBalance, setWalletBalance] = useState<number>(() => {
-    try {
-      const u = getCurrentUser();
-      const val = parseFloat(String(u?.wallet_balance ?? u?.walletBalance ?? 0));
-      return isNaN(val) ? 0 : val;
-    } catch (_) { return 0; }
-  });
-  const [walletCurrency, setWalletCurrency] = useState<string>('USD');
-  const [walletSymbol, setWalletSymbol] = useState<string>('$');
-
-  // Synchronized In-App Notifications State
-  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
-  const [unreadCount, setUnreadCount] = useState<number>(0);
-  const [showNotifications, setShowNotifications] = useState<boolean>(false);
-  const [showNotificationsMobile, setShowNotificationsMobile] = useState<boolean>(false);
-  const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
-
-  // Collapsible Navigation Sections (Create, Manage, Plan, Admin Access)
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+  // Accordion Sections State
+  const [openSections, setOpenSections] = useState<{
+    create: boolean;
+    manage: boolean;
+    plan: boolean;
+    finance: boolean;
+    admin: boolean;
+  }>({
     create: true,
     manage: true,
     plan: true,
-    admin: true
+    finance: true,
+    admin: false,
   });
 
-  const saveSectionsToPostgres = useCallback(async (nextSections: Record<string, boolean>, targetUser?: any) => {
-    try {
-      const activeUser = targetUser || user || getCurrentUser();
-      const userEmail = activeUser?.email;
-      if (!userEmail) return;
+  // Dropdown States
+  const [walletDropdownOpen, setWalletDropdownOpen] = useState<boolean>(false);
+  const [notifDropdownOpen, setNotifDropdownOpen] = useState<boolean>(false);
+  const [langDropdownOpen, setLangDropdownOpen] = useState<boolean>(false);
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState<boolean>(false);
 
-      await fetch('/api/user/sidebar-settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: userEmail,
-          sections: nextSections
-        })
-      });
-    } catch (_) {}
-  }, [user]);
+  // Live Balances & Telemetry
+  const [tokenBalance, setTokenBalance] = useState<number>(50);
+  const [walletBalance, setWalletBalance] = useState<number>(0.00);
+  const [currencySymbol, setCurrencySymbol] = useState<string>('$');
+  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
 
-  const loadSectionsFromPostgres = useCallback(async (targetUser?: any) => {
-    try {
-      const activeUser = targetUser || user || getCurrentUser();
-      const userEmail = activeUser?.email;
-      if (!userEmail) return;
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-      const res = await fetch(`/api/user/sidebar-settings?email=${encodeURIComponent(userEmail)}&t=${Date.now()}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.sections && typeof data.sections === 'object') {
-          setOpenSections(prev => {
-            const merged = { ...prev, ...data.sections };
-            if (typeof window !== 'undefined') {
-              try {
-                localStorage.setItem('zecratary_sidebar_sections', JSON.stringify(merged));
-              } catch (_) {}
-            }
-            return merged;
-          });
-        }
-      }
-    } catch (_) {}
-  }, [user]);
+  // Route Suppression Checks
+  const isAuthRoute = Boolean(
+    pathname === '/login' ||
+    pathname === '/register' ||
+    pathname === '/forgot-password' ||
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/register') ||
+    pathname.startsWith('/forgot-password')
+  );
 
-  const toggleSection = (sectionKey: string) => {
-    setOpenSections(prev => {
-      const next = { ...prev, [sectionKey]: !prev[sectionKey] };
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('zecratary_sidebar_sections', JSON.stringify(next));
-        } catch (_) {}
-      }
-      saveSectionsToPostgres(next);
-      return next;
-    });
-  };
+  const isHomePage = Boolean(
+    pathname === '/' ||
+    pathname === '' ||
+    pathname === '/index'
+  );
 
-  const notifConfigRef = useRef<{ soundEnabled: boolean; quietHoursEnabled: boolean; quietHoursStart: string; quietHoursEnd: string }>({
-    soundEnabled: true,
-    quietHoursEnabled: false,
-    quietHoursStart: '22:00',
-    quietHoursEnd: '07:00'
-  });
-
-  // Dropdown click-outside refs
-  const profileDropdownRef = useRef<HTMLDivElement>(null);
-  const notifDropdownRef = useRef<HTMLDivElement>(null);
-  const notifMobileDropdownRef = useRef<HTMLDivElement>(null);
-
-  const [availableLanguages, setAvailableLanguages] = useState<{ code: string; name: string; flag: string }[]>([
-    { code: 'en', name: 'English', flag: '🇺🇸' },
-    { code: 'es', name: 'Español', flag: '🇪🇸' },
-    { code: 'fr', name: 'Français', flag: '🇫🇷' },
-    { code: 'th', name: 'ไทย', flag: '🇹🇭' },
-  ]);
-
-  const loadLanguagesFromAdmin = () => {
-    try {
-      const raw = localStorage.getItem('zecratary_languages');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const activeOnly = parsed
-            .filter((item: any) => item.status === 'active')
-            .map((item: any) => ({
-              code: item.code,
-              name: item.nativeName || item.name,
-              flag: item.flag || getLanguageFlag(item.code)
-            }));
-          if (activeOnly.length > 0) {
-            setAvailableLanguages(activeOnly);
-          }
-        }
-      }
-    } catch (_) {}
-  };
-
-  // Fetch Notifications
-  const fetchNotifications = useCallback(async (currentUser?: any) => {
-    try {
-      let activeUser = currentUser || user;
-      if (!activeUser && typeof window !== 'undefined') {
-        try {
-          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user');
-          if (raw) activeUser = JSON.parse(raw);
-        } catch (_) {}
-        if (!activeUser) activeUser = getCurrentUser();
-      }
-
-      const userEmail = activeUser?.email || 'admin@zecratary.com';
-      const userId = activeUser?.id || '';
-
-      const res = await fetch(`/api/notifications?email=${encodeURIComponent(userEmail)}&userId=${encodeURIComponent(userId)}&t=${Date.now()}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          if (Array.isArray(data.notifications)) {
-            setNotifications(data.notifications);
-          }
-          if (typeof data.unreadCount === 'number') {
-            setUnreadCount(data.unreadCount);
-          }
-          if (data.settings) {
-            notifConfigRef.current = {
-              soundEnabled: Boolean(data.settings.soundEnabled ?? true),
-              quietHoursEnabled: Boolean(data.settings.quietHoursEnabled ?? false),
-              quietHoursStart: data.settings.quietHoursStart || '22:00',
-              quietHoursEnd: data.settings.quietHoursEnd || '07:00'
-            };
-          }
-        }
-      }
-    } catch (_) {}
-  }, [user]);
-
-  const handleMarkAsRead = async (notifId: string) => {
-    setNotifications(prev => prev.map(n => n.id === notifId ? { ...n, isRead: true } : n));
-    setUnreadCount(prev => Math.max(0, prev - 1));
-
-    try {
-      const activeUser = getCurrentUser() || user;
-      const userEmail = activeUser?.email || 'admin@zecratary.com';
-      await fetch('/api/notifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'mark_read',
-          email: userEmail,
-          notificationId: notifId
-        })
-      });
-    } catch (_) {}
-  };
-
-  const handleMarkAllRead = async () => {
-    setUnreadCount(0);
-    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-
-    try {
-      const activeUser = getCurrentUser() || user;
-      const userEmail = activeUser?.email || 'admin@zecratary.com';
-      await fetch('/api/notifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'mark_all_read',
-          email: userEmail,
-          notificationIds: notifications.map(n => n.id)
-        })
-      });
-    } catch (_) {}
-  };
-
-  // Fetch Token Settings & Balances
-  const fetchUserTokenAndNotifications = useCallback(async (currentUser?: any) => {
-    try {
-      let cfgRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
-      if (!cfgRes.ok) {
-        cfgRes = await fetch('/api/admin/token-settings', { cache: 'no-store' });
-      }
-      if (cfgRes.ok) {
-        const cfgData = await cfgRes.json();
-        const cfg = cfgData.settings || cfgData.config || cfgData;
-        if (cfg?.tokenSymbol) {
-          setTokenSymbol(cfg.tokenSymbol);
-        }
-      }
-
-      let activeUser = currentUser || user;
-      if (!activeUser && typeof window !== 'undefined') {
-        try {
-          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user');
-          if (raw) activeUser = JSON.parse(raw);
-        } catch (_) {}
-        if (!activeUser) activeUser = getCurrentUser();
-      }
-
-      const userEmail = activeUser?.email || 'admin@zecratary.com';
-      const userId = activeUser?.id || '';
-
-      const queryParam = userId 
-        ? `?userId=${encodeURIComponent(userId)}&email=${encodeURIComponent(userEmail)}`
-        : `?email=${encodeURIComponent(userEmail)}`;
-      
-      const tokenRes = await fetch(`/api/tokens${queryParam}&t=${Date.now()}`, { cache: 'no-store' });
-      if (tokenRes.ok) {
-        const tokenData = await tokenRes.json();
-        if (tokenData.success) {
-          const bal = typeof tokenData.balance === 'number'
-            ? tokenData.balance
-            : typeof tokenData.tokenBalance === 'number'
-            ? tokenData.tokenBalance
-            : null;
-
-          if (bal !== null) {
-            setTokenBalance(bal);
-            if (typeof window !== 'undefined') {
-              try {
-                const raw = localStorage.getItem('zecratary_user');
-                if (raw) {
-                  const u = JSON.parse(raw);
-                  u.token_balance = bal;
-                  u.tokenBalance = bal;
-                  localStorage.setItem('zecratary_user', JSON.stringify(u));
-                }
-              } catch (_) {}
-            }
-          }
-          if (typeof tokenData.walletBalance === 'number') {
-            setWalletBalance(tokenData.walletBalance);
-          }
-          if (tokenData.tokenSymbol) setTokenSymbol(tokenData.tokenSymbol);
-        }
-      }
-    } catch (_) {}
-  }, [user]);
-
-  // Fetch Wallet Data
-  const fetchWalletData = useCallback(async (currentUser?: any) => {
-    try {
-      let activeUser = currentUser || user;
-      if (!activeUser && typeof window !== 'undefined') {
-        try {
-          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser') || localStorage.getItem('zecratary_current_user');
-          if (raw) activeUser = JSON.parse(raw);
-        } catch (_) {}
-        if (!activeUser) activeUser = getCurrentUser();
-      }
-
-      const userEmail = activeUser?.email || '';
-      const userId = String(activeUser?.id || '');
-
-      const params = new URLSearchParams({
-        email: userEmail,
-        userId: userId,
-        t: String(Date.now())
-      });
-
-      const res = await fetch(`/api/wallet?${params.toString()}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          const rawBal = data.wallet_balance ?? data.walletBalance ?? data.balance ?? data.user?.wallet_balance;
-          if (rawBal !== undefined && rawBal !== null) {
-            const wBal = parseFloat(String(rawBal));
-            if (!isNaN(wBal)) {
-              setWalletBalance(wBal);
-              if (typeof window !== 'undefined') {
-                try {
-                  const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
-                  if (raw) {
-                    const u = JSON.parse(raw);
-                    u.wallet_balance = wBal;
-                    u.walletBalance = wBal;
-                    localStorage.setItem('zecratary_user', JSON.stringify(u));
-                  }
-                } catch (_) {}
-              }
-            }
-          }
-
-          const curr = data.currency || data.settings?.currency || 'USD';
-          setWalletCurrency(curr);
-          setWalletSymbol(CURRENCY_SYMBOLS[curr.toUpperCase()] || data.walletSymbol || '$');
-        }
-      }
-    } catch (_) {}
-  }, [user]);
-
+  // Layout Clearance Token Synchronization
   useEffect(() => {
-    setMounted(true);
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
 
-    if (typeof window !== 'undefined') {
-      try {
-        const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user');
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (typeof parsed.token_balance === 'number') setTokenBalance(parsed.token_balance);
-          else if (typeof parsed.tokenBalance === 'number') setTokenBalance(parsed.tokenBalance);
-          if (typeof parsed.wallet_balance === 'number') setWalletBalance(parsed.wallet_balance);
-        }
-      } catch (_) {}
-
-      // Load saved collapsible section preferences from cache first
-      try {
-        const savedSections = localStorage.getItem('zecratary_sidebar_sections');
-        if (savedSections) {
-          setOpenSections(prev => ({ ...prev, ...JSON.parse(savedSections) }));
-        }
-      } catch (_) {}
-    }
-
-    const currentUser = getCurrentUser();
-    setUser(currentUser);
-    const name = getSiteName();
-    const icon = getSiteIcon();
-    setSiteName(name);
-    setSiteIcon(icon);
-    updateFavicon(icon);
-    loadLanguagesFromAdmin();
-
-    fetchUserTokenAndNotifications(currentUser);
-    fetchWalletData(currentUser);
-    fetchNotifications(currentUser);
-    loadSectionsFromPostgres(currentUser);
-
-    const savedMode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-    if (savedMode) {
-      const isDark = savedMode === 'dark';
-      setIsDarkMode(isDark);
-      document.documentElement.classList.toggle('dark', isDark);
-    } else {
-      const hasDarkClass = document.documentElement.classList.contains('dark');
-      setIsDarkMode(hasDarkClass);
-    }
-
-    const initialWidth = window.innerWidth;
-    if (initialWidth >= 768 && initialWidth < 1024) {
-      setIsCollapsed(true);
-    } else {
-      setIsCollapsed(false);
-    }
-
-    let prevCategory: 'mobile' | 'tablet' | 'desktop' = 
-      initialWidth < 768 ? 'mobile' : initialWidth < 1024 ? 'tablet' : 'desktop';
-
-    const handleScreenResize = () => {
-      const width = window.innerWidth;
-      const currentCategory: 'mobile' | 'tablet' | 'desktop' = 
-        width < 768 ? 'mobile' : width < 1024 ? 'tablet' : 'desktop';
-
-      if (currentCategory !== prevCategory) {
-        if (currentCategory === 'tablet') setIsCollapsed(true);
-        else if (currentCategory === 'desktop') setIsCollapsed(false);
-        if (currentCategory !== 'mobile') {
-          setIsOpen(false);
-          setShowNotificationsMobile(false);
-        }
-        prevCategory = currentCategory;
+    const updateLayoutMetrics = () => {
+      if (isAuthRoute || isHomePage) {
+        root.style.setProperty('--sidebar-width', '0px');
+        root.style.setProperty('--topbar-height', '0px');
+        return;
+      }
+      if (window.innerWidth < 768) {
+        root.style.setProperty('--sidebar-width', '0px');
+        root.style.setProperty('--topbar-height', '3.5rem');
+      } else {
+        root.style.setProperty('--sidebar-width', isCollapsed ? '5rem' : '16rem');
+        root.style.setProperty('--topbar-height', '4rem');
       }
     };
 
-    window.addEventListener('resize', handleScreenResize);
+    updateLayoutMetrics();
+    window.addEventListener('resize', updateLayoutMetrics);
+    return () => window.removeEventListener('resize', updateLayoutMetrics);
+  }, [isAuthRoute, isHomePage, isCollapsed]);
 
-    const handleAuthChange = () => {
-      const updated = getCurrentUser();
-      setUser(updated);
-      fetchUserTokenAndNotifications(updated);
-      fetchWalletData(updated);
-      fetchNotifications(updated);
-      loadSectionsFromPostgres(updated);
-    };
-    const handleSiteSync = () => {
-      setSiteName(getSiteName());
-      setSiteIcon(getSiteIcon());
-      updateFavicon(getSiteIcon());
-    };
-    const handleLangSync = () => loadLanguagesFromAdmin();
-    const handleThemeModeSync = () => {
-      const isDark = localStorage.getItem('zecratary_theme_mode') !== 'light';
-      setIsDarkMode(isDark);
-    };
-    const handleTokenSync = () => {
+  const syncUserState = useCallback(() => {
+    try {
       const u = getCurrentUser();
-      fetchUserTokenAndNotifications(u);
-    };
-    const handleWalletSync = (e?: any) => {
-      if (e?.detail) {
-        const b = e.detail.wallet_balance ?? e.detail.walletBalance ?? e.detail.balance;
-        if (b !== undefined && b !== null) {
-          const parsed = parseFloat(String(b));
-          if (!isNaN(parsed)) setWalletBalance(parsed);
+      setCurrentUser(u);
+      if (typeof getSiteName === 'function') setSiteName(getSiteName());
+      if (typeof getSiteIcon === 'function') setSiteIcon(getSiteIcon());
+
+      if (typeof window !== 'undefined') {
+        const themeMode = localStorage.getItem('zecratary_theme_mode') || 'dark';
+        setIsDarkMode(themeMode === 'dark');
+
+        const cur = localStorage.getItem('zecratary_currency') || 'USD';
+        setCurrencySymbol(CURRENCY_SYMBOLS[cur] || '$');
+
+        const storedCollapsed = localStorage.getItem('zecratary_sidebar_collapsed');
+        if (storedCollapsed !== null) {
+          setIsCollapsed(storedCollapsed === 'true');
+        }
+
+        const storedSections = localStorage.getItem('zecratary_sidebar_sections');
+        if (storedSections) {
+          try {
+            setOpenSections(prev => ({ ...prev, ...JSON.parse(storedSections) }));
+          } catch (_) {}
+        }
+
+        if (u) {
+          const storedTokens = localStorage.getItem(`zecratary_tokens_${u.id}`);
+          if (storedTokens !== null) setTokenBalance(Number(storedTokens) || 50);
+
+          const storedWallet = localStorage.getItem(`zecratary_wallet_${u.id}`);
+          if (storedWallet !== null) setWalletBalance(Number(storedWallet) || 0.00);
         }
       }
-      const u = getCurrentUser();
-      fetchWalletData(u);
-    };
+    } catch (_) {}
+  }, []);
 
-    const handleNewNotification = (e: any) => {
-      const detail = e.detail;
-      if (!detail) return;
-
-      const newNotif: InAppNotification = {
-        id: detail.id || `notif_${Date.now()}`,
-        title: detail.title || 'System Notification',
-        message: detail.message || '',
-        type: detail.type || 'info',
-        isRead: false,
-        actionUrl: detail.actionUrl,
-        actionLabel: detail.actionLabel,
-        timestamp: detail.timestamp || new Date().toISOString()
-      };
-
-      setNotifications(prev => [newNotif, ...prev.filter(n => n.id !== newNotif.id)]);
-      setUnreadCount(prev => prev + 1);
-
-      const cfg = notifConfigRef.current;
-      if (cfg.soundEnabled && !isQuietHours(cfg.quietHoursStart, cfg.quietHoursEnd)) {
-        playNotificationChime();
-      }
-
-      fetchNotifications();
-    };
-
-    const handleNotifSettingsUpdated = () => {
-      fetchNotifications();
-    };
-
-    const handleClickOutside = (e: MouseEvent) => {
-      if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target as Node)) {
-        setShowProfileMenu(false);
-      }
-      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target as Node)) {
-        setShowNotifications(false);
-      }
-      if (notifMobileDropdownRef.current && !notifMobileDropdownRef.current.contains(e.target as Node)) {
-        setShowNotificationsMobile(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    window.addEventListener('zecratary_auth_changed', handleAuthChange);
-    window.addEventListener('zecratary_site_settings_changed', handleSiteSync);
-    window.addEventListener('zecratary_languages_updated', handleLangSync);
-    window.addEventListener('zecratary_theme_mode_changed', handleThemeModeSync);
-    window.addEventListener('zecratary_theme_changed', handleThemeModeSync);
-    window.addEventListener('zecratary_token_settings_updated', handleTokenSync);
-    window.addEventListener('zecratary_tokens_updated', handleTokenSync);
-    window.addEventListener('zecratary_wallet_updated', handleWalletSync);
-    window.addEventListener('focus', () => fetchWalletData());
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') fetchWalletData();
-    });
-    let balanceChannel: BroadcastChannel | null = null;
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      try {
-        balanceChannel = new BroadcastChannel('zecratary_balance_channel');
-        balanceChannel.onmessage = (msg) => {
-          if (msg.data?.wallet_balance !== undefined) {
-            setWalletBalance(parseFloat(String(msg.data.wallet_balance)));
-          }
-        };
-      } catch (_) {}
-    }
-    window.addEventListener('zecratary_wallet_settings_updated', handleWalletSync);
-    window.addEventListener('zecratary_new_notification', handleNewNotification);
-    window.addEventListener('zecratary_notification_settings_updated', handleNotifSettingsUpdated);
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      window.removeEventListener('resize', handleScreenResize);
-      window.removeEventListener('zecratary_auth_changed', handleAuthChange);
-      window.removeEventListener('zecratary_site_settings_changed', handleSiteSync);
-      window.removeEventListener('zecratary_languages_updated', handleLangSync);
-      window.removeEventListener('zecratary_theme_mode_changed', handleThemeModeSync);
-      window.removeEventListener('zecratary_theme_changed', handleThemeModeSync);
-      window.removeEventListener('zecratary_token_settings_updated', handleTokenSync);
-      window.removeEventListener('zecratary_tokens_updated', handleTokenSync);
-      window.removeEventListener('zecratary_wallet_updated', handleWalletSync);
-      window.removeEventListener('zecratary_wallet_settings_updated', handleWalletSync);
-      window.removeEventListener('zecratary_new_notification', handleNewNotification);
-      window.removeEventListener('zecratary_notification_settings_updated', handleNotifSettingsUpdated);
-    };
-  }, [fetchUserTokenAndNotifications, fetchWalletData, fetchNotifications, loadSectionsFromPostgres]);
-
-  // Route-Aware Auto-Expansion: Automatically expand the section that contains the active route
+  // Route-Aware Auto-Expansion
   useEffect(() => {
     if (!pathname) return;
-
     if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
       setOpenSections(prev => prev.create ? prev : { ...prev, create: true });
     } else if (['/saved', '/books', '/pantry'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
       setOpenSections(prev => prev.manage ? prev : { ...prev, manage: true });
     } else if (['/shopping', '/planner', '/templates'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
       setOpenSections(prev => prev.plan ? prev : { ...prev, plan: true });
+    } else if (['/token', '/wallet', '/subscriptions', '/billing'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+      setOpenSections(prev => prev.finance ? prev : { ...prev, finance: true });
     } else if (pathname.startsWith('/admin')) {
       setOpenSections(prev => prev.admin ? prev : { ...prev, admin: true });
     }
   }, [pathname]);
 
-  const toggleThemeMode = () => {
+  useEffect(() => {
+    setMounted(true);
+    syncUserState();
+
+    const handleSync = () => syncUserState();
+    window.addEventListener('storage', handleSync);
+    window.addEventListener('zecratary_auth_changed', handleSync);
+    window.addEventListener('zecratary_site_settings_changed', handleSync);
+    window.addEventListener('zecratary_theme_mode_changed', handleSync);
+    window.addEventListener('zecratary_wallet_updated', handleSync);
+    window.addEventListener('zecratary_tokens_updated', handleSync);
+
+    return () => {
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('zecratary_auth_changed', handleSync);
+      window.removeEventListener('zecratary_site_settings_changed', handleSync);
+      window.removeEventListener('zecratary_theme_mode_changed', handleSync);
+      window.removeEventListener('zecratary_wallet_updated', handleSync);
+      window.removeEventListener('zecratary_tokens_updated', handleSync);
+    };
+  }, [syncUserState]);
+
+  // Click outside listener for dropdowns
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setWalletDropdownOpen(false);
+        setNotifDropdownOpen(false);
+        setLangDropdownOpen(false);
+        setProfileDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const toggleCollapse = () => {
+    setIsCollapsed(prev => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('zecratary_sidebar_collapsed', next ? 'true' : 'false');
+        } catch (_) {}
+      }
+      return next;
+    });
+  };
+
+  const toggleSection = (sectionKey: keyof typeof openSections) => {
+    setOpenSections(prev => {
+      const next = { ...prev, [sectionKey]: !prev[sectionKey] };
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('zecratary_sidebar_sections', JSON.stringify(next));
+          fetch('/api/user/sidebar-settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sections: next }),
+          }).catch(() => {});
+        } catch (_) {}
+      }
+      return next;
+    });
+  };
+
+  const toggleTheme = () => {
     const nextMode = !isDarkMode;
     setIsDarkMode(nextMode);
-    if (typeof document !== 'undefined') {
-      document.documentElement.classList.toggle('dark', nextMode);
-      localStorage.setItem('zecratary_theme_mode', nextMode ? 'dark' : 'light');
-      window.dispatchEvent(new Event('zecratary_theme_mode_changed'));
-      window.dispatchEvent(new Event('zecratary_theme_changed'));
+    if (typeof window !== 'undefined') {
+      const modeStr = nextMode ? 'dark' : 'light';
+      localStorage.setItem('zecratary_theme_mode', modeStr);
+      if (nextMode) {
+        document.documentElement.classList.add('dark');
+        document.documentElement.classList.remove('light');
+      } else {
+        document.documentElement.classList.remove('dark');
+        document.documentElement.classList.add('light');
+      }
+      window.dispatchEvent(new CustomEvent('zecratary_theme_mode_changed', { detail: { mode: modeStr } }));
     }
   };
 
-  useEffect(() => {
-    setIsOpen(false);
-    setShowProfileMenu(false);
-    setShowNotifications(false);
-    setShowNotificationsMobile(false);
-  }, [pathname]);
+  if (!mounted || isAuthRoute || isHomePage) {
+    return null;
+  }
 
-  const isAdmin = user && (
-    user.role === 'admin' || 
-    user.email === 'admin@foodieprep.com' || 
-    user.email?.includes('admin')
+  const isAdmin = Boolean(
+    currentUser?.role === 'admin' ||
+    currentUser?.email === 'admin@zecratary.com' ||
+    currentUser?.email?.includes('admin')
   );
 
-  const isActive = (href: string) => {
-    if (href === '/dashboard') return pathname === '/dashboard' || pathname === '/';
-    if (href === '/admin') return pathname === '/admin';
-    if (href === '/chef') return pathname === '/chef';
-    return pathname === href || pathname.startsWith(`${href}/`);
+  // ACCURATE ROUTE MATCHER: Eliminates dual-highlighting between /admin and /admin/*
+  const isRouteActive = (route: string): boolean => {
+    if (!pathname) return false;
+    const cleanPath = pathname === '/' ? '/' : pathname.replace(/\/+$/, '');
+    const cleanRoute = route === '/' ? '/' : route.replace(/\/+$/, '');
+
+    // Root and Admin Overview require exact match so child modules don't activate them
+    if (cleanRoute === '/' || cleanRoute === '/admin') {
+      return cleanPath === cleanRoute;
+    }
+
+    // Sibling routes require exact match or explicit sub-path boundary ('/route/...')
+    return cleanPath === cleanRoute || cleanPath.startsWith(`${cleanRoute}/`);
   };
 
-  const showCollapsed = isCollapsed && !isOpen;
-
-  const navClass = (href: string) => `
-    w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition-colors duration-150 select-none
-    ${isActive(href)
-      ? isDarkMode
-        ? 'bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/30 shadow-md font-bold'
-        : 'bg-[var(--color-primary)]/10 text-slate-900 border border-[var(--color-primary)]/40 shadow-sm font-bold'
-      : isDarkMode
-        ? 'text-slate-300 hover:text-white hover:bg-[#141b2d]/50'
-        : 'text-slate-800 hover:text-slate-950 hover:bg-slate-200/80 font-bold'
-    }
-  `;
-
-  const getNotifIcon = (type: InAppNotification['type']) => {
-    switch (type) {
-      case 'urgent':
-        return <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />;
-      case 'warning':
-        return <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />;
-      case 'promo':
-        return <Sparkles className="h-4 w-4 text-purple-400 shrink-0" />;
-      case 'success':
-        return <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />;
-      default:
-        return <Bell className="h-4 w-4 text-blue-400 shrink-0" />;
-    }
+  const navClass = (route: string) => {
+    const active = isRouteActive(route);
+    return `flex items-center gap-3 px-3 py-2 rounded-xl font-bold text-xs transition duration-200 cursor-pointer ${
+      active
+        ? 'text-white shadow-xs'
+        : 'hover:text-white hover:bg-slate-800/30'
+    }`;
   };
 
-  const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
-  const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
-  const iconStyle = { color: 'var(--color-sidebar-icon, var(--color-primary))' };
-
-  const renderNotificationsList = (onItemClick?: () => void) => {
-    return (
-      <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-        {notifications.length === 0 ? (
-          <div className="p-6 text-center text-xs space-y-1 opacity-75">
-            <Bell className="h-6 w-6 mx-auto opacity-40 text-amber-500 mb-1" />
-            <p className="font-bold">{t('allCaughtUp', "You're all caught up!")}</p>
-            <p className="text-[11px] opacity-70">{t('noNewNotifs', 'No notifications at this time.')}</p>
-          </div>
-        ) : (
-          notifications.map((item) => (
-            <div
-              key={item.id}
-              onClick={() => {
-                if (!item.isRead) handleMarkAsRead(item.id);
-              }}
-              className={`p-3 rounded-2xl border transition flex items-start gap-2.5 cursor-pointer relative ${
-                !item.isRead ? 'border-[var(--color-primary)]/40 shadow-xs' : 'opacity-80'
-              }`}
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: !item.isRead ? 'rgba(224, 86, 56, 0.35)' : 'var(--color-border)' }}
-            >
-              <div className="pt-0.5">{getNotifIcon(item.type)}</div>
-              <div className="min-w-0 flex-1 space-y-1">
-                <div className="flex items-center justify-between gap-1.5">
-                  <span className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
-                    {item.title}
-                  </span>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="text-[10px] opacity-60 font-mono">
-                      {formatNotificationTime(item.timestamp)}
-                    </span>
-                    {!item.isRead && (
-                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: 'var(--color-primary)' }} />
-                    )}
-                  </div>
-                </div>
-
-                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                  {item.message}
-                </p>
-
-                {item.actionUrl && (
-                  <div className="pt-1">
-                    <Link
-                      href={item.actionUrl}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleMarkAsRead(item.id);
-                        if (onItemClick) onItemClick();
-                      }}
-                      className="inline-flex items-center gap-1 text-[10px] font-bold underline hover:opacity-80"
-                      style={{ color: 'var(--color-primary)' }}
-                    >
-                      <span>{item.actionLabel || t('viewDetails', 'View Details')}</span>
-                      <ExternalLink className="h-2.5 w-2.5" />
-                    </Link>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    );
+  const navStyle = (route: string) => {
+    const active = isRouteActive(route);
+    return active
+      ? { backgroundColor: 'var(--color-primary)', color: '#ffffff' }
+      : { color: 'var(--color-text-secondary)', backgroundColor: 'transparent' };
   };
 
   return (
     <>
-      {/* MOBILE TOP BAR */}
-      <header className="md:hidden sticky top-0 z-40 bg-[var(--color-card)] border-b border-[var(--color-border)] px-4 py-3 flex items-center justify-between w-full">
-        <Link href="/dashboard" className="flex items-center gap-2">
-          {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
-          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[100px]">
-            {displayName}
-          </span>
-        </Link>
+      {/* DESKTOP TOP BAR */}
+      <header
+        id="zecratary-desktop-topbar"
+        className="hidden md:flex fixed top-0 left-0 right-0 h-16 border-b z-40 items-center justify-between px-6 transition-colors duration-200"
+        style={{
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)',
+          color: 'var(--color-text)'
+        }}
+        ref={dropdownRef}
+      >
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={toggleCollapse}
+            className="p-1.5 rounded-lg border hover:bg-slate-800/20 cursor-pointer transition mr-1"
+            style={{ borderColor: 'var(--color-border)' }}
+            title={isCollapsed ? t('expandSidebar', 'Expand Menu') : t('collapseSidebar', 'Collapse Menu')}
+          >
+            <Menu className="h-4 w-4" />
+          </button>
+          <Link href="/dashboard" className="flex items-center gap-2.5 font-black text-lg text-[var(--color-primary)]">
+            {isImageIcon(siteIcon) ? (
+              <img src={siteIcon} alt="Logo" className="w-7 h-7 rounded-lg object-contain" />
+            ) : (
+              <span className="text-2xl">{siteIcon || '🍳'}</span>
+            )}
+            <span>{siteName || 'Zecratary'}</span>
+          </Link>
+        </div>
 
-        <div className="flex items-center gap-1.5">
-          {/* Mobile Wallet Balance & Top Up Link Button */}
-          <div className="flex items-center rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/50">
-            <Link
-              href="/wallet"
-              className="flex items-center gap-1 px-2 py-1 text-[11px] font-mono font-bold"
-              title={t('wallet') || 'Wallet'}
-            >
-              <Wallet className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-              <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
-                {walletSymbol}{mounted ? Number(walletBalance || 0).toFixed(2) : '0.00'}
-              </span>
-            </Link>
-            <Link
-              href="/wallet"
-              className="p-1 px-1.5 rounded-lg bg-[var(--color-primary)] text-white text-[10px] font-sans font-black flex items-center justify-center hover:brightness-110 active:scale-95 transition"
-              title={t('topUpWallet') || 'Top Up Wallet'}
-              aria-label="Top Up Wallet"
-            >
-              <Plus className="h-2.5 w-2.5 stroke-[3]" />
-            </Link>
-          </div>
-
-          {/* Mobile Token Balance & Top Up Link Button */}
-          <div className="flex items-center rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/50">
-            <Link
-              href="/token"
-              className="flex items-center gap-1 px-2 py-1 text-[11px] font-mono font-bold"
-              title={t('token') || 'Token'}
-            >
-              <Coins className="h-3.5 w-3.5 text-amber-500" />
-              <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
-                {mounted ? tokenBalance.toLocaleString() : '0'}
-              </span>
-            </Link>
-            <Link
-              href="/token"
-              className="p-1 px-1.5 rounded-lg bg-[var(--color-primary)] text-white text-[10px] font-sans font-black flex items-center justify-center hover:brightness-110 active:scale-95 transition"
-              title={t('topUpTokens') || 'Top Up Tokens'}
-              aria-label="Top Up Tokens"
-            >
-              <Plus className="h-2.5 w-2.5 stroke-[3]" />
-            </Link>
-          </div>
-
-          {/* Mobile Notifications Bell & Drawer */}
-          <div className="relative" ref={notifMobileDropdownRef}>
+        {/* TOP CONTROLS */}
+        <div className="flex items-center gap-3">
+          {/* WALLET / TOKEN BADGE */}
+          <div className="relative">
             <button
               type="button"
               onClick={() => {
-                setShowNotificationsMobile(!showNotificationsMobile);
-                setShowProfileMenu(false);
+                setWalletDropdownOpen(!walletDropdownOpen);
+                setNotifDropdownOpen(false);
+                setLangDropdownOpen(false);
+                setProfileDropdownOpen(false);
               }}
-              className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
-              aria-label="Notifications"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs cursor-pointer"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
             >
-              <Bell className="h-4 w-4" style={iconStyle} />
-              {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md">
-                  {unreadCount > 9 ? '9+' : unreadCount}
-                </span>
-              )}
+              <Coins className="h-3.5 w-3.5 text-amber-400" />
+              <span>{tokenBalance.toLocaleString()}</span>
+              <span className="opacity-40">|</span>
+              <Wallet className="h-3.5 w-3.5 text-emerald-400" />
+              <span>{currencySymbol}{walletBalance.toFixed(2)}</span>
+              <ChevronDown className="h-3 w-3 opacity-60" />
             </button>
 
-            {showNotificationsMobile && (
-              <div 
-                className="fixed inset-x-3 top-16 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in max-h-[82vh] overflow-y-auto"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            {walletDropdownOpen && (
+              <div
+                className="absolute right-0 mt-2 w-64 border rounded-2xl p-3 shadow-xl z-50 space-y-2 text-xs"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
               >
-                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2">
-                    <BellRing className="h-4 w-4 text-amber-500" />
-                    <div>
-                      <h3 className="text-xs font-black uppercase tracking-wider">{t('notifications', 'Notifications')}</h3>
-                      <p className="text-[10px] opacity-70">
-                        {unreadCount > 0 ? `${unreadCount} ${t('unreadAlerts', 'unread alert(s)')}` : t('allRead', 'All notifications read')}
-                      </p>
-                    </div>
+                <div className="font-extrabold text-[11px] uppercase tracking-wider text-[var(--color-primary)] px-1">
+                  {t('tokenAndWallet', 'Token & Wallet Balance')}
+                </div>
+                <div className="p-2.5 rounded-xl border space-y-1" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">{t('availableTokens', 'Available Tokens')}:</span>
+                    <span className="font-bold text-amber-400">{tokenBalance.toLocaleString()}</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {unreadCount > 0 && (
-                      <button 
-                        type="button"
-                        onClick={handleMarkAllRead}
-                        className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
-                      >
-                        {t('markAllRead', 'Mark all read')}
-                      </button>
-                    )}
-                    <button 
-                      type="button"
-                      onClick={() => setShowNotificationsMobile(false)}
-                      className="p-1 rounded-lg border border-[var(--color-border)] cursor-pointer"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
+                  <div className="flex justify-between items-center">
+                    <span className="text-muted-foreground">{t('walletCredits', 'Wallet Credits')}:</span>
+                    <span className="font-bold text-emerald-400">{currencySymbol}{walletBalance.toFixed(2)}</span>
                   </div>
                 </div>
-
-                {renderNotificationsList(() => setShowNotificationsMobile(false))}
+                <Link
+                  href="/wallet"
+                  onClick={() => setWalletDropdownOpen(false)}
+                  className="block w-full py-2 text-center rounded-xl text-white font-bold text-xs transition shadow-xs"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                >
+                  {t('manageWallet', 'Top Up & Wallet Portal')}
+                </Link>
+                <Link
+                  href="/token"
+                  onClick={() => setWalletDropdownOpen(false)}
+                  className="block w-full py-2 text-center rounded-xl font-bold text-xs transition border"
+                  style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)' }}
+                >
+                  {t('manageTokens', 'Token Bundles & Quotas')}
+                </Link>
               </div>
             )}
           </div>
 
-          {/* Profile Button */}
-          <div className="relative" ref={profileDropdownRef}>
+          {/* NOTIFICATION BELL */}
+          <div className="relative">
             <button
               type="button"
               onClick={() => {
-                setShowProfileMenu(!showProfileMenu);
-                setShowNotificationsMobile(false);
+                setNotifDropdownOpen(!notifDropdownOpen);
+                setWalletDropdownOpen(false);
+                setLangDropdownOpen(false);
+                setProfileDropdownOpen(false);
               }}
-              className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer flex items-center justify-center"
-              aria-label="User Profile"
+              className="p-2 rounded-xl border transition cursor-pointer shadow-xs relative"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+              title={t('notifications', 'Notifications')}
             >
-              <UserIcon className="h-4 w-4" style={iconStyle} />
+              <Bell className="h-4 w-4" />
+              {notifications.some(n => !n.isRead) && (
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-red-500" />
+              )}
             </button>
 
-            {showProfileMenu && (
-              <div 
-                className="absolute right-0 mt-2 w-64 rounded-2xl border p-2.5 space-y-2 shadow-2xl z-50 animate-in fade-in"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+            {notifDropdownOpen && (
+              <div
+                className="absolute right-0 mt-2 w-80 border rounded-2xl p-4 shadow-xl z-50 space-y-3 text-xs"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
               >
-                <div className="px-2 py-1 border-b border-[var(--color-border)] pb-2 flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
-                    <UserIcon className="w-3.5 h-3.5" style={iconStyle} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
-                      {user?.name || user?.email || 'User Account'}
-                    </p>
-                    <p className="text-[10px] opacity-60 truncate">{user?.email || 'Authenticated'}</p>
-                  </div>
+                <div className="flex items-center justify-between font-bold">
+                  <span>{t('notifications', 'Notifications')}</span>
+                  {isAdmin && (
+                    <Link
+                      href="/admin/notification-settings"
+                      onClick={() => setNotifDropdownOpen(false)}
+                      className="text-[10px] text-[var(--color-primary)] hover:underline"
+                    >
+                      {t('settings', 'Settings')}
+                    </Link>
+                  )}
                 </div>
+                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                  {notifications.length === 0 ? (
+                    <div className="text-center py-6 text-muted-foreground opacity-60 text-xs">
+                      {t('noNotifications', 'No unread notifications')}
+                    </div>
+                  ) : (
+                    notifications.map((n) => (
+                      <div
+                        key={n.id}
+                        className="p-2.5 rounded-xl border space-y-1"
+                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                      >
+                        <div className="font-bold text-xs">{n.title}</div>
+                        <div className="text-[11px] opacity-80">{n.message}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
 
-                <div className="px-2 py-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs font-bold">
-                    <Languages className="h-3.5 w-3.5" style={iconStyle} />
-                    <span>{t('language') || 'Language'}</span>
-                  </div>
-                  <select
-                    value={locale}
-                    onChange={(e) => setLocale(e.target.value)}
-                    className="bg-transparent text-xs font-bold outline-none cursor-pointer"
-                    style={{ color: 'var(--color-primary)' }}
+          {/* LANGUAGE PICKER */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setLangDropdownOpen(!langDropdownOpen);
+                setWalletDropdownOpen(false);
+                setNotifDropdownOpen(false);
+                setProfileDropdownOpen(false);
+              }}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs cursor-pointer"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+              title={t('selectLanguage', 'Select Language')}
+            >
+              <span className="text-sm">{getLanguageFlag(currentLanguage || 'en')}</span>
+              <span className="uppercase text-[11px] font-extrabold">{currentLanguage || 'EN'}</span>
+            </button>
+
+            {langDropdownOpen && (
+              <div
+                className="absolute right-0 mt-2 w-44 border rounded-2xl p-2 shadow-xl z-50 space-y-1 text-xs"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                {Object.keys(LANGUAGE_FLAG_MAP).map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => {
+                      if (typeof changeLanguage === 'function') changeLanguage(code);
+                      setLangDropdownOpen(false);
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg hover:bg-slate-800/40 text-xs font-semibold cursor-pointer transition"
                   >
-                    {availableLanguages.map((lang) => (
-                      <option key={lang.code} value={lang.code} className={isDarkMode ? 'bg-[#111726] text-white' : 'bg-white text-slate-900'}>
-                        {lang.flag} {lang.name}
-                      </option>
-                    ))}
-                  </select>
+                    <span className="flex items-center gap-2">
+                      <span>{LANGUAGE_FLAG_MAP[code]}</span>
+                      <span className="uppercase">{code}</span>
+                    </span>
+                    {currentLanguage === code && <Check className="h-3.5 w-3.5 text-emerald-400" />}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* THEME TOGGLE */}
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="p-2 rounded-xl border transition cursor-pointer shadow-xs"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+            title={isDarkMode ? t('switchToDayMode', 'Day Mode') : t('switchToDarkMode', 'Dark Mode')}
+          >
+            {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-300" />}
+          </button>
+
+          {/* USER PROFILE */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setProfileDropdownOpen(!profileDropdownOpen);
+                setWalletDropdownOpen(false);
+                setNotifDropdownOpen(false);
+                setLangDropdownOpen(false);
+              }}
+              className="flex items-center gap-2 p-1.5 pr-2.5 rounded-xl border transition cursor-pointer shadow-xs"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <div className="w-6 h-6 rounded-lg bg-[var(--color-primary)] text-white flex items-center justify-center font-black text-xs">
+                {currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
+              </div>
+              <span className="text-xs font-bold max-w-[80px] truncate">{currentUser?.name || 'Chef'}</span>
+              <ChevronDown className="h-3 w-3 opacity-60" />
+            </button>
+
+            {profileDropdownOpen && (
+              <div
+                className="absolute right-0 mt-2 w-48 border rounded-2xl p-2 shadow-xl z-50 space-y-1 text-xs"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <div className="px-3 py-1.5 border-b mb-1" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="font-bold truncate">{currentUser?.name || 'Chef'}</div>
+                  <div className="text-[10px] opacity-60 truncate">{currentUser?.email || ''}</div>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={toggleThemeMode}
-                  className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    {isDarkMode ? <Moon className="h-3.5 w-3.5" style={iconStyle} /> : <Sun className="h-3.5 w-3.5 text-amber-500" />}
-                    <span>{isDarkMode ? (t('nightMode') || 'Dark Mode') : (t('dayMode') || 'Light Mode')}</span>
-                  </div>
-                  <span className="text-[10px] opacity-60 font-mono">{isDarkMode ? 'Dark' : 'Day'}</span>
-                </button>
-
                 <Link
-                  href="/token"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
+                  href="/profile"
+                  onClick={() => setProfileDropdownOpen(false)}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800/40 font-bold transition"
                 >
-                  <Coins className="h-3.5 w-3.5 text-amber-500" />
-                  <span>{t('token') || 'Token'}</span>
+                  <UserIcon className="h-3.5 w-3.5" /> {t('profile', 'User Profile')}
                 </Link>
-
-                <Link
-                  href="/wallet"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                >
-                  <Wallet className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                  <span>{t('myWallet') || 'Store Wallet'}</span>
-                </Link>
-
                 <Link
                   href="/subscriptions"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
+                  onClick={() => setProfileDropdownOpen(false)}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800/40 font-bold transition"
                 >
-                  <Layers className="h-3.5 w-3.5" style={iconStyle} />
-                  <span>{t('subscriptions') || 'Subscriptions'}</span>
+                  <Layers className="h-3.5 w-3.5" /> {t('subscriptions', 'Subscriptions')}
                 </Link>
-
                 <Link
                   href="/billing"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
+                  onClick={() => setProfileDropdownOpen(false)}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-800/40 font-bold transition"
                 >
-                  <CreditCard className="h-3.5 w-3.5" style={iconStyle} />
-                  <span>{t('billing') || 'Billing'}</span>
+                  <Receipt className="h-3.5 w-3.5" /> {t('billing', 'Billing History')}
                 </Link>
-
-                <Link
-                  href="/contacts"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                >
-                  <Mail className="h-3.5 w-3.5" style={iconStyle} />
-                  <span>{t('contactUs') || 'Contact Us'}</span>
-                </Link>
-
                 <button
                   type="button"
                   onClick={() => {
-                    setShowProfileMenu(false);
-                    logoutUser('/');
+                    logoutUser();
+                    window.location.href = '/login';
                   }}
-                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 transition cursor-pointer border-t border-[var(--color-border)] pt-2"
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-red-400 hover:bg-red-500/10 font-bold transition text-left cursor-pointer"
                 >
-                  <LogOut className="h-3.5 w-3.5" />
-                  <span>{t('logout') || 'Logout'}</span>
+                  <LogOut className="h-3.5 w-3.5" /> {t('logOut', 'Log Out')}
                 </button>
               </div>
             )}
           </div>
-
-          <button
-            type="button"
-            onClick={() => setIsOpen(!isOpen)}
-            className={`p-2 rounded-xl border border-[var(--color-border)] transition cursor-pointer ${
-              isDarkMode ? 'bg-[#141b2d] text-slate-300 hover:text-white' : 'bg-slate-200 text-slate-800 hover:text-slate-950'
-            }`}
-            aria-label="Toggle navigation menu"
-          >
-            {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </button>
         </div>
       </header>
 
-      {/* DESKTOP TOP BAR */}
-      <div 
-        id="zecratary-desktop-topbar"
-        className={`hidden md:flex fixed top-0 right-0 z-30 h-16 bg-[var(--color-card)] border-b border-[var(--color-border)] px-6 items-center justify-between transition-all duration-300 ${
-          showCollapsed ? 'left-20' : 'left-64'
-        }`}
+      {/* MOBILE TOP BAR */}
+      <header
+        className="md:hidden fixed top-0 left-0 right-0 h-14 border-b z-40 flex items-center justify-between px-4 transition-colors duration-200"
         style={{
-          height: '4rem',
-          paddingTop: 0,
-          paddingBottom: 0,
-          boxSizing: 'border-box'
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)',
+          color: 'var(--color-text)'
         }}
       >
-        <div className="flex items-center gap-3">
-          <span className="text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-inner-dark)]" style={{ color: 'var(--color-primary)' }}>
-            {pathname === '/' ? 'Dashboard' : pathname.replace('/', '').toUpperCase()}
-          </span>
-        </div>
+        <Link href="/dashboard" className="flex items-center gap-2 font-black text-sm text-[var(--color-primary)]">
+          {isImageIcon(siteIcon) ? (
+            <img src={siteIcon} alt="Logo" className="w-6 h-6 rounded-md object-contain" />
+          ) : (
+            <span className="text-xl">{siteIcon || '🍳'}</span>
+          )}
+          <span>{siteName || 'Zecratary'}</span>
+        </Link>
 
-        <div className="flex items-center gap-3">
-          {/* WALLET BALANCE & DIRECT TOP UP BUTTON */}
-          <div className="flex items-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40">
-            <Link 
-              href="/wallet" 
-              className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
-              title={t('viewWalletBalance') || 'View Wallet Balance & History'}
-            >
-              <Wallet className="h-4 w-4 text-[var(--color-primary)] group-hover:scale-110 transition-transform" />
-              <span suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                {walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'}
-              </span>
-              <span className="text-[10px] font-bold opacity-60 font-mono">
-                {walletCurrency}
-              </span>
-            </Link>
+        <button
+          type="button"
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className="p-2 rounded-xl border cursor-pointer"
+          style={{
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: 'var(--color-border)'
+          }}
+        >
+          {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+        </button>
+      </header>
 
+      {/* DESKTOP SIDEBAR DRAWER WITH ACCORDION SECTIONS */}
+      <aside
+        className={`hidden md:flex flex-col fixed top-16 bottom-0 left-0 border-r z-30 transition-all duration-200 ${
+          isCollapsed ? 'w-20' : 'w-64'
+        }`}
+        style={{
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)'
+        }}
+      >
+        <div className="flex-1 overflow-y-auto p-3 space-y-4">
+          {/* DASHBOARD LINK */}
+          <div>
             <Link
-              href="/wallet"
-              className="flex items-center justify-center p-1.5 px-2 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
-              style={{ backgroundColor: 'var(--color-primary)' }}
-              title={t('topUpWallet') || 'Top Up Wallet Balance'}
-              aria-label="Top Up Wallet"
+              href="/dashboard"
+              className={navClass('/dashboard')}
+              style={navStyle('/dashboard')}
+              title={t('dashboard', 'Dashboard')}
             >
-              <Plus className="h-3.5 w-3.5 stroke-[3]" />
+              <LayoutDashboard className="h-4 w-4 shrink-0" />
+              {!isCollapsed && <span>{t('dashboard', 'Dashboard')}</span>}
             </Link>
           </div>
 
-          {/* TOKEN BALANCE & DIRECT TOP UP BUTTON */}
-          <div className="flex items-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40">
-            <Link 
-              href="/token" 
-              className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
-              title={t('viewTokenBalance') || 'View Token Balance & Summary'}
-            >
-              <Coins className="h-4 w-4 text-amber-500 group-hover:scale-110 transition-transform" />
-              <span suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                {mounted ? tokenBalance.toLocaleString() : '0'}
-              </span>
-              <span className="text-xs font-bold text-amber-500 font-mono">
-                {tokenSymbol}
-              </span>
-            </Link>
-
-            <Link
-              href="/token"
-              className="flex items-center justify-center p-1.5 px-2 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
-              style={{ backgroundColor: 'var(--color-primary)' }}
-              title={t('topUpTokens') || 'Top Up Tokens'}
-              aria-label="Top Up Tokens"
-            >
-              <Plus className="h-3.5 w-3.5 stroke-[3]" />
-            </Link>
-          </div>
-
-          {/* DYNAMIC DESKTOP NOTIFICATION BELL WIDGET */}
-          <div className="relative" ref={notifDropdownRef}>
-            <button
-              type="button"
-              onClick={() => {
-                setShowNotifications(!showNotifications);
-                setShowProfileMenu(false);
-              }}
-              className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
-              aria-label="Notifications"
-              title={t('notifications', 'Notifications')}
-            >
-              <Bell className="h-4 w-4" style={iconStyle} />
-              {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md animate-pulse">
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </span>
-              )}
-            </button>
-
-            {showNotifications && (
-              <div 
-                className="absolute right-0 mt-2 w-84 sm:w-96 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              >
-                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2">
-                    <BellRing className="h-4 w-4 text-amber-500" />
-                    <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                      {t('notifications', 'Notifications')}
-                    </h3>
-                    {unreadCount > 0 && (
-                      <span className="px-1.5 py-0.2 rounded-md bg-red-500/20 text-red-400 text-[10px] font-mono font-bold">
-                        {unreadCount} {t('new', 'new')}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {unreadCount > 0 && (
-                      <button 
-                        type="button"
-                        onClick={handleMarkAllRead}
-                        className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
-                      >
-                        {t('markAllRead', 'Mark all read')}
-                      </button>
-                    )}
-                    {isAdmin && (
-                      <Link
-                        href="/admin/notification-settings"
-                        onClick={() => setShowNotifications(false)}
-                        className="p-1 rounded-lg border hover:opacity-80 transition"
-                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
-                        title={t('notificationSettings', 'Notification Settings')}
-                      >
-                        <Settings className="h-3 w-3" />
-                      </Link>
-                    )}
-                  </div>
-                </div>
-
-                {renderNotificationsList(() => setShowNotifications(false))}
-              </div>
-            )}
-          </div>
-
-          {/* Profile Dropdown */}
-          <div className="relative" ref={profileDropdownRef}>
-            <button
-              type="button"
-              onClick={() => {
-                setShowProfileMenu(!showProfileMenu);
-                setShowNotifications(false);
-              }}
-              className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
-              aria-label="User Profile Dropdown"
-              title="Profile & Settings"
-            >
-              <UserIcon className="h-4 w-4" style={iconStyle} />
-            </button>
-
-            {showProfileMenu && (
-              <div 
-                className="absolute right-0 mt-2 w-72 rounded-2xl border p-3 space-y-2 shadow-2xl z-50 animate-in fade-in"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-              >
-                <Link
-                  href="/profile"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-3 p-2 rounded-xl hover:bg-[var(--color-inner-dark)] transition border-b border-[var(--color-border)] pb-3"
-                >
-                  <div className="w-8 h-8 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] flex items-center justify-center">
-                    <UserIcon className="w-4 h-4" style={iconStyle} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
-                      {user?.name || user?.email || 'User Account'}
-                    </p>
-                    <p className="text-[11px] opacity-60 truncate">
-                      {user?.email || t('viewProfile') || 'View Profile'}
-                    </p>
-                  </div>
-                </Link>
-
-                <div className="space-y-1 pt-1">
-                  <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-bold" style={{ color: 'var(--color-text)' }}>
-                      <Languages className="w-4 h-4" style={iconStyle} />
-                      <span>{t('language') || 'Language'}</span>
-                    </div>
-                    <select
-                      value={locale}
-                      onChange={(e) => setLocale(e.target.value)}
-                      className="bg-transparent text-xs font-bold outline-none cursor-pointer"
-                      style={{ color: 'var(--color-primary)' }}
-                    >
-                      {availableLanguages.map((lang) => (
-                        <option key={lang.code} value={lang.code} className={isDarkMode ? 'bg-[#111726] text-white' : 'bg-white text-slate-900'}>
-                          {lang.flag} {lang.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={toggleThemeMode}
-                    className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition cursor-pointer text-left"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      {isDarkMode ? <Moon className="h-4 w-4" style={iconStyle} /> : <Sun className="h-4 w-4 text-amber-500" />}
-                      <span>{isDarkMode ? (t('nightMode') || 'Dark Mode') : (t('dayMode') || 'Light Mode')}</span>
-                    </div>
-                    <span className="text-[10px] font-mono opacity-60 px-2 py-0.5 rounded-md border border-[var(--color-border)]">
-                      {isDarkMode ? 'Dark' : 'Day'}
-                    </span>
-                  </button>
-
-                  <Link
-                    href="/token"
-                    onClick={() => setShowProfileMenu(false)}
-                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <Coins className="h-4 w-4 text-amber-500" />
-                    <span>{t('token') || 'Token'}</span>
-                  </Link>
-
-                  <Link
-                    href="/wallet"
-                    onClick={() => setShowProfileMenu(false)}
-                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
-                    <span>{t('myWallet') || 'Store Wallet'}</span>
-                  </Link>
-
-                  <Link
-                    href="/subscriptions"
-                    onClick={() => setShowProfileMenu(false)}
-                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <Layers className="h-4 w-4" style={iconStyle} />
-                    <span>{t('subscriptions') || 'Subscriptions'}</span>
-                  </Link>
-
-                  <Link
-                    href="/billing"
-                    onClick={() => setShowProfileMenu(false)}
-                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <CreditCard className="h-4 w-4" style={iconStyle} />
-                    <span>{t('billing') || 'Billing'}</span>
-                  </Link>
-
-                  <Link
-                    href="/contacts"
-                    onClick={() => setShowProfileMenu(false)}
-                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <Mail className="h-4 w-4" style={iconStyle} />
-                    <span>{t('contactUs') || 'Contact Us'}</span>
-                  </Link>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowProfileMenu(false);
-                      logoutUser('/');
-                    }}
-                    className="w-full flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 transition cursor-pointer text-left border-t border-[var(--color-border)] mt-1.5 pt-2"
-                  >
-                    <LogOut className="h-4 w-4" />
-                    <span>{t('logout') || 'Logout'}</span>
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {isOpen && (
-        <div 
-          onClick={() => setIsOpen(false)} 
-          className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm md:hidden transition-opacity"
-        />
-      )}
-
-      {/* SIDEBAR CONTAINER */}
-      <aside className={`
-        fixed md:sticky top-0 left-0 z-50 h-screen bg-[var(--color-card)] border-r border-[var(--color-border)] 
-        flex flex-col justify-between shrink-0 select-none transition-all duration-300 ease-in-out
-        ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}
-        ${isOpen ? 'translate-x-0 w-64 p-5' : '-translate-x-full md:translate-x-0'}
-        ${!isOpen && showCollapsed ? 'md:w-20 p-3' : 'md:w-64 p-5'}
-      `}>
-        <div className="space-y-4 overflow-y-auto overflow-x-hidden pr-1">
-          {showCollapsed ? (
-            <div className="flex flex-col items-center gap-3 pb-2 border-b border-[var(--color-border)]">
+          {/* 1. CREATE ACCORDION GROUP */}
+          <div className="space-y-1">
+            {!isCollapsed ? (
               <button
                 type="button"
-                onClick={() => setIsCollapsed(false)}
-                className={`p-2 rounded-xl transition cursor-pointer ${
-                  isDarkMode ? 'text-slate-400 hover:text-white hover:bg-[#141b2d]' : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200'
-                }`}
-                title="Expand navigation"
+                onClick={() => toggleSection('create')}
+                className="w-full flex items-center justify-between px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground opacity-70 hover:opacity-100 transition cursor-pointer"
               >
-                <Menu className="h-5 w-5" />
+                <span>{t('createSection', 'Create')}</span>
+                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${openSections.create ? 'rotate-0' : '-rotate-90'}`} />
               </button>
-              <Link href="/dashboard" className="flex items-center justify-center p-1" title={displayName}>
-                {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
-              </Link>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between pb-2 border-b border-[var(--color-border)]">
-              <div className="flex items-center gap-2.5 min-w-0">
+            ) : (
+              <div className="h-px bg-slate-800/40 my-2" />
+            )}
+
+            {(openSections.create || isCollapsed) && (
+              <div className="space-y-0.5">
+                <Link href="/chef" className={navClass('/chef')} style={navStyle('/chef')} title={t('aiChef', 'AI Assistant')}>
+                  <MessageSquare className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('aiChef', 'AI Assistant')}</span>}
+                </Link>
+                <Link href="/manual" className={navClass('/manual')} style={navStyle('/manual')} title={t('manualEntry', 'Add Recipe')}>
+                  <SquarePen className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('manualEntry', 'Add Recipe')}</span>}
+                </Link>
+                <Link href="/import" className={navClass('/import')} style={navStyle('/import')} title={t('importRecipe', 'Import Recipe')}>
+                  <UploadCloud className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('importRecipe', 'Import Recipe')}</span>}
+                </Link>
+              </div>
+            )}
+          </div>
+
+          {/* 2. MANAGE ACCORDION GROUP */}
+          <div className="space-y-1">
+            {!isCollapsed ? (
+              <button
+                type="button"
+                onClick={() => toggleSection('manage')}
+                className="w-full flex items-center justify-between px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground opacity-70 hover:opacity-100 transition cursor-pointer"
+              >
+                <span>{t('manageSection', 'Manage')}</span>
+                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${openSections.manage ? 'rotate-0' : '-rotate-90'}`} />
+              </button>
+            ) : (
+              <div className="h-px bg-slate-800/40 my-2" />
+            )}
+
+            {(openSections.manage || isCollapsed) && (
+              <div className="space-y-0.5">
+                <Link href="/saved" className={navClass('/saved')} style={navStyle('/saved')} title={t('savedRecipes', 'Saved Recipes')}>
+                  <BookOpen className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('savedRecipes', 'Saved Recipes')}</span>}
+                </Link>
+                <Link href="/books" className={navClass('/books')} style={navStyle('/books')} title={t('cookbooks', 'Cookbooks')}>
+                  <Book className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('cookbooks', 'Cookbooks')}</span>}
+                </Link>
+                <Link href="/pantry" className={navClass('/pantry')} style={navStyle('/pantry')} title={t('pantryInventory', 'Pantry Inventory')}>
+                  <Package className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('pantryInventory', 'Pantry Inventory')}</span>}
+                </Link>
+              </div>
+            )}
+          </div>
+
+          {/* 3. PLAN ACCORDION GROUP */}
+          <div className="space-y-1">
+            {!isCollapsed ? (
+              <button
+                type="button"
+                onClick={() => toggleSection('plan')}
+                className="w-full flex items-center justify-between px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground opacity-70 hover:opacity-100 transition cursor-pointer"
+              >
+                <span>{t('planSection', 'Plan')}</span>
+                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${openSections.plan ? 'rotate-0' : '-rotate-90'}`} />
+              </button>
+            ) : (
+              <div className="h-px bg-slate-800/40 my-2" />
+            )}
+
+            {(openSections.plan || isCollapsed) && (
+              <div className="space-y-0.5">
+                <Link href="/planner" className={navClass('/planner')} style={navStyle('/planner')} title={t('mealPlanner', 'Meal Planner')}>
+                  <Calendar className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('mealPlanner', 'Meal Planner')}</span>}
+                </Link>
+                <Link href="/templates" className={navClass('/templates')} style={navStyle('/templates')} title={t('templates', 'Templates')}>
+                  <LayoutTemplate className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('templates', 'Meal Blueprints')}</span>}
+                </Link>
+                <Link href="/shopping" className={navClass('/shopping')} style={navStyle('/shopping')} title={t('shoppingList', 'Shopping List')}>
+                  <ShoppingCart className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('shoppingList', 'Shopping List')}</span>}
+                </Link>
+              </div>
+            )}
+          </div>
+
+          {/* 4. FINANCIAL & UTILITY GROUP */}
+          <div className="space-y-1">
+            {!isCollapsed ? (
+              <button
+                type="button"
+                onClick={() => toggleSection('finance')}
+                className="w-full flex items-center justify-between px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground opacity-70 hover:opacity-100 transition cursor-pointer"
+              >
+                <span>{t('financeSection', 'Finance & Hub')}</span>
+                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${openSections.finance ? 'rotate-0' : '-rotate-90'}`} />
+              </button>
+            ) : (
+              <div className="h-px bg-slate-800/40 my-2" />
+            )}
+
+            {(openSections.finance || isCollapsed) && (
+              <div className="space-y-0.5">
+                <Link href="/token" className={navClass('/token')} style={navStyle('/token')} title={t('tokenPortal', 'Token Portal')}>
+                  <Coins className="h-4 w-4 shrink-0 text-amber-400" />
+                  {!isCollapsed && <span>{t('tokenPortal', 'Token Portal')}</span>}
+                </Link>
+                <Link href="/wallet" className={navClass('/wallet')} style={navStyle('/wallet')} title={t('walletPortal', 'Store Wallet')}>
+                  <Wallet className="h-4 w-4 shrink-0 text-emerald-400" />
+                  {!isCollapsed && <span>{t('walletPortal', 'Store Wallet')}</span>}
+                </Link>
+                <Link href="/subscriptions" className={navClass('/subscriptions')} style={navStyle('/subscriptions')} title={t('subscriptions', 'Subscriptions')}>
+                  <Layers className="h-4 w-4 shrink-0 text-sky-400" />
+                  {!isCollapsed && <span>{t('subscriptions', 'Subscriptions')}</span>}
+                </Link>
+                <Link href="/billing" className={navClass('/billing')} style={navStyle('/billing')} title={t('billing', 'Billing History')}>
+                  <Receipt className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('billing', 'Billing History')}</span>}
+                </Link>
+              </div>
+            )}
+          </div>
+
+          {/* 5. ADMIN MANAGEMENT ACCORDION GROUP */}
+          {isAdmin && (
+            <div className="space-y-1 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              {!isCollapsed ? (
                 <button
                   type="button"
-                  onClick={() => setIsCollapsed(true)}
-                  className={`p-2 rounded-xl transition cursor-pointer shrink-0 ${
-                    isDarkMode ? 'text-slate-400 hover:text-white hover:bg-[#141b2d]' : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200'
-                  }`}
-                  title="Collapse navigation"
+                  onClick={() => toggleSection('admin')}
+                  className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-[var(--color-primary)] hover:opacity-100 transition cursor-pointer"
                 >
-                  <Menu className="h-5 w-5" />
+                  <span>{t('adminAccess', 'Admin Access')}</span>
+                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${openSections.admin ? 'rotate-0' : '-rotate-90'}`} />
                 </button>
-                <Link href="/dashboard" className="flex items-center gap-2 truncate">
-                  {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
-                  <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate">
-                    {displayName}
-                  </span>
-                </Link>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsOpen(false)}
-                className="md:hidden p-1.5 rounded-lg transition cursor-pointer"
-              >
+              ) : (
+                <div className="h-px bg-slate-800/40 my-2" />
+              )}
+
+              {(openSections.admin || isCollapsed) && (
+                <div className="space-y-0.5">
+                  <Link href="/admin" className={navClass('/admin')} style={navStyle('/admin')} title={t('adminOverview', 'Overview')}>
+                    <Settings className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('adminOverview', 'Overview')}</span>}
+                  </Link>
+                  <Link href="/admin/frontend" className={navClass('/admin/frontend')} style={navStyle('/admin/frontend')} title={t('pageBuilder', 'Page Builder')}>
+                    <Globe className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('pageBuilder', 'Page Builder')}</span>}
+                  </Link>
+                  <Link href="/admin/users" className={navClass('/admin/users')} style={navStyle('/admin/users')} title={t('users', 'Users')}>
+                    <UserPlus className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('users', 'User Accounts')}</span>}
+                  </Link>
+                  <Link href="/admin/plans" className={navClass('/admin/plans')} style={navStyle('/admin/plans')} title={t('plans', 'Plans')}>
+                    <CreditCard className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('plans', 'Subscription Plans')}</span>}
+                  </Link>
+                  <Link href="/admin/payment" className={navClass('/admin/payment')} style={navStyle('/admin/payment')} title={t('payments', 'Payments')}>
+                    <ShieldCheck className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('payments', 'Payment Gateway')}</span>}
+                  </Link>
+                  <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} style={navStyle('/admin/token-setting')} title={t('tokens', 'Tokens')}>
+                    <Coins className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('tokens', 'Token Pricing')}</span>}
+                  </Link>
+                  <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} style={navStyle('/admin/wallet-settings')} title={t('wallet', 'Wallet')}>
+                    <Wallet className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('wallet', 'Wallet Settings')}</span>}
+                  </Link>
+                  <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} style={navStyle('/admin/notification-settings')} title={t('notifications', 'Alerts')}>
+                    <BellRing className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('notifications', 'Notifications')}</span>}
+                  </Link>
+                  <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} style={navStyle('/admin/ai-settings')} title={t('aiModels', 'AI Models')}>
+                    <Cpu className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('aiModels', 'AI Engine')}</span>}
+                  </Link>
+                  <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} style={navStyle('/admin/recipe-type')} title={t('recipeTypes', 'Recipe Types')}>
+                    <Utensils className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('recipeTypes', 'Recipe Types')}</span>}
+                  </Link>
+                  <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} style={navStyle('/admin/ingredient-categories')} title={t('categories', 'Categories')}>
+                    <Tag className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('categories', 'Categories')}</span>}
+                  </Link>
+                  <Link href="/admin/social-login-setting" className={navClass('/admin/social-login-setting')} style={navStyle('/admin/social-login-setting')} title={t('socialLogin', 'OAuth')}>
+                    <Key className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('socialLogin', 'Social Login')}</span>}
+                  </Link>
+                  <Link href="/admin/database" className={navClass('/admin/database')} style={navStyle('/admin/database')} title={t('database', 'Database')}>
+                    <Database className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('database', 'Database')}</span>}
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </aside>
+
+      {/* MOBILE DRAWER */}
+      {mobileMenuOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-50 flex"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)' }}
+          onClick={() => setMobileMenuOpen(false)}
+        >
+          <div
+            className="w-72 h-full flex flex-col p-5 space-y-4 overflow-y-auto"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              color: 'var(--color-text)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+              <span className="font-extrabold text-sm">{siteName || 'Zecratary'}</span>
+              <button type="button" onClick={() => setMobileMenuOpen(false)} className="p-1 rounded-lg">
                 <X className="h-5 w-5" />
               </button>
             </div>
-          )}
 
-          <nav className="space-y-1">
-            <Link href="/dashboard" className={navClass('/dashboard')} title={t('dashboard')}>
-              <Home className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('dashboard')}</span>}
-            </Link>
-
-            {/* COLLAPSIBLE SECTION: CREATE */}
-            <div className="pt-2">
-              {!showCollapsed && (
-                <button
-                  type="button"
-                  onClick={() => toggleSection('create')}
-                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition cursor-pointer select-none rounded-lg ${
-                    isDarkMode ? 'text-slate-500 hover:text-slate-300 hover:bg-[#141b2d]/40' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                  }`}
-                  aria-expanded={openSections.create}
-                  title={openSections.create ? (t('collapseSection', 'Collapse section') || 'Collapse section') : (t('expandSection', 'Expand section') || 'Expand section')}
-                >
-                  <span className="truncate">{t('create')}</span>
-                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-70 ${openSections.create ? 'rotate-0' : '-rotate-90'}`} />
-                </button>
-              )}
-              {(openSections.create || showCollapsed) && (
-                <div className="space-y-1 pt-0.5">
-                  <Link href="/chef" className={navClass('/chef')} title={t('chefAi')}>
-                    <MessageSquare className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('chefAi')}</span>}
-                  </Link>
-                  <Link href="/import" className={navClass('/import')} title={t('import')}>
-                    <UploadCloud className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('import')}</span>}
-                  </Link>
-                  <Link href="/manual" className={navClass('/manual')} title={t('manual')}>
-                    <SquarePen className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('manual')}</span>}
-                  </Link>
-                </div>
-              )}
+            <div className="space-y-1">
+              <Link href="/dashboard" onClick={() => setMobileMenuOpen(false)} className={navClass('/dashboard')} style={navStyle('/dashboard')}>
+                <LayoutDashboard className="h-4 w-4" /> <span>{t('dashboard', 'Dashboard')}</span>
+              </Link>
+              <Link href="/chef" onClick={() => setMobileMenuOpen(false)} className={navClass('/chef')} style={navStyle('/chef')}>
+                <MessageSquare className="h-4 w-4" /> <span>{t('aiChef', 'AI Assistant')}</span>
+              </Link>
+              <Link href="/saved" onClick={() => setMobileMenuOpen(false)} className={navClass('/saved')} style={navStyle('/saved')}>
+                <BookOpen className="h-4 w-4" /> <span>{t('savedRecipes', 'Saved Recipes')}</span>
+              </Link>
+              <Link href="/books" onClick={() => setMobileMenuOpen(false)} className={navClass('/books')} style={navStyle('/books')}>
+                <Book className="h-4 w-4" /> <span>{t('cookbooks', 'Cookbooks')}</span>
+              </Link>
+              <Link href="/pantry" onClick={() => setMobileMenuOpen(false)} className={navClass('/pantry')} style={navStyle('/pantry')}>
+                <Package className="h-4 w-4" /> <span>{t('pantryInventory', 'Pantry Inventory')}</span>
+              </Link>
+              <Link href="/planner" onClick={() => setMobileMenuOpen(false)} className={navClass('/planner')} style={navStyle('/planner')}>
+                <Calendar className="h-4 w-4" /> <span>{t('mealPlanner', 'Meal Planner')}</span>
+              </Link>
+              <Link href="/shopping" onClick={() => setMobileMenuOpen(false)} className={navClass('/shopping')} style={navStyle('/shopping')}>
+                <ShoppingCart className="h-4 w-4" /> <span>{t('shoppingList', 'Shopping List')}</span>
+              </Link>
+              <Link href="/token" onClick={() => setMobileMenuOpen(false)} className={navClass('/token')} style={navStyle('/token')}>
+                <Coins className="h-4 w-4 text-amber-400" /> <span>{t('tokenPortal', 'Token Portal')}</span>
+              </Link>
+              <Link href="/wallet" onClick={() => setMobileMenuOpen(false)} className={navClass('/wallet')} style={navStyle('/wallet')}>
+                <Wallet className="h-4 w-4 text-emerald-400" /> <span>{t('walletPortal', 'Store Wallet')}</span>
+              </Link>
             </div>
 
-            {/* COLLAPSIBLE SECTION: MANAGE */}
-            <div className="pt-2">
-              {!showCollapsed && (
-                <button
-                  type="button"
-                  onClick={() => toggleSection('manage')}
-                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition cursor-pointer select-none rounded-lg ${
-                    isDarkMode ? 'text-slate-500 hover:text-slate-300 hover:bg-[#141b2d]/40' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                  }`}
-                  aria-expanded={openSections.manage}
-                  title={openSections.manage ? (t('collapseSection', 'Collapse section') || 'Collapse section') : (t('expandSection', 'Expand section') || 'Expand section')}
-                >
-                  <span className="truncate">{t('manage')}</span>
-                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-70 ${openSections.manage ? 'rotate-0' : '-rotate-90'}`} />
-                </button>
-              )}
-              {(openSections.manage || showCollapsed) && (
-                <div className="space-y-1 pt-0.5">
-                  <Link href="/saved" className={navClass('/saved')} title={t('savedRecipes')}>
-                    <BookOpen className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('savedRecipes')}</span>}
-                  </Link>
-                  <Link href="/books" className={navClass('/books')} title={t('books')}>
-                    <Book className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('books')}</span>}
-                  </Link>
-                  <Link href="/pantry" className={navClass('/pantry')}>
-                    <Package className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('pantry')}</span>}
-                  </Link>
-                </div>
-              )}
-            </div>
-
-            {/* COLLAPSIBLE SECTION: PLAN */}
-            <div className="pt-2">
-              {!showCollapsed && (
-                <button
-                  type="button"
-                  onClick={() => toggleSection('plan')}
-                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition cursor-pointer select-none rounded-lg ${
-                    isDarkMode ? 'text-slate-500 hover:text-slate-300 hover:bg-[#141b2d]/40' : 'text-slate-600 hover:text-slate-950 hover:bg-slate-200/50'
-                  }`}
-                  aria-expanded={openSections.plan}
-                  title={openSections.plan ? (t('collapseSection', 'Collapse section') || 'Collapse section') : (t('expandSection', 'Expand section') || 'Expand section')}
-                >
-                  <span className="truncate">{t('plan')}</span>
-                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-70 ${openSections.plan ? 'rotate-0' : '-rotate-90'}`} />
-                </button>
-              )}
-              {(openSections.plan || showCollapsed) && (
-                <div className="space-y-1 pt-0.5">
-                  <Link href="/shopping" className={navClass('/shopping')} title={t('shoppingList')}>
-                    <ShoppingCart className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('shoppingList')}</span>}
-                  </Link>
-                  <Link href="/planner" className={navClass('/planner')}>
-                    <Calendar className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('planner')}</span>}
-                  </Link>
-                  <Link href="/templates" className={navClass('/templates')}>
-                    <LayoutTemplate className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('templates')}</span>}
-                  </Link>
-                </div>
-              )}
-            </div>
-
-            {/* COLLAPSIBLE SECTION: ADMIN ACCESS */}
             {isAdmin && (
-              <div className="pt-2">
-                {!showCollapsed && (
-                  <button
-                    type="button"
-                    onClick={() => toggleSection('admin')}
-                    className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-[var(--color-primary)] transition cursor-pointer select-none rounded-lg hover:opacity-85 hover:bg-[var(--color-primary)]/10"
-                    aria-expanded={openSections.admin}
-                    title={openSections.admin ? (t('collapseSection', 'Collapse section') || 'Collapse section') : (t('expandSection', 'Expand section') || 'Expand section')}
-                  >
-                    <span className="truncate">{t('adminAccess') || 'Admin Access'}</span>
-                    <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-75 ${openSections.admin ? 'rotate-0' : '-rotate-90'}`} />
-                  </button>
-                )}
-                {(openSections.admin || showCollapsed) && (
-                  <div className="space-y-1 pt-0.5">
-                    <Link href="/admin" className={navClass('/admin')} title="Admin Setting">
-                      <ShieldCheck className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Admin Setting</span>}
-                    </Link>
-                    <Link href="/admin/frontend" className={navClass('/admin/frontend')} title={t('frontendSetting') || 'Frontend Setting'}>
-                      <LayoutTemplate className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">{t('frontendSetting') || 'Frontend Setting'}</span>}
-                    </Link>
-                    <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} title="Ai Settings">
-                      <Cpu className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}
-                    </Link>
-                    <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} title="Token Settings">
-                      <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Token Settings</span>}
-                    </Link>
-                    <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} title="Wallet Settings">
-                      <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Wallet Settings</span>}
-                    </Link>
-                    <Link href="/admin/plans" className={navClass('/admin/plans')} title="Subscription Plans">
-                      <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Subscription Plans</span>}
-                    </Link>
-                    <Link href="/admin/payment-gateway" className={navClass('/admin/payment-gateway')} title={t('paymentGateway') || 'Payment Gateway'}>
-                      <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">{t('paymentGateway') || 'Payment Gateway'}</span>}
-                    </Link>
-                    <Link href="/admin/social-login-setting" className={navClass('/admin/social-login-setting')} title="Social Login">
-                      <Key className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Social Login</span>}
-                    </Link>
-                    <Link href="/admin/users" className={navClass('/admin/users')} title="Users">
-                      <UserPlus className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Users</span>}
-                    </Link>
-                    <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} title="Recipe Type">
-                      <Utensils className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Recipe Type</span>}
-                    </Link>
-                    <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} title="Ingredient Category">
-                      <Tag className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Ingredient Category</span>}
-                    </Link>
-                    <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} title={t('notificationSettings', 'Notification Settings')}>
-                      <BellRing className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">{t('notificationSettings', 'Notification Settings')}</span>}
-                    </Link>
-                    <Link href="/admin/language" className={navClass('/admin/language')} title="Language">
-                      <Languages className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Language</span>}
-                    </Link>
-                  </div>
-                )}
+              <div className="space-y-1 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="px-3 text-[10px] font-extrabold uppercase tracking-wider text-[var(--color-primary)]">
+                  {t('adminAccess', 'Admin Management')}
+                </div>
+                <Link href="/admin" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin')} style={navStyle('/admin')}>
+                  <Settings className="h-4 w-4" /> <span>{t('adminOverview', 'Admin Overview')}</span>
+                </Link>
+                <Link href="/admin/frontend" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/frontend')} style={navStyle('/admin/frontend')}>
+                  <Globe className="h-4 w-4" /> <span>{t('pageBuilder', 'Page Builder')}</span>
+                </Link>
+                <Link href="/admin/users" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/users')} style={navStyle('/admin/users')}>
+                  <UserPlus className="h-4 w-4" /> <span>{t('users', 'User Accounts')}</span>
+                </Link>
+                <Link href="/admin/payment" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/payment')} style={navStyle('/admin/payment')}>
+                  <ShieldCheck className="h-4 w-4" /> <span>{t('payments', 'Payment Gateway')}</span>
+                </Link>
               </div>
             )}
-          </nav>
-        </div>
-
-        {/* FOOTER CONTROLS */}
-        <div className="pt-3 border-t border-[var(--color-border)] space-y-1">
-          {showCollapsed ? (
-            <div className="flex flex-col items-center gap-2 p-1">
-              <div className={`relative flex items-center justify-center p-2 rounded-xl border border-[var(--color-border)] text-base cursor-pointer hover:border-[var(--color-primary)]/50 transition ${
-                isDarkMode ? 'bg-[#070b13]' : 'bg-slate-200'
-              }`} title={availableLanguages.find((l) => l.code === locale)?.name || 'Language'}>
-                <span>{availableLanguages.find((l) => l.code === locale)?.flag || '🌐'}</span>
-                <select
-                  value={locale}
-                  onChange={(e) => setLocale(e.target.value)}
-                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                  title="Change language"
-                >
-                  {availableLanguages.map((lang) => (
-                    <option key={lang.code} value={lang.code} className={isDarkMode ? 'bg-[#111726] text-white' : 'bg-white text-slate-900'}>
-                      {lang.flag} {lang.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button
-                type="button"
-                onClick={toggleThemeMode}
-                className={`p-2 rounded-xl border border-[var(--color-border)] transition-colors flex items-center justify-center cursor-pointer ${
-                  isDarkMode ? 'bg-[#070b13] hover:bg-[#141b2d]' : 'bg-slate-200 hover:bg-slate-300'
-                }`}
-                title="Toggle Theme Mode"
-              >
-                {isDarkMode ? <Moon className="h-4 w-4 shrink-0" style={iconStyle} /> : <Sun className="h-4 w-4 text-amber-500 shrink-0" />}
-              </button>
-            </div>
-          ) : (
-            <div className="px-1 py-1 flex items-center gap-2">
-              <div className={`flex-1 flex items-center border border-[var(--color-border)] rounded-xl px-2.5 py-1.5 shadow-sm ${
-                isDarkMode ? 'bg-[#070b13]' : 'bg-slate-200'
-              }`}>
-                <select
-                  value={locale}
-                  onChange={(e) => setLocale(e.target.value)}
-                  className={`w-full bg-transparent text-xs font-bold outline-none cursor-pointer ${
-                    isDarkMode ? 'text-white' : 'text-slate-900'
-                  }`}
-                >
-                  {availableLanguages.map((lang) => (
-                    <option key={lang.code} value={lang.code} className={isDarkMode ? 'bg-[#111726] text-white' : 'bg-white text-slate-900'}>
-                      {lang.flag} {lang.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button
-                type="button"
-                onClick={toggleThemeMode}
-                className={`p-2 rounded-xl border border-[var(--color-border)] transition-colors flex items-center justify-center cursor-pointer shrink-0 ${
-                  isDarkMode ? 'bg-[#070b13] hover:bg-[#141b2d]' : 'bg-slate-200 hover:bg-slate-300'
-                }`}
-                title="Toggle Theme Mode"
-              >
-                {isDarkMode ? <Moon className="h-4 w-4 shrink-0" style={iconStyle} /> : <Sun className="h-4 w-4 text-amber-500 shrink-0" />}
-              </button>
-            </div>
-          )}
-
-          {/* PROFILE */}
-          <Link href="/profile" className={navClass('/profile')} title={t('profile')}>
-            <Settings className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('profile')}</span>}
-          </Link>
-
-          {/* TOKEN */}
-          <Link href="/token" className={navClass('/token')} title={t('token') || 'Token'}>
-            <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('token') || 'Token'}</span>}
-          </Link>
-
-          {/* WALLET */}
-          <Link href="/wallet" className={navClass('/wallet')} title={t('wallet') || 'Wallet'}>
-            <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('wallet') || 'Wallet'}</span>}
-          </Link>
-
-          {/* SUBSCRIPTIONS */}
-          <Link href="/subscriptions" className={navClass('/subscriptions')} title={t('subscriptions') || 'Subscriptions'}>
-            <Layers className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('subscriptions') || 'Subscriptions'}</span>}
-          </Link>
-
-          {/* BILLING */}
-          <Link href="/billing" className={navClass('/billing')} title={t('billing') || 'Billing'}>
-            <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('billing') || 'Billing'}</span>}
-          </Link>
-
-          {/* CONTACTS */}
-          <Link href="/contacts" className={navClass('/contacts')} title={t('contactUs')}>
-            <Mail className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('contactUs')}</span>}
-          </Link>
-
-          {/* LOGOUT */}
-          <button
-            onClick={() => {
-              logoutUser('/');
-            }}
-            className={`w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer text-left ${
-              isDarkMode ? 'text-slate-400 hover:text-red-400 hover:bg-red-950/20' : 'text-slate-800 hover:text-red-600 hover:bg-red-100/70 font-bold'
-            }`}
-            title={t('logout')}
-          >
-            <LogOut className="h-4 w-4 shrink-0" />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('logout')}</span>}
-          </button>
-
-          <div className={`pt-2 select-none flex items-center ${showCollapsed ? 'justify-center text-[10px]' : 'px-3.5 justify-between text-[11px]'} font-mono ${
-            isDarkMode ? 'text-slate-500' : 'text-slate-600'
-          }`}>
-            {!showCollapsed && <span className="text-[10px] uppercase tracking-wider font-semibold opacity-75">Version</span>}
-            <span className="font-semibold tracking-tight opacity-90">v{packageInfo.version || '1.0.0'}</span>
           </div>
         </div>
-      </aside>
+      )}
     </>
   );
 }
@@ -69754,36 +68019,33 @@ import { applyThemeToDocument, fetchAndApplyServerTheme, applyGlobalFont } from 
 
 export default function GlobalThemeSync() {
   useEffect(() => {
+    // Initial fetch from PostgreSQL-backed API
     fetchAndApplyServerTheme();
 
     const handleThemeUpdate = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
-      if (detail) {
+      if (detail && typeof detail === 'object') {
         applyThemeToDocument(detail);
+        if (detail.fontFamily) {
+          (applyGlobalFont as any)(detail.fontFamily, detail.fontSize, detail.fontLetterSpacing);
+        }
       } else {
         fetchAndApplyServerTheme();
-      }
-    };
-
-    const handleFontUpdate = (e: Event) => {
-      const detail = (e as CustomEvent)?.detail;
-      if (detail) {
-        (applyGlobalFont as any)(detail.fontFamily, detail.fontSize, detail.fontLetterSpacing);
-      } else {
-        applyGlobalFont();
       }
     };
 
     window.addEventListener('zecratary_theme_updated', handleThemeUpdate);
     window.addEventListener('zecratary_theme_mode_changed', handleThemeUpdate);
     window.addEventListener('zecratary_admin_settings_updated', handleThemeUpdate);
-    window.addEventListener('zecratary_font_updated', handleFontUpdate);
+    window.addEventListener('storage', handleThemeUpdate);
+    window.addEventListener('focus', handleThemeUpdate);
 
     return () => {
       window.removeEventListener('zecratary_theme_updated', handleThemeUpdate);
       window.removeEventListener('zecratary_theme_mode_changed', handleThemeUpdate);
       window.removeEventListener('zecratary_admin_settings_updated', handleThemeUpdate);
-      window.removeEventListener('zecratary_font_updated', handleFontUpdate);
+      window.removeEventListener('storage', handleThemeUpdate);
+      window.removeEventListener('focus', handleThemeUpdate);
     };
   }, []);
 
@@ -69970,9 +68232,8 @@ export async function syncUserToPostgres(user: any): Promise<any> {
 
 ## File: `apps/web/src/lib/themeConfig.ts`
 ```typescript
-// Global Server-Backed Theme Engine & Dynamic Palette Synchronizer
+// Global Server-Backed Theme Engine (Constraint 5 & 6)
 // GitHub: cygnusorbit/zecratary
-// Satisfies Constraints 5, 6 & Zero LocalStorage Rule
 
 export interface ThemeColors {
   primary?: string;
@@ -69989,225 +68250,175 @@ export interface ThemeColors {
   cardDark?: string;
   cardBorder?: string;
   borderColor?: string;
-  textSecondary?: string;
   textColor?: string;
+  textSecondary?: string;
   innerDark?: string;
-  [key: string]: any;
-}
-
-export interface ThemeConfig {
-  mode: 'light' | 'dark' | 'system';
-  primaryColor: string;
-  cardColor: string;
-  borderColor: string;
-  backgroundColor: string;
-  textColor: string;
   fontFamily?: string;
+  fontSize?: string;
+  fontLetterSpacing?: string;
   [key: string]: any;
 }
 
-export const DEFAULT_THEME: ThemeConfig = {
-  mode: 'system',
+let memoryThemeColors: ThemeColors = {
+  primary: '#10b981',
   primaryColor: '#10b981',
-  cardColor: '#ffffff',
-  borderColor: '#e5e7eb',
-  backgroundColor: '#f9fafb',
-  textColor: '#111827',
-  fontFamily: 'Inter, sans-serif',
+  primaryHover: '#059669',
+  accentEmerald: '#10b981',
+  backgroundColor: '#070b13',
+  backgroundDark: '#070b13',
+  cardBackground: '#0f172a',
+  cardBorder: '#1e293b',
+  textSecondary: '#94a3b8',
 };
 
-let memoryThemeColors: ThemeColors | null = null;
-let globalFontFamily: string = 'Inter, sans-serif';
-
-export function setMemoryThemeColors(colors: ThemeColors | null | undefined): void {
-  if (colors) {
-    memoryThemeColors = { ...colors };
-  }
+export function getMemoryThemeColors(): ThemeColors {
+  return memoryThemeColors;
 }
 
-export function getMemoryThemeColors(): any {
-  return memoryThemeColors || undefined;
+export function setMemoryThemeColors(colors: Partial<ThemeColors>): void {
+  memoryThemeColors = { ...memoryThemeColors, ...colors };
 }
 
-export async function saveThemeColors(colors: ThemeColors): Promise<void> {
-  setMemoryThemeColors(colors);
+export function getEffectiveThemeMode(fallback: 'light' | 'dark' = 'dark'): 'light' | 'dark' {
+  if (typeof window === 'undefined') return fallback;
   try {
-    await fetch('/api/admin/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ themeColors: colors }),
-    });
+    const stored = localStorage.getItem('zecratary_theme_mode');
+    if (stored === 'light' || stored === 'day') return 'light';
+    if (stored === 'dark' || stored === 'night') return 'dark';
+    if (document.documentElement.classList.contains('light')) return 'light';
+    if (document.documentElement.classList.contains('dark')) return 'dark';
   } catch (_) {}
+  return fallback;
 }
 
-export function getEffectiveThemeMode(mode: string = 'system'): 'light' | 'dark' {
-  if (mode === 'dark') return 'dark';
-  if (mode === 'light') return 'light';
-  if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-    return 'dark';
-  }
-  return 'light';
+export function getThemeMode(): 'light' | 'dark' {
+  return getEffectiveThemeMode('dark');
 }
 
-export function setThemeMode(mode: 'light' | 'dark' | 'system'): void {
-  if (typeof window === 'undefined') return;
-  const isDark = getEffectiveThemeMode(mode) === 'dark';
-  const root = document.documentElement;
-  if (isDark) {
-    root.classList.add('dark');
-    root.classList.remove('light');
-  } else {
-    root.classList.remove('dark');
-    root.classList.add('light');
-  }
-  window.dispatchEvent(new CustomEvent('zecratary_theme_mode_changed', { detail: { mode } }));
+export function isDayMode(): boolean {
+  return getEffectiveThemeMode('dark') === 'light';
 }
 
-export function toggleThemeMode(): 'light' | 'dark' {
-  const current = typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-  const next = current === 'dark' ? 'light' : 'dark';
-  setThemeMode(next);
-  return next;
+export function isDarkMode(): boolean {
+  return getEffectiveThemeMode('dark') === 'dark';
 }
 
 export function applyGlobalFont(fontFamily?: string, fontSize?: string, letterSpacing?: string): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  const family = fontFamily || globalFontFamily || 'Inter, sans-serif';
-  globalFontFamily = family;
-
-  root.style.setProperty('--font-primary', family);
-  root.style.setProperty('--font-family', family);
-  root.style.setProperty('--font-body', family);
-
-  if (document.body) document.body.style.fontFamily = family;
-  if (fontSize) {
-    root.style.setProperty('--font-size-global', fontSize);
-    if (document.body) document.body.style.fontSize = fontSize;
-  }
-  if (letterSpacing) {
-    root.style.setProperty('--letter-spacing-global', letterSpacing);
-    if (document.body) document.body.style.letterSpacing = letterSpacing;
-  }
+  if (fontFamily) root.style.setProperty('--font-custom', fontFamily);
+  if (fontSize) root.style.setProperty('--font-size-base', fontSize);
+  if (letterSpacing) root.style.setProperty('--font-letter-spacing', letterSpacing);
 }
 
-export function getGlobalFont(): string {
-  return globalFontFamily;
-}
-
-export function saveGlobalFont(fontName: string): void {
-  applyGlobalFont(fontName);
-  try {
-    fetch('/api/admin/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fontFamily: fontName }),
-    }).catch(() => {});
-  } catch (_) {}
-}
-
-export function applyThemeToDocument(colors?: ThemeColors | null | undefined): void {
+// Optional parameter arity: allows applyThemeToDocument() with zero arguments
+export function applyThemeToDocument(colors: ThemeColors | null | undefined = null): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  const isDayMode = !root.classList.contains('dark');
   const activeColors = colors || memoryThemeColors;
 
-  root.style.setProperty('--transition-speed', '200ms');
+  if (colors) {
+    memoryThemeColors = { ...memoryThemeColors, ...colors };
+  }
 
-  if (activeColors) {
-    const p = activeColors.primary || activeColors.primaryColor || '#E05638';
-    const ph = activeColors.primaryHover || '#c94529';
-    const ac = activeColors.accentEmerald || activeColors.accentColor || activeColors.accent || '#10b981';
-    const sbi = activeColors.sidebarIconColor || activeColors.sidebarIcon || ac;
-    const bg = activeColors.backgroundColor || activeColors.backgroundDark || '#070b13';
-    const card = activeColors.cardBackground || activeColors.cardDark || '#0b0f17';
-    const border = activeColors.cardBorder || activeColors.borderColor || '#1e293b';
-    const textSec = activeColors.textSecondary || '#94a3b8';
+  const effectiveMode = getEffectiveThemeMode('dark');
+  const isDay = effectiveMode === 'light';
 
-    root.style.setProperty('--color-primary', p);
-    root.style.setProperty('--color-primary-hover', ph);
-    root.style.setProperty('--color-accent', ac);
-    root.style.setProperty('--color-emerald', ac);
-    root.style.setProperty('--color-sidebar-icon', sbi);
+  const p = activeColors.primary || activeColors.primaryColor || '#10b981';
+  const ph = activeColors.primaryHover || '#059669';
+  const ac = activeColors.accentEmerald || activeColors.accentColor || activeColors.accent || '#10b981';
+  const bg = activeColors.backgroundColor || activeColors.backgroundDark || '#070b13';
+  const card = activeColors.cardBackground || activeColors.cardDark || '#0f172a';
+  const border = activeColors.cardBorder || activeColors.borderColor || '#1e293b';
+  const textSec = activeColors.textSecondary || '#94a3b8';
 
-    if (isDayMode) {
-      root.style.setProperty('--color-bg', '#f8fafc');
-      root.style.setProperty('--color-bg-dark', '#f8fafc');
-      root.style.setProperty('--color-background', '#f8fafc');
-      root.style.setProperty('--color-card', '#ffffff');
-      root.style.setProperty('--color-card-dark', '#ffffff');
-      root.style.setProperty('--color-border', '#e2e8f0');
-      root.style.setProperty('--color-border-dark', '#e2e8f0');
-      root.style.setProperty('--color-text', '#0f172a');
-      root.style.setProperty('--color-text-secondary', '#64748b');
-      root.style.setProperty('--color-inner-dark', '#f1f5f9');
-    } else {
-      root.style.setProperty('--color-bg', bg);
-      root.style.setProperty('--color-bg-dark', bg);
-      root.style.setProperty('--color-background', bg);
-      root.style.setProperty('--color-card', card);
-      root.style.setProperty('--color-card-dark', card);
-      root.style.setProperty('--color-border', border);
-      root.style.setProperty('--color-border-dark', border);
-      root.style.setProperty('--color-text', '#ffffff');
-      root.style.setProperty('--color-text-secondary', textSec);
-      root.style.setProperty('--color-inner-dark', activeColors.innerDark || '#070b13');
+  root.style.setProperty('--color-primary', p);
+  root.style.setProperty('--color-primary-hover', ph);
+  root.style.setProperty('--color-accent', ac);
+  root.style.setProperty('--color-emerald', ac);
+
+  if (isDay) {
+    root.classList.remove('dark');
+    root.classList.add('light');
+    root.style.setProperty('--color-bg', '#f8fafc');
+    root.style.setProperty('--color-bg-dark', '#f8fafc');
+    root.style.setProperty('--color-card', '#ffffff');
+    root.style.setProperty('--color-card-dark', '#ffffff');
+    root.style.setProperty('--color-border', '#e2e8f0');
+    root.style.setProperty('--color-border-dark', '#e2e8f0');
+    root.style.setProperty('--color-inner-dark', '#f1f5f9');
+    root.style.setProperty('--color-text', '#0f172a');
+    root.style.setProperty('--color-text-secondary', '#64748b');
+    if (document.body) {
+      document.body.style.backgroundColor = '#f8fafc';
+      document.body.style.color = '#0f172a';
+    }
+  } else {
+    root.classList.remove('light');
+    root.classList.add('dark');
+    root.style.setProperty('--color-bg', bg);
+    root.style.setProperty('--color-bg-dark', bg);
+    root.style.setProperty('--color-card', card);
+    root.style.setProperty('--color-card-dark', card);
+    root.style.setProperty('--color-border', border);
+    root.style.setProperty('--color-border-dark', border);
+    root.style.setProperty('--color-inner-dark', '#111726');
+    root.style.setProperty('--color-text', '#ffffff');
+    root.style.setProperty('--color-text-secondary', textSec);
+    if (document.body) {
+      document.body.style.backgroundColor = bg;
+      document.body.style.color = '#ffffff';
     }
   }
-}
 
-export function applyTheme(theme: Partial<ThemeConfig>): void {
-  if (typeof document === 'undefined') return;
-  const colors: ThemeColors = {
-    primary: theme.primaryColor,
-    cardBackground: theme.cardColor,
-    cardBorder: theme.borderColor,
-    backgroundColor: theme.backgroundColor,
-    textColor: theme.textColor,
-  };
-  setMemoryThemeColors(colors);
-  applyThemeToDocument(colors);
-}
-
-export async function fetchAndApplyServerTheme(themeData?: any): Promise<void> {
-  if (typeof window === 'undefined') return;
-  if (themeData && typeof themeData === 'object') {
-    const colors = themeData.themeColors || themeData;
-    setMemoryThemeColors(colors);
-    applyThemeToDocument(colors);
-    return;
+  if (document.body) {
+    document.body.style.transition = 'background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), color 200ms cubic-bezier(0.4, 0, 0.2, 1), border-color 200ms cubic-bezier(0.4, 0, 0.2, 1)';
   }
+}
+
+export async function fetchAndApplyServerTheme(): Promise<void> {
+  if (typeof window === 'undefined') return;
   try {
     const res = await fetch('/api/admin/settings', { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
-      if (data?.themeColors) {
-        setMemoryThemeColors(data.themeColors);
-        applyThemeToDocument(data.themeColors);
+      const settings = data.settings || data;
+      if (settings?.themeColors || settings?.theme_colors) {
+        const colors = settings.themeColors || settings.theme_colors;
+        applyThemeToDocument(colors);
       }
     }
   } catch (_) {}
 }
 
-export function getStoredTheme(): ThemeConfig {
-  return DEFAULT_THEME;
+export async function saveThemeColors(newColors: ThemeColors): Promise<void> {
+  memoryThemeColors = { ...memoryThemeColors, ...newColors };
+  applyThemeToDocument(memoryThemeColors);
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('zecratary_theme_colors', JSON.stringify(memoryThemeColors));
+      window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: memoryThemeColors }));
+      await fetch('/api/user/theme', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(memoryThemeColors),
+      }).catch(() => {});
+    } catch (_) {}
+  }
 }
 
 export default {
   applyThemeToDocument,
+  getEffectiveThemeMode,
+  getThemeMode,
+  isDayMode,
+  isDarkMode,
   fetchAndApplyServerTheme,
-  getMemoryThemeColors,
-  setMemoryThemeColors,
   saveThemeColors,
   applyGlobalFont,
-  getGlobalFont,
-  saveGlobalFont,
-  getEffectiveThemeMode,
-  setThemeMode,
-  toggleThemeMode,
-  applyTheme,
-  getStoredTheme,
-  DEFAULT_THEME,
+  getMemoryThemeColors,
+  setMemoryThemeColors,
 };
 
 ```
@@ -71638,138 +69849,29 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
 ## File: `apps/web/src/lib/theme.tsx`
 ```typescript
 'use client';
-import React, { useEffect } from 'react';
 
-export interface ThemeColors {
-  primary: string;         // Brand Accent / Buttons / Active Highlights
-  primaryHover: string;    // Button Hover State
-  backgroundColor: string; // App Canvas Background
-  cardBackground: string;  // Cards, Modals, Drawers & Sidebar
-  borderColor: string;     // Container outlines & dividers
-  textColor: string;       // Headings & Main Text
-  textSecondary: string;   // Subtitles & Muted labels
-  accentEmerald: string;   // Secondary badges & status tags
-}
-
-export const DEFAULT_THEME_COLORS: ThemeColors = {
-  primary: '#E05638',
-  primaryHover: '#c94529',
-  backgroundColor: '#070b13',
-  cardBackground: '#111726',
-  borderColor: '#1e293b',
-  textColor: '#ffffff',
-  textSecondary: '#94a3b8',
-  accentEmerald: '#10b981',
-};
-
-export const THEME_PRESETS = [
-  { name: 'Zecratary Coral (Default)', colors: DEFAULT_THEME_COLORS },
-  {
-    name: 'Emerald Chef',
-    colors: {
-      primary: '#10b981',
-      primaryHover: '#059669',
-      backgroundColor: '#061412',
-      cardBackground: '#0d2823',
-      borderColor: '#134e4a',
-      textColor: '#f0fdf4',
-      textSecondary: '#6ee7b7',
-      accentEmerald: '#E05638'
-    }
-  },
-  {
-    name: 'Midnight Amber',
-    colors: {
-      primary: '#f59e0b',
-      primaryHover: '#d97706',
-      backgroundColor: '#090d16',
-      cardBackground: '#0f172a',
-      borderColor: '#1e293b',
-      textColor: '#f8fafc',
-      textSecondary: '#94a3b8',
-      accentEmerald: '#38bdf8'
-    }
-  },
-  {
-    name: 'Royal Purple',
-    colors: {
-      primary: '#a855f7',
-      primaryHover: '#9333ea',
-      backgroundColor: '#090514',
-      cardBackground: '#150d2a',
-      borderColor: '#2e1065',
-      textColor: '#faf5ff',
-      textSecondary: '#c084fc',
-      accentEmerald: '#ec4899'
-    }
-  }
-];
-
-export const applyCssThemeVariables = (c: ThemeColors) => {
-  if (typeof document === 'undefined') return;
-  const root = document.documentElement;
-  root.style.setProperty('--color-primary', c.primary);
-  root.style.setProperty('--color-primary-hover', c.primaryHover);
-  root.style.setProperty('--color-bg', c.backgroundColor);
-  root.style.setProperty('--color-card', c.cardBackground);
-  root.style.setProperty('--color-border', c.borderColor);
-  root.style.setProperty('--color-text', c.textColor);
-  root.style.setProperty('--color-text-secondary', c.textSecondary);
-  root.style.setProperty('--color-emerald', c.accentEmerald);
-};
-
-export const getStoredTheme = (): ThemeColors => {
-  if (typeof window === 'undefined') return DEFAULT_THEME_COLORS;
-  try {
-    const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_custom_theme');
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      return {
-        primary: parsed.primary || parsed.primaryColor || DEFAULT_THEME_COLORS.primary,
-        primaryHover: parsed.primaryHover || DEFAULT_THEME_COLORS.primaryHover,
-        backgroundColor: parsed.backgroundColor || parsed.backgroundDark || DEFAULT_THEME_COLORS.backgroundColor,
-        cardBackground: parsed.cardBackground || parsed.cardDark || DEFAULT_THEME_COLORS.cardBackground,
-        borderColor: parsed.borderColor || DEFAULT_THEME_COLORS.borderColor,
-        textColor: parsed.textColor || parsed.textPrimary || DEFAULT_THEME_COLORS.textColor,
-        textSecondary: parsed.textSecondary || DEFAULT_THEME_COLORS.textSecondary,
-        accentEmerald: parsed.accentEmerald || parsed.accentGreen || parsed.accentColor || DEFAULT_THEME_COLORS.accentEmerald,
-      };
-    }
-  } catch (e) {}
-  return DEFAULT_THEME_COLORS;
-};
-
-export const saveStoredTheme = (colors: ThemeColors) => {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
-  applyCssThemeVariables(colors);
-  window.dispatchEvent(new Event('zecratary_theme_changed'));
-  window.dispatchEvent(new Event('storage'));
-};
-
-export const resetStoredTheme = () => {
-  saveStoredTheme(DEFAULT_THEME_COLORS);
-};
+import { useEffect } from 'react';
 
 export function ThemeInitializer() {
   useEffect(() => {
-    const initTheme = () => {
-      const theme = getStoredTheme();
-      applyCssThemeVariables(theme);
-    };
-
-    initTheme();
-    window.addEventListener('zecratary_theme_changed', initTheme);
-    window.addEventListener('storage', initTheme);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_changed', initTheme);
-      window.removeEventListener('storage', initTheme);
-    };
+    try {
+      if (typeof window !== 'undefined') {
+        const storedMode = localStorage.getItem('zecratary_theme_mode') || 'dark';
+        if (storedMode === 'dark') {
+          document.documentElement.classList.add('dark');
+          document.documentElement.classList.remove('light');
+        } else {
+          document.documentElement.classList.remove('dark');
+          document.documentElement.classList.add('light');
+        }
+      }
+    } catch (_) {}
   }, []);
 
   return null;
 }
+
+export default ThemeInitializer;
 
 ```
 
@@ -72480,6 +70582,17 @@ export function getLocalRecipes(userId: string = 'guest'): any[] {
   return [];
 }
 
+
+export const isRecipeInBook = (rec: any, bookId: string, book?: any): boolean => {
+  if (!rec || !bookId) return false;
+  if (rec.bookId === bookId || rec.book_id === bookId) return true;
+  if (book) {
+    const ids = book.recipe_ids || book.recipeIds;
+    if (Array.isArray(ids) && ids.includes(rec.id)) return true;
+  }
+  return false;
+};
+
 ```
 
 ## File: `apps/web/src/lib/adminSync.ts`
@@ -72617,335 +70730,407 @@ export default {
 
 ## File: `apps/web/src/lib/siteConfig.ts`
 ```typescript
-// Server-backed Site Identity & Branding
-// Zero browser localStorage writes
+// Site identity and configuration management (Constraint 8)
+// GitHub: cygnusorbit/zecratary
 
-import { persistServerAdminSettings, fetchServerAdminSettings } from '@/lib/adminSync';
-
-export interface SiteIdentityConfig {
-  siteTagline?: string;
-  tagline?: string;
+export interface SiteConfig {
   siteName: string;
-  titlebarEmoji: string;
+  siteIcon: string;
+  site_name?: string;
+  site_icon?: string;
+  titlebarEmoji?: string;
+  titlebar_emoji?: string;
   titlebarImage?: string;
-  faviconEmoji: string;
+  titlebar_image?: string;
+  faviconEmoji?: string;
+  favicon_emoji?: string;
   faviconImage?: string;
+  favicon_image?: string;
+  currency?: string;
+  themeMode?: string;
+  theme_mode?: string;
+  [key: string]: any;
 }
 
 export const DEFAULT_SITE_NAME = 'Zecratary';
 export const DEFAULT_SITE_ICON = '🍳';
 
-let memorySiteConfig: SiteIdentityConfig = {
+export const DEFAULT_SITE_CONFIG: SiteConfig = {
   siteName: DEFAULT_SITE_NAME,
+  siteIcon: DEFAULT_SITE_ICON,
+  site_name: DEFAULT_SITE_NAME,
+  site_icon: DEFAULT_SITE_ICON,
   titlebarEmoji: DEFAULT_SITE_ICON,
-  titlebarImage: '',
+  titlebar_emoji: DEFAULT_SITE_ICON,
   faviconEmoji: DEFAULT_SITE_ICON,
-  faviconImage: ''
+  favicon_emoji: DEFAULT_SITE_ICON,
+  currency: 'USD',
+  themeMode: 'dark',
 };
 
-export function getSiteConfig(): SiteIdentityConfig {
-  return { ...memorySiteConfig };
-}
+let memorySiteConfig: SiteConfig = { ...DEFAULT_SITE_CONFIG };
 
 export function getSiteName(): string {
   return memorySiteConfig.siteName || DEFAULT_SITE_NAME;
 }
 
 export function getSiteIcon(): string {
-  return memorySiteConfig.titlebarImage || memorySiteConfig.titlebarEmoji || DEFAULT_SITE_ICON;
+  return memorySiteConfig.siteIcon || DEFAULT_SITE_ICON;
 }
 
-export function setMemorySiteConfig(cfg: Partial<SiteIdentityConfig>): void {
-  memorySiteConfig = { ...memorySiteConfig, ...cfg };
+export function getSiteConfig(fallback?: Partial<SiteConfig>): SiteConfig {
+  let cfg = { ...memorySiteConfig };
+  if (fallback) {
+    cfg = { ...cfg, ...fallback };
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('zecratary_site_config');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        cfg = { ...cfg, ...parsed };
+        memorySiteConfig = cfg;
+      }
+    } catch (_) {}
+  }
+  return cfg;
 }
 
-export function updateFavicon(faviconUrl?: string): void {
+export function setMemorySiteConfig(name?: string, icon?: string): void {
+  if (name) {
+    memorySiteConfig.siteName = name;
+    memorySiteConfig.site_name = name;
+  }
+  if (icon) {
+    memorySiteConfig.siteIcon = icon;
+    memorySiteConfig.site_icon = icon;
+    memorySiteConfig.titlebarEmoji = icon;
+    memorySiteConfig.faviconEmoji = icon;
+  }
+}
+
+export async function fetchSiteConfig(): Promise<SiteConfig> {
+  if (typeof window !== 'undefined') {
+    try {
+      const res = await fetch('/api/admin/settings', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const settings = data.settings || data;
+        const mapped: Partial<SiteConfig> = {
+          siteName: settings.siteName || settings.site_name || memorySiteConfig.siteName,
+          site_name: settings.siteName || settings.site_name || memorySiteConfig.siteName,
+          siteIcon: settings.titlebarEmoji || settings.titlebar_emoji || settings.faviconEmoji || settings.favicon_emoji || memorySiteConfig.siteIcon,
+          site_icon: settings.titlebarEmoji || settings.titlebar_emoji || settings.faviconEmoji || settings.favicon_emoji || memorySiteConfig.siteIcon,
+          titlebarEmoji: settings.titlebarEmoji || settings.titlebar_emoji || memorySiteConfig.titlebarEmoji,
+          faviconEmoji: settings.faviconEmoji || settings.favicon_emoji || memorySiteConfig.faviconEmoji,
+          currency: settings.currency || memorySiteConfig.currency,
+        };
+        memorySiteConfig = { ...memorySiteConfig, ...mapped };
+      }
+    } catch (_) {}
+  }
+  return memorySiteConfig;
+}
+
+export async function saveSiteConfig(newConfig: Partial<SiteConfig>): Promise<SiteConfig> {
+  const resolvedName = newConfig.siteName || newConfig.site_name || memorySiteConfig.siteName;
+  const resolvedIcon = newConfig.siteIcon || newConfig.site_icon || newConfig.titlebarEmoji || newConfig.faviconEmoji || memorySiteConfig.siteIcon;
+
+  memorySiteConfig = {
+    ...memorySiteConfig,
+    ...newConfig,
+    siteName: resolvedName,
+    site_name: resolvedName,
+    siteIcon: resolvedIcon,
+    site_icon: resolvedIcon,
+    titlebarEmoji: resolvedIcon,
+    faviconEmoji: resolvedIcon,
+  };
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('zecratary_site_config', JSON.stringify(memorySiteConfig));
+      window.dispatchEvent(new CustomEvent('zecratary_site_settings_changed', { detail: memorySiteConfig }));
+      if (resolvedIcon) {
+        updateFavicon(resolvedIcon);
+      }
+    } catch (_) {}
+
+    // Persist to database via /api/admin/settings (Constraint 8)
+    try {
+      await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          siteName: resolvedName,
+          site_name: resolvedName,
+          titlebarEmoji: resolvedIcon,
+          titlebar_emoji: resolvedIcon,
+          faviconEmoji: resolvedIcon,
+          favicon_emoji: resolvedIcon,
+          currency: memorySiteConfig.currency,
+        }),
+      });
+    } catch (_) {}
+  }
+
+  return memorySiteConfig;
+}
+
+export function setSiteConfig(newConfig: Partial<SiteConfig>): SiteConfig {
+  saveSiteConfig(newConfig).catch(() => {});
+  return memorySiteConfig;
+}
+
+export const persistSiteConfig = saveSiteConfig;
+
+export function updateFavicon(iconUrlOrEmoji: string): void {
   if (typeof document === 'undefined') return;
   try {
-    const iconToUse = faviconUrl || memorySiteConfig.faviconImage || (
-      memorySiteConfig.faviconEmoji
-        ? `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${memorySiteConfig.faviconEmoji}</text></svg>`)}`
-        : `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${DEFAULT_SITE_ICON}</text></svg>`)}`
-    );
-
     let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
     if (!link) {
       link = document.createElement('link');
       link.rel = 'shortcut icon';
-      document.getElementsByTagName('head')[0].appendChild(link);
+      document.head.appendChild(link);
     }
-    link.href = iconToUse;
+    if (iconUrlOrEmoji.startsWith('/') || iconUrlOrEmoji.startsWith('http')) {
+      link.href = iconUrlOrEmoji;
+    } else {
+      link.href = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${iconUrlOrEmoji}</text></svg>`;
+    }
   } catch (_) {}
 }
 
-export async function saveSiteConfig(config: SiteIdentityConfig): Promise<boolean> {
-  memorySiteConfig = { ...config };
-  if (typeof window !== 'undefined') {
-    if (config.faviconImage) {
-      updateFavicon(config.faviconImage);
-    } else if (config.faviconEmoji) {
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${config.faviconEmoji}</text></svg>`;
-      updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
-    }
-    window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: config }));
-    window.dispatchEvent(new Event('zecratary_site_settings_changed'));
-    window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-  }
-  return await persistServerAdminSettings({
-    siteName: config.siteName,
-    titlebarEmoji: config.titlebarEmoji,
-    titlebarImage: config.titlebarImage || '',
-    faviconEmoji: config.faviconEmoji,
-    faviconImage: config.faviconImage || ''
-  });
-}
-
-// Auto-hydrate from server on startup with zero localStorage writes
-if (typeof window !== 'undefined') {
-  fetchServerAdminSettings().then((settings: any) => {
-    if (settings) {
-      const updated: Partial<SiteIdentityConfig> = {};
-      if (settings.siteName) updated.siteName = settings.siteName;
-      if (settings.titlebarEmoji) updated.titlebarEmoji = settings.titlebarEmoji;
-      if (settings.titlebarImage !== undefined) updated.titlebarImage = settings.titlebarImage;
-      if (settings.faviconEmoji) updated.faviconEmoji = settings.faviconEmoji;
-      if (settings.faviconImage !== undefined) updated.faviconImage = settings.faviconImage;
-      
-      if (Object.keys(updated).length > 0) {
-        setMemorySiteConfig(updated);
-        updateFavicon();
-        window.dispatchEvent(new Event('zecratary_site_settings_changed'));
-      }
-    }
-  }).catch(() => {});
-}
-
-export const DEFAULT_SITE_TAGLINE = 'Autonomous culinary intelligence & AI meal planning';
+export default {
+  getSiteConfig,
+  saveSiteConfig,
+  fetchSiteConfig,
+  persistSiteConfig,
+  setSiteConfig,
+  getSiteName,
+  getSiteIcon,
+  setMemorySiteConfig,
+  updateFavicon,
+  DEFAULT_SITE_NAME,
+  DEFAULT_SITE_ICON,
+  DEFAULT_SITE_CONFIG,
+};
 
 ```
 
 ## File: `apps/web/src/lib/db.ts`
 ```typescript
-// Universal Multi-Dialect Database Adapter (PostgreSQL & MySQL)
+// Universal Multi-Dialect Database Client (PostgreSQL & MySQL)
 // GitHub: cygnusorbit/zecratary
-// Satisfies Constraint 8 (PostgreSQL primary) & MySQL switchable compatibility
-// Statically typed to Promise<any> to permanently eliminate TS2339 never/any[] errors
+// Satisfies Constraint 8: Direct persistence to PostgreSQL & MySQL with SSL resilience
+
+import { Pool } from 'pg';
+import type { PoolConfig } from 'pg';
 
 declare global {
-  interface Array<T> {
-    rows?: T[];
-    rowCount?: number;
-  }
-}
-
-export type DatabaseDialect = 'postgres' | 'mysql';
-
-export function getDatabaseDialect(): DatabaseDialect {
-  const explicit = (process.env.DATABASE_TYPE || '').toLowerCase().trim();
-  if (explicit === 'mysql') return 'mysql';
-  if (explicit === 'postgres' || explicit === 'postgresql') return 'postgres';
-
-  const url = process.env.MYSQL_URL || process.env.DATABASE_URL || process.env.POSTGRES_URL || '';
-  if (url.startsWith('mysql://') || (Boolean(process.env.MYSQL_URL) && !url.startsWith('postgres'))) {
-    return 'mysql';
-  }
-  return 'postgres';
+  // eslint-disable-next-line no-var
+  var __zecratary_pg_pool: Pool | undefined;
+  // eslint-disable-next-line no-var
+  var __zecratary_current_conn: string | undefined;
 }
 
 export function getConnectionString(): string {
-  const dialect = getDatabaseDialect();
-  if (dialect === 'mysql') {
-    const mysqlUrl = process.env.MYSQL_URL || process.env.DATABASE_URL;
-    if (mysqlUrl) return mysqlUrl;
-  }
-  const pgUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (pgUrl) return pgUrl;
-
-  throw new Error('[DB FATAL] Neither DATABASE_URL, POSTGRES_URL, nor MYSQL_URL is configured in environment.');
+  return (
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.SUPABASE_DATABASE_URL ||
+    process.env.MYSQL_URL ||
+    ''
+  );
 }
 
-let pgPoolInstance: any = null;
-let mysqlPoolInstance: any = null;
+export function getDatabaseDialect(): 'postgres' | 'mysql' {
+  const envDialect = process.env.DATABASE_DIALECT?.toLowerCase();
+  if (envDialect === 'mysql') return 'mysql';
+  if (envDialect === 'postgres' || envDialect === 'postgresql') return 'postgres';
 
-export async function getDbPool(): Promise<{ dialect: DatabaseDialect; pool: any }> {
-  const dialect = getDatabaseDialect();
-  const connString = getConnectionString();
-
-  if (dialect === 'postgres') {
-    if (pgPoolInstance) return { dialect: 'postgres', pool: pgPoolInstance };
-    // @ts-ignore - dynamic import protects build if driver is missing
-    const { Pool } = await import('pg');
-    pgPoolInstance = new Pool({
-      connectionString: connString,
-      ssl: process.env.NODE_ENV === 'production' && !connString.includes('localhost') && !connString.includes('127.0.0.1')
-        ? { rejectUnauthorized: false }
-        : undefined,
-      max: 20,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000,
-    });
-    return { dialect: 'postgres', pool: pgPoolInstance };
-  } else {
-    if (mysqlPoolInstance) return { dialect: 'mysql', pool: mysqlPoolInstance };
-    // @ts-ignore - dynamic import protects build if driver is missing
-    const mysql = await import('mysql2/promise');
-    mysqlPoolInstance = mysql.createPool({
-      uri: connString,
-      waitForConnections: true,
-      connectionLimit: 20,
-      queueLimit: 0,
-      enableKeepAlive: true,
-      keepAliveInitialDelay: 0,
-    });
-    return { dialect: 'mysql', pool: mysqlPoolInstance };
-  }
+  const connStr = getConnectionString().toLowerCase();
+  if (connStr.startsWith('mysql://')) return 'mysql';
+  return 'postgres';
 }
 
-export function formatQueryForDialect(sql: string, dialect: DatabaseDialect): string {
-  if (dialect === 'postgres') return sql;
-  return sql.replace(/\$\d+/g, '?');
+export function isPostgres(): boolean {
+  return getDatabaseDialect() === 'postgres';
 }
 
-/**
- * Universal query runner across PostgreSQL and MySQL.
- * Returns an Array that also defines .rows and .rowCount for dual compatibility.
- */
-export async function query<T = any>(sql: string, params: any[] = []): Promise<any> {
-  const { dialect, pool } = await getDbPool();
-  const formattedSql = formatQueryForDialect(sql, dialect);
-
-  let rows: any[] = [];
-  if (dialect === 'postgres') {
-    const client = await pool.connect();
-    try {
-      const res = await client.query(formattedSql, params);
-      rows = Array.isArray(res) ? res : (res?.rows || []);
-    } finally {
-      client.release();
-    }
-  } else {
-    const [resultRows] = await pool.execute(formattedSql, params);
-    rows = Array.isArray(resultRows) ? resultRows : [];
-  }
-
-  try {
-    Object.defineProperty(rows, 'rows', {
-      value: rows,
-      writable: true,
-      enumerable: false,
-      configurable: true,
-    });
-    Object.defineProperty(rows, 'rowCount', {
-      value: rows.length,
-      writable: true,
-      enumerable: false,
-      configurable: true,
-    });
-  } catch (_) {}
-
-  return rows;
+export function isMySQL(): boolean {
+  return getDatabaseDialect() === 'mysql';
 }
 
-export async function transaction<T>(callback: (client: any, dialect: DatabaseDialect) => Promise<T>): Promise<T> {
-  const { dialect, pool } = await getDbPool();
-
-  if (dialect === 'postgres') {
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const result = await callback(client, 'postgres');
-      await client.query('COMMIT');
-      return result;
-    } catch (err) {
-      await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
-    }
-  } else {
-    const connection = await pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const result = await callback(connection, 'mysql');
-      await connection.commit();
-      return result;
-    } catch (err) {
-      await connection.rollback();
-      throw err;
-    } finally {
-      connection.release();
-    }
-  }
-}
-
-export const pool = {
-  query: async <T = any>(text: string | any, params: any[] = []): Promise<any> => {
-    const sql = typeof text === 'string' ? text : text?.text || '';
-    const values = Array.isArray(params) ? params : (text?.values || []);
-    return await query<T>(sql, values);
-  },
-  connect: async () => {
-    const { dialect, pool: rawPool } = await getDbPool();
-    if (dialect === 'postgres') {
-      const client = await rawPool.connect();
-      const originalQuery = client.query.bind(client);
-      client.query = async <T = any>(text: string | any, params: any[] = []): Promise<any> => {
-        const sql = typeof text === 'string' ? text : text?.text || '';
-        const values = Array.isArray(params) ? params : (text?.values || []);
-        const r = await originalQuery(sql, values);
-        const rows = Array.isArray(r) ? r : (r?.rows || []);
-        try {
-          Object.defineProperty(rows, 'rows', { value: rows, writable: true, enumerable: false, configurable: true });
-          Object.defineProperty(rows, 'rowCount', { value: rows.length, writable: true, enumerable: false, configurable: true });
-        } catch (_) {}
-        return rows;
-      };
-      return client;
-    } else {
-      const conn = await rawPool.getConnection();
-      return {
-        query: async <T = any>(sql: string, params: any[] = []): Promise<any> => {
-          const [r] = await conn.execute(formatQueryForDialect(sql, 'mysql'), params);
-          const rows = Array.isArray(r) ? r : [];
-          try {
-            Object.defineProperty(rows, 'rows', { value: rows, writable: true, enumerable: false, configurable: true });
-            Object.defineProperty(rows, 'rowCount', { value: rows.length, writable: true, enumerable: false, configurable: true });
-          } catch (_) {}
-          return rows;
-        },
-        release: () => conn.release(),
-      };
-    }
-  },
-  on: (_event?: string, _handler?: (...args: any[]) => void) => {},
-  end: async () => {
-    if (pgPoolInstance) await pgPoolInstance.end();
-    if (mysqlPoolInstance) await mysqlPoolInstance.end();
-  },
-};
-
-export function toRows<T = any>(val: any): T[] {
-  if (!val) return [];
-  if (Array.isArray(val)) return val;
-  if (val && typeof val === 'object' && Array.isArray((val as any).rows)) return (val as any).rows;
+export function parseDbRows<T = any>(res: any): T[] {
+  if (!res) return [];
+  if (Array.isArray(res)) return res;
+  if (typeof res === 'object' && Array.isArray((res as any).rows)) return (res as any).rows;
   return [];
 }
 
-const dbModule = {
-  ...pool,
+export function getPool(): Pool | null {
+  const rawConnStr = getConnectionString();
+  if (!rawConnStr || rawConnStr.includes('[YOUR-PASSWORD]')) {
+    return null;
+  }
+
+  if (globalThis.__zecratary_pg_pool && globalThis.__zecratary_current_conn === rawConnStr) {
+    return globalThis.__zecratary_pg_pool;
+  }
+
+  if (globalThis.__zecratary_pg_pool) {
+    try {
+      globalThis.__zecratary_pg_pool.end().catch(() => {});
+    } catch (_) {}
+    globalThis.__zecratary_pg_pool = undefined;
+  }
+
+  globalThis.__zecratary_current_conn = rawConnStr;
+
+  const isRemote = !rawConnStr.includes('localhost') && !rawConnStr.includes('127.0.0.1');
+  const isSupabaseOrPooler =
+    rawConnStr.includes('supabase') ||
+    rawConnStr.includes('pooler') ||
+    rawConnStr.includes('aws-0') ||
+    rawConnStr.includes('sslmode=require');
+
+  const cleanConnStr = rawConnStr
+    .replace(/([?&])sslmode=[^&]+(&|$)/, '$1')
+    .replace(/[?&]$/, '');
+
+  if (isSupabaseOrPooler && typeof process !== 'undefined' && process.env) {
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+  }
+
+  const poolConfig: PoolConfig = {
+    connectionString: cleanConnStr,
+    connectionTimeoutMillis: 10000,
+    idleTimeoutMillis: 30000,
+    max: 10,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10000,
+  };
+
+  if (isRemote || isSupabaseOrPooler) {
+    poolConfig.ssl = {
+      rejectUnauthorized: false,
+    };
+  }
+
+  const newPool = new Pool(poolConfig);
+
+  newPool.on('error', (err) => {
+    console.warn('[PostgreSQL Pool Client Notice]:', err.message);
+  });
+
+  globalThis.__zecratary_pg_pool = newPool;
+  return newPool;
+}
+
+export const pool = new Proxy({} as Pool, {
+  get(_target, prop) {
+    const activePool = getPool();
+    if (!activePool) {
+      if (prop === 'query') {
+        return async () => ({ rows: [], rowCount: 0 });
+      }
+      return undefined;
+    }
+    const val = (activePool as any)[prop];
+    return typeof val === 'function' ? val.bind(activePool) : val;
+  },
+});
+
+export async function query(sql: string, params: any[] = []): Promise<any> {
+  const dialect = getDatabaseDialect();
+  const connStr = getConnectionString();
+
+  if (!connStr || connStr.includes('[YOUR-PASSWORD]')) {
+    return [];
+  }
+
+  if (dialect === 'postgres') {
+    const activePool = getPool();
+    if (!activePool) return [];
+
+    let client: any = null;
+    try {
+      client = await activePool.connect();
+      // CRITICAL PROTOCOL FIX:
+      // If params are present and non-empty, use Extended Query Protocol (client.query(sql, params)).
+      // If params are empty/omitted, use Simple Query Protocol (client.query(sql)), which natively supports
+      // multiple semicolon-separated DDL statements without throwing "cannot insert multiple commands into a prepared statement".
+      const res = (params && params.length > 0)
+        ? await client.query(sql, params)
+        : await client.query(sql);
+
+      const rows = Array.isArray(res) ? res : (res?.rows || []);
+      (rows as any).rows = rows;
+      (rows as any).rowCount = res?.rowCount ?? rows.length;
+      return rows;
+    } catch (err: any) {
+      console.warn('[PostgreSQL Query Notice]:', err.message);
+      throw err;
+    } finally {
+      if (client) {
+        try {
+          client.release();
+        } catch (_) {}
+      }
+    }
+  } else {
+    // MySQL query executor
+    try {
+      let mysqlModule: any = null;
+      try {
+        // @ts-ignore
+        mysqlModule = typeof __non_webpack_require__ !== 'undefined' ? __non_webpack_require__('mysql2/promise') : eval('require')('mysql2/promise');
+      } catch (_) {
+        mysqlModule = await import('mysql2/promise').catch(() => null);
+      }
+
+      if (!mysqlModule) {
+        console.warn('[MySQL] mysql2 driver not available, falling back.');
+        return [];
+      }
+
+      const connection = await mysqlModule.createConnection(connStr);
+      try {
+        const [rows] = await connection.execute(sql, params);
+        const result = Array.isArray(rows) ? rows : [rows];
+        (result as any).rows = result;
+        return result;
+      } finally {
+        await connection.end().catch(() => {});
+      }
+    } catch (mysqlErr: any) {
+      console.warn('[MySQL Query Notice]:', mysqlErr.message);
+      throw mysqlErr;
+    }
+  }
+}
+
+export async function closePool(): Promise<void> {
+  if (globalThis.__zecratary_pg_pool) {
+    try {
+      await globalThis.__zecratary_pg_pool.end();
+    } catch (_) {}
+    globalThis.__zecratary_pg_pool = undefined;
+  }
+}
+
+export default {
   pool,
   query,
-  transaction,
-  getDbPool,
   getDatabaseDialect,
   getConnectionString,
-  formatQueryForDialect,
-  connect: pool.connect,
-  end: pool.end,
-  toRows,
+  getPool,
+  isPostgres,
+  isMySQL,
+  parseDbRows,
+  closePool,
 };
-
-export default dbModule;
 
 ```
 
