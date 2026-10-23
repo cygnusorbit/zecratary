@@ -1,6 +1,6 @@
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.19",
+  "version": "8.1.20",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -13,7 +13,7 @@
     "db:generate": "turbo run db:generate",
     "db:push": "turbo run db:push",
     "worker:dev": "turbo run worker:dev",
-    "postbuild": "node -e \"const fs=require('fs'),path=require('path');const src=path.join('apps','web','.next');if(fs.existsSync(src)){  ['.next','dist','build'].forEach(d=>{    if(!fs.existsSync(d)){      try{fs.symlinkSync(src,d,'junction');}catch(e){fs.cpSync(src,d,{recursive:true});}    }  });  const saStatic=path.join(src,'standalone','apps','web','.next','static');  const srcStatic=path.join(src,'static');  if(fs.existsSync(srcStatic)&&!fs.existsSync(saStatic)){    try{fs.mkdirSync(path.dirname(saStatic),{recursive:true});fs.cpSync(srcStatic,saStatic,{recursive:true});}catch(e){}  }  const saPublic=path.join(src,'standalone','apps','web','public');  const srcPublic=path.join('apps','web','public');  if(fs.existsSync(srcPublic)&&!fs.existsSync(saPublic)){    try{fs.mkdirSync(path.dirname(saPublic),{recursive:true});fs.cpSync(srcPublic,saPublic,{recursive:true});}catch(e){}  }  console.log('\u2713 Hostinger deployment artifacts bridged successfully.');}\"",
+    "postbuild": "node -e \"const fs=require('fs'),path=require('path');const src=path.join('apps','web','.next');if(fs.existsSync(src)){  const saStatic=path.join(src,'standalone','apps','web','.next','static');  const srcStatic=path.join(src,'static');  if(fs.existsSync(srcStatic)){    try{fs.mkdirSync(path.dirname(saStatic),{recursive:true});fs.cpSync(srcStatic,saStatic,{recursive:true});}catch(_){}    try{const rStatic=path.join(src,'standalone','.next','static');fs.mkdirSync(path.dirname(rStatic),{recursive:true});fs.cpSync(srcStatic,rStatic,{recursive:true});}catch(_){}  }  const saPublic=path.join(src,'standalone','apps','web','public');  const srcPublic=path.join('apps','web','public');  if(fs.existsSync(srcPublic)){    try{fs.mkdirSync(path.dirname(saPublic),{recursive:true});fs.cpSync(srcPublic,saPublic,{recursive:true});}catch(_){}    try{const rPublic=path.join(src,'standalone','public');fs.mkdirSync(path.dirname(rPublic),{recursive:true});fs.cpSync(srcPublic,rPublic,{recursive:true});}catch(_){}  }  ['.next','dist','build'].forEach(d=>{    try{      if(fs.existsSync(d)||fs.lstatSync?.(d,{throwIfNoEntry:false})){        if(fs.lstatSync(d).isSymbolicLink()){fs.unlinkSync(d);}else{fs.rmSync(d,{recursive:true,force:true});}      }      fs.cpSync(src,d,{recursive:true,dereference:true});    }catch(err){console.warn('Artifact copy notice for '+d+':',err.message);}  });  console.log('\u2713 Hostinger production standalone artifacts physically bridged.');}\"",
     "start:web": "npm run start --workspace=web"
   },
   "devDependencies": {},

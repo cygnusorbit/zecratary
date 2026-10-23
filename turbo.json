@@ -32,5 +32,12 @@
       "cache": false,
       "persistent": true
     }
-  }
+  },
+  "globalEnv": [
+    "NEXT_CPU_COUNT",
+    "PORT",
+    "DATABASE_URL",
+    "HOSTNAME",
+    "NODE_ENV"
+  ]
 }

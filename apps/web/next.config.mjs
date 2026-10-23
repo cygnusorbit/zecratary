@@ -4,14 +4,14 @@ import { fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Cap worker CPU allocation to 2 to prevent Hostinger CloudLinux CageFS thread exhaustion (os error 11)
+// Cap worker CPU allocation to prevent Hostinger CageFS thread exhaustion (os error 11)
 process.env.NEXT_CPU_COUNT = process.env.NEXT_CPU_COUNT || '2';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: process.env.NODE_ENV === 'production' ? 'standalone' : undefined,
+  // Unconditionally output standalone server bundle for Hostinger Node.js Web App
+  output: 'standalone',
   reactStrictMode: false,
-  // Throttles worker spawning during static page data collection
   experimental: {
     cpus: 2,
     workerThreads: false,
