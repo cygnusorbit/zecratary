@@ -3,8 +3,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { 
-  Book, Plus, Trash2, Edit3, Search, Clock, Users, Star, 
-  ArrowRight, X, BookOpen, Utensils, Check 
+  Book, Plus, Trash2, Edit3, Search, Utensils, X, 
+  BookOpen, ArrowRight 
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { getCurrentUser, User } from '@/lib/auth';
@@ -15,16 +15,13 @@ interface RecipeBook {
   user_id?: string;
   title: string;
   description: string;
-  coverImage?: string;
-  cover_image?: string;
-  coverColor?: string;
-  cover_color?: string;
   recipeCount?: number;
   recipeIds?: string[];
   recipe_ids?: string[];
   created_at?: string;
 }
 
+// Local helper (satisfies Next.js App Router export contract - no named export)
 const isRecipeInBook = (rec: any, bookId: string, book?: any): boolean => {
   if (!rec || !bookId) return false;
   if (rec.bookId === bookId || rec.book_id === bookId) return true;
@@ -45,12 +42,11 @@ export default function BooksPage() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedBook, setSelectedBook] = useState<RecipeBook | null>(null);
 
-  // Modal States
+  // Original Modal States: ONLY Title and Description (NO Color Selector)
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
   const [modalTitle, setModalTitle] = useState<string>('');
   const [modalDescription, setModalDescription] = useState<string>('');
-  const [modalCover, setModalCover] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Pure Database Hydration: Queries PostgreSQL Directly (NO LocalStorage)
@@ -125,7 +121,6 @@ export default function BooksPage() {
       user_id: targetUserId,
       title: modalTitle.trim(),
       description: modalDescription.trim(),
-      cover_image: modalCover.trim() || 'https://images.unsplash.com/photo-1556910103-1c02745aae4d?auto=format&fit=crop&w=800&q=80',
       createdBy: currentUser?.email || 'admin@zecratary.com',
       creatorName: currentUser?.name || 'Chef',
     };
@@ -142,7 +137,6 @@ export default function BooksPage() {
         setEditingBookId(null);
         setModalTitle('');
         setModalDescription('');
-        setModalCover('');
         await loadData(currentUser);
         window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
       }
@@ -226,7 +220,6 @@ export default function BooksPage() {
               setEditingBookId(null);
               setModalTitle('');
               setModalDescription('');
-              setModalCover('https://images.unsplash.com/photo-1556910103-1c02745aae4d?auto=format&fit=crop&w=800&q=80');
               setShowCreateModal(true);
             }}
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition cursor-pointer"
@@ -238,87 +231,82 @@ export default function BooksPage() {
         </div>
       </div>
 
-      {/* COOKBOOKS GRID */}
+      {/* ORIGINAL COOKBOOKS GRID (AUTHENTIC CARD DESIGN) */}
       {filteredBooks.length === 0 ? (
         <div className="p-12 text-center rounded-3xl border space-y-4" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
           <BookOpen className="h-12 w-12 mx-auto text-[var(--color-primary)] opacity-70" />
           <div className="space-y-1">
             <h3 className="text-base font-bold">{t('noCookbooksFound', 'No Cookbooks Found')}</h3>
             <p className="text-xs max-w-sm mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('emptyCookbooksHint', 'Create your first themed cookbook collection to group and organize your dishes.')}
+              {t('emptyCookbooksHint', 'Create your first cookbook collection to group and organize your dishes.')}
             </p>
           </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredBooks.map((book: RecipeBook, idx: number) => {
-            const count = book.recipeCount !== undefined ? book.recipeCount : (Array.isArray(book.recipe_ids) ? book.recipe_ids.length : 0);
+            // FIXED SCOPE: Correctly reference book.recipe_ids instead of undeclared b
+            const count = book.recipeCount !== undefined 
+              ? book.recipeCount 
+              : (Array.isArray(book.recipe_ids) ? book.recipe_ids.length : 0);
+
             return (
               <div
                 key={book.id || `book_${idx}`}
                 onClick={() => setSelectedBook(book)}
-                className="rounded-3xl border overflow-hidden cursor-pointer hover:shadow-lg transition flex flex-col justify-between group"
+                className="p-6 rounded-3xl border cursor-pointer hover:shadow-lg transition flex flex-col justify-between space-y-4 group"
                 style={{
                   backgroundColor: 'var(--color-card)',
                   borderColor: 'var(--color-border)',
                 }}
               >
-                <div className="relative h-48 w-full bg-slate-800 overflow-hidden">
-                  {book.cover_image || book.coverImage ? (
-                    <img
-                      src={book.cover_image || book.coverImage}
-                      alt={book.title}
-                      className="w-full h-full object-cover transition duration-300 group-hover:scale-105"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-4xl">📚</div>
-                  )}
-
-                  <div className="absolute bottom-3 left-3 px-3 py-1 rounded-full text-[11px] font-black text-white bg-black/60 backdrop-blur-md flex items-center gap-1.5">
-                    <Utensils className="h-3 w-3 text-[var(--color-primary)]" />
-                    <span>{count} {count === 1 ? 'Dish' : 'Dishes'}</span>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="p-2.5 rounded-2xl bg-[var(--color-inner-dark)] text-[var(--color-primary)]">
+                      <Book className="h-6 w-6" />
+                    </div>
+                    <span className="px-3 py-1 rounded-full text-xs font-bold border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text-secondary)' }}>
+                      {count} {count === 1 ? 'recipe' : 'recipes'}
+                    </span>
                   </div>
+
+                  <h3 className="text-lg font-black pt-2 line-clamp-1">{book.title}</h3>
+                  <p className="text-xs line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                    {book.description || t('noDescription', 'Curated culinary collection.')}
+                  </p>
                 </div>
 
-                <div className="p-5 flex-1 flex flex-col justify-between space-y-3">
-                  <div>
-                    <h3 className="text-base font-extrabold line-clamp-1">{book.title}</h3>
-                    <p className="text-xs line-clamp-2 pt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      {book.description || t('noDescription', 'Curated culinary collection.')}
-                    </p>
-                  </div>
+                <div className="pt-4 border-t flex items-center justify-between text-xs" style={{ borderColor: 'var(--color-border)' }}>
+                  <span className="font-bold text-[11px] text-[var(--color-primary)] flex items-center gap-1 group-hover:underline">
+                    <span>{t('viewCollection', 'View Collection')}</span>
+                    <ArrowRight className="h-3 w-3" />
+                  </span>
 
-                  <div className="pt-3 border-t flex items-center justify-between text-xs" style={{ borderColor: 'var(--color-border)' }}>
-                    <span className="font-semibold text-[11px]" style={{ color: 'var(--color-primary)' }}>
-                      {count} recipes
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditingBookId(book.id);
-                          setModalTitle(book.title);
-                          setModalDescription(book.description || '');
-                          setModalCover(book.cover_image || book.coverImage || '');
-                          setShowCreateModal(true);
-                        }}
-                        className="p-1.5 rounded-lg border hover:bg-slate-800/20 cursor-pointer"
-                        style={{ borderColor: 'var(--color-border)' }}
-                        title={t('edit', 'Edit')}
-                      >
-                        <Edit3 className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => handleDeleteBook(e, book.id)}
-                        className="p-1.5 rounded-lg border hover:bg-red-500/10 text-red-400 cursor-pointer"
-                        style={{ borderColor: 'var(--color-border)' }}
-                        title={t('delete', 'Delete')}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingBookId(book.id);
+                        setModalTitle(book.title);
+                        setModalDescription(book.description || '');
+                        setShowCreateModal(true);
+                      }}
+                      className="p-1.5 rounded-lg border hover:bg-slate-800/20 cursor-pointer"
+                      style={{ borderColor: 'var(--color-border)' }}
+                      title={t('edit', 'Edit')}
+                    >
+                      <Edit3 className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteBook(e, book.id)}
+                      className="p-1.5 rounded-lg border hover:bg-red-500/10 text-red-400 cursor-pointer"
+                      style={{ borderColor: 'var(--color-border)' }}
+                      title={t('delete', 'Delete')}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -327,7 +315,7 @@ export default function BooksPage() {
         </div>
       )}
 
-      {/* ACCESSIBLE MODAL: CREATE / EDIT COOKBOOK (ZERO <form> TAGS) */}
+      {/* ORIGINAL MODAL: CREATE / EDIT COOKBOOK (ZERO <form> TAGS, NO COLOR SELECTOR) */}
       {showCreateModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs"
@@ -372,23 +360,11 @@ export default function BooksPage() {
               <div>
                 <label className="block font-bold mb-1">{t('description', 'Description')}</label>
                 <textarea
-                  rows={2}
+                  rows={3}
                   value={modalDescription}
                   onChange={(e) => setModalDescription(e.target.value)}
                   placeholder="Overview of the dishes in this collection..."
                   className="w-full px-3 py-2 rounded-xl border outline-hidden resize-none"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1">{t('coverImageURL', 'Cover Image URL')}</label>
-                <input
-                  type="text"
-                  value={modalCover}
-                  onChange={(e) => setModalCover(e.target.value)}
-                  placeholder="https://images.unsplash.com/..."
-                  className="w-full px-3 py-2 rounded-xl border outline-hidden"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
@@ -417,7 +393,7 @@ export default function BooksPage() {
         </div>
       )}
 
-      {/* COOKBOOK RECIPE DRAWER / DETAILS MODAL */}
+      {/* ORIGINAL COOKBOOK RECIPE DRAWER / DETAILS MODAL */}
       {selectedBook && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs"
