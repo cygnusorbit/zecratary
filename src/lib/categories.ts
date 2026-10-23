@@ -1,126 +1,116 @@
-// Generated / Updated by AI Collaborator - Full PostgreSQL synchronization
-'use client';
+// Ingredient Categories Synchronization Engine
+// GitHub: cygnusorbit/zecratary
 
-import { useState, useEffect } from 'react';
-import { fetchServerAdminSettings, persistServerAdminSettings } from '@/lib/adminSync';
+export interface IngredientCategory {
+  id: string;
+  name: string;
+  icon?: string;
+  color?: string;
+}
 
 export const DEFAULT_CATEGORIES: string[] = [
   'Produce',
-  'Dairy & Eggs',
   'Meat & Poultry',
   'Seafood',
-  'Bakery',
+  'Dairy & Eggs',
   'Pantry & Dry Goods',
-  'Canned Goods',
-  'Baking & Cooking',
+  'Bakery & Bread',
   'Spices & Seasonings',
-  'Snacks',
+  'Oils & Vinegars',
   'Beverages',
   'Frozen Foods',
-  'Condiments & Sauces',
-  'Oils & Vinegars'
 ];
 
-export const DEFAULT_INGREDIENT_CATEGORIES = DEFAULT_CATEGORIES;
+export const INGREDIENT_CATEGORIES = DEFAULT_CATEGORIES;
 
 let memoryCategories: string[] = [...DEFAULT_CATEGORIES];
 
-export function getStoredCategories(): string[] {
-  return [...memoryCategories];
-}
-
-export function setMemoryCategories(cats: string[]): void {
+export function setMemoryCategories(cats: string[] | undefined | null): void {
   if (Array.isArray(cats) && cats.length > 0) {
     memoryCategories = [...cats];
   }
 }
 
-export async function saveCategories(cats: string[]): Promise<boolean> {
-  memoryCategories = [...cats];
+export function getMemoryCategories(): string[] {
+  return memoryCategories;
+}
 
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('zecratary_categories_changed', { detail: cats }));
-    window.dispatchEvent(new CustomEvent('zecratary_ingredient_categories_updated', { detail: cats }));
-  }
+export async function fetchCategories(): Promise<string[]> {
+  try {
+    const res = await fetch('/api/admin/ingredient-categories', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      const list = Array.isArray(data.categories) ? data.categories : (Array.isArray(data) ? data : DEFAULT_CATEGORIES);
+      memoryCategories = list;
+      return list;
+    }
+  } catch (_) {}
+  return memoryCategories;
+}
 
-  let success = false;
+export async function persistCategories(categories: string[]): Promise<boolean> {
   try {
     const res = await fetch('/api/admin/ingredient-categories', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ingredientCategories: cats })
+      body: JSON.stringify({ categories }),
     });
-    if (res.ok) success = true;
-  } catch (_) {}
-
-  try {
-    const res2 = await persistServerAdminSettings({ ingredientCategories: cats });
-    if (res2) success = true;
-  } catch (_) {}
-
-  return success;
-}
-
-export function useIngredientCategories(): string[] {
-  const [categories, setCategories] = useState<string[]>(memoryCategories);
-
-  useEffect(() => {
-    let isMounted = true;
-    async function fetchCategories() {
-      try {
-        const res = await fetch('/api/admin/ingredient-categories', { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          const list = Array.isArray(data) ? data : (data?.ingredientCategories || data?.categories);
-          if (Array.isArray(list) && list.length > 0 && isMounted) {
-            const parsed = list.map((item: any) => typeof item === 'string' ? item.trim() : (item.name || item.label || item.id || '').trim()).filter(Boolean);
-            if (parsed.length > 0) {
-              setCategories(parsed);
-              setMemoryCategories(parsed);
-              return;
-            }
-          }
-        }
-      } catch (_) {}
-
-      try {
-        const res2 = await fetch('/api/admin/settings', { cache: 'no-store' });
-        if (res2.ok) {
-          const data2 = await res2.json();
-          const list2 = data2?.settings?.ingredientCategories || data2?.ingredientCategories;
-          if (Array.isArray(list2) && list2.length > 0 && isMounted) {
-            const parsed2 = list2.map((item: any) => typeof item === 'string' ? item.trim() : (item.name || item.label || item.id || '').trim()).filter(Boolean);
-            if (parsed2.length > 0) {
-              setCategories(parsed2);
-              setMemoryCategories(parsed2);
-            }
-          }
-        }
-      } catch (_) {}
+    if (res.ok) {
+      memoryCategories = [...categories];
+      return true;
     }
-
-    fetchCategories();
-
-    const handleSync = (e: any) => {
-      if (e?.detail && Array.isArray(e.detail) && e.detail.length > 0) {
-        setCategories(e.detail);
-        setMemoryCategories(e.detail);
-      } else {
-        fetchCategories();
-      }
-    };
-
-    window.addEventListener('zecratary_ingredient_categories_updated', handleSync);
-    window.addEventListener('zecratary_categories_changed', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
-
-    return () => {
-      isMounted = false;
-      window.removeEventListener('zecratary_ingredient_categories_updated', handleSync);
-      window.removeEventListener('zecratary_categories_changed', handleSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
-    };
-  }, []);
-
-  return categories;
+  } catch (_) {}
+  return false;
 }
+
+export const saveCategories = persistCategories;
+
+export function getStoredCategories(): string[] {
+  return memoryCategories;
+}
+
+export function saveStoredCategories(categories: string[]): void {
+  memoryCategories = [...categories];
+}
+
+/**
+ * Universal Hook / Function for consuming ingredient categories
+ * Can be called as a hook or standard helper
+ */
+export function useIngredientCategories(): any {
+  if (typeof window !== 'undefined') {
+    try {
+      const React = require('react');
+      if (React.useState && React.useEffect) {
+        const [categories, setCategories] = React.useState(memoryCategories);
+        React.useEffect(() => {
+          fetchCategories().then((c: any) => {
+            if (Array.isArray(c) && c.length) setCategories(c);
+          });
+        }, []);
+        const res: any = categories;
+        res.categories = categories;
+        res.setCategories = setCategories;
+        res.loading = false;
+        return res;
+      }
+    } catch (_) {}
+  }
+  const fallback: any = [...memoryCategories];
+  fallback.categories = memoryCategories;
+  fallback.loading = false;
+  return fallback;
+}
+
+export default {
+  setMemoryCategories,
+  getMemoryCategories,
+  saveCategories,
+  fetchCategories,
+  persistCategories,
+  useIngredientCategories,
+  getStoredCategories,
+  saveStoredCategories,
+  DEFAULT_CATEGORIES,
+  INGREDIENT_CATEGORIES,
+};

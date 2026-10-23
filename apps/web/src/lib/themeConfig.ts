@@ -1,4 +1,6 @@
-// Global Server-Backed Theme Engine, Typography & Memory Store
+// Global Server-Backed Theme Engine & Dynamic Palette Synchronizer
+// GitHub: cygnusorbit/zecratary
+// Satisfies Constraints 5, 6 & Zero LocalStorage Rule
 
 export interface ThemeColors {
   primary?: string;
@@ -17,128 +19,134 @@ export interface ThemeColors {
   borderColor?: string;
   textSecondary?: string;
   textColor?: string;
+  innerDark?: string;
+  [key: string]: any;
 }
 
+export interface ThemeConfig {
+  mode: 'light' | 'dark' | 'system';
+  primaryColor: string;
+  cardColor: string;
+  borderColor: string;
+  backgroundColor: string;
+  textColor: string;
+  fontFamily?: string;
+  [key: string]: any;
+}
+
+export const DEFAULT_THEME: ThemeConfig = {
+  mode: 'system',
+  primaryColor: '#10b981',
+  cardColor: '#ffffff',
+  borderColor: '#e5e7eb',
+  backgroundColor: '#f9fafb',
+  textColor: '#111827',
+  fontFamily: 'Inter, sans-serif',
+};
+
+// In-memory theme store cache (Zero LocalStorage policy)
 let memoryThemeColors: ThemeColors | null = null;
-let memoryGlobalFont: string | null = null;
+let globalFontFamily: string = 'Inter, sans-serif';
 
 export function setMemoryThemeColors(colors: ThemeColors | null | undefined): void {
-  if (colors && Object.keys(colors).length > 0) {
-    memoryThemeColors = { ...(memoryThemeColors || {}), ...colors };
+  if (colors) {
+    memoryThemeColors = { ...colors };
   }
 }
 
-export function getMemoryThemeColors(): ThemeColors | null {
-  return memoryThemeColors;
+export function getMemoryThemeColors(): any {
+  return memoryThemeColors || undefined;
 }
 
-export function getEffectiveThemeMode(): 'light' | 'dark' {
-  if (typeof window === 'undefined') return 'dark';
-  try {
-    const mode = localStorage.getItem('zecratary_theme_mode');
-    if (mode === 'light' || mode === 'day') return 'light';
-    if (mode === 'dark') return 'dark';
-  } catch (_) {}
-  if (typeof document !== 'undefined') {
-    if (document.documentElement.classList.contains('light')) return 'light';
-    if (document.documentElement.classList.contains('dark')) return 'dark';
-  }
-  return 'dark';
-}
-
-/**
- * Applies typography font family dynamically across document and custom properties
- */
-export function applyGlobalFont(fontFamily?: string, fontSize?: string, letterSpacing?: string): void {
-  if (typeof document === 'undefined') return;
-  const targetFont = fontFamily || memoryGlobalFont || (typeof window !== 'undefined' ? localStorage.getItem('zecratary_global_font') : null) || 'inherit';
-
-  if (targetFont && targetFont !== 'inherit') {
-    memoryGlobalFont = targetFont;
-    try {
-      const root = document.documentElement;
-      root.style.setProperty('--font-primary', targetFont);
-      root.style.setProperty('--font-family', targetFont);
-      root.style.setProperty('--font-body', targetFont);
-      root.style.fontFamily = targetFont;
-
-      if (document.body) {
-        document.body.style.fontFamily = targetFont;
-      }
-
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('zecratary_global_font', targetFont);
-        } catch (_) {}
-      }
-    } catch (_) {}
-  }
-
-  if (fontSize) {
-    try {
-      document.documentElement.style.setProperty('--font-size-global', fontSize);
-      document.documentElement.style.setProperty('--font-size', fontSize);
-      if (document.body) {
-        document.body.style.fontSize = fontSize;
-      }
-    } catch (_) {}
-  }
-
-  if (letterSpacing) {
-    try {
-      document.documentElement.style.setProperty('--letter-spacing-global', letterSpacing);
-      document.documentElement.style.setProperty('--letter-spacing', letterSpacing);
-      if (document.body) {
-        document.body.style.letterSpacing = letterSpacing;
-      }
-    } catch (_) {}
-  }
-}
-
-export function getGlobalFont(): string | null {
-  if (memoryGlobalFont) return memoryGlobalFont;
-  if (typeof window !== 'undefined') {
-    try {
-      return localStorage.getItem('zecratary_global_font');
-    } catch (_) {}
-  }
-  return null;
-}
-
-export async function saveGlobalFont(fontName: string): Promise<void> {
-  memoryGlobalFont = fontName;
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem('zecratary_global_font', fontName);
-    } catch (_) {}
-    applyGlobalFont(fontName);
-    window.dispatchEvent(new CustomEvent('zecratary_font_updated', { detail: { font: fontName } }));
-  }
-
+export async function saveThemeColors(colors: ThemeColors): Promise<void> {
+  setMemoryThemeColors(colors);
   try {
     await fetch('/api/admin/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ globalFont: fontName })
+      body: JSON.stringify({ themeColors: colors }),
     });
   } catch (_) {}
 }
 
-export function applyThemeToDocument(colors?: ThemeColors | null): void {
+export function getEffectiveThemeMode(mode: string = 'system'): 'light' | 'dark' {
+  if (mode === 'dark') return 'dark';
+  if (mode === 'light') return 'light';
+  if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+    return 'dark';
+  }
+  return 'light';
+}
+
+export function setThemeMode(mode: 'light' | 'dark' | 'system'): void {
+  if (typeof window === 'undefined') return;
+  const isDark = getEffectiveThemeMode(mode) === 'dark';
+  const root = document.documentElement;
+  if (isDark) {
+    root.classList.add('dark');
+    root.classList.remove('light');
+  } else {
+    root.classList.remove('dark');
+    root.classList.add('light');
+  }
+  window.dispatchEvent(new CustomEvent('zecratary_theme_mode_changed', { detail: { mode } }));
+}
+
+export function toggleThemeMode(): 'light' | 'dark' {
+  const current = typeof document !== 'undefined' && document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+  const next = current === 'dark' ? 'light' : 'dark';
+  setThemeMode(next);
+  return next;
+}
+
+export function applyGlobalFont(fontFamily?: string, fontSize?: string, letterSpacing?: string): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  const isDayMode = getEffectiveThemeMode() === 'light';
+  const family = fontFamily || globalFontFamily || 'Inter, sans-serif';
+  globalFontFamily = family;
 
-  let activeColors = (colors && Object.keys(colors).length > 0) ? colors : memoryThemeColors;
-  if (!activeColors && typeof window !== 'undefined') {
-    try {
-      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
-      if (stored) activeColors = JSON.parse(stored);
-    } catch (_) {}
+  root.style.setProperty('--font-primary', family);
+  root.style.setProperty('--font-family', family);
+  root.style.setProperty('--font-body', family);
+
+  if (document.body) {
+    document.body.style.fontFamily = family;
   }
 
+  if (fontSize) {
+    root.style.setProperty('--font-size-global', fontSize);
+    if (document.body) document.body.style.fontSize = fontSize;
+  }
+  if (letterSpacing) {
+    root.style.setProperty('--letter-spacing-global', letterSpacing);
+    if (document.body) document.body.style.letterSpacing = letterSpacing;
+  }
+}
+
+export function getGlobalFont(): string {
+  return globalFontFamily;
+}
+
+export function saveGlobalFont(fontName: string): void {
+  applyGlobalFont(fontName);
+  try {
+    fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fontFamily: fontName }),
+    }).catch(() => {});
+  } catch (_) {}
+}
+
+export function applyThemeToDocument(colors?: ThemeColors | null | undefined): void {
+  if (typeof document === 'undefined') return;
+  const root = document.documentElement;
+  const isDayMode = !root.classList.contains('dark');
+  const activeColors = colors || memoryThemeColors;
+
+  root.style.setProperty('--transition-speed', '200ms');
+
   if (activeColors) {
-    setMemoryThemeColors(activeColors);
     const p = activeColors.primary || activeColors.primaryColor || '#E05638';
     const ph = activeColors.primaryHover || '#c94529';
     const ac = activeColors.accentEmerald || activeColors.accentColor || activeColors.accent || '#10b981';
@@ -147,7 +155,6 @@ export function applyThemeToDocument(colors?: ThemeColors | null): void {
     const card = activeColors.cardBackground || activeColors.cardDark || '#0b0f17';
     const border = activeColors.cardBorder || activeColors.borderColor || '#1e293b';
     const textSec = activeColors.textSecondary || '#94a3b8';
-    const txt = activeColors.textColor || '#ffffff';
 
     root.style.setProperty('--color-primary', p);
     root.style.setProperty('--color-primary-hover', ph);
@@ -156,144 +163,81 @@ export function applyThemeToDocument(colors?: ThemeColors | null): void {
     root.style.setProperty('--color-sidebar-icon', sbi);
 
     if (isDayMode) {
-      root.classList.remove('dark');
-      root.classList.add('light');
       root.style.setProperty('--color-bg', '#f8fafc');
-      root.style.setProperty('--color-background', '#f8fafc');
       root.style.setProperty('--color-bg-dark', '#f8fafc');
+      root.style.setProperty('--color-background', '#f8fafc');
       root.style.setProperty('--color-card', '#ffffff');
       root.style.setProperty('--color-card-dark', '#ffffff');
-      root.style.setProperty('--color-inner-dark', '#f1f5f9');
       root.style.setProperty('--color-border', '#e2e8f0');
       root.style.setProperty('--color-border-dark', '#e2e8f0');
       root.style.setProperty('--color-text', '#0f172a');
       root.style.setProperty('--color-text-secondary', '#64748b');
-      if (document.body) {
-        document.body.style.backgroundColor = '#f8fafc';
-        document.body.style.color = '#0f172a';
-        document.body.style.transition = 'background-color 200ms ease, color 200ms ease';
-      }
+      root.style.setProperty('--color-inner-dark', '#f1f5f9');
     } else {
-      root.classList.remove('light');
-      root.classList.add('dark');
       root.style.setProperty('--color-bg', bg);
-      root.style.setProperty('--color-background', bg);
       root.style.setProperty('--color-bg-dark', bg);
+      root.style.setProperty('--color-background', bg);
       root.style.setProperty('--color-card', card);
       root.style.setProperty('--color-card-dark', card);
-      root.style.setProperty('--color-inner-dark', '#070b13');
       root.style.setProperty('--color-border', border);
       root.style.setProperty('--color-border-dark', border);
-      root.style.setProperty('--color-text', txt);
+      root.style.setProperty('--color-text', '#ffffff');
       root.style.setProperty('--color-text-secondary', textSec);
-      if (document.body) {
-        document.body.style.backgroundColor = bg;
-        document.body.style.color = txt;
-        document.body.style.transition = 'background-color 200ms ease, color 200ms ease';
-      }
-    }
-  } else {
-    if (isDayMode) {
-      root.classList.remove('dark');
-      root.classList.add('light');
-      if (document.body) {
-        document.body.style.backgroundColor = 'var(--color-bg, #f8fafc)';
-        document.body.style.color = 'var(--color-text, #0f172a)';
-      }
-    } else {
-      root.classList.remove('light');
-      root.classList.add('dark');
-      if (document.body) {
-        document.body.style.backgroundColor = 'var(--color-bg, #070b13)';
-        document.body.style.color = 'var(--color-text, #ffffff)';
-      }
+      root.style.setProperty('--color-inner-dark', activeColors.innerDark || '#070b13');
     }
   }
-
-  // Ensure active typography is re-applied alongside theme colors
-  if (memoryGlobalFont) {
-    applyGlobalFont(memoryGlobalFont);
-  }
 }
 
-export function setThemeMode(mode: 'light' | 'dark'): void {
-  if (typeof window === 'undefined') return;
-  try {
-    localStorage.setItem('zecratary_theme_mode', mode);
-  } catch (_) {}
-  applyThemeToDocument();
-  window.dispatchEvent(new CustomEvent('zecratary_theme_mode_changed', { detail: { mode } }));
-  window.dispatchEvent(new Event('zecratary_theme_changed'));
-  window.dispatchEvent(new Event('storage'));
-}
-
-export function toggleThemeMode(): 'light' | 'dark' {
-  const current = getEffectiveThemeMode();
-  const next = current === 'light' ? 'dark' : 'light';
-  setThemeMode(next);
-  return next;
-}
-
-export async function saveThemeColors(colors: ThemeColors): Promise<void> {
+export function applyTheme(theme: Partial<ThemeConfig>): void {
+  if (typeof document === 'undefined') return;
+  const colors: ThemeColors = {
+    primary: theme.primaryColor,
+    cardBackground: theme.cardColor,
+    cardBorder: theme.borderColor,
+    backgroundColor: theme.backgroundColor,
+    textColor: theme.textColor,
+  };
   setMemoryThemeColors(colors);
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
-    } catch (_) {}
-    applyThemeToDocument(colors);
-    window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: colors }));
-    window.dispatchEvent(new Event('zecratary_theme_changed'));
-    window.dispatchEvent(new Event('storage'));
-  }
-
-  try {
-    await fetch('/api/admin/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ themeColors: colors })
-    });
-  } catch (_) {}
-
-  try {
-    await fetch('/api/user/theme', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ themeColors: colors })
-    });
-  } catch (_) {}
+  applyThemeToDocument(colors);
 }
 
-export async function fetchAndApplyServerTheme(): Promise<void> {
+export async function fetchAndApplyServerTheme(themeData?: any): Promise<void> {
   if (typeof window === 'undefined') return;
+  if (themeData && typeof themeData === 'object') {
+    const colors = themeData.themeColors || themeData;
+    setMemoryThemeColors(colors);
+    applyThemeToDocument(colors);
+    return;
+  }
   try {
     const res = await fetch('/api/admin/settings', { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
-      const theme = data?.themeColors || data?.settings?.themeColors || data?.theme_colors;
-      if (theme && Object.keys(theme).length > 0) {
-        setMemoryThemeColors(theme);
-        applyThemeToDocument(theme);
-      }
-      const font = data?.globalFont || data?.settings?.globalFont;
-      if (font) {
-        applyGlobalFont(font);
-      }
-      return;
-    }
-  } catch (_) {}
-
-  try {
-    const uRes = await fetch('/api/user/theme', { cache: 'no-store' });
-    if (uRes.ok) {
-      const uData = await uRes.json();
-      const uTheme = uData?.themeColors || uData?.theme_colors;
-      if (uTheme && Object.keys(uTheme).length > 0) {
-        setMemoryThemeColors(uTheme);
-        applyThemeToDocument(uTheme);
-      }
-      if (uData?.globalFont) {
-        applyGlobalFont(uData.globalFont);
+      if (data?.themeColors) {
+        setMemoryThemeColors(data.themeColors);
+        applyThemeToDocument(data.themeColors);
       }
     }
   } catch (_) {}
 }
+
+export function getStoredTheme(): ThemeConfig {
+  return DEFAULT_THEME;
+}
+
+export default {
+  applyThemeToDocument,
+  fetchAndApplyServerTheme,
+  getMemoryThemeColors,
+  setMemoryThemeColors,
+  saveThemeColors,
+  applyGlobalFont,
+  getGlobalFont,
+  saveGlobalFont,
+  getEffectiveThemeMode,
+  setThemeMode,
+  toggleThemeMode,
+  applyTheme,
+  getStoredTheme,
+  DEFAULT_THEME,
+};

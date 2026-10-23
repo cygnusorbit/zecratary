@@ -84,7 +84,7 @@ export default function ChefAISettingsPage() {
   const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
   // AI Configurations & Dynamic Models
-  const [provider, setProvider] = useState<'gemini' | 'openai'>('gemini');
+  const [provider, setProvider] = useState<'gemini' | 'openai' | string>('gemini');
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [model, setModel] = useState('gemini-2.5-flash');
@@ -315,8 +315,8 @@ export default function ChefAISettingsPage() {
       const serverData = await fetchServerAdminSettings();
       if (serverData) {
         const c = serverData.chefAiSettings || serverData.aiSettings || serverData;
-        if (c.provider) setProvider(c.provider);
-        else if (serverData.aiProvider) setProvider(serverData.aiProvider);
+        if (c.provider) setProvider((c.provider) as any);
+        else if (serverData.aiProvider) setProvider((serverData.aiProvider) as any);
 
         if (c.apiKey !== undefined && c.apiKey) setApiKey(c.apiKey);
 
@@ -875,7 +875,7 @@ export default function ChefAISettingsPage() {
         chefAiSettings: config,
         recommendedRecipeUrls,
         chefQuestionnaire: activeFlattenedQuestions,
-        themeColors: currentTheme
+        themeColors: (currentTheme as any) || undefined
       });
 
       if (cleanApiKey) {

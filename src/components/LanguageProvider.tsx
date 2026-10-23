@@ -1,105 +1,126 @@
-// Generated / Updated by AI Collaborator - Zero localStorage writes, full PostgreSQL synchronization
+// Global Language Localization Provider
+// GitHub: cygnusorbit/zecratary
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useTransition } from 'react';
 
 export interface LanguageContextType {
+  language: string;
+  setLanguage: (lang: string) => void;
   locale: string;
-  setLocale: (lang: string) => void;
-  language?: string;
-  currentLanguage?: string;
-  availableLanguages?: string[];
+  setLocale: (loc: string) => void;
+  version: string | number;
   t: (key: string, fallback?: string) => string;
-  version?: number;
+  translations: Record<string, string>;
+  availableLanguages: Array<{ code: string; name: string; nativeName?: string; flag?: string }>;
+  isLoaded: boolean;
   [key: string]: any;
 }
 
-export const DEFAULT_DICTIONARY: Record<string, string> = {
-  ingredientCatTitle: 'Ingredient Categories',
-  ingredientCatSubtitle: 'Manage custom ingredient categories and pantry classification',
-  addNewCategory: 'Add New Ingredient Category',
-  addCategoryBtn: 'Add Category',
-  categoryPlaceholder: 'e.g. Spices, Grains, Produce...',
-  activeCategories: 'Active Categories',
-  reposition: 'Reposition',
-  doneRepositioning: 'Done Repositioning',
-  done: 'Done',
-  save: 'Save',
-  cancel: 'Cancel',
-  resetDefaults: 'Reset Defaults',
-  reload: 'Reload',
-  adminConsole: 'Admin Console'
-};
+const DEFAULT_LANGUAGES = [
+  { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸' },
+  { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸' },
+  { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷' },
+  { code: 'de', name: 'German', nativeName: 'Deutsch', flag: '🇩🇪' },
+  { code: 'it', name: 'Italian', nativeName: 'Italiano', flag: '🇮🇹' },
+  { code: 'pt', name: 'Portuguese', nativeName: 'Português', flag: '🇵🇹' },
+  { code: 'zh', name: 'Chinese', nativeName: '中文', flag: '🇨🇳' },
+  { code: 'ja', name: 'Japanese', nativeName: '日本語', flag: '🇯🇵' },
+  { code: 'ko', name: 'Korean', nativeName: '한국어', flag: '🇰🇷' },
+  { code: 'th', name: 'Thai', nativeName: 'ไทย', flag: '🇹🇭' },
+];
 
-const LanguageContext = createContext<LanguageContextType>({
+export const LanguageContext = createContext<LanguageContextType>({
+  language: 'en',
+  setLanguage: () => {},
   locale: 'en',
   setLocale: () => {},
-  language: 'en',
-  currentLanguage: 'en',
-  availableLanguages: ['en', 'es', 'fr', 'de', 'th', 'zh', 'ja'],
-  t: (key: string, fallback?: string) => fallback || DEFAULT_DICTIONARY[key] || key,
-  version: 1
+  version: '2.1.0',
+  t: (key: string, fallback?: string) => fallback || key,
+  translations: {},
+  availableLanguages: DEFAULT_LANGUAGES,
+  isLoaded: true,
 });
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [locale, setLocaleState] = useState<string>('en');
-  const [dictionary, setDictionary] = useState<Record<string, string>>(DEFAULT_DICTIONARY);
-  const [version, setVersion] = useState<number>(1);
-
-  const fetchTranslations = useCallback(async (lang: string) => {
-    try {
-      const res = await fetch(`/api/admin/languages?lang=${encodeURIComponent(lang)}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.translations && typeof data.translations === 'object') {
-          setDictionary((prev) => ({ ...prev, ...data.translations }));
-          setVersion((v) => v + 1);
-        }
-      }
-    } catch (_) {}
-  }, []);
+  const [language, setLanguageState] = useState<string>('en');
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+  const [availableLanguages, setAvailableLanguages] = useState(DEFAULT_LANGUAGES);
+  const [isLoaded, setIsLoaded] = useState<boolean>(true);
+  const [, startTransition] = useTransition();
 
   useEffect(() => {
-    fetchTranslations(locale);
-  }, [locale, fetchTranslations]);
+    if (typeof window !== 'undefined') {
+      const match = document.cookie.match(/(?:^|; )zecratary_lang=([^;]*)/);
+      const saved = match ? decodeURIComponent(match[1]) : (navigator.language?.split('-')[0] || 'en');
+      setLanguageState(saved);
 
-  const setLocale = (newLocale: string) => {
-    setLocaleState(newLocale);
-    fetchTranslations(newLocale);
+      fetch('/api/admin/language')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data?.languages && Array.isArray(data.languages) && data.languages.length > 0) {
+            setAvailableLanguages(data.languages);
+          }
+          if (data?.translations && typeof data.translations === 'object') {
+            setTranslations(data.translations);
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
+
+  const setLanguage = (newLang: string) => {
+    startTransition(() => {
+      setLanguageState(newLang);
+      if (typeof window !== 'undefined') {
+        document.cookie = `zecratary_lang=${encodeURIComponent(newLang)}; path=/; max-age=31536000; SameSite=Lax`;
+        document.documentElement.lang = newLang;
+      }
+    });
   };
 
   const t = (key: string, fallback?: string): string => {
-    return dictionary[key] || fallback || key;
+    if (translations[key]) return translations[key];
+    if (fallback !== undefined) return fallback;
+    return key
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/_/g, ' ')
+      .replace(/^./, (str) => str.toUpperCase())
+      .trim();
+  };
+
+  const contextValue: LanguageContextType = {
+    language,
+    setLanguage,
+    locale: language,
+    setLocale: setLanguage,
+    version: '2.1.0',
+    t,
+    translations,
+    availableLanguages,
+    isLoaded,
   };
 
   return (
-    <LanguageContext.Provider
-      value={{
-        locale,
-        setLocale,
-        language: locale,
-        currentLanguage: locale,
-        availableLanguages: ['en', 'es', 'fr', 'de', 'th', 'zh', 'ja'],
-        t,
-        version
-      }}
-    >
+    <LanguageContext.Provider value={contextValue}>
       {children}
     </LanguageContext.Provider>
   );
 }
 
-export function useTranslation(): LanguageContextType {
+export function useTranslation() {
   const context = useContext(LanguageContext);
   if (!context) {
     return {
+      language: 'en',
+      setLanguage: () => {},
       locale: 'en',
       setLocale: () => {},
-      language: 'en',
-      currentLanguage: 'en',
-      availableLanguages: ['en', 'es', 'fr', 'de', 'th', 'zh', 'ja'],
-      t: (key: string, fallback?: string) => fallback || DEFAULT_DICTIONARY[key] || key,
-      version: 1
+      version: '2.1.0',
+      t: (key: string, fallback?: string) => fallback || key,
+      translations: {},
+      availableLanguages: DEFAULT_LANGUAGES,
+      isLoaded: true,
     };
   }
   return context;
