@@ -53,12 +53,10 @@ export function getPool(): Pool | null {
     return null;
   }
 
-  // Reuse existing pool instance if connection string is unchanged
   if (globalThis.__zecratary_pg_pool && globalThis.__zecratary_current_conn === rawConnStr) {
     return globalThis.__zecratary_pg_pool;
   }
 
-  // Cleanly close prior pool on connection change
   if (globalThis.__zecratary_pg_pool) {
     try {
       globalThis.__zecratary_pg_pool.end().catch(() => {});
@@ -75,12 +73,10 @@ export function getPool(): Pool | null {
     rawConnStr.includes('aws-0') ||
     rawConnStr.includes('sslmode=require');
 
-  // Strip conflicting sslmode query parameters to allow explicit SSL configuration
   const cleanConnStr = rawConnStr
     .replace(/([?&])sslmode=[^&]+(&|$)/, '$1')
     .replace(/[?&]$/, '');
 
-  // Safeguard: suppress Node.js certificate chain rejection on cloud poolers
   if (isSupabaseOrPooler && typeof process !== 'undefined' && process.env) {
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   }
@@ -90,9 +86,10 @@ export function getPool(): Pool | null {
     connectionTimeoutMillis: 10000,
     idleTimeoutMillis: 30000,
     max: 10,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10000,
   };
 
-  // Explicitly disable strict certificate authorization for remote PostgreSQL / Supabase poolers
   if (isRemote || isSupabaseOrPooler) {
     poolConfig.ssl = {
       rejectUnauthorized: false,
@@ -109,7 +106,6 @@ export function getPool(): Pool | null {
   return newPool;
 }
 
-// Adaptive pool proxy for components importing { pool } from '@/lib/db'
 export const pool = new Proxy({} as Pool, {
   get(_target, prop) {
     const activePool = getPool();
@@ -139,9 +135,15 @@ export async function query(sql: string, params: any[] = []): Promise<any> {
     let client: any = null;
     try {
       client = await activePool.connect();
-      const res = await client.query(sql, params);
+      // CRITICAL PROTOCOL FIX:
+      // If params are present and non-empty, use Extended Query Protocol (client.query(sql, params)).
+      // If params are empty/omitted, use Simple Query Protocol (client.query(sql)), which natively supports
+      // multiple semicolon-separated DDL statements without throwing "cannot insert multiple commands into a prepared statement".
+      const res = (params && params.length > 0)
+        ? await client.query(sql, params)
+        : await client.query(sql);
+
       const rows = Array.isArray(res) ? res : (res?.rows || []);
-      // Attach metadata for dual compatibility
       (rows as any).rows = rows;
       (rows as any).rowCount = res?.rowCount ?? rows.length;
       return rows;
@@ -156,7 +158,7 @@ export async function query(sql: string, params: any[] = []): Promise<any> {
       }
     }
   } else {
-    // MySQL query executor with isolated runtime loader
+    // MySQL query executor
     try {
       let mysqlModule: any = null;
       try {

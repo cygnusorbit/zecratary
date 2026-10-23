@@ -4,6 +4,8 @@ import { query } from '@/lib/db';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
+let isFrontendPagesTableEnsured = false;
+
 const DEFAULT_PADDING = {
   top: '2.5rem',
   bottom: '4rem',
@@ -73,7 +75,10 @@ const DEFAULT_HOME_ELEMENTS = [
 ];
 
 async function ensureFrontendPagesTable() {
+  if (isFrontendPagesTableEnsured) return;
+
   try {
+    // 1. Execute DDL without parameters (Simple Query Protocol executes all commands cleanly)
     await query(`
       CREATE TABLE IF NOT EXISTS frontend_pages (
         id VARCHAR(255) PRIMARY KEY,
@@ -103,8 +108,10 @@ async function ensureFrontendPagesTable() {
       ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS order_index INT DEFAULT 0;
       ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'published';
       ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS content TEXT DEFAULT '';
+    `);
 
-      -- Ensure default homepage exists with complete structure
+    // 2. Execute Parameterized Seed as a SINGLE SQL command
+    await query(`
       INSERT INTO frontend_pages (
         id, title, slug, description, content, status, is_default, show_in_nav, show_in_footer, order_index, elements, padding, footer
       )
@@ -129,6 +136,8 @@ async function ensureFrontendPagesTable() {
         padding = CASE WHEN frontend_pages.padding IS NULL THEN EXCLUDED.padding ELSE frontend_pages.padding END,
         footer = CASE WHEN frontend_pages.footer IS NULL THEN EXCLUDED.footer ELSE frontend_pages.footer END;
     `, [JSON.stringify(DEFAULT_HOME_ELEMENTS), JSON.stringify(DEFAULT_PADDING), JSON.stringify(DEFAULT_FOOTER)]);
+
+    isFrontendPagesTableEnsured = true;
   } catch (err: any) {
     console.warn('[frontend_pages schema notice]:', err.message);
   }
@@ -266,7 +275,6 @@ export async function POST(req: NextRequest) {
       if (!pageId) {
         return NextResponse.json({ success: false, error: 'Page ID required' }, { status: 400 });
       }
-      // Protect default homepage from deletion
       const check = await query('SELECT is_default, slug FROM frontend_pages WHERE id = $1;', [pageId]);
       const target = Array.isArray(check) ? check[0] : check?.rows?.[0];
       if (target?.is_default || target?.slug === 'home') {
@@ -293,7 +301,6 @@ export async function POST(req: NextRequest) {
     const paddingJson = JSON.stringify(pageData.padding || DEFAULT_PADDING);
     const footerJson = JSON.stringify(pageData.footer || DEFAULT_FOOTER);
 
-    // If marked default, clear default flag on all other pages
     if (isDefault) {
       await query('UPDATE frontend_pages SET is_default = false WHERE id != $1 AND slug != $2;', [id, slug]);
     }
