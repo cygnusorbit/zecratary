@@ -1,4 +1,5 @@
 // Complete Self-Healing Database Migration for Supabase / PostgreSQL (Constraint 8)
+// GitHub: cygnusorbit/zecratary
 const path = require('path');
 const fs = require('fs');
 
@@ -156,40 +157,103 @@ async function runMigration() {
       ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS directions JSONB DEFAULT '[]'::jsonb;
       ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT false;
       ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'::jsonb;
+      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS image TEXT;
+      ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS image_url TEXT;
     `);
     console.log('  ✅ [4/7] saved_recipes table verified & columns updated.');
 
-    // 5. subscription_plans table & seeds
+    // 5. subscription_plans table & dual-column synchronization
     await client.query(`
       CREATE TABLE IF NOT EXISTS subscription_plans (
         id VARCHAR(255) PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
         slug VARCHAR(255) UNIQUE NOT NULL,
+        monthly_price_dollars NUMERIC(10, 2) DEFAULT 0,
+        annual_price_dollars NUMERIC(10, 2) DEFAULT 0,
         price_monthly NUMERIC(10, 2) DEFAULT 0,
         price_annual NUMERIC(10, 2) DEFAULT 0,
-        tokens_monthly INT DEFAULT 100,
+        price NUMERIC(10, 2) DEFAULT 0,
+        token_limit INT DEFAULT 50000,
+        tokens_monthly INT DEFAULT 50000,
+        monthly_tokens INT DEFAULT 50000,
         features JSONB DEFAULT '[]'::jsonb,
         is_free BOOLEAN DEFAULT false,
+        is_default BOOLEAN DEFAULT false,
         is_active BOOLEAN DEFAULT true,
         sort_order INT DEFAULT 0,
         plan_group_id VARCHAR(100),
         monthly_plan_id VARCHAR(100),
         annual_plan_id VARCHAR(100),
+        monthly_badge VARCHAR(64) DEFAULT '',
+        annual_badge VARCHAR(64) DEFAULT '',
+        trial_badge VARCHAR(64) DEFAULT '',
+        description_monthly TEXT DEFAULT '',
+        description_annual TEXT DEFAULT '',
+        button_text VARCHAR(64) DEFAULT 'Choose Plan',
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      -- Idempotent column evolution: guarantee all column variations exist
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_price_dollars NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_price_dollars NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS price_monthly NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS price_annual NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS price NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS token_limit INT DEFAULT 50000;
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS tokens_monthly INT DEFAULT 50000;
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_tokens INT DEFAULT 50000;
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS features JSONB DEFAULT '[]'::jsonb;
       ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS is_free BOOLEAN DEFAULT false;
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT false;
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS sort_order INT DEFAULT 0;
       ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS plan_group_id VARCHAR(100);
       ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_plan_id VARCHAR(100);
       ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_plan_id VARCHAR(100);
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS monthly_badge VARCHAR(64) DEFAULT '';
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS annual_badge VARCHAR(64) DEFAULT '';
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS trial_badge VARCHAR(64) DEFAULT '';
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS description_monthly TEXT DEFAULT '';
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS description_annual TEXT DEFAULT '';
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS button_text VARCHAR(64) DEFAULT 'Choose Plan';
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+      ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
-      INSERT INTO subscription_plans (id, name, slug, price_monthly, price_annual, tokens_monthly, is_free, is_active, sort_order)
+      -- Synchronize price and token columns bi-directionally
+      UPDATE subscription_plans
+      SET 
+        monthly_price_dollars = COALESCE(monthly_price_dollars, price_monthly, price, 0),
+        price_monthly = COALESCE(price_monthly, monthly_price_dollars, price, 0),
+        annual_price_dollars = COALESCE(annual_price_dollars, price_annual, 0),
+        price_annual = COALESCE(price_annual, annual_price_dollars, 0),
+        token_limit = COALESCE(token_limit, tokens_monthly, monthly_tokens, 50000),
+        tokens_monthly = COALESCE(tokens_monthly, token_limit, monthly_tokens, 50000),
+        monthly_tokens = COALESCE(monthly_tokens, token_limit, tokens_monthly, 50000);
+
+      -- Slug-safe upsert without unique key collisions
+      INSERT INTO subscription_plans (
+        id, name, slug, plan_group_id, monthly_plan_id, annual_plan_id,
+        monthly_price_dollars, annual_price_dollars, price_monthly, price_annual,
+        token_limit, tokens_monthly, monthly_tokens, is_free, is_active, sort_order
+      )
       VALUES 
-        ('plan_taster', 'Taster', 'taster', 0, 0, 50, true, true, 1),
-        ('plan_starter', 'Starter Chef', 'starter', 9.99, 89.99, 250, false, true, 2),
-        ('plan_pro', 'Nutrition Pro', 'pro', 19.99, 189.99, 600, false, true, 3),
-        ('plan_master', 'Master Culinary', 'master', 39.99, 349.99, 1500, false, true, 4)
-      ON CONFLICT (slug) DO NOTHING;
+        ('plan_taster', 'Taster', 'taster', 'group_taster', 'plan_taster_monthly', 'plan_taster_annual', 0, 0, 0, 0, 50000, 50000, 50000, true, true, 1),
+        ('plan_starter', 'Starter Chef', 'starter', 'group_starter', 'plan_starter_monthly', 'plan_starter_annual', 9.99, 89.99, 9.99, 89.99, 100000, 100000, 100000, false, true, 2),
+        ('plan_pro', 'Nutrition Pro', 'pro', 'group_pro', 'plan_pro_monthly', 'plan_pro_annual', 19.99, 189.99, 19.99, 189.99, 250000, 250000, 250000, false, true, 3),
+        ('plan_master', 'Master Culinary', 'master', 'group_master', 'plan_master_monthly', 'plan_master_annual', 39.99, 349.99, 39.99, 349.99, 600000, 600000, 600000, false, true, 4)
+      ON CONFLICT (slug) DO UPDATE SET
+        name = EXCLUDED.name,
+        monthly_price_dollars = EXCLUDED.monthly_price_dollars,
+        annual_price_dollars = EXCLUDED.annual_price_dollars,
+        price_monthly = EXCLUDED.price_monthly,
+        price_annual = EXCLUDED.price_annual,
+        token_limit = EXCLUDED.token_limit,
+        tokens_monthly = EXCLUDED.tokens_monthly,
+        monthly_tokens = EXCLUDED.monthly_tokens,
+        is_free = EXCLUDED.is_free,
+        is_active = EXCLUDED.is_active,
+        sort_order = EXCLUDED.sort_order;
     `);
     console.log('  ✅ [5/7] subscription_plans table verified & plans seeded.');
 
@@ -198,23 +262,56 @@ async function runMigration() {
       CREATE TABLE IF NOT EXISTS payment_transactions (
         id VARCHAR(255) PRIMARY KEY,
         user_id VARCHAR(255),
+        customer_name VARCHAR(255),
         customer_email VARCHAR(255) NOT NULL,
-        amount NUMERIC(10, 2) NOT NULL,
+        amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
         currency VARCHAR(10) DEFAULT 'USD',
         plan_id VARCHAR(100),
         plan_name VARCHAR(255),
+        plan_slug VARCHAR(64),
         billing_cycle VARCHAR(50) DEFAULT 'monthly',
         status VARCHAR(50) DEFAULT 'succeeded',
+        gateway VARCHAR(50) DEFAULT 'stripe',
         payment_method VARCHAR(50) DEFAULT 'stripe',
         transaction_id VARCHAR(255),
+        gateway_transaction_id TEXT,
+        test_mode BOOLEAN DEFAULT FALSE,
+        failure_reason TEXT,
+        is_recurring BOOLEAN DEFAULT FALSE,
+        auto_renew BOOLEAN DEFAULT FALSE,
+        confirmed_amount NUMERIC,
+        confirmed_at TIMESTAMPTZ,
         expiry_date TIMESTAMPTZ,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS user_id VARCHAR(255);
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS customer_name VARCHAR(255);
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255);
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS plan_id VARCHAR(100);
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS plan_name VARCHAR(255);
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS plan_slug VARCHAR(64);
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS amount NUMERIC(10, 2) DEFAULT 0;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD';
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS billing_cycle VARCHAR(50) DEFAULT 'monthly';
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'succeeded';
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS gateway VARCHAR(50) DEFAULT 'stripe';
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50) DEFAULT 'stripe';
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS transaction_id VARCHAR(255);
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS gateway_transaction_id TEXT;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS test_mode BOOLEAN DEFAULT FALSE;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS failure_reason TEXT;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS is_recurring BOOLEAN DEFAULT FALSE;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS auto_renew BOOLEAN DEFAULT FALSE;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_amount NUMERIC;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS expiry_date TIMESTAMPTZ;
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+      ALTER TABLE payment_transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
     `);
     console.log('  ✅ [6/7] payment_transactions table verified.');
 
-    // 7. token_transactions & token_settings tables
+    // 7. token_settings & token_transactions tables
     await client.query(`
       CREATE TABLE IF NOT EXISTS token_settings (
         id VARCHAR(255) PRIMARY KEY DEFAULT 'current',
@@ -225,17 +322,30 @@ async function runMigration() {
         plan_allocations JSONB DEFAULT '{}'::jsonb,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE token_settings ADD COLUMN IF NOT EXISTS free_tier_tokens INT DEFAULT 50;
+      ALTER TABLE token_settings ADD COLUMN IF NOT EXISTS cost_per_recipe INT DEFAULT 5;
+      ALTER TABLE token_settings ADD COLUMN IF NOT EXISTS cost_per_ai_chat INT DEFAULT 2;
+      ALTER TABLE token_settings ADD COLUMN IF NOT EXISTS cost_per_image INT DEFAULT 10;
+      ALTER TABLE token_settings ADD COLUMN IF NOT EXISTS plan_allocations JSONB DEFAULT '{}'::jsonb;
+      ALTER TABLE token_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
       CREATE TABLE IF NOT EXISTS token_transactions (
         id VARCHAR(255) PRIMARY KEY,
         user_id VARCHAR(255),
         user_email VARCHAR(255),
-        amount INT NOT NULL,
-        type VARCHAR(50) NOT NULL,
+        amount INT NOT NULL DEFAULT 0,
+        type VARCHAR(50) NOT NULL DEFAULT 'usage',
         description TEXT,
         balance_after INT,
         created_at TIMESTAMPTZ DEFAULT NOW()
       );
+      ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS user_id VARCHAR(255);
+      ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS user_email VARCHAR(255);
+      ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS amount INT DEFAULT 0;
+      ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS type VARCHAR(50) DEFAULT 'usage';
+      ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS description TEXT;
+      ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS balance_after INT;
+      ALTER TABLE token_transactions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
     `);
     console.log('  ✅ [7/7] token_settings & token_transactions tables verified.');
 
