@@ -573,7 +573,7 @@ export default function ManualRecipePage() {
                         color: 'var(--color-text)'
                       }}
                     >
-                      {ingredientCategories.map((cat) => (
+                      {ingredientCategories.map((cat: any) => (
                         <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
                       ))}
                     </select>

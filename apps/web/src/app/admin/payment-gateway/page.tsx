@@ -811,7 +811,7 @@ export default function AdminPaymentGatewayPage() {
       persistServerAdminSettings({
         paymentSettings: updatedConfig,
         currency: updatedConfig.currency
-      }).catch((err) => console.warn('persistServerAdminSettings warning:', err));
+      }).catch((err: any) => console.warn('persistServerAdminSettings warning:', err));
 
       setConfig(updatedConfig);
       configRef.current = updatedConfig;

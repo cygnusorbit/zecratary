@@ -83,7 +83,7 @@ export async function saveSiteConfig(config: SiteIdentityConfig): Promise<boolea
 
 // Auto-hydrate from server on startup with zero localStorage writes
 if (typeof window !== 'undefined') {
-  fetchServerAdminSettings().then((settings) => {
+  fetchServerAdminSettings().then((settings: any) => {
     if (settings) {
       const updated: Partial<SiteIdentityConfig> = {};
       if (settings.siteName) updated.siteName = settings.siteName;

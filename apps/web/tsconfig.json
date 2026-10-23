@@ -16,7 +16,8 @@
     "jsx": "react-jsx",
     "paths": {
       "@/*": [
-        "./src/*"
+        "./src/*",
+        "./*"
       ]
     },
     "incremental": true,
@@ -27,7 +28,8 @@
         "name": "next"
       }
     ],
-    "downlevelIteration": true
+    "downlevelIteration": true,
+    "baseUrl": "."
   },
   "include": [
     "src/**/*.ts",

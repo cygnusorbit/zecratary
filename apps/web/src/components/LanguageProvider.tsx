@@ -1,84 +1,129 @@
+// Global Language Localization Provider
+// GitHub: cygnusorbit/zecratary
 'use client';
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { 
-  DEFAULT_DICTIONARIES, 
-  getMergedDictionary, 
-  getStoredLocale, 
-  setStoredLocale as saveStoredLocale 
-} from '@/lib/i18n';
+
+import React, { createContext, useContext, useState, useEffect, useTransition } from 'react';
 
 export interface LanguageContextType {
+  language: string;
+  setLanguage: (lang: string) => void;
   locale: string;
-  currentLanguage?: string;
-  language?: string;
-  setLocale: (locale: string) => void;
-  setLanguage?: (lang: string) => void;
+  setLocale: (loc: string) => void;
+  version: string | number;
   t: (key: string, fallback?: string) => string;
-  version: number;
+  translations: Record<string, string>;
+  availableLanguages: Array<{ code: string; name: string; nativeName?: string; flag?: string }>;
+  isLoaded: boolean;
   [key: string]: any;
 }
 
-const LanguageContext = createContext<LanguageContextType>({
+const DEFAULT_LANGUAGES = [
+  { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸' },
+  { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸' },
+  { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷' },
+  { code: 'de', name: 'German', nativeName: 'Deutsch', flag: '🇩🇪' },
+  { code: 'it', name: 'Italian', nativeName: 'Italiano', flag: '🇮🇹' },
+  { code: 'pt', name: 'Portuguese', nativeName: 'Português', flag: '🇵🇹' },
+  { code: 'zh', name: 'Chinese', nativeName: '中文', flag: '🇨🇳' },
+  { code: 'ja', name: 'Japanese', nativeName: '日本語', flag: '🇯🇵' },
+  { code: 'ko', name: 'Korean', nativeName: '한국어', flag: '🇰🇷' },
+  { code: 'th', name: 'Thai', nativeName: 'ไทย', flag: '🇹🇭' },
+];
+
+export const LanguageContext = createContext<LanguageContextType>({
+  language: 'en',
+  setLanguage: () => {},
   locale: 'en',
   setLocale: () => {},
-  t: (key: string, fallback?: string) => {
-    const en = DEFAULT_DICTIONARIES['en'] || {};
-    return en[key] || fallback || key;
-  },
-  version: 0,
+  version: '2.1.0',
+  t: (key: string, fallback?: string) => fallback || key,
+  translations: {},
+  availableLanguages: DEFAULT_LANGUAGES,
+  isLoaded: true,
 });
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [locale, setLocaleState] = useState<string>('en');
-  const [dict, setDict] = useState<Record<string, string>>(() => {
-    return DEFAULT_DICTIONARIES['en'] || {};
-  });
-  const [version, setVersion] = useState<number>(0);
+  const [language, setLanguageState] = useState<string>('en');
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+  const [availableLanguages, setAvailableLanguages] = useState(DEFAULT_LANGUAGES);
+  const [isLoaded, setIsLoaded] = useState<boolean>(true);
+  const [, startTransition] = useTransition();
 
   useEffect(() => {
-    const activeLocale = getStoredLocale();
-    setLocaleState(activeLocale);
-    setDict(getMergedDictionary(activeLocale));
+    if (typeof window !== 'undefined') {
+      const match = document.cookie.match(/(?:^|; )zecratary_lang=([^;]*)/);
+      const saved = match ? decodeURIComponent(match[1]) : (navigator.language?.split('-')[0] || 'en');
+      setLanguageState(saved);
 
-    const handleLocaleChange = () => {
-      const updatedLocale = getStoredLocale();
-      setLocaleState(updatedLocale);
-      setDict(getMergedDictionary(updatedLocale));
-      setVersion((v) => v + 1);
-    };
-
-    window.addEventListener('zecratary_locale_changed', handleLocaleChange);
-    window.addEventListener('zecratary_dictionaries_updated', handleLocaleChange);
-    window.addEventListener('storage', handleLocaleChange);
-
-    return () => {
-      window.removeEventListener('zecratary_locale_changed', handleLocaleChange);
-      window.removeEventListener('zecratary_dictionaries_updated', handleLocaleChange);
-      window.removeEventListener('storage', handleLocaleChange);
-    };
+      fetch('/api/admin/language')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data?.languages && Array.isArray(data.languages) && data.languages.length > 0) {
+            setAvailableLanguages(data.languages);
+          }
+          if (data?.translations && typeof data.translations === 'object') {
+            setTranslations(data.translations);
+          }
+        })
+        .catch(() => {});
+    }
   }, []);
 
-  const setLocale = (newLocale: string) => {
-    saveStoredLocale(newLocale);
-    setLocaleState(newLocale);
-    setDict(getMergedDictionary(newLocale));
-    setVersion((v) => v + 1);
+  const setLanguage = (newLang: string) => {
+    startTransition(() => {
+      setLanguageState(newLang);
+      if (typeof window !== 'undefined') {
+        document.cookie = `zecratary_lang=${encodeURIComponent(newLang)}; path=/; max-age=31536000; SameSite=Lax`;
+        document.documentElement.lang = newLang;
+      }
+    });
   };
 
-  const t = useCallback((key: string, fallback?: string): string => {
-    if (dict && dict[key]) return dict[key];
-    const enDict = DEFAULT_DICTIONARIES['en'] || {};
-    if (enDict[key]) return enDict[key];
-    return fallback || key;
-  }, [dict]);
+  const t = (key: string, fallback?: string): string => {
+    if (translations[key]) return translations[key];
+    if (fallback !== undefined) return fallback;
+    return key
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/_/g, ' ')
+      .replace(/^./, (str) => str.toUpperCase())
+      .trim();
+  };
+
+  const contextValue: LanguageContextType = {
+    language,
+    setLanguage,
+    locale: language,
+    setLocale: setLanguage,
+    version: '2.1.0',
+    t,
+    translations,
+    availableLanguages,
+    isLoaded,
+  };
 
   return (
-    <LanguageContext.Provider value={{ locale, currentLanguage: locale, language: locale, setLocale, setLanguage: setLocale, t, version }}>
+    <LanguageContext.Provider value={contextValue}>
       {children}
     </LanguageContext.Provider>
   );
 }
 
 export function useTranslation() {
-  return useContext(LanguageContext);
+  const context = useContext(LanguageContext);
+  if (!context) {
+    return {
+      language: 'en',
+      setLanguage: () => {},
+      locale: 'en',
+      setLocale: () => {},
+      version: '2.1.0',
+      t: (key: string, fallback?: string) => fallback || key,
+      translations: {},
+      availableLanguages: DEFAULT_LANGUAGES,
+      isLoaded: true,
+    };
+  }
+  return context;
 }
+
+export default LanguageProvider;
