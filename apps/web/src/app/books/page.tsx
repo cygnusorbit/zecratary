@@ -23,7 +23,7 @@ interface RecipeBook {
   created_at?: string;
 }
 
-// Curated theme color presets matching the application palette
+// Curated palette presets
 const PRESET_COLORS = [
   { label: 'Emerald Teal', value: 'bg-gradient-to-r from-emerald-600 to-teal-600', hex: '#10b981' },
   { label: 'Sapphire Blue', value: 'bg-gradient-to-r from-blue-600 to-cyan-600', hex: '#2563eb' },
@@ -54,7 +54,7 @@ export default function BooksPage() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedBook, setSelectedBook] = useState<RecipeBook | null>(null);
 
-  // Modal States: Title, Description, and Color Picker
+  // Modal States: Title, Description, and Color Theme
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
   const [modalTitle, setModalTitle] = useState<string>('');
@@ -120,7 +120,7 @@ export default function BooksPage() {
     };
   }, [loadData]);
 
-  // Open Edit Modal with existing Cookbook Color
+  // Open Edit Modal with existing Cookbook Color Pre-selected
   const handleOpenEdit = (e: React.MouseEvent, book: RecipeBook) => {
     e.stopPropagation();
     setEditingBookId(book.id);
@@ -405,14 +405,14 @@ export default function BooksPage() {
                 />
               </div>
 
-              {/* INTEGRATED COLOR PICKER (PRESETS + CUSTOM PICKER) */}
+              {/* INTEGRATED COLOR PICKER (PRESET SWATCHES + CUSTOM PICKER) */}
               <div className="space-y-2">
                 <label className="block font-bold flex items-center gap-1.5">
                   <Palette className="h-3.5 w-3.5 text-[var(--color-primary)]" />
                   <span>{t('cookbookColor', 'Cookbook Color Theme')}</span>
                 </label>
 
-                {/* COLOR PRESETS */}
+                {/* PRESET SWATCHES */}
                 <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
                   {PRESET_COLORS.map((preset) => {
                     const isSelected = modalColor === preset.value;
@@ -447,7 +447,7 @@ export default function BooksPage() {
                     type="text"
                     value={modalColor}
                     onChange={(e) => setModalColor(e.target.value)}
-                    placeholder="Custom color / class"
+                    placeholder="Custom color / gradient class"
                     className="flex-1 px-3 py-1.5 rounded-xl border outline-hidden text-[11px]"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />

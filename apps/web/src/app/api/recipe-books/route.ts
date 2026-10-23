@@ -16,7 +16,6 @@ async function ensureBooksTable() {
         description TEXT DEFAULT '',
         cover_color VARCHAR(255) DEFAULT 'bg-gradient-to-r from-emerald-600 to-teal-600',
         recipe_ids JSONB DEFAULT '[]'::jsonb,
-        is_favorite BOOLEAN DEFAULT false,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
@@ -28,7 +27,6 @@ async function ensureBooksTable() {
         description TEXT DEFAULT '',
         cover_color VARCHAR(255) DEFAULT 'bg-gradient-to-r from-emerald-600 to-teal-600',
         recipe_ids JSONB DEFAULT '[]'::jsonb,
-        is_favorite BOOLEAN DEFAULT false,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
@@ -93,7 +91,6 @@ export async function GET(req: NextRequest) {
         recipe_ids: recipeIdsArray,
         recipeCount: actualCount,
         recipes_count: actualCount,
-        is_favorite: Boolean(b.is_favorite),
         created_at: b.created_at,
         updated_at: b.updated_at,
       };
