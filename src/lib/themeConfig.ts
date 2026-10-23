@@ -44,7 +44,6 @@ export const DEFAULT_THEME: ThemeConfig = {
   fontFamily: 'Inter, sans-serif',
 };
 
-// In-memory theme store cache (Zero LocalStorage policy)
 let memoryThemeColors: ThemeColors | null = null;
 let globalFontFamily: string = 'Inter, sans-serif';
 
@@ -109,10 +108,7 @@ export function applyGlobalFont(fontFamily?: string, fontSize?: string, letterSp
   root.style.setProperty('--font-family', family);
   root.style.setProperty('--font-body', family);
 
-  if (document.body) {
-    document.body.style.fontFamily = family;
-  }
-
+  if (document.body) document.body.style.fontFamily = family;
   if (fontSize) {
     root.style.setProperty('--font-size-global', fontSize);
     if (document.body) document.body.style.fontSize = fontSize;

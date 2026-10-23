@@ -1,13 +1,6 @@
 // Ingredient Categories Synchronization Engine
 // GitHub: cygnusorbit/zecratary
 
-export interface IngredientCategory {
-  id: string;
-  name: string;
-  icon?: string;
-  color?: string;
-}
-
 export const DEFAULT_CATEGORIES: string[] = [
   'Produce',
   'Meat & Poultry',
@@ -73,10 +66,6 @@ export function saveStoredCategories(categories: string[]): void {
   memoryCategories = [...categories];
 }
 
-/**
- * Universal Hook / Function for consuming ingredient categories
- * Can be called as a hook or standard helper
- */
 export function useIngredientCategories(): any {
   if (typeof window !== 'undefined') {
     try {

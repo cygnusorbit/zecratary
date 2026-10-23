@@ -24,3 +24,7 @@ node_modules
 
 # Hostinger deployment artifacts & bridges
 *.local
+
+# Sensitive environment files and build caches
+.env.*.local
+apps/web/.env
