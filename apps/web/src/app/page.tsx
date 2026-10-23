@@ -735,7 +735,7 @@ export default function DynamicHomePage() {
             </p>
           </div>
         ) : (
-          activePage.elements.map((elem) => {
+          (Array.isArray(activePage?.elements) ? activePage.elements : []).map((elem: any) => {
             const elemBg = elem.bgColor || 'transparent';
             const elemText = elem.textColor || 'inherit';
             const elemBorder = elem.borderColor || 'var(--color-border, #1e293b)';
@@ -776,7 +776,7 @@ export default function DynamicHomePage() {
                 <div key={elem.id} className="space-y-6 py-2">
                   {elem.title && <h3 className="text-2xl font-black text-center tracking-tight" style={{ color: elemAccent }}>{elem.title}</h3>}
                   <div className={`grid grid-cols-1 ${gridCols} gap-5 sm:gap-6`}>
-                    {(elem.columns || []).map((col) => (
+                    {(elem.columns || []).map((col: any) => (
                       <div key={col.id} className="p-6 rounded-3xl border space-y-2.5 shadow-md transition hover:-translate-y-1" style={{ backgroundColor: elem.bgColor || 'var(--color-inner-dark, #0e1422)', borderColor: elemBorder, color: elemText }}>
                         <h4 className="text-base font-bold" style={{ color: elemAccent }}>{col.title}</h4>
                         <p className="text-xs sm:text-sm leading-relaxed opacity-80">{col.content}</p>
@@ -1091,7 +1091,7 @@ export default function DynamicHomePage() {
               </div>
 
               {/* Dynamic Footer Link Columns */}
-              {(activePage?.footer?.columns || []).map((col) => (
+              {(activePage?.footer?.columns || []).map((col: any) => (
                 <div key={col.id} className="space-y-3">
                   <h4 
                     className="text-xs font-black uppercase tracking-wider"
@@ -1100,7 +1100,7 @@ export default function DynamicHomePage() {
                     {col.title}
                   </h4>
                   <ul className="space-y-2 text-xs opacity-75">
-                    {col.links.map((link) => (
+                    {col.links.map((link: any) => (
                       <li key={link.id}>
                         <Link href={link.url} className="hover:underline transition hover:opacity-100">
                           {link.label}

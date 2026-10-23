@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.19",
+  "version": "8.1.20",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -20,14 +20,7 @@
     "postbuild": "node -e \"const fs=require('fs'),path=require('path');const src=path.join('apps','web','.next');if(fs.existsSync(src)){  ['.next','dist','build'].forEach(d=>{    if(!fs.existsSync(d)){      try{fs.symlinkSync(src,d,'junction');}catch(e){fs.cpSync(src,d,{recursive:true});}    }  });  const saStatic=path.join(src,'standalone','apps','web','.next','static');  const srcStatic=path.join(src,'static');  if(fs.existsSync(srcStatic)&&!fs.existsSync(saStatic)){    try{fs.mkdirSync(path.dirname(saStatic),{recursive:true});fs.cpSync(srcStatic,saStatic,{recursive:true});}catch(e){}  }  const saPublic=path.join(src,'standalone','apps','web','public');  const srcPublic=path.join('apps','web','public');  if(fs.existsSync(srcPublic)&&!fs.existsSync(saPublic)){    try{fs.mkdirSync(path.dirname(saPublic),{recursive:true});fs.cpSync(srcPublic,saPublic,{recursive:true});}catch(e){}  }  console.log('\u2713 Hostinger deployment artifacts bridged successfully.');}\"",
     "start:web": "npm run start --workspace=web"
   },
-  "devDependencies": {
-    "@types/pg": "^8.11.0",
-    "prisma": "5.22.0",
-    "typescript": "^5.7.3",
-    "tailwindcss": "^3.4.17",
-    "postcss": "^8.4.49",
-    "autoprefixer": "^10.4.20"
-  },
+  "devDependencies": {},
   "packageManager": "npm@10.8.2",
   "dependencies": {
     "@prisma/client": "5.22.0",
@@ -37,7 +30,13 @@
     "next": "^16.3.5",
     "pg": "^8.23.0",
     "stripe": "^22.6.2",
-    "turbo": "^2.11.6"
+    "turbo": "^2.11.6",
+    "tailwindcss": "^3.4.17",
+    "postcss": "^8.4.49",
+    "autoprefixer": "^10.4.20",
+    "prisma": "5.22.0",
+    "typescript": "^5.7.3",
+    "@types/pg": "^8.11.0"
   }
 }
 
@@ -121,7 +120,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.19",
+  "version": "8.1.20",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -139,18 +138,20 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "stripe": "^16.12.0",
-    "tailwind-merge": "^2.6.0"
-  },
-  "devDependencies": {
+    "tailwind-merge": "^2.6.0",
+    "tailwindcss": "^3.4.17",
+    "postcss": "^8.4.49",
+    "autoprefixer": "^10.4.20",
+    "turbo": "^2.11.6",
+    "@prisma/client": "5.22.0",
+    "prisma": "5.22.0",
+    "typescript": "^5.7.3",
     "@types/node": "^20.17.19",
     "@types/pg": "^8.11.0",
     "@types/react": "^18.3.18",
-    "@types/react-dom": "^18.3.5",
-    "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.49",
-    "typescript": "^5.7.3",
-    "tailwindcss": "^3.4.17"
-  }
+    "@types/react-dom": "^18.3.5"
+  },
+  "devDependencies": {}
 }
 
 ```
