@@ -129,7 +129,7 @@ export default function Sidebar() {
     pathname === '/index'
   );
 
-  // Synchronize layout CSS custom properties with sidebar width and topbar height
+  // Layout Clearance Token Synchronization
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
@@ -299,8 +299,23 @@ export default function Sidebar() {
     currentUser?.email?.includes('admin')
   );
 
+  // ACCURATE ROUTE MATCHER: Eliminates dual-highlighting between /admin and /admin/*
+  const isRouteActive = (route: string): boolean => {
+    if (!pathname) return false;
+    const cleanPath = pathname === '/' ? '/' : pathname.replace(/\/+$/, '');
+    const cleanRoute = route === '/' ? '/' : route.replace(/\/+$/, '');
+
+    // Root and Admin Overview require exact match so child modules don't activate them
+    if (cleanRoute === '/' || cleanRoute === '/admin') {
+      return cleanPath === cleanRoute;
+    }
+
+    // Sibling routes require exact match or explicit sub-path boundary ('/route/...')
+    return cleanPath === cleanRoute || cleanPath.startsWith(`${cleanRoute}/`);
+  };
+
   const navClass = (route: string) => {
-    const active = pathname === route || (route !== '/' && pathname.startsWith(route));
+    const active = isRouteActive(route);
     return `flex items-center gap-3 px-3 py-2 rounded-xl font-bold text-xs transition duration-200 cursor-pointer ${
       active
         ? 'text-white shadow-xs'
@@ -309,7 +324,7 @@ export default function Sidebar() {
   };
 
   const navStyle = (route: string) => {
-    const active = pathname === route || (route !== '/' && pathname.startsWith(route));
+    const active = isRouteActive(route);
     return active
       ? { backgroundColor: 'var(--color-primary)', color: '#ffffff' }
       : { color: 'var(--color-text-secondary)', backgroundColor: 'transparent' };
