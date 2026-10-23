@@ -1,104 +1,185 @@
-// Server-backed Site Identity & Branding
-// Zero browser localStorage writes
+// Site identity and configuration management (Constraint 8)
+// GitHub: cygnusorbit/zecratary
 
-import { persistServerAdminSettings, fetchServerAdminSettings } from '@/lib/adminSync';
-
-export interface SiteIdentityConfig {
-  siteTagline?: string;
-  tagline?: string;
+export interface SiteConfig {
   siteName: string;
-  titlebarEmoji: string;
+  siteIcon: string;
+  site_name?: string;
+  site_icon?: string;
+  titlebarEmoji?: string;
+  titlebar_emoji?: string;
   titlebarImage?: string;
-  faviconEmoji: string;
+  titlebar_image?: string;
+  faviconEmoji?: string;
+  favicon_emoji?: string;
   faviconImage?: string;
+  favicon_image?: string;
+  currency?: string;
+  themeMode?: string;
+  theme_mode?: string;
+  [key: string]: any;
 }
 
 export const DEFAULT_SITE_NAME = 'Zecratary';
 export const DEFAULT_SITE_ICON = '🍳';
 
-let memorySiteConfig: SiteIdentityConfig = {
+export const DEFAULT_SITE_CONFIG: SiteConfig = {
   siteName: DEFAULT_SITE_NAME,
+  siteIcon: DEFAULT_SITE_ICON,
+  site_name: DEFAULT_SITE_NAME,
+  site_icon: DEFAULT_SITE_ICON,
   titlebarEmoji: DEFAULT_SITE_ICON,
-  titlebarImage: '',
+  titlebar_emoji: DEFAULT_SITE_ICON,
   faviconEmoji: DEFAULT_SITE_ICON,
-  faviconImage: ''
+  favicon_emoji: DEFAULT_SITE_ICON,
+  currency: 'USD',
+  themeMode: 'dark',
 };
 
-export function getSiteConfig(): SiteIdentityConfig {
-  return { ...memorySiteConfig };
-}
+let memorySiteConfig: SiteConfig = { ...DEFAULT_SITE_CONFIG };
 
 export function getSiteName(): string {
   return memorySiteConfig.siteName || DEFAULT_SITE_NAME;
 }
 
 export function getSiteIcon(): string {
-  return memorySiteConfig.titlebarImage || memorySiteConfig.titlebarEmoji || DEFAULT_SITE_ICON;
+  return memorySiteConfig.siteIcon || DEFAULT_SITE_ICON;
 }
 
-export function setMemorySiteConfig(cfg: Partial<SiteIdentityConfig>): void {
-  memorySiteConfig = { ...memorySiteConfig, ...cfg };
+export function getSiteConfig(fallback?: Partial<SiteConfig>): SiteConfig {
+  let cfg = { ...memorySiteConfig };
+  if (fallback) {
+    cfg = { ...cfg, ...fallback };
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('zecratary_site_config');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        cfg = { ...cfg, ...parsed };
+        memorySiteConfig = cfg;
+      }
+    } catch (_) {}
+  }
+  return cfg;
 }
 
-export function updateFavicon(faviconUrl?: string): void {
+export function setMemorySiteConfig(name?: string, icon?: string): void {
+  if (name) {
+    memorySiteConfig.siteName = name;
+    memorySiteConfig.site_name = name;
+  }
+  if (icon) {
+    memorySiteConfig.siteIcon = icon;
+    memorySiteConfig.site_icon = icon;
+    memorySiteConfig.titlebarEmoji = icon;
+    memorySiteConfig.faviconEmoji = icon;
+  }
+}
+
+export async function fetchSiteConfig(): Promise<SiteConfig> {
+  if (typeof window !== 'undefined') {
+    try {
+      const res = await fetch('/api/admin/settings', { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const settings = data.settings || data;
+        const mapped: Partial<SiteConfig> = {
+          siteName: settings.siteName || settings.site_name || memorySiteConfig.siteName,
+          site_name: settings.siteName || settings.site_name || memorySiteConfig.siteName,
+          siteIcon: settings.titlebarEmoji || settings.titlebar_emoji || settings.faviconEmoji || settings.favicon_emoji || memorySiteConfig.siteIcon,
+          site_icon: settings.titlebarEmoji || settings.titlebar_emoji || settings.faviconEmoji || settings.favicon_emoji || memorySiteConfig.siteIcon,
+          titlebarEmoji: settings.titlebarEmoji || settings.titlebar_emoji || memorySiteConfig.titlebarEmoji,
+          faviconEmoji: settings.faviconEmoji || settings.favicon_emoji || memorySiteConfig.faviconEmoji,
+          currency: settings.currency || memorySiteConfig.currency,
+        };
+        memorySiteConfig = { ...memorySiteConfig, ...mapped };
+      }
+    } catch (_) {}
+  }
+  return memorySiteConfig;
+}
+
+export async function saveSiteConfig(newConfig: Partial<SiteConfig>): Promise<SiteConfig> {
+  const resolvedName = newConfig.siteName || newConfig.site_name || memorySiteConfig.siteName;
+  const resolvedIcon = newConfig.siteIcon || newConfig.site_icon || newConfig.titlebarEmoji || newConfig.faviconEmoji || memorySiteConfig.siteIcon;
+
+  memorySiteConfig = {
+    ...memorySiteConfig,
+    ...newConfig,
+    siteName: resolvedName,
+    site_name: resolvedName,
+    siteIcon: resolvedIcon,
+    site_icon: resolvedIcon,
+    titlebarEmoji: resolvedIcon,
+    faviconEmoji: resolvedIcon,
+  };
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('zecratary_site_config', JSON.stringify(memorySiteConfig));
+      window.dispatchEvent(new CustomEvent('zecratary_site_settings_changed', { detail: memorySiteConfig }));
+      if (resolvedIcon) {
+        updateFavicon(resolvedIcon);
+      }
+    } catch (_) {}
+
+    // Persist to database via /api/admin/settings (Constraint 8)
+    try {
+      await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          siteName: resolvedName,
+          site_name: resolvedName,
+          titlebarEmoji: resolvedIcon,
+          titlebar_emoji: resolvedIcon,
+          faviconEmoji: resolvedIcon,
+          favicon_emoji: resolvedIcon,
+          currency: memorySiteConfig.currency,
+        }),
+      });
+    } catch (_) {}
+  }
+
+  return memorySiteConfig;
+}
+
+export function setSiteConfig(newConfig: Partial<SiteConfig>): SiteConfig {
+  saveSiteConfig(newConfig).catch(() => {});
+  return memorySiteConfig;
+}
+
+export const persistSiteConfig = saveSiteConfig;
+
+export function updateFavicon(iconUrlOrEmoji: string): void {
   if (typeof document === 'undefined') return;
   try {
-    const iconToUse = faviconUrl || memorySiteConfig.faviconImage || (
-      memorySiteConfig.faviconEmoji
-        ? `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${memorySiteConfig.faviconEmoji}</text></svg>`)}`
-        : `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${DEFAULT_SITE_ICON}</text></svg>`)}`
-    );
-
     let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
     if (!link) {
       link = document.createElement('link');
       link.rel = 'shortcut icon';
-      document.getElementsByTagName('head')[0].appendChild(link);
+      document.head.appendChild(link);
     }
-    link.href = iconToUse;
+    if (iconUrlOrEmoji.startsWith('/') || iconUrlOrEmoji.startsWith('http')) {
+      link.href = iconUrlOrEmoji;
+    } else {
+      link.href = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${iconUrlOrEmoji}</text></svg>`;
+    }
   } catch (_) {}
 }
 
-export async function saveSiteConfig(config: SiteIdentityConfig): Promise<boolean> {
-  memorySiteConfig = { ...config };
-  if (typeof window !== 'undefined') {
-    if (config.faviconImage) {
-      updateFavicon(config.faviconImage);
-    } else if (config.faviconEmoji) {
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">${config.faviconEmoji}</text></svg>`;
-      updateFavicon(`data:image/svg+xml,${encodeURIComponent(svg)}`);
-    }
-    window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: config }));
-    window.dispatchEvent(new Event('zecratary_site_settings_changed'));
-    window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-  }
-  return await persistServerAdminSettings({
-    siteName: config.siteName,
-    titlebarEmoji: config.titlebarEmoji,
-    titlebarImage: config.titlebarImage || '',
-    faviconEmoji: config.faviconEmoji,
-    faviconImage: config.faviconImage || ''
-  });
-}
-
-// Auto-hydrate from server on startup with zero localStorage writes
-if (typeof window !== 'undefined') {
-  fetchServerAdminSettings().then((settings: any) => {
-    if (settings) {
-      const updated: Partial<SiteIdentityConfig> = {};
-      if (settings.siteName) updated.siteName = settings.siteName;
-      if (settings.titlebarEmoji) updated.titlebarEmoji = settings.titlebarEmoji;
-      if (settings.titlebarImage !== undefined) updated.titlebarImage = settings.titlebarImage;
-      if (settings.faviconEmoji) updated.faviconEmoji = settings.faviconEmoji;
-      if (settings.faviconImage !== undefined) updated.faviconImage = settings.faviconImage;
-      
-      if (Object.keys(updated).length > 0) {
-        setMemorySiteConfig(updated);
-        updateFavicon();
-        window.dispatchEvent(new Event('zecratary_site_settings_changed'));
-      }
-    }
-  }).catch(() => {});
-}
-
-export const DEFAULT_SITE_TAGLINE = 'Autonomous culinary intelligence & AI meal planning';
+export default {
+  getSiteConfig,
+  saveSiteConfig,
+  fetchSiteConfig,
+  persistSiteConfig,
+  setSiteConfig,
+  getSiteName,
+  getSiteIcon,
+  setMemorySiteConfig,
+  updateFavicon,
+  DEFAULT_SITE_NAME,
+  DEFAULT_SITE_ICON,
+  DEFAULT_SITE_CONFIG,
+};
