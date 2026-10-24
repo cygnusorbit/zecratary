@@ -17,7 +17,7 @@ interface FontAwesomeIconProps extends React.SVGProps<SVGSVGElement> {
   color?: string;
 }
 
-// Official Font Awesome 6 Free SVG Vector Definitions
+// Official Font Awesome 6 Free SVG Vector Definitions with Exact Unicode Hex Keys
 const FA_ICONS: Record<string, { viewBox: string; path: React.ReactNode; unicode: string }> = {
   // Apple Icon (Unicode: f179)
   f179: {

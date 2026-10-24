@@ -4,10 +4,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { 
-  Shield, Key, Globe, Check, Copy, Eye, EyeOff, RotateCcw, 
-  ArrowLeft, CheckCircle2, AlertCircle, RefreshCw, Sparkles, ExternalLink
+  Key, Check, Copy, Eye, EyeOff, RotateCcw, 
+  ArrowLeft, CheckCircle2, AlertCircle, RefreshCw, Sparkles
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
+import FontAwesomeIcon from '@/components/FontAwesomeIcon';
 
 interface ProviderConfig {
   enabled: boolean;
@@ -193,7 +194,6 @@ export default function SocialLoginSettingPage() {
     setSettings(DEFAULT_SETTINGS);
   };
 
-  // Provider Status Helper
   const getProviderStatus = (prov: 'google' | 'facebook' | 'apple') => {
     const c = settings[prov];
     if (!c.enabled) return { label: t('statusDisabled', 'Disabled'), color: 'text-gray-400 bg-gray-500/10 border-gray-500/20' };
@@ -293,7 +293,7 @@ export default function SocialLoginSettingPage() {
         </div>
       ) : (
         <div className="space-y-6">
-          {/* PROVIDER 1: GOOGLE */}
+          {/* PROVIDER 1: GOOGLE (Font Awesome: f1a0) */}
           <div 
             role="region"
             data-lpignore="true"
@@ -305,10 +305,21 @@ export default function SocialLoginSettingPage() {
           >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
               <div className="flex items-center gap-3">
-                <span className="w-10 h-10 rounded-2xl border flex items-center justify-center text-xl shrink-0"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  🌐
-                </span>
+                <div 
+                  className="w-10 h-10 rounded-2xl border flex items-center justify-center shrink-0 shadow-xs"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  <FontAwesomeIcon
+                    name="f1a0"
+                    unicode="f1a0"
+                    size={20}
+                    className="shrink-0 text-[#EA4335]"
+                    title="Google (f1a0)"
+                  />
+                </div>
                 <div>
                   <h2 className="text-sm font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
                     <span>{t('googleProviderTitle', 'Google Identity Services')}</span>
@@ -339,7 +350,7 @@ export default function SocialLoginSettingPage() {
               </div>
             </div>
 
-            {/* Google Inputs (Autofill Safe Accessible Container) */}
+            {/* Google Inputs */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-bold">
               <div>
                 <label className="block mb-1.5">{t('clientIdLabel', 'Client ID')}</label>
@@ -447,7 +458,7 @@ export default function SocialLoginSettingPage() {
             </div>
           </div>
 
-          {/* PROVIDER 2: FACEBOOK */}
+          {/* PROVIDER 2: FACEBOOK (Font Awesome: f09a) */}
           <div 
             role="region"
             data-lpignore="true"
@@ -459,10 +470,21 @@ export default function SocialLoginSettingPage() {
           >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
               <div className="flex items-center gap-3">
-                <span className="w-10 h-10 rounded-2xl border flex items-center justify-center text-xl shrink-0"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  📘
-                </span>
+                <div 
+                  className="w-10 h-10 rounded-2xl border flex items-center justify-center shrink-0 shadow-xs"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  <FontAwesomeIcon
+                    name="f09a"
+                    unicode="f09a"
+                    size={20}
+                    className="shrink-0 text-[#1877F2]"
+                    title="Facebook (f09a)"
+                  />
+                </div>
                 <div>
                   <h2 className="text-sm font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
                     <span>{t('facebookProviderTitle', 'Facebook Login (Meta Graph)')}</span>
@@ -493,7 +515,7 @@ export default function SocialLoginSettingPage() {
               </div>
             </div>
 
-            {/* Facebook Inputs (Autofill Safe Accessible Container) */}
+            {/* Facebook Inputs */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-bold">
               <div>
                 <label className="block mb-1.5">{t('facebookAppIdLabel', 'Facebook App ID')}</label>
@@ -601,7 +623,7 @@ export default function SocialLoginSettingPage() {
             </div>
           </div>
 
-          {/* PROVIDER 3: APPLE */}
+          {/* PROVIDER 3: APPLE (Font Awesome: f179) */}
           <div 
             role="region"
             data-lpignore="true"
@@ -613,10 +635,22 @@ export default function SocialLoginSettingPage() {
           >
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
               <div className="flex items-center gap-3">
-                <span className="w-10 h-10 rounded-2xl border flex items-center justify-center text-xl shrink-0"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  🍎
-                </span>
+                <div 
+                  className="w-10 h-10 rounded-2xl border flex items-center justify-center shrink-0 shadow-xs"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  <FontAwesomeIcon
+                    name="f179"
+                    unicode="f179"
+                    size={20}
+                    className="shrink-0"
+                    style={{ color: 'var(--color-text)' }}
+                    title="Apple (f179)"
+                  />
+                </div>
                 <div>
                   <h2 className="text-sm font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
                     <span>{t('appleProviderTitle', 'Sign in with Apple')}</span>
@@ -647,7 +681,7 @@ export default function SocialLoginSettingPage() {
               </div>
             </div>
 
-            {/* Apple Inputs (Autofill Safe Accessible Container) */}
+            {/* Apple Inputs */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-bold">
               <div>
                 <label className="block mb-1.5">{t('clientIdLabel', 'Services ID (Client ID)')}</label>
