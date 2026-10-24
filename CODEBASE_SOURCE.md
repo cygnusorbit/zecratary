@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.21",
+  "version": "8.1.22",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -120,7 +120,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.21",
+  "version": "8.1.22",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -38861,7 +38861,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { 
   Book, Plus, Trash2, Edit3, Search, Utensils, X, 
-  BookOpen, ArrowRight 
+  BookOpen, ArrowRight, Palette, Check 
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 import { getCurrentUser, User } from '@/lib/auth';
@@ -38872,13 +38872,25 @@ interface RecipeBook {
   user_id?: string;
   title: string;
   description: string;
+  coverColor?: string;
+  cover_color?: string;
   recipeCount?: number;
   recipeIds?: string[];
   recipe_ids?: string[];
   created_at?: string;
 }
 
-// Local helper (satisfies Next.js App Router export contract - no named export)
+// Curated palette presets
+const PRESET_COLORS = [
+  { label: 'Emerald Teal', value: 'bg-gradient-to-r from-emerald-600 to-teal-600', hex: '#10b981' },
+  { label: 'Sapphire Blue', value: 'bg-gradient-to-r from-blue-600 to-cyan-600', hex: '#2563eb' },
+  { label: 'Sunset Amber', value: 'bg-gradient-to-r from-amber-500 to-yellow-500', hex: '#f59e0b' },
+  { label: 'Ruby Coral', value: 'bg-gradient-to-r from-rose-500 to-red-600', hex: '#E05638' },
+  { label: 'Royal Amethyst', value: 'bg-gradient-to-r from-purple-600 to-indigo-600', hex: '#8b5cf6' },
+  { label: 'Charcoal Slate', value: 'bg-gradient-to-r from-slate-700 to-zinc-900', hex: '#334155' },
+];
+
+// Local helper (satisfies Next.js App Router export contract - unexported)
 const isRecipeInBook = (rec: any, bookId: string, book?: any): boolean => {
   if (!rec || !bookId) return false;
   if (rec.bookId === bookId || rec.book_id === bookId) return true;
@@ -38899,11 +38911,12 @@ export default function BooksPage() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedBook, setSelectedBook] = useState<RecipeBook | null>(null);
 
-  // Original Modal States: ONLY Title and Description (NO Color Selector)
+  // Modal States: Title, Description, and Color Theme
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
   const [modalTitle, setModalTitle] = useState<string>('');
   const [modalDescription, setModalDescription] = useState<string>('');
+  const [modalColor, setModalColor] = useState<string>(PRESET_COLORS[0].value);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Pure Database Hydration: Queries PostgreSQL Directly (NO LocalStorage)
@@ -38964,7 +38977,26 @@ export default function BooksPage() {
     };
   }, [loadData]);
 
-  // Save / Update Cookbook directly in PostgreSQL
+  // Open Edit Modal with existing Cookbook Color Pre-selected
+  const handleOpenEdit = (e: React.MouseEvent, book: RecipeBook) => {
+    e.stopPropagation();
+    setEditingBookId(book.id);
+    setModalTitle(book.title);
+    setModalDescription(book.description || '');
+    setModalColor(book.cover_color || book.coverColor || PRESET_COLORS[0].value);
+    setShowCreateModal(true);
+  };
+
+  // Open Create Modal
+  const handleOpenCreate = () => {
+    setEditingBookId(null);
+    setModalTitle('');
+    setModalDescription('');
+    setModalColor(PRESET_COLORS[0].value);
+    setShowCreateModal(true);
+  };
+
+  // Save / Update Cookbook directly in PostgreSQL (Persisting Color)
   const handleSaveBook = async () => {
     if (!modalTitle.trim()) return;
     setIsSubmitting(true);
@@ -38978,6 +39010,8 @@ export default function BooksPage() {
       user_id: targetUserId,
       title: modalTitle.trim(),
       description: modalDescription.trim(),
+      cover_color: modalColor,
+      coverColor: modalColor,
       createdBy: currentUser?.email || 'admin@zecratary.com',
       creatorName: currentUser?.name || 'Chef',
     };
@@ -39073,12 +39107,7 @@ export default function BooksPage() {
 
           <button
             type="button"
-            onClick={() => {
-              setEditingBookId(null);
-              setModalTitle('');
-              setModalDescription('');
-              setShowCreateModal(true);
-            }}
+            onClick={handleOpenCreate}
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition cursor-pointer"
             style={{ backgroundColor: 'var(--color-primary)' }}
           >
@@ -39088,7 +39117,7 @@ export default function BooksPage() {
         </div>
       </div>
 
-      {/* ORIGINAL COOKBOOKS GRID (AUTHENTIC CARD DESIGN) */}
+      {/* ORIGINAL COOKBOOKS GRID WITH COLOR ACCENT BINDING */}
       {filteredBooks.length === 0 ? (
         <div className="p-12 text-center rounded-3xl border space-y-4" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
           <BookOpen className="h-12 w-12 mx-auto text-[var(--color-primary)] opacity-70" />
@@ -39102,68 +39131,75 @@ export default function BooksPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredBooks.map((book: RecipeBook, idx: number) => {
-            // FIXED SCOPE: Correctly reference book.recipe_ids instead of undeclared b
             const count = book.recipeCount !== undefined 
               ? book.recipeCount 
               : (Array.isArray(book.recipe_ids) ? book.recipe_ids.length : 0);
+
+            const cardColor = book.cover_color || book.coverColor || 'bg-gradient-to-r from-emerald-600 to-teal-600';
+            const isCustomHex = cardColor.startsWith('#');
 
             return (
               <div
                 key={book.id || `book_${idx}`}
                 onClick={() => setSelectedBook(book)}
-                className="p-6 rounded-3xl border cursor-pointer hover:shadow-lg transition flex flex-col justify-between space-y-4 group"
+                className="rounded-3xl border cursor-pointer hover:shadow-lg transition flex flex-col justify-between overflow-hidden group"
                 style={{
                   backgroundColor: 'var(--color-card)',
                   borderColor: 'var(--color-border)',
                 }}
               >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="p-2.5 rounded-2xl bg-[var(--color-inner-dark)] text-[var(--color-primary)]">
-                      <Book className="h-6 w-6" />
+                {/* TOP COLOR ACCENT STRIP */}
+                <div 
+                  className={`h-2.5 w-full ${!isCustomHex ? cardColor : ''}`}
+                  style={isCustomHex ? { backgroundColor: cardColor } : {}}
+                />
+
+                <div className="p-6 space-y-4 flex-1 flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div 
+                        className={`p-2.5 rounded-2xl text-white shadow-xs ${!isCustomHex ? cardColor : ''}`}
+                        style={isCustomHex ? { backgroundColor: cardColor } : {}}
+                      >
+                        <Book className="h-5 w-5" />
+                      </div>
+                      <span className="px-3 py-1 rounded-full text-xs font-bold border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text-secondary)' }}>
+                        {count} {count === 1 ? 'recipe' : 'recipes'}
+                      </span>
                     </div>
-                    <span className="px-3 py-1 rounded-full text-xs font-bold border" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text-secondary)' }}>
-                      {count} {count === 1 ? 'recipe' : 'recipes'}
-                    </span>
+
+                    <h3 className="text-lg font-black pt-2 line-clamp-1">{book.title}</h3>
+                    <p className="text-xs line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                      {book.description || t('noDescription', 'Curated culinary collection.')}
+                    </p>
                   </div>
 
-                  <h3 className="text-lg font-black pt-2 line-clamp-1">{book.title}</h3>
-                  <p className="text-xs line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                    {book.description || t('noDescription', 'Curated culinary collection.')}
-                  </p>
-                </div>
+                  <div className="pt-4 border-t flex items-center justify-between text-xs" style={{ borderColor: 'var(--color-border)' }}>
+                    <span className="font-bold text-[11px] text-[var(--color-primary)] flex items-center gap-1 group-hover:underline">
+                      <span>{t('viewCollection', 'View Collection')}</span>
+                      <ArrowRight className="h-3 w-3" />
+                    </span>
 
-                <div className="pt-4 border-t flex items-center justify-between text-xs" style={{ borderColor: 'var(--color-border)' }}>
-                  <span className="font-bold text-[11px] text-[var(--color-primary)] flex items-center gap-1 group-hover:underline">
-                    <span>{t('viewCollection', 'View Collection')}</span>
-                    <ArrowRight className="h-3 w-3" />
-                  </span>
-
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setEditingBookId(book.id);
-                        setModalTitle(book.title);
-                        setModalDescription(book.description || '');
-                        setShowCreateModal(true);
-                      }}
-                      className="p-1.5 rounded-lg border hover:bg-slate-800/20 cursor-pointer"
-                      style={{ borderColor: 'var(--color-border)' }}
-                      title={t('edit', 'Edit')}
-                    >
-                      <Edit3 className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => handleDeleteBook(e, book.id)}
-                      className="p-1.5 rounded-lg border hover:bg-red-500/10 text-red-400 cursor-pointer"
-                      style={{ borderColor: 'var(--color-border)' }}
-                      title={t('delete', 'Delete')}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={(e) => handleOpenEdit(e, book)}
+                        className="p-1.5 rounded-lg border hover:bg-slate-800/20 cursor-pointer"
+                        style={{ borderColor: 'var(--color-border)' }}
+                        title={t('edit', 'Edit Cookbook')}
+                      >
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteBook(e, book.id)}
+                        className="p-1.5 rounded-lg border hover:bg-red-500/10 text-red-400 cursor-pointer"
+                        style={{ borderColor: 'var(--color-border)' }}
+                        title={t('delete', 'Delete')}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -39172,7 +39208,7 @@ export default function BooksPage() {
         </div>
       )}
 
-      {/* ORIGINAL MODAL: CREATE / EDIT COOKBOOK (ZERO <form> TAGS, NO COLOR SELECTOR) */}
+      {/* EDIT / CREATE COOKBOOK MODAL WITH COLOR PICKER (ZERO <form> TAGS) */}
       {showCreateModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs"
@@ -39224,6 +39260,55 @@ export default function BooksPage() {
                   className="w-full px-3 py-2 rounded-xl border outline-hidden resize-none"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
+              </div>
+
+              {/* INTEGRATED COLOR PICKER (PRESET SWATCHES + CUSTOM PICKER) */}
+              <div className="space-y-2">
+                <label className="block font-bold flex items-center gap-1.5">
+                  <Palette className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+                  <span>{t('cookbookColor', 'Cookbook Color Theme')}</span>
+                </label>
+
+                {/* PRESET SWATCHES */}
+                <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                  {PRESET_COLORS.map((preset) => {
+                    const isSelected = modalColor === preset.value;
+                    return (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => setModalColor(preset.value)}
+                        className={`h-9 rounded-xl flex items-center justify-center transition border ${preset.value} cursor-pointer shadow-xs`}
+                        style={{
+                          borderColor: isSelected ? '#ffffff' : 'transparent',
+                          transform: isSelected ? 'scale(1.05)' : 'scale(1)',
+                        }}
+                        title={preset.label}
+                      >
+                        {isSelected && <Check className="h-4 w-4 text-white drop-shadow-md" />}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* CUSTOM COLOR INPUT */}
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="color"
+                    value={modalColor.startsWith('#') ? modalColor : '#10b981'}
+                    onChange={(e) => setModalColor(e.target.value)}
+                    className="w-8 h-8 rounded-lg cursor-pointer border border-transparent bg-transparent"
+                    title={t('pickCustomColor', 'Pick custom color')}
+                  />
+                  <input
+                    type="text"
+                    value={modalColor}
+                    onChange={(e) => setModalColor(e.target.value)}
+                    placeholder="Custom color / gradient class"
+                    className="flex-1 px-3 py-1.5 rounded-xl border outline-hidden text-[11px]"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                </div>
               </div>
             </div>
 
@@ -48055,10 +48140,25 @@ async function ensureBooksTable() {
         creator_name VARCHAR(255) DEFAULT 'Chef',
         title VARCHAR(255) NOT NULL,
         description TEXT DEFAULT '',
+        cover_color VARCHAR(255) DEFAULT 'bg-gradient-to-r from-emerald-600 to-teal-600',
         recipe_ids JSONB DEFAULT '[]'::jsonb,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS cookbooks (
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255) DEFAULT 'usr_admin_1',
+        title VARCHAR(255) NOT NULL,
+        description TEXT DEFAULT '',
+        cover_color VARCHAR(255) DEFAULT 'bg-gradient-to-r from-emerald-600 to-teal-600',
+        recipe_ids JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      ALTER TABLE recipe_books ADD COLUMN IF NOT EXISTS cover_color VARCHAR(255) DEFAULT 'bg-gradient-to-r from-emerald-600 to-teal-600';
+      ALTER TABLE cookbooks ADD COLUMN IF NOT EXISTS cover_color VARCHAR(255) DEFAULT 'bg-gradient-to-r from-emerald-600 to-teal-600';
       ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS book_id VARCHAR(128);
     `);
   } catch (_) {}
@@ -48081,7 +48181,7 @@ export async function GET(req: NextRequest) {
 
     const books = await query(sql, params);
 
-    // Compute live recipe counts from saved_recipes
+    // Compute live recipe counts dynamically from saved_recipes
     const countMap: Record<string, number> = {};
     try {
       const countRows = await query(`
@@ -48111,6 +48211,8 @@ export async function GET(req: NextRequest) {
         title: b.title || 'Untitled Cookbook',
         name: b.title || 'Untitled Cookbook',
         description: b.description || '',
+        coverColor: b.cover_color || 'bg-gradient-to-r from-emerald-600 to-teal-600',
+        cover_color: b.cover_color || 'bg-gradient-to-r from-emerald-600 to-teal-600',
         recipeIds: recipeIdsArray,
         recipe_ids: recipeIdsArray,
         recipeCount: actualCount,
@@ -48171,7 +48273,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, recipe_ids: rList, recipes_count: rList.length });
     }
 
-    // Standard Create or Update (Single-statement executions)
+    // Standard Create or Update (Isolated Single-Statement Queries)
     const items = Array.isArray(body) ? body : (body.books || [body.book || body]);
 
     for (const b of items) {
@@ -48179,15 +48281,18 @@ export async function POST(req: NextRequest) {
       const targetUserId = b.userId || b.user_id || 'usr_admin_1';
       const title = b.title.trim();
       const desc = b.description || '';
+      const color = b.coverColor || b.cover_color || 'bg-gradient-to-r from-emerald-600 to-teal-600';
       const recipeIds = JSON.stringify(Array.isArray(b.recipeIds) ? b.recipeIds : (Array.isArray(b.recipe_ids) ? b.recipe_ids : []));
 
+      // 1. Single statement for recipe_books
       await query(`
         INSERT INTO recipe_books (
-          id, user_id, created_by, creator_name, title, description, recipe_ids, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, NOW())
+          id, user_id, created_by, creator_name, title, description, cover_color, recipe_ids, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           description = EXCLUDED.description,
+          cover_color = EXCLUDED.cover_color,
           recipe_ids = EXCLUDED.recipe_ids,
           updated_at = NOW();
       `, [
@@ -48197,16 +48302,19 @@ export async function POST(req: NextRequest) {
         b.creatorName || b.creator_name || 'Chef',
         title,
         desc,
+        color,
         recipeIds
       ]);
 
+      // 2. Single statement for cookbooks
       await query(`
         INSERT INTO cookbooks (
-          id, user_id, title, description, recipe_ids, updated_at
-        ) VALUES ($1, $2, $3, $4, $5::jsonb, NOW())
+          id, user_id, title, description, cover_color, recipe_ids, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           description = EXCLUDED.description,
+          cover_color = EXCLUDED.cover_color,
           recipe_ids = EXCLUDED.recipe_ids,
           updated_at = NOW();
       `, [
@@ -48214,6 +48322,7 @@ export async function POST(req: NextRequest) {
         targetUserId,
         title,
         desc,
+        color,
         recipeIds
       ]);
     }
@@ -56392,10 +56501,25 @@ async function ensureBooksTable() {
         creator_name VARCHAR(255) DEFAULT 'Chef',
         title VARCHAR(255) NOT NULL,
         description TEXT DEFAULT '',
+        cover_color VARCHAR(255) DEFAULT 'bg-gradient-to-r from-emerald-600 to-teal-600',
         recipe_ids JSONB DEFAULT '[]'::jsonb,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
+
+      CREATE TABLE IF NOT EXISTS cookbooks (
+        id VARCHAR(255) PRIMARY KEY,
+        user_id VARCHAR(255) DEFAULT 'usr_admin_1',
+        title VARCHAR(255) NOT NULL,
+        description TEXT DEFAULT '',
+        cover_color VARCHAR(255) DEFAULT 'bg-gradient-to-r from-emerald-600 to-teal-600',
+        recipe_ids JSONB DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+
+      ALTER TABLE recipe_books ADD COLUMN IF NOT EXISTS cover_color VARCHAR(255) DEFAULT 'bg-gradient-to-r from-emerald-600 to-teal-600';
+      ALTER TABLE cookbooks ADD COLUMN IF NOT EXISTS cover_color VARCHAR(255) DEFAULT 'bg-gradient-to-r from-emerald-600 to-teal-600';
       ALTER TABLE saved_recipes ADD COLUMN IF NOT EXISTS book_id VARCHAR(128);
     `);
   } catch (_) {}
@@ -56418,7 +56542,7 @@ export async function GET(req: NextRequest) {
 
     const books = await query(sql, params);
 
-    // Compute live recipe counts from saved_recipes
+    // Compute live recipe counts dynamically from saved_recipes
     const countMap: Record<string, number> = {};
     try {
       const countRows = await query(`
@@ -56448,6 +56572,8 @@ export async function GET(req: NextRequest) {
         title: b.title || 'Untitled Cookbook',
         name: b.title || 'Untitled Cookbook',
         description: b.description || '',
+        coverColor: b.cover_color || 'bg-gradient-to-r from-emerald-600 to-teal-600',
+        cover_color: b.cover_color || 'bg-gradient-to-r from-emerald-600 to-teal-600',
         recipeIds: recipeIdsArray,
         recipe_ids: recipeIdsArray,
         recipeCount: actualCount,
@@ -56508,7 +56634,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, recipe_ids: rList, recipes_count: rList.length });
     }
 
-    // Standard Create or Update (Single-statement executions)
+    // Standard Create or Update (Isolated Single-Statement Queries)
     const items = Array.isArray(body) ? body : (body.books || [body.book || body]);
 
     for (const b of items) {
@@ -56516,15 +56642,18 @@ export async function POST(req: NextRequest) {
       const targetUserId = b.userId || b.user_id || 'usr_admin_1';
       const title = b.title.trim();
       const desc = b.description || '';
+      const color = b.coverColor || b.cover_color || 'bg-gradient-to-r from-emerald-600 to-teal-600';
       const recipeIds = JSON.stringify(Array.isArray(b.recipeIds) ? b.recipeIds : (Array.isArray(b.recipe_ids) ? b.recipe_ids : []));
 
+      // 1. Single statement for recipe_books
       await query(`
         INSERT INTO recipe_books (
-          id, user_id, created_by, creator_name, title, description, recipe_ids, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, NOW())
+          id, user_id, created_by, creator_name, title, description, cover_color, recipe_ids, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           description = EXCLUDED.description,
+          cover_color = EXCLUDED.cover_color,
           recipe_ids = EXCLUDED.recipe_ids,
           updated_at = NOW();
       `, [
@@ -56534,16 +56663,19 @@ export async function POST(req: NextRequest) {
         b.creatorName || b.creator_name || 'Chef',
         title,
         desc,
+        color,
         recipeIds
       ]);
 
+      // 2. Single statement for cookbooks
       await query(`
         INSERT INTO cookbooks (
-          id, user_id, title, description, recipe_ids, updated_at
-        ) VALUES ($1, $2, $3, $4, $5::jsonb, NOW())
+          id, user_id, title, description, cover_color, recipe_ids, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, NOW())
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           description = EXCLUDED.description,
+          cover_color = EXCLUDED.cover_color,
           recipe_ids = EXCLUDED.recipe_ids,
           updated_at = NOW();
       `, [
@@ -56551,6 +56683,7 @@ export async function POST(req: NextRequest) {
         targetUserId,
         title,
         desc,
+        color,
         recipeIds
       ]);
     }
