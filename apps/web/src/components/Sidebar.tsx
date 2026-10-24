@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON } from '@/lib/siteConfig';
-import { useTranslation, SupportedLanguage, DEFAULT_SYSTEM_LANGUAGES } from '@/components/LanguageProvider';
+import { DEFAULT_SUPPORTED_LANGUAGES, DEFAULT_SYSTEM_LANGUAGES, SupportedLanguage, useTranslation } from '@/components/LanguageProvider';
 
 interface InAppNotification {
   id: string;
@@ -365,14 +365,14 @@ export default function Sidebar() {
       : DEFAULT_SYSTEM_LANGUAGES;
     return rawList
       .map(normalizeLanguageItem)
-      .filter(l => l.status === 'active' || l.status === '');
+      .filter((l: any) => l.status === 'active' || l.status === '');
   }, [availableLanguages]);
 
   // Safe Resolution of Active Language Object
   const currentLangObj = useMemo(() => {
     const safeLang = typeof currentLanguage === 'string' && currentLanguage ? currentLanguage.toLowerCase().trim() : 'en';
-    const found = activeLanguages.find(l => isCodeMatch(l, safeLang)) || 
-                  availableLanguages.map(normalizeLanguageItem).find(l => isCodeMatch(l, safeLang));
+    const found = activeLanguages.find((l: any) => isCodeMatch(l, safeLang)) || 
+                  availableLanguages.map(normalizeLanguageItem).find((l: any) => isCodeMatch(l, safeLang));
     
     if (found) return found;
     return { 
@@ -634,7 +634,7 @@ export default function Sidebar() {
                 </div>
 
                 <div className="max-h-64 overflow-y-auto space-y-1 pr-0.5">
-                  {activeLanguages.map((rawLang, idx) => {
+                  {activeLanguages.map((rawLang: any, idx: number) => {
                     const lang = normalizeLanguageItem(rawLang);
                     const isSelected = isCodeMatch(lang.code, currentLanguage);
                     return (
