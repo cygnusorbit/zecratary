@@ -24,6 +24,31 @@ interface PantryItem {
   expiryDate: string;
 }
 
+
+const getCategoryName = (cat: any): string => {
+  if (!cat) return '';
+  if (typeof cat === 'string') {
+    const trimmed = cat.trim();
+    return trimmed === '[object Object]' ? 'Other' : trimmed;
+  }
+  if (typeof cat === 'object') {
+    return (cat.name || cat.label || cat.title || cat.id || cat.slug || 'Other').trim();
+  }
+  return String(cat).trim();
+};
+
+const normalizeCategoriesList = (list: any[]): string[] => {
+  if (!Array.isArray(list)) return [];
+  const result: string[] = [];
+  list.forEach((item) => {
+    const name = getCategoryName(item);
+    if (name && name !== 'All' && !result.includes(name)) {
+      result.push(name);
+    }
+  });
+  return result;
+};
+
 export default function PantryPage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -447,9 +472,15 @@ export default function PantryPage() {
               }}
             >
               <option value="All">{t('allCategories', 'All Categories')}</option>
-              {categoriesList.map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
+              {categoriesList.map((cat: any, idx: number) => {
+                  const catName = getCategoryName(cat);
+                  if (!catName || catName === 'All') return null;
+                  return (
+                    <option key={`pantry_cat_${catName}_${idx}`} value={catName}>
+                      {catName}
+                    </option>
+                  );
+                })}
             </select>
           </div>
         </div>
@@ -795,9 +826,15 @@ export default function PantryPage() {
                     color: 'var(--color-text)'
                   }}
                 >
-                  {categoriesList.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
+                  {categoriesList.map((cat: any, idx: number) => {
+                  const catName = getCategoryName(cat);
+                  if (!catName || catName === 'All') return null;
+                  return (
+                    <option key={`pantry_cat_${catName}_${idx}`} value={catName}>
+                      {catName}
+                    </option>
+                  );
+                })}
                 </select>
               </div>
 
@@ -971,9 +1008,15 @@ export default function PantryPage() {
                     color: 'var(--color-text)'
                   }}
                 >
-                  {categoriesList.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
+                  {categoriesList.map((cat: any, idx: number) => {
+                  const catName = getCategoryName(cat);
+                  if (!catName || catName === 'All') return null;
+                  return (
+                    <option key={`pantry_cat_${catName}_${idx}`} value={catName}>
+                      {catName}
+                    </option>
+                  );
+                })}
                 </select>
               </div>
 
