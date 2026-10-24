@@ -1,1 +1,1 @@
-export { GET, POST, OPTIONS, dynamic } from '../tokens/route';
+export { GET, POST, OPTIONS, dynamic, revalidate } from '../tokens/route';
