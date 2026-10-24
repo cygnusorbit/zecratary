@@ -114,11 +114,11 @@ const isImageIcon = (icon?: unknown): icon is string =>
   );
 
 export default function Sidebar() {
-  const pathname = usePathname();
-  const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
-  if (isAuthRoute) return null;
-
+  // 1. Navigation & Translation Hooks
+  const pathname = usePathname() || '';
   const { t, locale, setLocale } = useTranslation();
+
+  // 2. Core State Hooks
   const [user, setUser] = useState<User | null>(null);
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
   const [siteIcon, setSiteIcon] = useState<string>(DEFAULT_SITE_ICON);
@@ -127,7 +127,7 @@ export default function Sidebar() {
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
   const [mounted, setMounted] = useState<boolean>(false);
 
-  // Balances & Token package state
+  // 3. Balances & Token Package State Hooks
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
@@ -138,7 +138,7 @@ export default function Sidebar() {
   const [topUpSuccessMsg, setTopUpSuccessMsg] = useState<string>('');
   const [topUpErrorMsg, setTopUpErrorMsg] = useState<string>('');
 
-  // Live Wallet Balance state
+  // 4. Live Wallet Balance State Hooks
   const [walletBalance, setWalletBalance] = useState<number>(0);
   const [walletCurrency, setWalletCurrency] = useState<string>('USD');
   const [walletSymbol, setWalletSymbol] = useState<string>('$');
@@ -149,12 +149,12 @@ export default function Sidebar() {
   const [walletTopUpSuccessMsg, setWalletTopUpSuccessMsg] = useState<string>('');
   const [walletTopUpErrorMsg, setWalletTopUpErrorMsg] = useState<string>('');
 
-  // Notifications & Profile state
+  // 5. Notifications & Profile Dropdown State Hooks
   const [unreadCount, setUnreadCount] = useState<number>(3);
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
 
-  // Dropdown click-outside refs
+  // 6. Dropdown Click-Outside Refs
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const notifDropdownRef = useRef<HTMLDivElement>(null);
   const topUpDropdownRef = useRef<HTMLDivElement>(null);
@@ -190,7 +190,7 @@ export default function Sidebar() {
     } catch (_) {}
   };
 
-  // 1. Data Fetchers Declared BEFORE useEffect
+  // 7. Data Fetchers Declared with useCallback
   const fetchUserTokenAndNotifications = useCallback(async (currentUser?: any) => {
     try {
       let cfgRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
@@ -308,7 +308,9 @@ export default function Sidebar() {
     } catch (_) {}
   }, [user]);
 
-  // 2. Real-Time BroadcastChannel & Cross-Window Balance Synchronization
+  const showCollapsed = isCollapsed && !isOpen;
+
+  // 8. TOP-LEVEL EFFECT 1: Real-Time Cross-Window & Tab Balance Synchronization
   useEffect(() => {
     let channel: BroadcastChannel | null = null;
     try {
@@ -345,10 +347,7 @@ export default function Sidebar() {
     };
   }, [fetchWalletData, fetchUserTokenAndNotifications]);
 
-  // 3. Primary Component Mounting Lifecycle
-  useEffect(() => {
-    setMounted(true);
-  // Dynamically synchronize CSS custom properties for main content clearance
+  // 9. TOP-LEVEL EFFECT 2: Layout CSS Property Synchronization (--sidebar-width, --topbar-height)
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const isMobile = window.innerWidth < 768;
@@ -368,6 +367,9 @@ export default function Sidebar() {
     return () => window.removeEventListener('resize', handleResize);
   }, [showCollapsed]);
 
+  // 10. TOP-LEVEL EFFECT 3: Primary Mounting, Theme, Window Listeners & Outside Clicks
+  useEffect(() => {
+    setMounted(true);
 
     if (typeof window !== 'undefined') {
       try {
@@ -499,6 +501,17 @@ export default function Sidebar() {
     };
   }, [fetchUserTokenAndNotifications, fetchWalletData]);
 
+  // 11. TOP-LEVEL EFFECT 4: Reset Menus on Route Change
+  useEffect(() => {
+    setIsOpen(false);
+    setShowProfileMenu(false);
+    setShowNotifications(false);
+    setShowTopUpMenu(false);
+    setShowTopUpMobileMenu(false);
+    setShowWalletTopUpMenu(false);
+    setShowWalletMobileMenu(false);
+  }, [pathname]);
+
   const toggleThemeMode = () => {
     const nextMode = !isDarkMode;
     setIsDarkMode(nextMode);
@@ -509,16 +522,6 @@ export default function Sidebar() {
       window.dispatchEvent(new Event('zecratary_theme_changed'));
     }
   };
-
-  useEffect(() => {
-    setIsOpen(false);
-    setShowProfileMenu(false);
-    setShowNotifications(false);
-    setShowTopUpMenu(false);
-    setShowTopUpMobileMenu(false);
-    setShowWalletTopUpMenu(false);
-    setShowWalletMobileMenu(false);
-  }, [pathname]);
 
   const handlePurchasePackage = async (pkg: TokenPackage) => {
     if (!pkg) return;
@@ -639,8 +642,6 @@ export default function Sidebar() {
     return pathname === href || pathname.startsWith(`${href}/`);
   };
 
-  const showCollapsed = isCollapsed && !isOpen;
-
   const navClass = (href: string) => `
     w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition-colors duration-150 select-none
     ${isActive(href)
@@ -653,10 +654,13 @@ export default function Sidebar() {
     }
   `;
 
+  // 12. Guard Rail: Unconditional Hook Execution Complete Before Early Return
+  const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
+  if (isAuthRoute) return null;
+
   const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
   const iconStyle = { color: 'var(--color-sidebar-icon, var(--color-primary))' };
-
   const displayPackages = tokenPackages.length > 0 ? tokenPackages : DEFAULT_FALLBACK_PACKAGES;
 
   return (
@@ -1683,7 +1687,7 @@ export default function Sidebar() {
 
       {/* SIDEBAR CONTAINER */}
       <aside className={`
-        fixed top-0 left-0 z-50 h-screen bg-[var(--color-card)] border-r border-[var(--color-border)] 
+        fixed top-0 left-0 z-40 h-screen bg-[var(--color-card)] border-r border-[var(--color-border)] 
         flex flex-col justify-between shrink-0 select-none transition-all duration-300 ease-in-out
         ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}
         ${isOpen ? 'translate-x-0 w-64 p-5' : '-translate-x-full md:translate-x-0'}
