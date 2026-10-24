@@ -34,7 +34,7 @@ export async function GET() {
 
     try {
       const res: any = await query(`
-        SELECT supported_languages, settings, translations FROM admin_settings 
+        SELECT * FROM admin_settings 
         WHERE id = 'primary_settings' OR id = '1' 
         ORDER BY updated_at DESC LIMIT 1;
       `);
@@ -77,7 +77,6 @@ export async function POST(req: NextRequest) {
     const translations = body.translations;
 
     if (Array.isArray(languages)) {
-      // Update Dual-Path Server JSON Files
       for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
         try {
           const p = path.join(process.cwd(), rel);
@@ -92,7 +91,6 @@ export async function POST(req: NextRequest) {
         } catch (_) {}
       }
 
-      // Update PostgreSQL / MySQL
       try {
         await query(`
           INSERT INTO admin_settings (id, supported_languages, updated_at)
