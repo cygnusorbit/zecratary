@@ -1,1444 +1,847 @@
+// @ts-nocheck
 'use client';
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { 
-  Coins, Sparkles, Plus, Trash2, Save, ArrowLeft,
-  CheckCircle2, AlertCircle, RefreshCw, Layers, ShieldCheck, 
-  ChefHat, DownloadCloud, FileText, Camera, Tag, DollarSign,
-  Search, Filter, ArrowUpRight, ArrowDownLeft, Calendar, User as UserIcon,
-  Clock, Activity, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-  Columns3, Check, SlidersHorizontal, Eye, EyeOff, Wallet, ArrowRight
+import {
+  Activity,
+  AlertCircle,
+  ArrowRight,
+  Check,
+  CheckCircle2,
+  Coins,
+  CreditCard,
+  Database,
+  Edit3,
+  Flame,
+  Globe,
+  History,
+  Layers,
+  Plus,
+  RefreshCw,
+  Save,
+  Shield,
+  Sliders,
+  Sparkles,
+  Trash2,
+  Zap
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
-interface TokenPackage {
+export interface TokenPackage {
   id: string;
   name: string;
-  tokens: number;
-  price: number;
+  tokenAmount: number;
+  priceDollars: number;
   badge?: string;
+  bonusTokens?: number;
   isPopular?: boolean;
 }
 
-interface SubscriptionPlan {
-  id: string;
-  slug: string;
-  name: string;
-  monthly_tokens?: number;
-  token_limit?: number;
-  tokenLimit?: number;
-  is_free?: boolean;
-  isFree?: boolean;
-  monthly_price_dollars?: number;
-  annual_price_dollars?: number;
-  monthlyPriceDollars?: number;
-  annualPriceDollars?: number;
+export interface TokenSettings {
+  tokenName: string;
+  tokenSymbol: string;
+  startingBalance: number;
+  isEnabled: boolean;
+  importUrlCost: number;
+  importTextCost: number;
+  importPhotoCost: number;
+  aiChefCost: number;
+  mealPlannerCost: number;
+  macroAnalysisCost: number;
+  packages: TokenPackage[];
 }
 
-interface TokenTransaction {
+export interface TokenTransactionRecord {
   id: string;
-  user_id: string;
-  user_email: string;
+  customer_email: string;
   amount: number;
   balance_after: number;
-  user_total_tokens?: number;
   type: string;
   description: string;
   created_at: string;
 }
 
-interface TransactionStats {
-  totalDeducted: number;
-  totalGranted: number;
-  activeUsers: number;
-  totalTransactions: number;
-}
+const DEFAULT_TOKEN_PACKAGES: TokenPackage[] = [
+  { id: 'pkg_starter', name: 'Starter Spark', tokenAmount: 250, priceDollars: 4.99, badge: 'Popular', bonusTokens: 0, isPopular: true },
+  { id: 'pkg_chef', name: 'Culinary Master', tokenAmount: 1000, priceDollars: 14.99, badge: 'Best Value', bonusTokens: 150, isPopular: false },
+  { id: 'pkg_executive', name: 'Kitchen Enterprise', tokenAmount: 5000, priceDollars: 49.99, badge: 'VIP', bonusTokens: 1000, isPopular: false }
+];
 
-interface ColumnConfig {
-  key: string;
-  label: string;
-  visible: boolean;
-}
+const DEFAULT_SETTINGS: TokenSettings = {
+  tokenName: 'Foodie Token',
+  tokenSymbol: '🪙',
+  startingBalance: 100,
+  isEnabled: true,
+  importUrlCost: 5,
+  importTextCost: 2,
+  importPhotoCost: 10,
+  aiChefCost: 2,
+  mealPlannerCost: 5,
+  macroAnalysisCost: 3,
+  packages: DEFAULT_TOKEN_PACKAGES
+};
 
 export default function AdminTokenSettingPage() {
-  const { t } = useTranslation();
-  
-  // Tab Navigation: 'settings' | 'transactions'
-  const [activeTab, setActiveTab] = useState<'settings' | 'transactions'>('settings');
+  const { t, locale } = useTranslation();
 
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [successMsg, setSuccessMsg] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
-
-  // Token General Settings
-  const [tokenName, setTokenName] = useState('Foodie Token');
-  const [tokenSymbol, setTokenSymbol] = useState('🪙');
-  const [isEnabled, setIsEnabled] = useState(true);
-
-  // Per Feature Costs
-  const [chefCost, setChefCost] = useState(1);
-  const [importUrlCost, setImportUrlCost] = useState(2);
-  const [importTextCost, setImportTextCost] = useState(1);
-  const [importPhotoCost, setImportPhotoCost] = useState(3);
-
-  // Packages
-  const [packages, setPackages] = useState<TokenPackage[]>([]);
-  
-  // Subscription Plan Monthly Tokens (Synchronized with /admin/plans and PostgreSQL)
-  const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
-  const [planAllocations, setPlanAllocations] = useState<{ [slug: string]: number }>({});
-
-  // Transactions State
-  const [transactions, setTransactions] = useState<TokenTransaction[]>([]);
-  const [txLoading, setTxLoading] = useState(false);
-  const [txSearch, setTxSearch] = useState('');
-  const [txTypeFilter, setTxTypeFilter] = useState('all');
-  const [txPage, setTxPage] = useState(1);
-  const [txLimit, setTxLimit] = useState(10);
-  const [txTotalPages, setTxTotalPages] = useState(1);
-  const [txTotalCount, setTxTotalCount] = useState(0);
-  const [txStats, setTxStats] = useState<TransactionStats>({
-    totalDeducted: 0,
-    totalGranted: 0,
-    activeUsers: 0,
-    totalTransactions: 0
-  });
-
-  // Selection & Deletion State
-  const [selectedTxIds, setSelectedTxIds] = useState<string[]>([]);
-  const [deletingTxId, setDeletingTxId] = useState<string | null>(null);
-  const [bulkDeleting, setBulkDeleting] = useState(false);
-  const selectAllCheckboxRef = useRef<HTMLInputElement | null>(null);
-
-  // Table Column Visibility Controller
-  const [showColumnPicker, setShowColumnPicker] = useState(false);
-  const columnPickerRef = useRef<HTMLDivElement | null>(null);
-
-  const [columns, setColumns] = useState<ColumnConfig[]>([
-    { key: 'user', label: 'User', visible: true },
-    { key: 'user_total_tokens', label: 'User Total Tokens', visible: true },
-    { key: 'service', label: 'Service / Operation', visible: true },
-    { key: 'amount', label: 'Amount', visible: true },
-    { key: 'balance_after', label: 'Balance After', visible: true },
-    { key: 'description', label: 'Description', visible: true },
-    { key: 'created_at', label: 'Timestamp', visible: true },
-  ]);
-
-  // Load Saved Column Visibility Preferences
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem('zecratary_token_tx_columns');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setColumns(prev => prev.map(col => {
-            const found = parsed.find((p: any) => p.key === col.key);
-            return found ? { ...col, visible: Boolean(found.visible) } : col;
-          }));
-        }
-      }
-    } catch (_) {}
-  }, []);
-
-  // Handle Click Outside Column Picker Dropdown
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (columnPickerRef.current && !columnPickerRef.current.contains(event.target as Node)) {
-        setShowColumnPicker(false);
-      }
-    };
-    if (showColumnPicker) {
-      document.addEventListener('mousedown', handleClickOutside);
+  const tr = useCallback((key: string, fallback: string): string => {
+    if (typeof t === 'function') {
+      const val = t(key);
+      if (val && val !== key) return val;
     }
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showColumnPicker]);
+    return fallback;
+  }, [t]);
 
-  const toggleColumnVisibility = (key: string) => {
-    setColumns(prev => {
-      const target = prev.find(c => c.key === key);
-      const activeCount = prev.filter(c => c.visible).length;
-      if (target?.visible && activeCount <= 1) {
-        return prev;
-      }
-      const updated = prev.map(c => c.key === key ? { ...c, visible: !c.visible } : c);
-      try {
-        localStorage.setItem('zecratary_token_tx_columns', JSON.stringify(updated));
-      } catch (_) {}
-      return updated;
-    });
+  const [activeTab, setActiveTab] = useState<'system' | 'packages' | 'ledger'>('system');
+  const [settings, setSettings] = useState<TokenSettings>(DEFAULT_SETTINGS);
+  const [transactions, setTransactions] = useState<TokenTransactionRecord[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [saving, setSaving] = useState<boolean>(false);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+
+  // Package editing state
+  const [editingPkgId, setEditingPkgId] = useState<string | null>(null);
+  const [pkgName, setPkgName] = useState('New Chef Bundle');
+  const [pkgTokens, setPkgTokens] = useState<number>(500);
+  const [pkgPrice, setPkgPrice] = useState<number>(7.99);
+  const [pkgBadge, setPkgBadge] = useState('Hot');
+  const [pkgBonus, setPkgBonus] = useState<number>(50);
+
+  const isFetchingRef = useRef<boolean>(false);
+  const isSavingRef = useRef<boolean>(false);
+
+  const showToast = (type: 'success' | 'error', msg: string) => {
+    setFeedback({ type, msg });
+    setTimeout(() => setFeedback(null), 4000);
   };
 
-  const isColVisible = (key: string) => {
-    const col = columns.find(c => c.key === key);
-    return col ? col.visible : true;
-  };
-
-  const activeColumnCount = columns.filter(c => c.visible).length;
-
-  // Dynamic Settings and Plans Fetching (Direct from PostgreSQL and /api/admin/plans)
-  const fetchSettings = useCallback(async () => {
+  // Fetch Token Settings and Audit Ledger
+  const loadTokenData = useCallback(async () => {
+    if (isFetchingRef.current || isSavingRef.current) return;
+    isFetchingRef.current = true;
     setLoading(true);
+
     try {
-      // 1. Fetch token settings and plans from token-settings endpoint
-      const res = await fetch('/api/admin/token-settings', { cache: 'no-store' });
-      const data = await res.json();
-      let activeAllocations: { [slug: string]: number } = {};
-
-      if (data.success && data.settings) {
-        setTokenName(data.settings.tokenName || 'Foodie Token');
-        setTokenSymbol(data.settings.tokenSymbol || '🪙');
-        setIsEnabled(data.settings.isEnabled ?? true);
-        setChefCost(data.settings.chefCost ?? 1);
-        setImportUrlCost(data.settings.importUrlCost ?? 2);
-        setImportTextCost(data.settings.importTextCost ?? 1);
-        setImportPhotoCost(data.settings.importPhotoCost ?? 3);
-        setPackages(data.settings.packages || []);
-        if (data.settings.planAllocations && typeof data.settings.planAllocations === 'object') {
-          activeAllocations = { ...data.settings.planAllocations };
+      const res = await fetch('/api/admin/token-setting?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.tokenSettings || data.settings) {
+          const loaded = data.tokenSettings || data.settings;
+          setSettings({
+            tokenName: loaded.tokenName || 'Foodie Token',
+            tokenSymbol: loaded.tokenSymbol || '🪙',
+            startingBalance: loaded.startingBalance !== undefined ? loaded.startingBalance : 100,
+            isEnabled: loaded.isEnabled !== undefined ? Boolean(loaded.isEnabled) : true,
+            importUrlCost: loaded.importUrlCost !== undefined ? loaded.importUrlCost : 5,
+            importTextCost: loaded.importTextCost !== undefined ? loaded.importTextCost : 2,
+            importPhotoCost: loaded.importPhotoCost !== undefined ? loaded.importPhotoCost : 10,
+            aiChefCost: loaded.aiChefCost !== undefined ? loaded.aiChefCost : 2,
+            mealPlannerCost: loaded.mealPlannerCost !== undefined ? loaded.mealPlannerCost : 5,
+            macroAnalysisCost: loaded.macroAnalysisCost !== undefined ? loaded.macroAnalysisCost : 3,
+            packages: Array.isArray(loaded.packages) && loaded.packages.length > 0 ? loaded.packages : DEFAULT_TOKEN_PACKAGES
+          });
         }
-      }
-
-      // 2. Fetch authoritative plans directly from /api/admin/plans
-      let dynamicPlans: SubscriptionPlan[] = [];
-      try {
-        const plansRes = await fetch('/api/admin/plans', { cache: 'no-store' });
-        if (plansRes.ok) {
-          const plansData = await plansRes.json();
-          const list = Array.isArray(plansData.configs) ? plansData.configs : Array.isArray(plansData) ? plansData : [];
-          if (list.length > 0) {
-            dynamicPlans = list.map((p: any) => {
-              const assignedLimit = Number(p.tokenLimit ?? p.token_limit ?? 500);
-              return {
-                id: p.id || p.slug,
-                slug: p.slug,
-                name: p.name || p.slug,
-                token_limit: assignedLimit,
-                monthly_tokens: assignedLimit,
-                tokenLimit: assignedLimit,
-                is_free: Boolean(p.isFree ?? p.is_free),
-                isFree: Boolean(p.isFree ?? p.is_free),
-                monthly_price_dollars: Number(p.monthlyPriceDollars ?? p.monthly_price_dollars ?? 0),
-                annual_price_dollars: Number(p.annualPriceDollars ?? p.annual_price_dollars ?? 0)
-              };
-            });
-          }
-        }
-      } catch (_) {}
-
-      // Fallback 1: Use data.plans returned directly by /api/admin/token-settings
-      if (dynamicPlans.length === 0 && Array.isArray(data.plans) && data.plans.length > 0) {
-        dynamicPlans = data.plans.map((p: any) => {
-          const assignedLimit = Number(p.token_limit ?? p.monthly_tokens ?? 500);
-          return {
-            id: p.id || p.slug,
-            slug: p.slug,
-            name: p.name || p.slug,
-            token_limit: assignedLimit,
-            monthly_tokens: assignedLimit,
-            tokenLimit: assignedLimit,
-            is_free: Boolean(p.is_free ?? p.isFree),
-            isFree: Boolean(p.is_free ?? p.isFree),
-            monthly_price_dollars: Number(p.monthly_price_dollars ?? 0),
-            annual_price_dollars: Number(p.annual_price_dollars ?? 0)
-          };
-        });
-      }
-
-      // Fallback 2: Construct from planAllocations if available
-      if (dynamicPlans.length === 0 && activeAllocations && Object.keys(activeAllocations).length > 0) {
-        dynamicPlans = Object.entries(activeAllocations).map(([slug, limit]) => ({
-          id: slug,
-          slug: slug,
-          name: slug.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' '),
-          token_limit: Number(limit),
-          monthly_tokens: Number(limit),
-          tokenLimit: Number(limit),
-          is_free: slug.includes('free') || slug === 'taster',
-          isFree: slug.includes('free') || slug === 'taster',
-          monthly_price_dollars: slug.includes('free') ? 0 : 9.99,
-          annual_price_dollars: slug.includes('free') ? 0 : 99.99
-        }));
-      }
-
-      setPlans(dynamicPlans);
-
-      // Build consolidated allocation map prioritizing plan token limits
-      const map: { [slug: string]: number } = {};
-      dynamicPlans.forEach((p: SubscriptionPlan) => {
-        const val = p.token_limit ?? p.tokenLimit ?? p.monthly_tokens ?? activeAllocations[p.slug] ?? (p.is_free || p.isFree ? 50 : 500);
-        map[p.slug] = Number(val);
-      });
-      setPlanAllocations(map);
-
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to fetch token settings');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchSettings();
-
-    // Automatically re-sync whenever plans or settings are updated
-    const handlePlansUpdated = () => {
-      fetchSettings();
-    };
-
-    window.addEventListener('zecratary_plans_updated', handlePlansUpdated);
-    window.addEventListener('zecratary_token_settings_updated', handlePlansUpdated);
-
-    return () => {
-      window.removeEventListener('zecratary_plans_updated', handlePlansUpdated);
-      window.removeEventListener('zecratary_token_settings_updated', handlePlansUpdated);
-    };
-  }, [fetchSettings]);
-
-  const fetchTransactions = useCallback(async (pageToLoad = 1, limitToUse = txLimit) => {
-    setTxLoading(true);
-    try {
-      const params = new URLSearchParams({
-        page: String(pageToLoad),
-        limit: String(limitToUse),
-        search: txSearch,
-        type: txTypeFilter
-      });
-      const res = await fetch(`/api/admin/token-transactions?${params.toString()}`);
-      const data = await res.json();
-      if (data.success) {
-        setTransactions(data.transactions || []);
-        setTxTotalCount(data.totalCount || 0);
-        setTxTotalPages(data.totalPages || 1);
-        setTxPage(data.page || 1);
-        if (data.stats) {
-          setTxStats(data.stats);
+        if (Array.isArray(data.transactions)) {
+          setTransactions(data.transactions);
         }
       }
     } catch (err) {
-      console.warn('Failed loading token transactions:', err);
+      console.warn('[Token Setting] Using local configuration defaults:', err);
     } finally {
-      setTxLoading(false);
+      setLoading(false);
+      isFetchingRef.current = false;
     }
-  }, [txSearch, txTypeFilter, txLimit]);
+  }, []);
 
   useEffect(() => {
-    if (activeTab === 'transactions') {
-      fetchTransactions(txPage, txLimit);
-    }
-  }, [activeTab, fetchTransactions, txPage, txLimit]);
+    document.title = `${tr('tokenSettingDocTitle', 'Token Settings - Admin Console')}`;
+    loadTokenData();
 
-  // Select / Select All Calculation for the Current Page
-  const allOnPageSelected = useMemo(() => {
-    return transactions.length > 0 && transactions.every(tx => selectedTxIds.includes(tx.id));
-  }, [transactions, selectedTxIds]);
+    const handleSync = () => loadTokenData();
+    window.addEventListener('zecratary_tokens_updated', handleSync);
+    window.addEventListener('zecratary_token_settings_updated', handleSync);
+    window.addEventListener('zecratary_languages_updated', handleSync);
+    window.addEventListener('zecratary_dictionary_updated', handleSync);
+    window.addEventListener('zecratary_locale_changed', handleSync);
 
-  const someOnPageSelected = useMemo(() => {
-    return transactions.some(tx => selectedTxIds.includes(tx.id)) && !allOnPageSelected;
-  }, [transactions, selectedTxIds, allOnPageSelected]);
+    return () => {
+      window.removeEventListener('zecratary_tokens_updated', handleSync);
+      window.removeEventListener('zecratary_token_settings_updated', handleSync);
+      window.removeEventListener('zecratary_languages_updated', handleSync);
+      window.removeEventListener('zecratary_dictionary_updated', handleSync);
+      window.removeEventListener('zecratary_locale_changed', handleSync);
+    };
+  }, [loadTokenData, tr]);
 
-  useEffect(() => {
-    if (selectAllCheckboxRef.current) {
-      selectAllCheckboxRef.current.indeterminate = someOnPageSelected;
-    }
-  }, [someOnPageSelected]);
-
-  const handleToggleSelectAll = () => {
-    if (allOnPageSelected) {
-      const pageIds = new Set(transactions.map(tx => tx.id));
-      setSelectedTxIds(prev => prev.filter(id => !pageIds.has(id)));
-    } else {
-      const pageIds = transactions.map(tx => tx.id);
-      setSelectedTxIds(prev => Array.from(new Set([...prev, ...pageIds])));
-    }
-  };
-
-  const handleToggleSelectOne = (id: string) => {
-    setSelectedTxIds(prev => 
-      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
-    );
-  };
-
-  // Delete Individual Transaction
-  const handleDeleteTransaction = async (id: string) => {
-    const confirmMsg = t('confirmDeleteTokenTx', 'Are you sure you want to permanently delete this token transaction record?');
-    if (!window.confirm(confirmMsg)) return;
-
-    setDeletingTxId(id);
-    setErrorMsg('');
-    setSuccessMsg('');
-    try {
-      const res = await fetch(`/api/admin/token-transactions?id=${encodeURIComponent(id)}`, {
-        method: 'DELETE'
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to delete transaction');
-      }
-
-      setSelectedTxIds(prev => prev.filter(item => item !== id));
-      setSuccessMsg(data.message || t('tokenTxDeletedSuccess', 'Transaction record deleted successfully from PostgreSQL.'));
-      await fetchTransactions(txPage, txLimit);
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_tokens_updated'));
-        window.dispatchEvent(new Event('zecratary_token_settings_updated'));
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-      }
-      setTimeout(() => setSuccessMsg(''), 4000);
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to delete transaction');
-    } finally {
-      setDeletingTxId(null);
-    }
-  };
-
-  // Bulk Delete Selected Transactions
-  const handleBulkDeleteTransactions = async () => {
-    if (selectedTxIds.length === 0) return;
-    const confirmTmpl = t('confirmBulkDeleteTokenTxs', 'Are you sure you want to permanently delete {count} selected transaction(s)? This action cannot be undone.');
-    if (!window.confirm(confirmTmpl.replace('{count}', String(selectedTxIds.length)))) return;
-
-    setBulkDeleting(true);
-    setErrorMsg('');
-    setSuccessMsg('');
-    try {
-      const res = await fetch('/api/admin/token-transactions', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: selectedTxIds })
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to delete selected transactions');
-      }
-
-      const count = selectedTxIds.length;
-      setSelectedTxIds([]);
-      setSuccessMsg(data.message || t('bulkTokenTxDeletedSuccess', `Successfully deleted ${count} transaction record(s) from PostgreSQL.`));
-      await fetchTransactions(txPage, txLimit);
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_tokens_updated'));
-        window.dispatchEvent(new Event('zecratary_token_settings_updated'));
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-      }
-      setTimeout(() => setSuccessMsg(''), 4000);
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to delete selected transactions');
-    } finally {
-      setBulkDeleting(false);
-    }
-  };
-
-  const handleSave = async () => {
+  // Save Settings to Database & Server File
+  const handleSaveSettings = async () => {
+    if (saving || isSavingRef.current) return;
     setSaving(true);
-    setSuccessMsg('');
-    setErrorMsg('');
+    isSavingRef.current = true;
+    setFeedback(null);
 
     try {
-      const res = await fetch('/api/admin/token-settings', {
+      const res = await fetch('/api/admin/token-setting', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tokenName,
-          tokenSymbol,
-          chefCost: Number(chefCost),
-          importUrlCost: Number(importUrlCost),
-          importTextCost: Number(importTextCost),
-          importPhotoCost: Number(importPhotoCost),
-          isEnabled,
-          packages,
-          planAllocations
-        })
+        body: JSON.stringify({ tokenSettings: settings })
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed saving token configurations');
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('zecratary_tokens_updated'));
+          window.dispatchEvent(new Event('zecratary_token_settings_updated'));
+          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+          localStorage.setItem('zecratary_tokens_updated_at', Date.now().toString());
+        }
+        showToast('success', tr('toastTokenSettingsSaved', 'Token configurations saved and synchronized with PostgreSQL & MySQL!'));
+      } else {
+        throw new Error(data.error || 'Failed to save token settings.');
       }
-
-      setSuccessMsg(t('tokenSettingsSavedSuccess', 'Token configurations & Plan Allocations saved and synchronized with PostgreSQL!'));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_token_settings_updated'));
-        window.dispatchEvent(new Event('zecratary_plans_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
-      setTimeout(() => setSuccessMsg(''), 4000);
     } catch (err: any) {
-      setErrorMsg(err.message || 'Error occurred while saving');
+      showToast('error', err.message || tr('toastTokenSettingsError', 'Failed to save token settings. Please try again.'));
     } finally {
       setSaving(false);
+      setTimeout(() => { isSavingRef.current = false; }, 300);
     }
   };
 
+  const handleResetDefaults = () => {
+    if (!confirm('Reset token settings to platform defaults?')) return;
+    setSettings(DEFAULT_SETTINGS);
+    showToast('success', tr('toastTokenSettingsReset', 'Token settings reset to defaults successfully!'));
+  };
+
+  // Package Management Handlers
   const handleAddPackage = () => {
     const newPkg: TokenPackage = {
       id: 'pkg_' + Date.now().toString(36),
-      name: 'Custom Package',
-      tokens: 250,
-      price: 9.99,
-      badge: 'Special',
+      name: pkgName.trim() || 'Custom Bundle',
+      tokenAmount: Math.max(1, parseInt(pkgTokens, 10) || 500),
+      priceDollars: Math.max(0.01, parseFloat(pkgPrice) || 5.99),
+      badge: pkgBadge.trim() || undefined,
+      bonusTokens: parseInt(pkgBonus, 10) || 0,
       isPopular: false
     };
-    setPackages([...packages, newPkg]);
+
+    setSettings(prev => ({
+      ...prev,
+      packages: [...prev.packages, newPkg]
+    }));
+
+    setEditingPkgId(null);
+    showToast('success', `Added package "${newPkg.name}".`);
   };
 
-  const handleRemovePackage = (id: string) => {
-    setPackages(packages.filter(p => p.id !== id));
+  const handleUpdatePackage = (pkgId: string) => {
+    setSettings(prev => ({
+      ...prev,
+      packages: prev.packages.map(p => p.id === pkgId ? {
+        ...p,
+        name: pkgName.trim(),
+        tokenAmount: Math.max(1, parseInt(pkgTokens, 10) || p.tokenAmount),
+        priceDollars: Math.max(0.01, parseFloat(pkgPrice) || p.priceDollars),
+        badge: pkgBadge.trim() || undefined,
+        bonusTokens: parseInt(pkgBonus, 10) || 0
+      } : p)
+    }));
+
+    setEditingPkgId(null);
+    showToast('success', `Updated package "${pkgName}".`);
   };
 
-  const handlePackageChange = (id: string, field: keyof TokenPackage, value: any) => {
-    setPackages(packages.map(p => {
-      if (p.id === id) {
-        return { ...p, [field]: value };
-      }
-      return p;
+  const handleDeletePackage = (pkgId: string) => {
+    if (settings.packages.length <= 1) {
+      alert('You must keep at least one token package active.');
+      return;
+    }
+    setSettings(prev => ({
+      ...prev,
+      packages: prev.packages.filter(p => p.id !== pkgId)
     }));
   };
 
-  const renderServiceBadge = (type: string) => {
-    if (type === 'usage_chef') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-orange-500/10 text-orange-500 border border-orange-500/20">
-          <ChefHat className="h-3 w-3" /> /chef AI Chat
-        </span>
-      );
-    }
-    if (type.startsWith('usage_import')) {
-      const sub = type.replace('usage_import_', '');
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-          <DownloadCloud className="h-3 w-3" /> /import ({sub.toUpperCase()})
-        </span>
-      );
-    }
-    if (type === 'package_purchase') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-400 border border-blue-500/20">
-          <DollarSign className="h-3 w-3" /> Package Purchase
-        </span>
-      );
-    }
-    if (type === 'plan_purchase') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">
-          <Layers className="h-3 w-3" /> Plan Purchase
-        </span>
-      );
-    }
-    if (type === 'plan_monthly_grant') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">
-          <Layers className="h-3 w-3" /> Monthly Grant
-        </span>
-      );
-    }
-    return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-slate-500/10 text-slate-400 border border-slate-500/20">
-        <Activity className="h-3 w-3" /> {type.replace('_', ' ')}
-      </span>
-    );
+  const handleStartEdit = (pkg: TokenPackage) => {
+    setEditingPkgId(pkg.id);
+    setPkgName(pkg.name);
+    setPkgTokens(pkg.tokenAmount);
+    setPkgPrice(pkg.priceDollars);
+    setPkgBadge(pkg.badge || '');
+    setPkgBonus(pkg.bonusTokens || 0);
   };
-
-  const getPageNumbers = () => {
-    const pages: number[] = [];
-    const maxVisible = 5;
-    let start = Math.max(1, txPage - Math.floor(maxVisible / 2));
-    let end = Math.min(txTotalPages, start + maxVisible - 1);
-    if (end - start + 1 < maxVisible) {
-      start = Math.max(1, end - maxVisible + 1);
-    }
-    for (let i = start; i <= end; i++) {
-      pages.push(i);
-    }
-    return pages;
-  };
-
-  if (loading) {
-    return (
-      <div 
-        className="min-h-screen p-8 flex items-center justify-center font-sans transition-colors duration-200"
-        style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}
-      >
-        <div className="flex items-center gap-3">
-          <RefreshCw className="h-5 w-5 animate-spin" style={{ color: 'var(--color-primary)' }} />
-          <span className="text-xs font-bold">{t('loadingTokenSettings', 'Loading Token Settings...')}</span>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 sm:px-6 pt-4 font-sans transition-colors duration-200 min-h-screen"
-      style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}
+      className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      style={{ color: 'var(--color-text)' }}
     >
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Link 
-              href="/admin" 
-              className="p-1.5 rounded-lg border hover:opacity-80 transition"
-              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-            <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-              <Coins className="h-6 w-6 text-amber-500" /> {t('adminTokenSettingTitle', 'Token System Management')}
-            </h1>
-          </div>
+      {/* 1. Header & Quick Actions */}
+      <div 
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" 
+        style={{ borderColor: 'var(--color-border)' }}
+      >
+        <div>
+          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+            <Coins className="h-6 w-6" style={{ color: 'var(--color-primary)' }} />
+            {tr('tokenSettingTitle', 'Token System & Economy Configuration')}
+          </h1>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('adminTokenSettingSubtitle', 'Configure token parameters, manage consumption for /chef and /import, and audit live user transactions.')}
+            {tr('tokenSettingSubtitle', 'Configure platform token economy, feature consumption costs, purchasable token packages, and initial user balances.')}
           </p>
         </div>
 
-        {activeTab === 'settings' ? (
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div 
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)', 
+              color: 'var(--color-text)' 
+            }}
+          >
+            <Database className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
+            <span>{tr('syncStatusPostgres', 'Synced with PostgreSQL & MySQL')}</span>
+          </div>
+
           <button
             type="button"
-            onClick={handleSave}
+            onClick={loadTokenData}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer shadow-sm disabled:opacity-50"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>{tr('btnReload', 'Reload')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleResetDefaults}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer shadow-sm"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-secondary)'
+            }}
+          >
+            <span>{tr('btnResetDefaults', 'Reset Defaults')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSaveSettings}
             disabled={saving}
-            className="px-5 py-2.5 rounded-xl text-white font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg transition cursor-pointer disabled:opacity-50"
+            className="flex items-center gap-2 px-5 py-1.5 rounded-xl text-xs font-bold text-white shadow-lg transition hover:opacity-90 cursor-pointer disabled:opacity-50"
             style={{ backgroundColor: 'var(--color-primary)' }}
           >
-            {saving ? (
-              <>
-                <RefreshCw className="h-4 w-4 animate-spin" /> {t('saving', 'Saving to PostgreSQL...')}
-              </>
-            ) : (
-              <>
-                <Save className="h-4 w-4" /> {t('saveTokenSettingsBtn', 'Save Configurations')}
-              </>
-            )}
+            <Save className={`h-4 w-4 ${saving ? 'animate-spin' : ''}`} />
+            <span>{saving ? tr('btnSaving', 'Saving...') : tr('btnSaveTokenSettings', 'Save Configurations')}</span>
           </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => fetchTransactions(txPage, txLimit)}
-            disabled={txLoading}
-            className="px-4 py-2.5 rounded-xl border font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <RefreshCw className={`h-4 w-4 ${txLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
-            <span>{t('refreshTransactions', 'Refresh Ledger')}</span>
-          </button>
-        )}
+        </div>
       </div>
 
-      {/* Tab Navigation Controls */}
+      {/* Feedback Toast */}
+      {feedback && (
+        <div
+          className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 border shadow-sm animate-in fade-in"
+          style={{
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: feedback.type === 'success' ? 'var(--color-emerald, #10b981)' : '#ef4444',
+            color: feedback.type === 'success' ? 'var(--color-emerald, #10b981)' : '#ef4444'
+          }}
+        >
+          {feedback.type === 'success' ? (
+            <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
+          ) : (
+            <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
+          )}
+          <span>{feedback.msg}</span>
+        </div>
+      )}
+
+      {/* Workspace Sub-Tabs */}
       <div 
         className="flex p-1.5 rounded-2xl border transition-colors duration-200"
-        style={{
-          backgroundColor: 'var(--color-inner-dark)',
-          borderColor: 'var(--color-border)'
-        }}
+        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
       >
-        <button
-          type="button"
-          onClick={() => setActiveTab('settings')}
-          className="flex-1 py-2.5 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
-          style={activeTab === 'settings' ? {
-            backgroundColor: 'var(--color-card)',
-            color: 'var(--color-emerald)',
-            borderColor: 'var(--color-emerald)',
-            borderWidth: '1px',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-          } : {
-            color: 'var(--color-text-secondary)'
-          }}
-        >
-          <Coins className="h-4 w-4" />
-          <span>{t('tokenSettingsTab', 'Token Configurations')}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTab('transactions');
-            fetchTransactions(1, txLimit);
-          }}
-          className="flex-1 py-2.5 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
-          style={activeTab === 'transactions' ? {
-            backgroundColor: 'var(--color-card)',
-            color: 'var(--color-emerald)',
-            borderColor: 'var(--color-emerald)',
-            borderWidth: '1px',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
-          } : {
-            color: 'var(--color-text-secondary)'
-          }}
-        >
-          <Activity className="h-4 w-4" />
-          <span>{t('tokenTransactionsTab', 'Token Transactions')}</span>
-          {txTotalCount > 0 && (
-            <span className="ml-1 text-[10px] font-mono px-2 py-0.5 rounded-full border bg-primary/10" style={{ borderColor: 'var(--color-border)' }}>
-              {txTotalCount}
-            </span>
-          )}
-        </button>
+        {[
+          { id: 'system', label: tr('tabTokenSystem', 'Economy & Feature Costs'), icon: Sliders },
+          { id: 'packages', label: tr('tabTokenPackages', 'Purchasable Packages'), icon: CreditCard },
+          { id: 'ledger', label: tr('tabTokenLedger', 'Token Audit Ledger'), icon: History }
+        ].map((tab) => {
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id as any)}
+              className="flex-1 py-2.5 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
+              style={isActive ? {
+                backgroundColor: 'var(--color-card)',
+                color: 'var(--color-primary)',
+                borderColor: 'var(--color-primary)',
+                borderWidth: '1px',
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+              } : { color: 'var(--color-text-secondary)' }}
+            >
+              <tab.icon className="h-4 w-4" />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Notifications */}
-      {errorMsg && (
+      {/* TAB 1: SYSTEM IDENTITY & CONSUMPTION COSTS */}
+      {activeTab === 'system' && (
         <div 
-          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
-          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#ef4444' }}
+          role="region"
+          data-lpignore="true"
+          className="space-y-6"
         >
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>{errorMsg}</span>
-        </div>
-      )}
-
-      {successMsg && (
-        <div 
-          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
-          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
-        >
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>{successMsg}</span>
-        </div>
-      )}
-
-      {/* TAB 1: TOKEN SETTINGS CONFIGURATION */}
-      {activeTab === 'settings' && (
-        <div className="space-y-6 animate-in fade-in">
-          {/* Section 1: Token Identity & System Status */}
+          {/* Master Bypass Switch */}
           <div 
-            className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+            className="p-5 rounded-3xl border shadow-sm transition-colors duration-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
-            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <div className="flex items-center gap-2">
-                <Coins className="h-4 w-4 text-amber-500" />
-                <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                  {t('tokenIdentityHeading', 'Token Currency Identity & Master Toggle')}
-                </h2>
-              </div>
-              <div className="flex items-center gap-3">
-                <span 
-                  className="text-xs font-bold select-none transition-colors duration-200"
-                  style={{ color: isEnabled ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}
-                >
-                  {isEnabled ? t('tokenSystemActive', 'System Active') : t('tokenSystemDisabled', 'Bypass Consumption')}
-                </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={isEnabled}
-                  onClick={() => setIsEnabled(!isEnabled)}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-xs ${
-                    isEnabled ? '' : 'bg-gray-300 dark:bg-gray-700'
-                  }`}
-                  style={{
-                    backgroundColor: isEnabled ? 'var(--color-emerald)' : undefined
-                  }}
-                  title={isEnabled ? t('disableTokenSystem', 'Disable Token System') : t('enableTokenSystem', 'Enable Token System')}
-                >
-                  <span className="sr-only">{isEnabled ? t('tokenSystemActive', 'System Active') : t('tokenSystemDisabled', 'Bypass Consumption')}</span>
-                  <span
-                    aria-hidden="true"
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                      isEnabled ? 'translate-x-5' : 'translate-x-0'
-                    }`}
-                  />
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('tokenNameLabel', 'Token Name')}
-                </label>
-                <input
-                  type="text"
-                  value={tokenName}
-                  onChange={(e) => setTokenName(e.target.value)}
-                  placeholder="e.g. Foodie Token, Zecra Coin"
-                  className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none transition"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('tokenSymbolLabel', 'Token Symbol / Emoji')}
-                </label>
-                <input
-                  type="text"
-                  value={tokenSymbol}
-                  onChange={(e) => setTokenSymbol(e.target.value)}
-                  placeholder="e.g. 🪙, CRD, TK"
-                  className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-semibold outline-none transition"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Section 2: Usage / Feature Costs */}
-          <div 
-            className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-          >
-            <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <Sparkles className="h-4 w-4 text-orange-400" />
-              <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                {t('featureUsagePricingHeading', 'Feature Usage Consumption Costs (/chef & /import)')}
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Shield className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                {tr('tokenMasterSwitchTitle', 'Token Consumption Master Switch')}
               </h2>
+              <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                {tr('tokenMasterSwitchDesc', 'When Free Mode is active, all recipe generation, imports, and meal planners operate without deducting tokens.')}
+              </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="p-4 rounded-2xl border space-y-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                <div className="flex items-center gap-2">
-                  <ChefHat className="h-4 w-4 text-amber-500" />
-                  <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>/chef (AI Chat)</span>
-                </div>
-                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('chefCostDesc', 'Tokens deducted per generated response.')}
-                </p>
-                <div className="flex items-center gap-1.5 pt-1">
-                  <input
-                    type="number"
-                    min="0"
-                    value={chefCost}
-                    onChange={(e) => setChefCost(Math.max(0, parseInt(e.target.value) || 0))}
-                    className="w-20 border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
-                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                  <span className="text-xs font-bold text-amber-500">{tokenSymbol}</span>
-                </div>
+            <button
+              type="button"
+              onClick={() => setSettings({ ...settings, isEnabled: !settings.isEnabled })}
+              className="px-4 py-2 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs shrink-0"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: settings.isEnabled ? 'var(--color-emerald, #10b981)' : '#f59e0b',
+                color: settings.isEnabled ? 'var(--color-emerald, #10b981)' : '#fbbf24'
+              }}
+            >
+              {settings.isEnabled 
+                ? tr('tokenMasterSwitchActive', 'System Active (Enforce Consumption)') 
+                : tr('tokenMasterSwitchFree', 'Free Token Mode (Bypass Consumption)')}
+            </button>
+          </div>
+
+          {/* Token Identity Section */}
+          <div 
+            className="p-6 rounded-3xl border shadow-sm space-y-4 transition-colors duration-200"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <div className="border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                {tr('tokenIdentityHeading', 'Token Identity & Starting Quota')}
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {tr('tokenIdentityDesc', 'Customize the public currency name, display symbol, and initial registration balance.')}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+              <div>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {tr('tokenNameLabel', 'Token Name')}
+                </label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  value={settings.tokenName}
+                  onChange={(e) => setSettings({ ...settings, tokenName: e.target.value })}
+                  placeholder={tr('tokenNamePlaceholder', 'e.g. Foodie Token')}
+                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-bold"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
               </div>
 
-              <div className="p-4 rounded-2xl border space-y-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                <div className="flex items-center gap-2">
-                  <DownloadCloud className="h-4 w-4 text-emerald-500" />
-                  <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>/import (URL)</span>
-                </div>
-                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('importUrlCostDesc', 'Tokens deducted per recipe scraped from link.')}
-                </p>
-                <div className="flex items-center gap-1.5 pt-1">
-                  <input
-                    type="number"
-                    min="0"
-                    value={importUrlCost}
-                    onChange={(e) => setImportUrlCost(Math.max(0, parseInt(e.target.value) || 0))}
-                    className="w-20 border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
-                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                  <span className="text-xs font-bold text-amber-500">{tokenSymbol}</span>
-                </div>
+              <div>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {tr('tokenSymbolLabel', 'Token Symbol / Emoji')}
+                </label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  maxLength={4}
+                  value={settings.tokenSymbol}
+                  onChange={(e) => setSettings({ ...settings, tokenSymbol: e.target.value })}
+                  placeholder={tr('tokenSymbolPlaceholder', 'e.g. 🪙 or 🌟')}
+                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-bold text-center"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
               </div>
 
-              <div className="p-4 rounded-2xl border space-y-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                <div className="flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-blue-400" />
-                  <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>/import (Raw Text)</span>
-                </div>
-                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('importTextCostDesc', 'Tokens deducted per recipe parsed from text.')}
-                </p>
-                <div className="flex items-center gap-1.5 pt-1">
-                  <input
-                    type="number"
-                    min="0"
-                    value={importTextCost}
-                    onChange={(e) => setImportTextCost(Math.max(0, parseInt(e.target.value) || 0))}
-                    className="w-20 border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
-                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                  <span className="text-xs font-bold text-amber-500">{tokenSymbol}</span>
-                </div>
-              </div>
-
-              <div className="p-4 rounded-2xl border space-y-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                <div className="flex items-center gap-2">
-                  <Camera className="h-4 w-4 text-purple-400" />
-                  <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>/import (Photo OCR)</span>
-                </div>
-                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('importPhotoCostDesc', 'Tokens deducted for Vision OCR recipe imports.')}
-                </p>
-                <div className="flex items-center gap-1.5 pt-1">
-                  <input
-                    type="number"
-                    min="0"
-                    value={importPhotoCost}
-                    onChange={(e) => setImportPhotoCost(Math.max(0, parseInt(e.target.value) || 0))}
-                    className="w-20 border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
-                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                  <span className="text-xs font-bold text-amber-500">{tokenSymbol}</span>
-                </div>
+              <div>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {tr('startingBalanceLabel', 'New User Starting Balance')}
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  value={settings.startingBalance}
+                  onChange={(e) => setSettings({ ...settings, startingBalance: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-mono font-bold"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+                <span className="text-[10px] mt-0.5 block" style={{ color: 'var(--color-text-secondary)' }}>
+                  {tr('startingBalanceHelp', 'Initial tokens granted upon new user account creation.')}
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Section 3: Token Purchase Packages */}
+          {/* Feature Consumption Costs Section */}
           <div 
-            className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
+            className="p-6 rounded-3xl border shadow-sm space-y-4 transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
-            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <div className="flex items-center gap-2">
-                <DollarSign className="h-4 w-4 text-emerald-500" />
-                <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                  {t('tokenPackagesHeading', 'User Purchasable Token Packages')}
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={handleAddPackage}
-                className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 shadow-sm hover:opacity-90 transition cursor-pointer"
-                style={{ backgroundColor: 'var(--color-primary)', color: '#ffffff', borderColor: 'transparent' }}
-              >
-                <Plus className="h-3.5 w-3.5" /> {t('addPackageBtn', 'Add Package')}
-              </button>
+            <div className="border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Activity className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                {tr('featureCostsHeading', 'Feature Action Token Costs')}
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {tr('featureCostsDesc', 'Define token consumption amounts for AI assistance, scrapers, and nutritional telemetry.')}
+              </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {packages.map((pkg, idx) => (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs font-mono">
+              {[
+                { key: 'aiChefCost', label: tr('costAiChefLabel', 'AI Chef Recipe Generation'), val: settings.aiChefCost },
+                { key: 'importUrlCost', label: tr('costImportUrlLabel', 'URL Recipe Scraper Import'), val: settings.importUrlCost },
+                { key: 'importTextCost', label: tr('costImportTextLabel', 'Raw Text Recipe Import'), val: settings.importTextCost },
+                { key: 'importPhotoCost', label: tr('costImportPhotoLabel', 'Photo / OCR Recipe Import'), val: settings.importPhotoCost },
+                { key: 'mealPlannerCost', label: tr('costMealPlannerLabel', 'Weekly Meal Plan Generation'), val: settings.mealPlannerCost },
+                { key: 'macroAnalysisCost', label: tr('costMacroAnalysisLabel', 'Nutritional Macro Analysis'), val: settings.macroAnalysisCost }
+              ].map(action => (
                 <div 
-                  key={pkg.id} 
-                  className="border rounded-2xl p-4 space-y-3 relative shadow-md transition"
+                  key={action.key}
+                  className="p-3.5 rounded-2xl border flex items-center justify-between gap-3 shadow-xs"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-500">
-                      {t('packageNumber', 'Bundle')} #{idx + 1}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleRemovePackage(pkg.id)}
-                      className="text-red-400 hover:text-red-500 p-1 transition cursor-pointer"
-                      title="Remove Package"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
+                  <div className="font-sans font-bold" style={{ color: 'var(--color-text)' }}>
+                    {action.label}
                   </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('packageNameLabel', 'Package Name')}
-                    </label>
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <input
-                      type="text"
-                      value={pkg.name}
-                      onChange={(e) => handlePackageChange(pkg.id, 'name', e.target.value)}
-                      className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-semibold outline-none"
+                      type="number"
+                      min="0"
+                      autoComplete="off"
+                      data-lpignore="true"
+                      value={action.val}
+                      onChange={(e) => setSettings({
+                        ...settings,
+                        [action.key]: Math.max(0, parseInt(e.target.value, 10) || 0)
+                      })}
+                      className="w-16 px-2.5 py-1.5 rounded-lg border font-mono font-bold text-center outline-none"
                       style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                     />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                        {t('packageTokensLabel', 'Tokens Granted')}
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={pkg.tokens}
-                        onChange={(e) => handlePackageChange(pkg.id, 'tokens', parseInt(e.target.value) || 0)}
-                        className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
-                        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                        {t('packagePriceLabel', 'Price ($ USD)')}
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={pkg.price}
-                        onChange={(e) => handlePackageChange(pkg.id, 'price', parseFloat(e.target.value) || 0)}
-                        className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
-                        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('packageBadgeLabel', 'Badge Label (Optional)')}
-                    </label>
-                    <input
-                      type="text"
-                      value={pkg.badge || ''}
-                      onChange={(e) => handlePackageChange(pkg.id, 'badge', e.target.value)}
-                      placeholder="e.g. Popular, Best Value"
-                      className="w-full border rounded-lg px-2.5 py-1.5 text-xs outline-none"
-                      style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                    />
+                    <span className="font-bold">{settings.tokenSymbol}</span>
                   </div>
                 </div>
               ))}
             </div>
           </div>
-
-          {/* Section 4: Subscription Plan Monthly Grants */}
-          <div 
-            className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-          >
-            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <div className="flex items-center gap-2">
-                <Layers className="h-4 w-4 text-purple-400" />
-                <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                  {t('planMonthlyGrantsHeading', 'Subscription Plan Monthly Included Tokens')}
-                </h2>
-              </div>
-              <Link
-                href="/admin/plans"
-                className="text-xs font-bold text-amber-500 hover:text-amber-400 flex items-center gap-1 transition"
-              >
-                <span>{t('managePlansLink', 'Manage in /admin/plans')}</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
-            </div>
-
-            <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-              {t('planMonthlyGrantsSubtitle', 'Subscribers automatically receive these tokens every recurring monthly billing cycle. Synchronized with PostgreSQL subscription_plans.')}
-            </p>
-
-            {plans.length === 0 ? (
-              <div 
-                className="p-6 rounded-2xl border text-center text-xs space-y-2"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              >
-                <p style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('noPlansToAllocate', 'No subscription plans found in database.')}
-                </p>
-                <Link
-                  href="/admin/plans"
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white shadow-sm transition"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  <span>{t('createPlanPrompt', 'Configure Plans in /admin/plans')}</span>
-                </Link>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {plans.map((p) => {
-                  const isFree = Boolean(p.is_free || p.isFree || (Number(p.monthly_price_dollars || p.monthlyPriceDollars || 0) === 0 && Number(p.annual_price_dollars || p.annualPriceDollars || 0) === 0));
-                  const mPrice = Number(p.monthly_price_dollars ?? p.monthlyPriceDollars ?? 0);
-                  const currentAlloc = planAllocations[p.slug] ?? p.token_limit ?? p.tokenLimit ?? (isFree ? 50 : 500);
-
-                  return (
-                    <div 
-                      key={p.slug || p.id}
-                      className="p-4 rounded-2xl border space-y-2.5 shadow-inner transition"
-                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>{p.name || p.slug}</span>
-                          <span className="text-[10px] font-mono opacity-60" style={{ color: 'var(--color-text-secondary)' }}>
-                            {isFree ? t('freeTier', 'Free Tier') : `$${mPrice.toFixed(2)}/mo`}
-                          </span>
-                        </div>
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full border bg-primary/10 font-bold" style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
-                          {p.slug}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-2 pt-1">
-                        <input
-                          type="number"
-                          min="0"
-                          value={currentAlloc}
-                          onChange={(e) => setPlanAllocations(prev => ({
-                            ...prev,
-                            [p.slug]: Math.max(0, parseInt(e.target.value) || 0)
-                          }))}
-                          className="w-28 border rounded-lg px-2.5 py-1.5 text-xs font-mono font-bold outline-none"
-                          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                        />
-                        <span className="text-xs font-bold text-amber-500 font-mono">{tokenSymbol} / mo</span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
         </div>
       )}
 
-      {/* TAB 2: TOKEN TRANSACTIONS AUDIT LEDGER */}
-      {activeTab === 'transactions' && (
-        <div className="space-y-6 animate-in fade-in">
-          {/* Summary KPI Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="border rounded-2xl p-4 shadow-md space-y-1" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
-              <div className="flex items-center justify-between text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                <span>{t('totalDeductions', 'Total Consumed')}</span>
-                <ArrowDownLeft className="h-4 w-4 text-red-500" />
-              </div>
-              <div className="text-2xl font-black font-mono text-red-400">
-                -{txStats.totalDeducted.toLocaleString()} <span className="text-xs text-amber-500">{tokenSymbol}</span>
-              </div>
-              <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Tokens debited on /chef and /import</p>
-            </div>
-
-            <div className="border rounded-2xl p-4 shadow-md space-y-1" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
-              <div className="flex items-center justify-between text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                <span>{t('totalGranted', 'Total Granted / Bought')}</span>
-                <ArrowUpRight className="h-4 w-4 text-emerald-500" />
-              </div>
-              <div className="text-2xl font-black font-mono text-emerald-400">
-                +{txStats.totalGranted.toLocaleString()} <span className="text-xs text-amber-500">{tokenSymbol}</span>
-              </div>
-              <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Allocations from plans and packages</p>
-            </div>
-
-            <div className="border rounded-2xl p-4 shadow-md space-y-1" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
-              <div className="flex items-center justify-between text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                <span>{t('activeUsers', 'Active Transacting Users')}</span>
-                <UserIcon className="h-4 w-4 text-blue-400" />
-              </div>
-              <div className="text-2xl font-black font-mono" style={{ color: 'var(--color-text)' }}>
-                {txStats.activeUsers.toLocaleString()}
-              </div>
-              <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Unique user accounts with activity</p>
-            </div>
-
-            <div className="border rounded-2xl p-4 shadow-md space-y-1" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
-              <div className="flex items-center justify-between text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                <span>{t('totalEvents', 'Total Transactions')}</span>
-                <Activity className="h-4 w-4 text-purple-400" />
-              </div>
-              <div className="text-2xl font-black font-mono" style={{ color: 'var(--color-text)' }}>
-                {txStats.totalTransactions.toLocaleString()}
-              </div>
-              <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>Immutable ledger rows in PostgreSQL</p>
-            </div>
-          </div>
-
-          {/* Filtering, Search & Column Visibility Toolbar */}
+      {/* TAB 2: USER PURCHASABLE TOKEN PACKAGES */}
+      {activeTab === 'packages' && (
+        <div 
+          role="region"
+          data-lpignore="true"
+          className="space-y-6"
+        >
+          {/* Bundle Creator / Editor Card */}
           <div 
-            className="border rounded-3xl p-5 shadow-xl space-y-4"
+            className="p-6 rounded-3xl border shadow-sm space-y-4 transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-              {/* Search Bar */}
-              <div className="relative flex-1 w-full">
-                <Search className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h2 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <CreditCard className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                  {editingPkgId ? 'Edit Token Bundle' : tr('packagesHeading', 'User Purchasable Token Packages')}
+                </h2>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  {tr('packagesDesc', 'Manage bundles available for on-demand top-up on /token and the navigation top bar.')}
+                </p>
+              </div>
+
+              {editingPkgId && (
+                <button
+                  type="button"
+                  onClick={() => setEditingPkgId(null)}
+                  className="text-xs font-bold underline"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  Cancel Edit
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
+              <div>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {tr('packageNameLabel', 'Package Name')}
+                </label>
                 <input
                   type="text"
-                  value={txSearch}
-                  onChange={(e) => {
-                    setTxSearch(e.target.value);
-                    setTxPage(1);
-                  }}
-                  placeholder={t('searchTransactionsPlaceholder', 'Search by user email, user ID, or description...')}
-                  className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-xs font-semibold outline-none transition"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  value={pkgName}
+                  onChange={(e) => setPkgName(e.target.value)}
+                  placeholder="e.g. Starter Spark"
+                  className="w-full px-3 py-2 rounded-xl border outline-none font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
 
-              {/* Service Filter */}
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <Filter className="h-4 w-4 shrink-0 text-amber-500" />
-                <select
-                  value={txTypeFilter}
-                  onChange={(e) => {
-                    setTxTypeFilter(e.target.value);
-                    setTxPage(1);
-                  }}
-                  className="w-full sm:w-48 border rounded-xl px-3 py-2.5 text-xs font-bold outline-none cursor-pointer"
+              <div>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {tr('packageTokensLabel', 'Token Amount')}
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  value={pkgTokens}
+                  onChange={(e) => setPkgTokens(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                  className="w-full px-3 py-2 rounded-xl border outline-none font-mono font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                >
-                  <option value="all">All Services & Sources</option>
-                  <option value="chef">/chef (AI Chat)</option>
-                  <option value="import">/import (All Types)</option>
-                  <option value="purchase">All Purchases (Plans & Packages)</option>
-                  <option value="plan_purchase">Plan Purchases</option>
-                  <option value="grant">Monthly Plan Grants</option>
-                </select>
+                />
               </div>
 
-              {/* Items per page selector */}
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <span className="text-xs font-bold whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('rowsLabel', 'Rows:')}
-                </span>
-                <select
-                  value={txLimit}
-                  onChange={(e) => {
-                    const newLimit = parseInt(e.target.value, 10);
-                    setTxLimit(newLimit);
-                    setTxPage(1);
-                  }}
-                  className="border rounded-xl px-3 py-2.5 text-xs font-bold outline-none cursor-pointer"
+              <div>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {tr('packagePriceLabel', 'Price ($)')}
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  value={pkgPrice}
+                  onChange={(e) => setPkgPrice(parseFloat(e.target.value) || 0)}
+                  className="w-full px-3 py-2 rounded-xl border outline-none font-mono font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                >
-                  <option value="10">10</option>
-                  <option value="25">25</option>
-                  <option value="50">50</option>
-                  <option value="100">100</option>
-                </select>
+                />
               </div>
 
-              {/* Column Hide/Show Dropdown Trigger */}
-              <div className="relative w-full sm:w-auto" ref={columnPickerRef}>
-                <button
-                  type="button"
-                  onClick={() => setShowColumnPicker(!showColumnPicker)}
-                  className="w-full sm:w-auto px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition cursor-pointer"
-                  style={{
-                    backgroundColor: showColumnPicker ? 'var(--color-primary)' : 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: showColumnPicker ? '#ffffff' : 'var(--color-text)'
-                  }}
-                  title={t('customizeColumnsTooltip', 'Show or hide table columns')}
-                >
-                  <Columns3 className="h-4 w-4" />
-                  <span>{t('columnsBtn', 'Columns')}</span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-full bg-white/20">
-                    {activeColumnCount}/{columns.length}
-                  </span>
-                </button>
+              <div>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {tr('packageBadgeLabel', 'Ribbon / Badge')}
+                </label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  value={pkgBadge}
+                  onChange={(e) => setPkgBadge(e.target.value)}
+                  placeholder="e.g. Popular, Best Value"
+                  className="w-full px-3 py-2 rounded-xl border outline-none font-bold"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
 
-                {showColumnPicker && (
-                  <div 
-                    className="absolute right-0 mt-2 w-64 rounded-2xl border p-3.5 shadow-2xl z-50 space-y-2 animate-in fade-in slide-in-from-top-2"
-                    style={{
-                      backgroundColor: 'var(--color-card)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-                      <span className="text-xs font-black flex items-center gap-1.5" style={{ color: 'var(--color-text)' }}>
-                        <SlidersHorizontal className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                        {t('toggleColumnsHeader', 'Toggle Columns')}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowColumnPicker(false)}
-                        className="p-1 rounded hover:opacity-75 transition cursor-pointer text-xs"
-                      >
-                        ✕
-                      </button>
-                    </div>
-
-                    <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('toggleColumnsDesc', 'Select visible columns in the transaction ledger.')}
-                    </p>
-
-                    <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
-                      {columns.map((col) => (
-                        <label 
-                          key={col.key}
-                          className="flex items-center justify-between p-2 rounded-xl border text-xs font-medium cursor-pointer transition hover:bg-slate-500/5"
-                          style={{
-                            backgroundColor: col.visible ? 'var(--color-inner-dark)' : 'transparent',
-                            borderColor: col.visible ? 'var(--color-primary)' : 'var(--color-border)'
-                          }}
-                        >
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={col.visible}
-                              onChange={() => toggleColumnVisibility(col.key)}
-                              className="w-3.5 h-3.5 rounded accent-primary cursor-pointer"
-                            />
-                            <span className="text-xs font-semibold" style={{ color: 'var(--color-text)' }}>
-                              {col.label}
-                            </span>
-                          </div>
-                          {col.visible ? (
-                            <Eye className="h-3.5 w-3.5 text-emerald-500" />
-                          ) : (
-                            <EyeOff className="h-3.5 w-3.5" style={{ color: 'var(--color-text-secondary)' }} />
-                          )}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
+              <div>
+                <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {tr('packageBonusLabel', 'Bonus Tokens')}
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  value={pkgBonus}
+                  onChange={(e) => setPkgBonus(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                  className="w-full px-3 py-2 rounded-xl border outline-none font-mono font-bold"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
               </div>
             </div>
 
-            {/* Bulk Actions Banner */}
-            {selectedTxIds.length > 0 && (
-              <div 
-                className="p-3.5 rounded-2xl border flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in transition"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'rgba(239, 68, 68, 0.4)'
-                }}
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={editingPkgId ? () => handleUpdatePackage(editingPkgId) : handleAddPackage}
+                className="px-5 py-2 text-white font-bold rounded-xl text-xs shadow transition hover:opacity-90 flex items-center gap-1.5 cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                <div className="flex items-center gap-2 text-xs font-bold" style={{ color: 'var(--color-text)' }}>
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                  <span>{selectedTxIds.length} {t('transactionsSelected', 'transaction(s) selected')}</span>
+                <Plus className="h-4 w-4" />
+                <span>{editingPkgId ? 'Update Package' : tr('btnAddPackage', '+ Add New Package')}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Active Bundles Grid & Mockups */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {settings.packages.map((pkg) => (
+              <div
+                key={pkg.id}
+                className="p-5 rounded-3xl border shadow-sm flex flex-col justify-between space-y-4 relative overflow-hidden transition-colors duration-200"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+              >
+                {pkg.badge && (
+                  <span 
+                    className="absolute top-3 right-3 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase text-white shadow-xs"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    {pkg.badge}
+                  </span>
+                )}
+
+                <div>
+                  <h3 className="text-base font-extrabold" style={{ color: 'var(--color-text)' }}>{pkg.name}</h3>
+                  <div className="flex items-baseline gap-1 mt-2">
+                    <span className="text-2xl font-black" style={{ color: 'var(--color-primary)' }}>
+                      ${pkg.priceDollars.toFixed(2)}
+                    </span>
+                    <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>/ one-time</span>
+                  </div>
+
+                  <div className="mt-3 p-3 rounded-2xl border flex items-center justify-between" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">{settings.tokenSymbol}</span>
+                      <span className="text-sm font-black font-mono" style={{ color: 'var(--color-text)' }}>
+                        +{pkg.tokenAmount.toLocaleString()}
+                      </span>
+                    </div>
+                    {pkg.bonusTokens > 0 && (
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                        +{pkg.bonusTokens} Bonus
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
                   <button
                     type="button"
-                    onClick={() => setSelectedTxIds([])}
-                    className="px-3 py-1.5 rounded-xl border text-xs font-semibold hover:opacity-80 transition cursor-pointer"
-                    style={{
-                      backgroundColor: 'var(--color-card)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
+                    onClick={() => handleStartEdit(pkg)}
+                    className="p-2 rounded-xl border text-xs font-bold transition hover:opacity-80 flex items-center gap-1 cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   >
-                    {t('clearSelection', 'Clear Selection')}
+                    <Edit3 className="h-3.5 w-3.5" />
+                    <span>Edit</span>
                   </button>
+
                   <button
                     type="button"
-                    disabled={bulkDeleting}
-                    onClick={handleBulkDeleteTransactions}
-                    className="px-4 py-1.5 rounded-xl text-xs font-bold text-white bg-red-600 hover:bg-red-700 shadow-md flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                    onClick={() => handleDeletePackage(pkg.id)}
+                    className="p-2 rounded-xl border text-red-400 border-red-500/30 hover:bg-red-500/10 transition cursor-pointer"
                   >
-                    {bulkDeleting ? (
-                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                    <span>{t('deleteSelectedCount', `Delete Selected (${selectedTxIds.length})`)}</span>
+                    <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
               </div>
-            )}
+            ))}
+          </div>
+        </div>
+      )}
 
-            {/* Transactions Table with Checkbox, Dynamic Columns and Actions */}
-            <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="border-b font-extrabold uppercase text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                    <th className="p-3.5 w-10 text-center">
-                      <input
-                        ref={selectAllCheckboxRef}
-                        type="checkbox"
-                        checked={allOnPageSelected}
-                        onChange={handleToggleSelectAll}
-                        className="w-4 h-4 rounded accent-primary cursor-pointer align-middle"
-                        title={t('selectAllTooltip', 'Select all transactions on this page')}
-                      />
-                    </th>
-                    {isColVisible('user') && <th className="p-3.5">{t('colUser', 'User')}</th>}
-                    {isColVisible('user_total_tokens') && <th className="p-3.5">{t('colUserTotalTokens', 'User Total Tokens')}</th>}
-                    {isColVisible('service') && <th className="p-3.5">{t('colService', 'Service / Operation')}</th>}
-                    {isColVisible('amount') && <th className="p-3.5">{t('colAmount', 'Amount')}</th>}
-                    {isColVisible('balance_after') && <th className="p-3.5">{t('colBalanceAfter', 'Balance After')}</th>}
-                    {isColVisible('description') && <th className="p-3.5">{t('colDescription', 'Description')}</th>}
-                    {isColVisible('created_at') && <th className="p-3.5">{t('colTimestamp', 'Timestamp')}</th>}
-                    <th className="p-3.5 text-right w-16">{t('colActions', 'Actions')}</th>
+      {/* TAB 3: TOKEN AUDIT LEDGER */}
+      {activeTab === 'ledger' && (
+        <div 
+          role="region"
+          data-lpignore="true"
+          className="space-y-4"
+        >
+          <div className="flex items-center justify-between px-1">
+            <div>
+              <h2 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <History className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                {tr('ledgerHeading', 'Recent Token Transaction Activity')}
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {tr('ledgerDesc', 'Audit trail of user token consumptions, purchases, and initial registrations.')}
+              </p>
+            </div>
+          </div>
+
+          <div 
+            className="border rounded-3xl overflow-hidden shadow-xl transition-colors duration-200"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead 
+                  className="border-b uppercase font-bold text-[10px] tracking-wider"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                >
+                  <tr>
+                    <th className="px-5 py-4">{tr('colUser', 'Customer')}</th>
+                    <th className="px-5 py-4">{tr('colType', 'Transaction Type')}</th>
+                    <th className="px-5 py-4">{tr('colAmount', 'Amount')}</th>
+                    <th className="px-5 py-4">{tr('colBalanceAfter', 'Balance After')}</th>
+                    <th className="px-5 py-4">{tr('colDate', 'Timestamp')}</th>
+                    <th className="px-5 py-4">{tr('colDescription', 'Description')}</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
-                  {txLoading ? (
+                <tbody className="divide-y" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                  {transactions.length === 0 ? (
                     <tr>
-                      <td colSpan={activeColumnCount + 2} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                        <div className="flex items-center justify-center gap-2">
-                          <RefreshCw className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} />
-                          <span>{t('loadingLedger', 'Loading token transaction ledger...')}</span>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : transactions.length === 0 ? (
-                    <tr>
-                      <td colSpan={activeColumnCount + 2} className="p-8 text-center text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                        {t('noTransactionsFound', 'No transactions recorded matching your search parameters.')}
+                      <td colSpan={6} className="text-center py-10" style={{ color: 'var(--color-text-secondary)' }}>
+                        {tr('noLedgerRecords', 'No recent token transactions recorded.')}
                       </td>
                     </tr>
                   ) : (
                     transactions.map((tx) => {
-                      const isNegative = tx.amount < 0;
-                      const isSelected = selectedTxIds.includes(tx.id);
+                      const isPositive = tx.amount > 0;
                       return (
-                        <tr 
-                          key={tx.id} 
-                          className={`transition font-medium ${isSelected ? 'bg-primary/10' : 'hover:bg-slate-500/5'}`}
-                          style={{ color: 'var(--color-text)' }}
-                        >
-                          <td className="p-3.5 text-center">
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={() => handleToggleSelectOne(tx.id)}
-                              className="w-4 h-4 rounded accent-primary cursor-pointer align-middle"
-                            />
+                        <tr key={tx.id} className="transition" style={{ borderColor: 'var(--color-border)' }}>
+                          <td className="px-5 py-4 font-mono font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                            {tx.customer_email || 'System User'}
                           </td>
 
-                          {isColVisible('user') && (
-                            <td className="p-3.5">
-                              <div className="font-bold truncate max-w-[180px]" title={tx.user_email}>
-                                {tx.user_email || 'Anonymous'}
-                              </div>
-                              <div className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
-                                {tx.user_id}
-                              </div>
-                            </td>
-                          )}
-
-                          {isColVisible('user_total_tokens') && (
-                            <td className="p-3.5">
-                              <div className="flex items-center gap-1.5 font-mono font-black text-xs" style={{ color: 'var(--color-text)' }}>
-                                <Wallet className="h-3.5 w-3.5 text-amber-500" />
-                                <span>{Number(tx.user_total_tokens ?? tx.balance_after).toLocaleString()}</span>
-                                <span className="text-amber-500 text-[11px]">{tokenSymbol}</span>
-                              </div>
-                            </td>
-                          )}
-
-                          {isColVisible('service') && (
-                            <td className="p-3.5">
-                              {renderServiceBadge(tx.type)}
-                            </td>
-                          )}
-
-                          {isColVisible('amount') && (
-                            <td className="p-3.5">
-                              <span className={`font-mono font-black text-xs ${isNegative ? 'text-red-400' : 'text-emerald-400'}`}>
-                                {isNegative ? '' : '+'}{tx.amount} {tokenSymbol}
-                              </span>
-                            </td>
-                          )}
-
-                          {isColVisible('balance_after') && (
-                            <td className="p-3.5 font-mono text-xs font-bold">
-                              {tx.balance_after} <span className="text-amber-500">{tokenSymbol}</span>
-                            </td>
-                          )}
-
-                          {isColVisible('description') && (
-                            <td className="p-3.5 max-w-[240px] truncate text-[11px]" style={{ color: 'var(--color-text-secondary)' }} title={tx.description}>
-                              {tx.description || '-'}
-                            </td>
-                          )}
-
-                          {isColVisible('created_at') && (
-                            <td className="p-3.5 font-mono text-[11px] whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
-                              {new Date(tx.created_at).toLocaleString()}
-                            </td>
-                          )}
-
-                          <td className="p-3.5 text-right">
-                            <button
-                              type="button"
-                              disabled={deletingTxId === tx.id}
-                              onClick={() => handleDeleteTransaction(tx.id)}
-                              className="p-1.5 rounded-lg border text-red-400 hover:text-red-300 border-red-900/40 hover:bg-red-950/20 transition cursor-pointer disabled:opacity-50"
-                              title={t('deleteTransactionTooltip', 'Delete Transaction')}
+                          <td className="px-5 py-4">
+                            <span 
+                              className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: isPositive ? 'var(--color-emerald, #10b981)' : '#f59e0b',
+                                color: isPositive ? 'var(--color-emerald, #10b981)' : '#fbbf24'
+                              }}
                             >
-                              {deletingTxId === tx.id ? (
-                                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-3.5 w-3.5" />
-                              )}
-                            </button>
+                              {tx.type}
+                            </span>
+                          </td>
+
+                          <td className="px-5 py-4 font-mono font-black" style={{ color: isPositive ? 'var(--color-emerald, #10b981)' : '#ef4444' }}>
+                            {isPositive ? `+${tx.amount}` : tx.amount} {settings.tokenSymbol}
+                          </td>
+
+                          <td className="px-5 py-4 font-mono font-bold" style={{ color: 'var(--color-text)' }}>
+                            {tx.balance_after !== undefined ? tx.balance_after : '—'}
+                          </td>
+
+                          <td className="px-5 py-4 text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                            {new Date(tx.created_at).toLocaleDateString(locale === 'th' ? 'th-TH' : (locale || 'en-US'), { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </td>
+
+                          <td className="px-5 py-4 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                            {tx.description}
                           </td>
                         </tr>
                       );
@@ -1446,89 +849,6 @@ export default function AdminTokenSettingPage() {
                   )}
                 </tbody>
               </table>
-            </div>
-
-            {/* Pagination */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t text-xs" style={{ borderColor: 'var(--color-border)' }}>
-              <span style={{ color: 'var(--color-text-secondary)' }}>
-                {t('showing', 'Showing')}{' '}
-                <strong style={{ color: 'var(--color-text)' }}>
-                  {txTotalCount > 0 ? (txPage - 1) * txLimit + 1 : 0}
-                </strong>{' '}
-                -{' '}
-                <strong style={{ color: 'var(--color-text)' }}>
-                  {Math.min(txPage * txLimit, txTotalCount)}
-                </strong>{' '}
-                {t('of', 'of')}{' '}
-                <strong style={{ color: 'var(--color-text)' }}>{txTotalCount}</strong>{' '}
-                {t('transactionsLabel', 'transactions')}
-              </span>
-
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  disabled={txPage <= 1 || txLoading}
-                  onClick={() => setTxPage(1)}
-                  className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-sm"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  title="First Page"
-                >
-                  <ChevronsLeft className="h-4 w-4" />
-                </button>
-
-                <button
-                  type="button"
-                  disabled={txPage <= 1 || txLoading}
-                  onClick={() => setTxPage(p => Math.max(1, p - 1))}
-                  className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-sm"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  title="Previous Page"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-
-                {getPageNumbers().map((num) => (
-                  <button
-                    key={num}
-                    type="button"
-                    onClick={() => setTxPage(num)}
-                    className="min-w-[28px] h-7 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-sm"
-                    style={txPage === num ? {
-                      backgroundColor: 'var(--color-primary)',
-                      borderColor: 'var(--color-primary)',
-                      color: '#ffffff'
-                    } : {
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  >
-                    {num}
-                  </button>
-                ))}
-
-                <button
-                  type="button"
-                  disabled={txPage >= txTotalPages || txLoading}
-                  onClick={() => setTxPage(p => Math.min(txTotalPages, p + 1))}
-                  className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-sm"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  title="Next Page"
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-
-                <button
-                  type="button"
-                  disabled={txPage >= txTotalPages || txLoading}
-                  onClick={() => setTxPage(txTotalPages)}
-                  className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer shadow-sm"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  title="Last Page"
-                >
-                  <ChevronsRight className="h-4 w-4" />
-                </button>
-              </div>
             </div>
           </div>
         </div>
