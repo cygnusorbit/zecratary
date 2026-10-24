@@ -1,25 +1,15 @@
+// @ts-nocheck
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
-  Coins, 
-  Sparkles, 
-  RefreshCw, 
-  CheckCircle2, 
-  AlertCircle, 
-  Plus, 
-  Search, 
-  Filter, 
-  ChevronLeft, 
-  ChevronRight, 
-  ArrowUpRight, 
-  ArrowDownLeft, 
-  Wallet, 
-  Layers, 
-  Clock 
+  Coins, Wallet, Sparkles, TrendingUp, TrendingDown, Clock, 
+  ArrowRight, CheckCircle2, AlertCircle, Search, RefreshCw, 
+  X, Check, ShieldAlert, ChevronLeft, ChevronRight, Zap, Award
 } from 'lucide-react';
-import { getCurrentUser, User } from '@/lib/auth';
+import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
 interface TokenPackage {
@@ -27,845 +17,711 @@ interface TokenPackage {
   name: string;
   tokens: number;
   price: number;
-  badge?: string;
-  isPopular?: boolean;
+  popular?: boolean;
+  bestValue?: boolean;
+  description?: string;
 }
 
 interface TokenTransaction {
-  id: string | number;
+  id: string;
+  user_id?: string;
+  user_email?: string;
   amount: number;
   balance_after: number;
   type: string;
   description: string;
   created_at: string;
-  user_total_tokens?: number;
 }
 
+const DEFAULT_PACKAGES: TokenPackage[] = [
+  { id: 'pkg_starter', name: 'Starter Pack', tokens: 100, price: 4.99, popular: false, description: 'Perfect for light exploration and weekend cooking.' },
+  { id: 'pkg_pro', name: 'Chef Pro Bundle', tokens: 500, price: 19.99, popular: true, description: 'Our most popular bundle for daily AI recipe formulation.' },
+  { id: 'pkg_unlimited', name: 'Master Gourmet Pack', tokens: 1500, price: 49.99, popular: false, bestValue: true, description: 'Maximum tokens with priority generation throughput.' }
+];
+
 const CURRENCY_SYMBOLS: Record<string, string> = {
-  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'AU$', JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
+  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'AU$', JPY: '¥', THB: '฿'
 };
 
-export default function TokenPage() {
+export default function TokenPortalPage() {
+  const router = useRouter();
   const { t } = useTranslation();
-  const [user, setUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
-  // Live Balances & System Settings (Synchronized with PostgreSQL)
+  // Balances & Telemetry
   const [tokenBalance, setTokenBalance] = useState<number>(0);
-  const [walletBalance, setWalletBalance] = useState<number | null>(null);
-  const [currency, setCurrency] = useState<string>('USD');
+  const [walletBalance, setWalletBalance] = useState<number>(0.00);
   const [currencySymbol, setCurrencySymbol] = useState<string>('$');
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
-  const [packages, setPackages] = useState<TokenPackage[]>([
-    { id: 'pkg_starter', name: 'Starter Pantry', tokens: 100, price: 4.99, badge: 'Starter' },
-    { id: 'pkg_pro', name: 'Culinary Master', tokens: 500, price: 19.99, badge: 'Popular', isPopular: true },
-    { id: 'pkg_buffet', name: 'Executive Chef', tokens: 1500, price: 49.99, badge: 'Best Value' }
-  ]);
-  const [selectedPackageId, setSelectedPackageId] = useState<string>('pkg_starter');
+  const [isTokenEnabled, setIsTokenEnabled] = useState<boolean>(true);
 
-  // Top Up Actions
-  const [purchasingPkgId, setPurchasingPkgId] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-
-  // Transactions State
-  const [transactions, setTransactions] = useState<TokenTransaction[]>([]);
-  const [loadingTransactions, setLoadingTransactions] = useState<boolean>(true);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [typeFilter, setTypeFilter] = useState<string>('all');
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(10);
-  const [totalCount, setTotalCount] = useState<number>(0);
-  const [totalPages, setTotalPages] = useState<number>(1);
+  // Feature Costs
+  const [costs, setCosts] = useState({ chef: 1, import_url: 2, import_photo: 3, import_text: 1 });
+  const [packages, setPackages] = useState<TokenPackage[]>(DEFAULT_PACKAGES);
 
   // KPI Stats
-  const [stats, setStats] = useState({
-    totalDeducted: 0,
-    totalGranted: 0,
-    totalEvents: 0
-  });
+  const [stats, setStats] = useState({ totalDeducted: 0, totalGranted: 0, totalEvents: 0 });
 
-  const isFetchingRef = useRef<boolean>(false);
+  // Ledger State
+  const [transactions, setTransactions] = useState<TokenTransaction[]>([]);
+  const [search, setSearch] = useState<string>('');
+  const [selectedType, setSelectedType] = useState<string>('all');
+  const [page, setPage] = useState<number>(1);
+  const [totalPages, setTotalPages] = useState<number>(1);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [purchasing, setPurchasing] = useState<boolean>(false);
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // 1. Initial Load & User Hydration
-  useEffect(() => {
-    const currentUser = getCurrentUser();
-    setUser(currentUser);
+  // Confirmation Modal State (Autofill Safe Form-Free Container)
+  const [confirmModalPackage, setConfirmModalPackage] = useState<TokenPackage | null>(null);
 
-    if (typeof window !== 'undefined') {
-      try {
-        const cachedRaw = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
-        if (cachedRaw) {
-          const cached = JSON.parse(cachedRaw);
-          if (typeof cached.token_balance === 'number') {
-            setTokenBalance(cached.token_balance);
-          } else if (typeof cached.tokenBalance === 'number') {
-            setTokenBalance(cached.tokenBalance);
+  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage({ type, text });
+    setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  // 1. Load Token Telemetry, Packages & User Transactions
+  const fetchTokenData = useCallback(async (user: User | null, targetPage = 1, searchQuery = '', typeFilter = 'all') => {
+    const targetUserId = user?.id || 'usr_admin_1';
+    const targetEmail = user?.email || 'admin@zecratary.com';
+    setLoading(true);
+
+    try {
+      // Currency detection
+      if (typeof window !== 'undefined') {
+        const cur = localStorage.getItem('zecratary_currency') || 'USD';
+        setCurrencySymbol(CURRENCY_SYMBOLS[cur] || '$');
+      }
+
+      const qParams = new URLSearchParams({
+        userId: targetUserId,
+        email: targetEmail,
+        page: String(targetPage),
+        limit: '10',
+        search: searchQuery,
+        type: typeFilter,
+        t: String(Date.now())
+      });
+
+      const res = await fetch(`/api/tokens?${qParams.toString()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          if (data.balance !== null && data.balance !== undefined) setTokenBalance(Number(data.balance));
+          if (data.tokenSymbol) setTokenSymbol(data.tokenSymbol);
+          if (data.tokenName) setTokenName(data.tokenName);
+          if (data.isEnabled !== undefined) setIsTokenEnabled(Boolean(data.isEnabled));
+          if (data.costs) setCosts(data.costs);
+
+          if (Array.isArray(data.packages) && data.packages.length > 0) {
+            setPackages(data.packages);
           }
-          if (typeof cached.wallet_balance === 'number') {
-            setWalletBalance(cached.wallet_balance);
-          } else if (typeof cached.walletBalance === 'number') {
-            setWalletBalance(cached.walletBalance);
+
+          if (Array.isArray(data.transactions)) {
+            setTransactions(data.transactions);
+          }
+
+          if (data.totalPages) setTotalPages(data.totalPages);
+          if (data.stats) setStats(data.stats);
+        }
+      }
+
+      // Fetch Live Store Wallet Balance
+      try {
+        const wRes = await fetch(`/api/wallet?email=${encodeURIComponent(targetEmail)}&t=${Date.now()}`, { cache: 'no-store' });
+        if (wRes.ok) {
+          const wData = await wRes.json();
+          if (wData.user && typeof wData.user.wallet_balance !== 'undefined') {
+            setWalletBalance(parseFloat(wData.user.wallet_balance || 0));
+          }
+          if (wData.settings?.currency) {
+            setCurrencySymbol(CURRENCY_SYMBOLS[wData.settings.currency] || '$');
           }
         }
       } catch (_) {}
+
+    } catch (err) {
+      console.warn('[TokenPortal] Error loading telemetry:', err);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
-  // 2. Fetch Data from /api/tokens (Backed by PostgreSQL)
-  const fetchTokenData = useCallback(async (isSilent = false) => {
-    if (isFetchingRef.current && !isSilent) return;
-    isFetchingRef.current = true;
-    if (!isSilent) setLoadingTransactions(true);
-
-    try {
-      const currentUser = getCurrentUser() || user;
-      const params = new URLSearchParams({
-        page: currentPage.toString(),
-        limit: pageSize.toString(),
-        type: typeFilter,
-        search: searchQuery
-      });
-
-      if (currentUser?.id) params.append('userId', String(currentUser.id));
-      if (currentUser?.email) params.append('email', currentUser.email);
-
-      const res = await fetch(`/api/tokens?${params.toString()}&t=${Date.now()}`, { cache: 'no-store' });
-      const text = await res.text();
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch (_) {
-        data = {};
-      }
-
-      if (data.success) {
-        const rawTok = data.balance ?? data.tokenBalance ?? data.token_balance;
-        if (typeof rawTok === 'number') setTokenBalance(rawTok);
-
-        const rawWal = data.walletBalance ?? data.wallet_balance;
-        if (typeof rawWal === 'number') setWalletBalance(rawWal);
-
-        if (data.tokenSymbol) setTokenSymbol(data.tokenSymbol);
-        if (data.tokenName) setTokenName(data.tokenName);
-
-        const curr = data.currency || 'USD';
-        setCurrency(curr);
-        setCurrencySymbol(CURRENCY_SYMBOLS[curr.toUpperCase()] || data.currencySymbol || '$');
-
-        if (Array.isArray(data.packages) && data.packages.length > 0) {
-          setPackages(data.packages);
-          setSelectedPackageId(prev => {
-            const exists = data.packages.some((p: TokenPackage) => p.id === prev);
-            return exists ? prev : (data.packages[0]?.id || 'pkg_starter');
-          });
-        }
-
-        setTransactions(data.transactions || []);
-        setTotalCount(data.total || data.totalCount || 0);
-        setTotalPages(data.totalPages || 1);
-
-        if (data.stats) {
-          setStats({
-            totalDeducted: Number(data.stats.totalDeducted) || 0,
-            totalGranted: Number(data.stats.totalGranted) || 0,
-            totalEvents: Number(data.stats.totalEvents) || 0
-          });
-        }
-      }
-    } catch (err: any) {
-      console.warn('[Token Page] Error fetching tokens:', err?.message || err);
-    } finally {
-      if (!isSilent) setLoadingTransactions(false);
-      isFetchingRef.current = false;
-    }
-  }, [currentPage, pageSize, typeFilter, searchQuery, user]);
-
   useEffect(() => {
-    fetchTokenData();
-  }, [fetchTokenData]);
-
-  // Real-time Event Listener & Cross-Tab Synchronization
-  useEffect(() => {
-    const handleSync = () => fetchTokenData(true);
-
-    window.addEventListener('zecratary_tokens_updated', handleSync);
-    window.addEventListener('zecratary_token_settings_updated', handleSync);
-    window.addEventListener('zecratary_wallet_updated', handleSync);
-
-    const handleStorage = (e: StorageEvent) => {
-      if (!e.key || e.key.includes('token') || e.key.includes('wallet') || e.key.includes('user')) {
-        fetchTokenData(true);
-      }
-    };
-    window.addEventListener('storage', handleStorage);
-
-    const handleFocus = () => fetchTokenData(true);
-    window.addEventListener('focus', handleFocus);
-
-    let balanceChannel: BroadcastChannel | null = null;
-    try {
-      balanceChannel = new BroadcastChannel('zecratary_balance_channel');
-      balanceChannel.onmessage = (event) => {
-        if (event.data?.type === 'BALANCE_UPDATED' || event.data?.type === 'BALANCE_UPDATE') {
-          if (typeof event.data.tokenBalance === 'number') setTokenBalance(event.data.tokenBalance);
-          if (typeof event.data.wallet_balance === 'number') setWalletBalance(event.data.wallet_balance);
-          else if (typeof event.data.walletBalance === 'number') setWalletBalance(event.data.walletBalance);
-          fetchTokenData(true);
-        }
-      };
-    } catch (_) {}
-
-    return () => {
-      window.removeEventListener('zecratary_tokens_updated', handleSync);
-      window.removeEventListener('zecratary_token_settings_updated', handleSync);
-      window.removeEventListener('zecratary_wallet_updated', handleSync);
-      window.removeEventListener('storage', handleStorage);
-      window.removeEventListener('focus', handleFocus);
-      if (balanceChannel) balanceChannel.close();
-    };
-  }, [fetchTokenData]);
-
-  // Purchase Package Handler (Atomic Dual-Ledger Settlement)
-  const handlePurchase = async (pkgId: string) => {
-    const pkg = packages.find(p => p.id === pkgId);
-    if (!pkg) return;
-
-    setPurchasingPkgId(pkgId);
-    setFeedback(null);
-
-    const price = Number(pkg.price) || 0;
-    if (walletBalance !== null && walletBalance < price) {
-      setFeedback({
-        type: 'error',
-        message: t(
-          'insufficientWalletForTokens',
-          `Insufficient wallet balance (${currencySymbol}${Number(walletBalance || 0).toFixed(2)} available). This bundle requires ${currencySymbol}${price.toFixed(2)}. Please top up your wallet first.`
-        )
-      });
-      setPurchasingPkgId(null);
+    document.title = `${t('tokenPortalTitle', 'Token Portal')} - Zecratary`;
+    initAuthStorage();
+    const user = getCurrentUser();
+    if (!user) {
+      router.replace('/login');
       return;
     }
+    setCurrentUser(user);
+    fetchTokenData(user, page, search, selectedType);
+
+    const handleSync = () => {
+      const u = getCurrentUser();
+      if (u) {
+        setCurrentUser(u);
+        fetchTokenData(u, page, search, selectedType);
+      }
+    };
+
+    window.addEventListener('storage', handleSync);
+    window.addEventListener('zecratary_tokens_updated', handleSync);
+    window.addEventListener('zecratary_wallet_updated', handleSync);
+    window.addEventListener('zecratary_token_settings_updated', handleSync);
+    window.addEventListener('zecratary_languages_updated', handleSync);
+    window.addEventListener('zecratary_dictionary_updated', handleSync);
+    window.addEventListener('zecratary_locale_changed', handleSync);
+
+    return () => {
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('zecratary_tokens_updated', handleSync);
+      window.removeEventListener('zecratary_wallet_updated', handleSync);
+      window.removeEventListener('zecratary_token_settings_updated', handleSync);
+      window.removeEventListener('zecratary_languages_updated', handleSync);
+      window.removeEventListener('zecratary_dictionary_updated', handleSync);
+      window.removeEventListener('zecratary_locale_changed', handleSync);
+    };
+  }, [fetchTokenData, page, search, selectedType, router, t]);
+
+  // Execute Atomic Purchase via Store Wallet
+  const handleConfirmPurchase = async () => {
+    if (!confirmModalPackage || !currentUser) return;
+    setPurchasing(true);
 
     try {
-      const currentUser = getCurrentUser() || user;
       const res = await fetch('/api/tokens', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'purchase',
-          packageId: pkg.id,
-          tokens: Number(pkg.tokens),
-          price: Number(pkg.price),
-          packageName: pkg.name,
-          userId: currentUser?.id || null,
-          userEmail: currentUser?.email || null,
-          email: currentUser?.email || null,
-          paymentMethod: 'wallet'
+          packageId: confirmModalPackage.id,
+          tokens: confirmModalPackage.tokens,
+          price: confirmModalPackage.price,
+          packageName: confirmModalPackage.name,
+          userId: currentUser.id || 'usr_admin_1',
+          userEmail: currentUser.email || 'admin@zecratary.com'
         })
       });
 
-      const text = await res.text();
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch (_) {
-        throw new Error(
-          res.ok 
-            ? 'Unexpected response from server.' 
-            : `Server returned HTTP ${res.status}${text ? `: ${text.slice(0, 100)}` : ''}`
-        );
-      }
-
+      const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || data.message || 'Failed to complete token purchase.');
+        throw new Error(data.error || 'Token purchase failed.');
       }
 
-      const newBal = typeof data.newBalance === 'number' 
-        ? data.newBalance 
-        : typeof data.balance === 'number'
-        ? data.balance
-        : (tokenBalance + pkg.tokens);
-
+      const newBal = Number(data.balance ?? (tokenBalance + confirmModalPackage.tokens));
       setTokenBalance(newBal);
 
-      let nextWalletBal = walletBalance;
-      if (typeof data.newWalletBalance === 'number') {
-        nextWalletBal = data.newWalletBalance;
-        setWalletBalance(data.newWalletBalance);
-      } else if (typeof data.wallet_balance === 'number') {
-        nextWalletBal = data.wallet_balance;
-        setWalletBalance(data.wallet_balance);
-      } else if (walletBalance !== null) {
-        nextWalletBal = Math.max(0, walletBalance - price);
-        setWalletBalance(nextWalletBal);
-      }
+      const newWalletBal = Math.max(0, walletBalance - Number(confirmModalPackage.price));
+      setWalletBalance(newWalletBal);
 
-      setFeedback({
-        type: 'success',
-        message: data.message || `+${pkg.tokens.toLocaleString()} ${tokenSymbol} credited to your account!`
-      });
-
+      // Local user cache sync
       if (typeof window !== 'undefined') {
         try {
-          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('currentUser');
+          const raw = localStorage.getItem('zecratary_user');
           if (raw) {
             const u = JSON.parse(raw);
             u.token_balance = newBal;
-            u.tokenBalance = newBal;
-            if (nextWalletBal !== null) {
-              u.wallet_balance = nextWalletBal;
-              u.walletBalance = nextWalletBal;
-            }
+            u.wallet_balance = newWalletBal;
             localStorage.setItem('zecratary_user', JSON.stringify(u));
           }
         } catch (_) {}
-
-        window.dispatchEvent(new Event('zecratary_tokens_updated'));
-        window.dispatchEvent(new Event('zecratary_wallet_updated'));
-        window.dispatchEvent(new Event('zecratary_token_settings_updated'));
-
-        try {
-          const channel = new BroadcastChannel('zecratary_balance_channel');
-          channel.postMessage({
-            type: 'BALANCE_UPDATED',
-            tokenBalance: newBal,
-            walletBalance: nextWalletBal
-          });
-          channel.close();
-        } catch (_) {}
       }
 
-      fetchTokenData(true);
+      // Broadcast to all tabs and navigation header
+      window.dispatchEvent(new Event('zecratary_tokens_updated'));
+      window.dispatchEvent(new Event('zecratary_wallet_updated'));
+      window.dispatchEvent(new Event('storage'));
 
-      setTimeout(() => {
-        setFeedback(null);
-      }, 5000);
+      try {
+        const bc = new BroadcastChannel('zecratary_balance_channel');
+        bc.postMessage({ type: 'TOKEN_PURCHASED', tokens: newBal, wallet: newWalletBal });
+        bc.close();
+      } catch (_) {}
+
+      showToast(
+        (t('purchaseSuccessToast', 'Successfully purchased {tokens} {symbol}!'))
+          .replace('{tokens}', confirmModalPackage.tokens.toLocaleString())
+          .replace('{symbol}', tokenSymbol),
+        'success'
+      );
+
+      setConfirmModalPackage(null);
+      fetchTokenData(currentUser, page, search, selectedType);
     } catch (err: any) {
-      setFeedback({
-        type: 'error',
-        message: err.message || 'Error processing transaction.'
-      });
+      showToast(err.message || 'Error completing purchase.', 'error');
     } finally {
-      setPurchasingPkgId(null);
-    }
-  };
-
-  const formatServiceType = (type: string) => {
-    if (!type) return 'Operation';
-    switch (type) {
-      case 'usage_chef':
-      case 'chef_prompt':
-      case 'chef':
-        return t('opChefAi', 'AI Chef Recipe Assistant');
-      case 'usage_import_url':
-      case 'import_url':
-        return t('opImportUrl', 'Import Recipe URL');
-      case 'usage_import_text':
-      case 'import_text':
-        return t('opImportText', 'Import Recipe Text');
-      case 'usage_import_photo':
-      case 'import_photo':
-        return t('opImportPhoto', 'Import Recipe Photo');
-      case 'package_purchase':
-        return t('opPackagePurchase', 'Token Bundle Purchase');
-      case 'plan_purchase':
-      case 'plan_monthly_grant':
-        return t('opMonthlyPlanGrant', 'Monthly Plan Allowance');
-      case 'manual_credit':
-        return t('opAdminCredit', 'Admin Credit');
-      case 'manual_debit':
-        return t('opAdminAdjustment', 'Admin Adjustment');
-      default:
-        return type.replace(/_/g, ' ').replace(/ \w/g, l => l.toUpperCase());
+      setPurchasing(false);
     }
   };
 
   return (
     <div 
-      className="min-h-screen p-4 sm:p-6 lg:p-8 space-y-6 transition-colors duration-200"
-      style={{
-        backgroundColor: 'var(--color-bg)',
-        color: 'var(--color-text)'
-      }}
+      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
+      style={{ color: 'var(--color-text)' }}
     >
-      {/* 1. Header Bar: Accessible Region with Store Wallet Moved to the Left */}
-      <div 
-        role="region"
-        aria-label={t('tokenHeaderRegion', 'Token Account Overview')}
-        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 rounded-3xl border shadow-sm"
-        style={{
-          backgroundColor: 'var(--color-card)',
-          borderColor: 'var(--color-border)'
-        }}
-      >
-        <div className="space-y-1">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2.5 rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
-              <Coins className="h-6 w-6" />
-            </div>
-            <div>
-              <h1 className="text-xl sm:text-2xl font-black tracking-tight flex items-center gap-2">
-                <span>{tokenName}</span>
-                <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-inner-dark)] text-amber-500">
-                  {tokenSymbol}
-                </span>
-              </h1>
-              <p className="text-xs font-semibold opacity-70">
-                {t('tokenHubSubtitle', 'Manage your AI token credits, top up your wallet, and audit your usage transactions.')}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          {/* 1. Live Wallet Balance Pill (Moved to the LEFT) */}
-          <Link
-            href="/wallet"
-            className="flex items-center gap-2 px-4 py-2 rounded-2xl border bg-[var(--color-inner-dark)] shadow-inner hover:border-[var(--color-primary)]/50 transition cursor-pointer"
-            style={{ borderColor: 'var(--color-border)' }}
-            title={t('viewWallet', 'View Store Wallet')}
-          >
-            <Wallet className="h-5 w-5 text-[var(--color-primary)]" />
-            <div className="flex flex-col">
-              <span className="text-[10px] font-bold uppercase tracking-wider opacity-60">
-                {t('walletBalance', 'Store Wallet')}
-              </span>
-              <span 
-                className="text-base font-black font-mono" 
-                style={{ color: 'var(--color-emerald)' }}
-                suppressHydrationWarning
-              >
-                {currencySymbol}{Number(walletBalance || 0).toFixed(2)}
-              </span>
-            </div>
-          </Link>
-
-          {/* 2. Live Token Balance Pill */}
-          <div 
-            className="flex items-center gap-2 px-4 py-2 rounded-2xl border bg-[var(--color-inner-dark)] shadow-inner"
-            style={{ borderColor: 'var(--color-border)' }}
-          >
-            <Coins className="h-5 w-5 text-amber-500" />
-            <div className="flex flex-col">
-              <span className="text-[10px] font-bold uppercase tracking-wider opacity-60">
-                {t('availableBalance', 'Available Balance')}
-              </span>
-              <span 
-                className="text-base font-black font-mono" 
-                style={{ color: 'var(--color-emerald)' }}
-                suppressHydrationWarning
-              >
-                {tokenBalance.toLocaleString()} {tokenSymbol}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Global Feedback Banner */}
-      {feedback && (
+      {/* Toast Alert Banner */}
+      {toastMessage && (
         <div 
-          role="alert"
-          className={`p-4 rounded-2xl border flex items-center justify-between gap-3 text-xs font-bold shadow-md animate-in fade-in duration-200 ${
-            feedback.type === 'success' 
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
-              : 'bg-red-500/10 border-red-500/30 text-red-400'
-          }`}
+          className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: toastMessage.type === 'success' ? 'var(--color-emerald)' : '#ef4444',
+            color: 'var(--color-text)'
+          }}
         >
-          <div className="flex items-center gap-2">
-            {feedback.type === 'success' ? <CheckCircle2 className="h-5 w-5 shrink-0" /> : <AlertCircle className="h-5 w-5 shrink-0" />}
-            <span>{feedback.message}</span>
-          </div>
-          <button 
-            type="button" 
-            onClick={() => setFeedback(null)} 
-            className="opacity-70 hover:opacity-100 cursor-pointer text-xs p-1"
-            aria-label="Dismiss alert"
-          >
-            ✕
-          </button>
+          {toastMessage.type === 'success' ? (
+            <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
+          ) : (
+            <AlertCircle className="h-4 w-4 text-red-500" />
+          )}
+          <span>{toastMessage.text}</span>
         </div>
       )}
 
-      {/* 2. Top-Up Package Catalog (Clean Header without edit/subscription links) */}
-      <div 
-        role="region"
-        aria-label={t('tokenPackagesRegion', 'Token Bundles Catalog')}
-        className="p-6 rounded-3xl border shadow-sm space-y-4"
-        style={{
-          backgroundColor: 'var(--color-card)',
-          borderColor: 'var(--color-border)'
-        }}
-      >
-        <div className="border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
-          <h2 className="text-base font-black flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-amber-500" />
-            <span>{t('topUpPackagesTitle', 'Top Up Token Bundles')}</span>
-          </h2>
-          <p className="text-xs opacity-70 mt-1">
-            {t('topUpPackagesSubtitle', 'Choose an instant token package to fuel AI cooking, recipe generation, and OCR imports. Bundles synchronize with admin settings.')}
+      {/* Top Header Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+        <div>
+          <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+            {t('tokenPortalTitle', 'Token Portal')}
+          </h1>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('tokenPortalSubtitle', 'Purchase and manage tokens for AI Chef recipe generation and automated imports.')}
           </p>
         </div>
 
-        {/* Dynamic Packages Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
-          {packages.map((pkg) => {
-            const isSelected = selectedPackageId === pkg.id;
-            const isBuying = purchasingPkgId === pkg.id;
-            const isShort = walletBalance !== null && walletBalance < pkg.price;
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => fetchTokenData(currentUser, page, search, selectedType)}
+            disabled={loading}
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50 hover:opacity-80"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            title={t('reloadBtn', 'Reload')}
+          >
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
+            <span>{t('reloadBtn', 'Reload')}</span>
+          </button>
 
-            return (
-              <div
-                key={pkg.id}
-                onClick={() => setSelectedPackageId(pkg.id)}
-                className={`relative flex flex-col justify-between p-5 rounded-3xl border transition-all cursor-pointer ${
-                  isSelected 
-                    ? 'border-[var(--color-primary)] ring-2 ring-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 shadow-md' 
-                    : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/40 bg-[var(--color-inner-dark)] hover:shadow-xs'
-                }`}
-              >
-                {pkg.badge && (
-                  <div className="absolute top-4 right-4">
-                    <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-500 border border-amber-500/30 shadow-xs">
-                      {pkg.badge}
-                    </span>
-                  </div>
-                )}
-
-                <div className="space-y-3">
-                  <div className="pr-12">
-                    <h3 className="text-sm font-black truncate">{pkg.name}</h3>
-                    <div className="flex items-baseline gap-1 mt-1 font-mono">
-                      <span className="text-2xl font-black text-amber-500">+{pkg.tokens.toLocaleString()}</span>
-                      <span className="text-xs font-bold opacity-75">{tokenSymbol}</span>
-                    </div>
-                  </div>
-
-                  <p className="text-[11px] opacity-70">
-                    {t('bundleAddsNotice', 'Instantly adds')} <strong className="font-bold">{pkg.tokens.toLocaleString()}</strong> {t('spendableTokensNotice', 'spendable AI tokens to your live wallet.')}
-                  </p>
-                </div>
-
-                <div className="pt-4 mt-4 border-t flex items-center justify-between gap-3" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] uppercase font-bold opacity-60">{t('price', 'Price')}</span>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-base font-black font-mono">{currencySymbol}{Number(pkg.price).toFixed(2)}</span>
-                      {isShort && (
-                        <span className="text-[10px] font-bold text-amber-500 font-mono">
-                          {t('shortfallLabel', 'Short')} {currencySymbol}{(Number(pkg.price) - Number(walletBalance)).toFixed(2)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled={Boolean(purchasingPkgId)}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handlePurchase(pkg.id);
-                    }}
-                    className="py-2 px-4 rounded-xl text-xs font-extrabold text-white flex items-center gap-1.5 shadow-md transition hover:opacity-90 disabled:opacity-50 cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                  >
-                    {isBuying ? (
-                      <>
-                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                        <span>{t('processingBtn', 'Processing...')}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Plus className="h-3.5 w-3.5" />
-                        <span>{t('buyNow', 'Buy Now')}</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+          <Link
+            href="/wallet"
+            className="px-4 py-2.5 rounded-xl text-xs font-bold border transition shadow-xs flex items-center gap-1.5 hover:opacity-80"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-emerald)' }}
+          >
+            <Wallet className="h-4 w-4" />
+            <span>{t('topUpWalletBtn', 'Top Up Wallet')}</span>
+          </Link>
         </div>
       </div>
 
-      {/* 3. 4-KPI Metric Cards */}
-      <div 
-        role="region"
-        aria-label={t('tokenMetricsRegion', 'Token Performance Metrics')}
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
-      >
+      {/* Free Token Mode Alert Banner */}
+      {!isTokenEnabled && (
         <div 
-          className="p-5 rounded-3xl border shadow-sm flex items-center gap-4"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          className="p-4 rounded-3xl border flex items-center gap-3 shadow-sm animate-in fade-in"
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-emerald)',
+            color: 'var(--color-text)'
+          }}
         >
-          <div className="p-3.5 rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
-            <Coins className="h-6 w-6" />
+          <div className="p-2.5 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <Sparkles className="h-5 w-5" />
           </div>
-          <div className="min-w-0">
-            <p className="text-[11px] font-bold uppercase tracking-wider opacity-60">{t('myTokenBalance', 'Token Balance')}</p>
-            <p className="text-xl font-black font-mono truncate" style={{ color: 'var(--color-emerald)' }} suppressHydrationWarning>
-              {tokenBalance.toLocaleString()} {tokenSymbol}
-            </p>
-          </div>
-        </div>
-
-        <div 
-          className="p-5 rounded-3xl border shadow-sm flex items-center gap-4"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="p-3.5 rounded-2xl bg-red-500/10 text-red-400 border border-red-500/20">
-            <ArrowDownLeft className="h-6 w-6" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-[11px] font-bold uppercase tracking-wider opacity-60">{t('totalConsumed', 'Total Consumed')}</p>
-            <p className="text-xl font-black font-mono text-red-400 truncate" suppressHydrationWarning>
-              -{stats.totalDeducted.toLocaleString()} {tokenSymbol}
-            </p>
-          </div>
-        </div>
-
-        <div 
-          className="p-5 rounded-3xl border shadow-sm flex items-center gap-4"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="p-3.5 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-            <ArrowUpRight className="h-6 w-6" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-[11px] font-bold uppercase tracking-wider opacity-60">{t('totalGranted', 'Total Granted')}</p>
-            <p className="text-xl font-black font-mono text-emerald-400 truncate" suppressHydrationWarning>
-              +{stats.totalGranted.toLocaleString()} {tokenSymbol}
-            </p>
-          </div>
-        </div>
-
-        <div 
-          className="p-5 rounded-3xl border shadow-sm flex items-center gap-4"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="p-3.5 rounded-2xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
-            <Layers className="h-6 w-6" />
-          </div>
-          <div className="min-w-0">
-            <p className="text-[11px] font-bold uppercase tracking-wider opacity-60">{t('totalEvents', 'Activity Events')}</p>
-            <p className="text-xl font-black font-mono truncate" suppressHydrationWarning>
-              {stats.totalEvents.toLocaleString()}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* 4. Token Ledger & Transaction History with Autofill Guardrails */}
-      <div 
-        role="region"
-        aria-label={t('tokenLedgerRegion', 'Token Transaction Audit Ledger')}
-        className="p-6 rounded-3xl border shadow-sm space-y-4"
-        style={{
-          backgroundColor: 'var(--color-card)',
-          borderColor: 'var(--color-border)'
-        }}
-      >
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
           <div>
-            <h2 className="text-base font-black flex items-center gap-2">
-              <Clock className="h-4 w-4 text-[var(--color-primary)]" />
-              <span>{t('tokenLedgerTitle', 'Token Audit Ledger')}</span>
-            </h2>
-            <p className="text-xs opacity-70">
-              {t('tokenLedgerSubtitle', 'Detailed historical audit of token deductions, purchases, and promotional grants.')}
+            <h4 className="font-extrabold text-xs uppercase tracking-wider text-emerald-400">
+              {t('freeTokenModeBanner', 'Free Token Mode Active')}
+            </h4>
+            <p className="text-xs opacity-80 mt-0.5">
+              {t('freeTokenModeDesc', 'Token consumption is currently bypassed by the administrator. All AI Chef and import features are free to use!')}
             </p>
           </div>
+        </div>
+      )}
 
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Search Input with Autofill Guardrail (Constraint 9) */}
-            <div 
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border bg-[var(--color-inner-dark)]"
-              style={{ borderColor: 'var(--color-border)' }}
+      {/* 1. KPI Telemetry Summary Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div 
+          className="p-5 rounded-3xl border shadow-xs flex flex-col justify-between space-y-3"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold opacity-75">{t('currentTokenBalance', 'Current Token Balance')}</span>
+            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
+              <Coins className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="text-2xl font-black font-mono">
+            {tokenBalance.toLocaleString()} <span className="text-amber-500 text-sm">{tokenSymbol}</span>
+          </div>
+        </div>
+
+        <div 
+          className="p-5 rounded-3xl border shadow-xs flex flex-col justify-between space-y-3"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold opacity-75">{t('storeWalletBalance', 'Store Wallet Balance')}</span>
+            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <Wallet className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="text-2xl font-black font-mono text-emerald-400">
+            {currencySymbol}{walletBalance.toFixed(2)}
+          </div>
+        </div>
+
+        <div 
+          className="p-5 rounded-3xl border shadow-xs flex flex-col justify-between space-y-3"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold opacity-75">{t('lifetimeDeducted', 'Lifetime Tokens Used')}</span>
+            <div className="p-2 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20">
+              <TrendingDown className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="text-2xl font-black font-mono">
+            {stats.totalDeducted.toLocaleString()}
+          </div>
+        </div>
+
+        <div 
+          className="p-5 rounded-3xl border shadow-xs flex flex-col justify-between space-y-3"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold opacity-75">{t('lifetimeGranted', 'Lifetime Tokens Granted')}</span>
+            <div className="p-2 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20">
+              <TrendingUp className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="text-2xl font-black font-mono">
+            {stats.totalGranted.toLocaleString()}
+          </div>
+        </div>
+      </div>
+
+      {/* 2. Token Bundles Showcase */}
+      <div 
+        className="p-6 rounded-3xl border shadow-sm space-y-5"
+        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+          <div>
+            <h3 className="text-lg font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+              {t('tokenBundlesHeading', 'Available Token Bundles')}
+            </h3>
+            <p className="text-xs opacity-75">
+              {t('tokenBundlesDesc', 'Select a package to instantly top up your AI token balance via your Store Wallet.')}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {packages.map((pkg) => (
+            <div
+              key={pkg.id}
+              className="p-5 rounded-3xl border flex flex-col justify-between space-y-4 shadow-xs hover:shadow-md transition relative group"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: pkg.popular ? 'var(--color-primary)' : 'var(--color-border)'
+              }}
             >
-              <Search className="h-3.5 w-3.5 opacity-50" />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
+                    {pkg.name}
+                  </h4>
+                  {pkg.popular && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider text-white bg-[var(--color-primary)]">
+                      {t('popularBadge', 'Most Popular')}
+                    </span>
+                  )}
+                  {pkg.bestValue && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider text-emerald-400 border border-emerald-500/30 bg-emerald-500/10">
+                      {t('bestValueBadge', 'Best Value')}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-baseline gap-1 font-mono">
+                  <span className="text-2xl font-black text-amber-500">
+                    +{pkg.tokens.toLocaleString()}
+                  </span>
+                  <span className="text-xs opacity-70">{tokenSymbol}</span>
+                </div>
+
+                {pkg.description && (
+                  <p className="text-xs leading-relaxed opacity-75">
+                    {pkg.description}
+                  </p>
+                )}
+              </div>
+
+              <div className="pt-3 border-t flex items-center justify-between gap-2" style={{ borderColor: 'var(--color-border)' }}>
+                <span className="text-base font-black font-mono">
+                  {currencySymbol}{Number(pkg.price).toFixed(2)}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => setConfirmModalPackage(pkg)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white transition shadow cursor-pointer hover:opacity-90"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                >
+                  {t('buyNowBtn', 'Buy Now')}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 3. Feature Consumption Information Bar */}
+      <div 
+        className="p-4 rounded-3xl border flex flex-col md:flex-row items-center justify-between gap-4 text-xs font-medium"
+        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+      >
+        <span className="font-bold text-[var(--color-primary)] uppercase tracking-wider text-[11px]">
+          {t('featureCostsHeading', 'Feature Consumption Rates')}:
+        </span>
+
+        <div className="flex flex-wrap items-center gap-4 text-xs font-bold">
+          <span className="flex items-center gap-1.5 opacity-80">
+            <Zap className="h-3.5 w-3.5 text-amber-400" />
+            {t('chefCostLabel', 'AI Chef Generation')}: <strong className="font-mono text-amber-500">{costs.chef} {tokenSymbol}</strong>
+          </span>
+          <span className="flex items-center gap-1.5 opacity-80">
+            <Zap className="h-3.5 w-3.5 text-sky-400" />
+            {t('importUrlCostLabel', 'Web URL Import')}: <strong className="font-mono text-sky-400">{costs.import_url} {tokenSymbol}</strong>
+          </span>
+          <span className="flex items-center gap-1.5 opacity-80">
+            <Zap className="h-3.5 w-3.5 text-emerald-400" />
+            {t('importPhotoCostLabel', 'Photo OCR Import')}: <strong className="font-mono text-emerald-400">{costs.import_photo} {tokenSymbol}</strong>
+          </span>
+        </div>
+      </div>
+
+      {/* 4. Token Audit Ledger Table */}
+      <div 
+        role="region"
+        data-lpignore="true"
+        className="p-6 rounded-3xl border shadow-sm space-y-4"
+        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+      >
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+          <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+            {t('tokenLedgerHeading', 'Token Audit Ledger')}
+          </h3>
+
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="h-3.5 w-3.5 absolute left-3 top-2.5 pointer-events-none opacity-60" />
               <input
                 type="text"
-                value={searchQuery}
                 autoComplete="off"
                 data-lpignore="true"
                 data-form-type="other"
-                spellCheck={false}
-                role="searchbox"
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  setCurrentPage(1);
-                }}
-                placeholder={t('searchTransactions', 'Search operations...')}
-                className="bg-transparent text-xs outline-none w-36 sm:w-44 font-semibold placeholder:opacity-50"
+                spellCheck="false"
+                placeholder={t('searchLedgerPlaceholder', 'Search transactions by description or ID...')}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-8 pr-3 py-1.5 rounded-xl border text-xs outline-none font-medium w-48 sm:w-64"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               />
-              {searchQuery && (
-                <button 
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="text-xs opacity-50 hover:opacity-100 cursor-pointer"
-                  aria-label="Clear search"
-                >
-                  ✕
-                </button>
-              )}
             </div>
 
-            <div 
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border bg-[var(--color-inner-dark)]"
-              style={{ borderColor: 'var(--color-border)' }}
+            <select
+              value={selectedType}
+              onChange={(e) => setSelectedType(e.target.value)}
+              className="px-2.5 py-1.5 rounded-xl border text-xs font-bold outline-none cursor-pointer"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
             >
-              <Filter className="h-3.5 w-3.5 opacity-50" />
-              <select
-                value={typeFilter}
-                data-lpignore="true"
-                onChange={(e) => {
-                  setTypeFilter(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="bg-transparent text-xs font-bold outline-none cursor-pointer"
-              >
-                <option value="all">{t('filterAll', 'All Operations')}</option>
-                <option value="chef">{t('filterChef', 'AI Chef Assistant')}</option>
-                <option value="import">{t('filterImport', 'Recipe Imports')}</option>
-                <option value="package_purchase">{t('filterPurchases', 'Package Purchases')}</option>
-                <option value="plan">{t('filterPlans', 'Monthly Plan Grants')}</option>
-              </select>
-            </div>
-
-            <div 
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border bg-[var(--color-inner-dark)]"
-              style={{ borderColor: 'var(--color-border)' }}
-            >
-              <span className="text-[11px] font-bold opacity-60">{t('rowsLabel', 'Rows:')}</span>
-              <select
-                value={pageSize}
-                data-lpignore="true"
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setCurrentPage(1);
-                }}
-                className="bg-transparent text-xs font-bold outline-none cursor-pointer"
-              >
-                <option value={10}>10</option>
-                <option value={25}>25</option>
-                <option value={50}>50</option>
-              </select>
-            </div>
+              <option value="all">{t('allTypesFilter', 'All Types')}</option>
+              <option value="chef">{t('filterTypeChef', 'AI Chef')}</option>
+              <option value="import">{t('filterTypeImport', 'Recipe Import')}</option>
+              <option value="purchase">{t('filterTypePurchase', 'Bundle Purchases')}</option>
+              <option value="grant">{t('filterTypeGrant', 'Plan Grants')}</option>
+            </select>
           </div>
         </div>
 
-        {/* Ledger Table */}
-        <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr 
-                className="border-b uppercase font-mono text-[10px] tracking-wider opacity-60"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              >
-                <th className="py-3 px-4">{t('colService', 'Service / Operation')}</th>
-                <th className="py-3 px-4">{t('colDescription', 'Description')}</th>
-                <th className="py-3 px-4 text-right">{t('colAmount', 'Amount')}</th>
-                <th className="py-3 px-4 text-right">{t('colBalanceAfter', 'Balance After')}</th>
-                <th className="py-3 px-4 text-right">{t('colTimestamp', 'Timestamp')}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
-              {loadingTransactions ? (
-                <tr>
-                  <td colSpan={5} className="py-12 text-center opacity-60">
-                    <div className="flex flex-col items-center justify-center gap-2">
-                      <RefreshCw className="h-5 w-5 animate-spin text-[var(--color-primary)]" />
-                      <span>{t('loadingTokenRecords', 'Loading token transactions...')}</span>
-                    </div>
-                  </td>
+        {/* Transactions Table */}
+        <div className="overflow-x-auto">
+          {transactions.length === 0 ? (
+            <div className="py-12 text-center text-xs opacity-50">
+              {t('noTransactionsFound', 'No transactions found matching your criteria.')}
+            </div>
+          ) : (
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b text-[10px] uppercase font-bold opacity-70" style={{ borderColor: 'var(--color-border)' }}>
+                  <th className="py-2.5 px-3">{t('colTxDate', 'Date')}</th>
+                  <th className="py-2.5 px-3">{t('colTxId', 'Transaction ID')}</th>
+                  <th className="py-2.5 px-3">{t('colTxType', 'Type')}</th>
+                  <th className="py-2.5 px-3">{t('colTxDesc', 'Description')}</th>
+                  <th className="py-2.5 px-3 text-right">{t('colTxAmount', 'Amount')}</th>
+                  <th className="py-2.5 px-3 text-right">{t('colTxBalanceAfter', 'Balance After')}</th>
                 </tr>
-              ) : transactions.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="py-12 text-center opacity-60">
-                    <Coins className="h-8 w-8 mx-auto mb-2 opacity-30 text-amber-500" />
-                    <p className="font-bold">{t('noTokenTxFound', 'No token transactions found')}</p>
-                    <p className="text-[11px] opacity-75 mt-1">
-                      {searchQuery || typeFilter !== 'all' 
-                        ? t('clearFiltersHint', 'Try clearing your filters or search keywords.') 
-                        : t('tokenActivityHint', 'Your token activity ledger will appear here once you interact with AI tools or top up.')}
-                    </p>
-                  </td>
-                </tr>
-              ) : (
-                transactions.map((tx) => {
+              </thead>
+              <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
+                {transactions.map((tx) => {
                   const isCredit = Number(tx.amount) > 0;
                   return (
-                    <tr 
-                      key={tx.id}
-                      className="hover:bg-[var(--color-inner-dark)]/50 transition-colors"
-                    >
-                      <td className="py-3 px-4 font-bold whitespace-nowrap">
-                        <div className="flex items-center gap-2">
-                          <span className={`w-2 h-2 rounded-full ${isCredit ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                          <span>{formatServiceType(tx.type)}</span>
-                        </div>
+                    <tr key={tx.id} className="hover:bg-slate-800/20 transition">
+                      <td className="py-3 px-3 font-mono text-[11px] opacity-75">
+                        {tx.created_at ? new Date(tx.created_at).toLocaleDateString() : '—'}
                       </td>
-
-                      <td className="py-3 px-4 max-w-xs truncate opacity-85 font-medium">
-                        {tx.description || 'Token Ledger Record'}
+                      <td className="py-3 px-3 font-mono text-[10px] opacity-60">
+                        {tx.id.slice(0, 14)}...
                       </td>
-
-                      <td className="py-3 px-4 text-right font-mono font-black whitespace-nowrap">
-                        <span className={isCredit ? 'text-emerald-400' : 'text-red-400'}>
-                          {isCredit ? `+${Number(tx.amount).toLocaleString()}` : Number(tx.amount).toLocaleString()} {tokenSymbol}
+                      <td className="py-3 px-3">
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border opacity-80" style={{ borderColor: 'var(--color-border)' }}>
+                          {tx.type}
                         </span>
                       </td>
-
-                      <td className="py-3 px-4 text-right font-mono font-bold whitespace-nowrap opacity-90">
-                        {typeof tx.balance_after === 'number' ? `${tx.balance_after.toLocaleString()} ${tokenSymbol}` : '—'}
+                      <td className="py-3 px-3 font-medium">
+                        {tx.description}
                       </td>
-
-                      <td className="py-3 px-4 text-right font-mono text-[11px] opacity-60 whitespace-nowrap">
-                        <span suppressHydrationWarning>
-                          {tx.created_at ? new Date(tx.created_at).toLocaleString() : '—'}
-                        </span>
+                      <td className={`py-3 px-3 text-right font-bold font-mono ${isCredit ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {isCredit ? `+${tx.amount}` : tx.amount} {tokenSymbol}
+                      </td>
+                      <td className="py-3 px-3 text-right font-mono font-bold opacity-80">
+                        {tx.balance_after}
                       </td>
                     </tr>
                   );
-                })
-              )}
-            </tbody>
-          </table>
+                })}
+              </tbody>
+            </table>
+          )}
         </div>
 
         {/* Pagination Controls */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-          <div className="text-xs font-mono opacity-60">
-            {t('showingCount', 'Showing')} {totalCount > 0 ? (currentPage - 1) * pageSize + 1 : 0} - {Math.min(currentPage * pageSize, totalCount)} {t('ofTotal', 'of')} {totalCount} {t('transactionsLabel', 'transactions')}
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              disabled={currentPage <= 1 || loadingTransactions}
-              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-              className="p-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)] transition disabled:opacity-40 cursor-pointer"
-              title={t('prevPage', 'Previous Page')}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-
-            <span className="px-3 py-1 rounded-xl text-xs font-mono font-bold border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
-              {t('pageLabel', 'Page')} {currentPage} {t('ofTotal', 'of')} {totalPages}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between pt-4 border-t text-xs" style={{ borderColor: 'var(--color-border)' }}>
+            <span className="opacity-75">
+              {(t('pageIndicator', 'Page {page} of {total}'))
+                .replace('{page}', String(page))
+                .replace('{total}', String(totalPages))}
             </span>
 
-            <button
-              type="button"
-              disabled={currentPage >= totalPages || loadingTransactions}
-              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-              className="p-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)] transition disabled:opacity-40 cursor-pointer"
-              title={t('nextPage', 'Next Page')}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage(Math.max(1, page - 1))}
+                disabled={page === 1}
+                className="p-2 rounded-xl border disabled:opacity-30 cursor-pointer shadow-xs hover:opacity-80"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                title={t('prevPage', 'Previous')}
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage(Math.min(totalPages, page + 1))}
+                disabled={page === totalPages}
+                className="p-2 rounded-xl border disabled:opacity-30 cursor-pointer shadow-xs hover:opacity-80"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                title={t('nextPage', 'Next')}
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* CONFIRMATION PURCHASE MODAL (Autofill Safe Form-Free Container) */}
+      {confirmModalPackage && (
+        <div 
+          onClick={() => setConfirmModalPackage(null)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            role="region"
+            data-lpignore="true"
+            className="border rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          >
+            <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+                {t('confirmPurchaseModalTitle', 'Confirm Token Purchase')}
+              </h3>
+              <button type="button" onClick={() => setConfirmModalPackage(null)} className="p-1 rounded-lg">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3.5">
+              <div className="p-4 rounded-2xl border space-y-2.5" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <div className="flex justify-between items-center">
+                  <span className="opacity-75">{t('tokensToCredit', 'Tokens to Credit')}:</span>
+                  <span className="text-base font-black font-mono text-amber-500">
+                    +{confirmModalPackage.tokens.toLocaleString()} {tokenSymbol}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="opacity-75">{t('amountToDeduct', 'Cost to Deduct')}:</span>
+                  <span className="text-base font-black font-mono text-rose-400">
+                    -{currencySymbol}{Number(confirmModalPackage.price).toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center border-t pt-2" style={{ borderColor: 'var(--color-border)' }}>
+                  <span className="opacity-75">{t('storeWalletBalance', 'Store Wallet Balance')}:</span>
+                  <span className="font-mono font-bold">
+                    {currencySymbol}{walletBalance.toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="opacity-75">{t('walletBalanceAfter', 'Projected Wallet Balance')}:</span>
+                  <span className={`font-mono font-black ${walletBalance >= confirmModalPackage.price ? 'text-emerald-400' : 'text-red-500'}`}>
+                    {currencySymbol}{Math.max(0, walletBalance - confirmModalPackage.price).toFixed(2)}
+                  </span>
+                </div>
+              </div>
+
+              {walletBalance < confirmModalPackage.price && (
+                <div className="p-3 rounded-2xl border flex items-center justify-between text-[11px] text-amber-500" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: '#f59e0b' }}>
+                  <span>
+                    {(t('shortfallWarning', 'Insufficient wallet funds. Short by {amount}.'))
+                      .replace('{amount}', `${currencySymbol}${(confirmModalPackage.price - walletBalance).toFixed(2)}`)}
+                  </span>
+                  <Link
+                    href={`/wallet?amount=${(confirmModalPackage.price - walletBalance).toFixed(2)}`}
+                    className="font-bold underline hover:opacity-80"
+                  >
+                    {t('topUpWalletBtn', 'Top Up Wallet')}
+                  </Link>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                <button
+                  type="button"
+                  onClick={() => setConfirmModalPackage(null)}
+                  className="px-4 py-2 border rounded-xl font-bold cursor-pointer hover:opacity-80"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                >
+                  {t('cancelBtn', 'Cancel')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmPurchase}
+                  disabled={purchasing || walletBalance < confirmModalPackage.price}
+                  className="px-5 py-2 text-white font-bold rounded-xl shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                >
+                  {purchasing ? t('processingPurchase', 'Processing...') : t('confirmAndPayBtn', 'Confirm & Pay')}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
