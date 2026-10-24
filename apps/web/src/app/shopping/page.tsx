@@ -27,6 +27,31 @@ interface ShoppingItem {
   recipeTitle?: string;
 }
 
+
+const getCategoryName = (cat: any): string => {
+  if (!cat) return '';
+  if (typeof cat === 'string') {
+    const trimmed = cat.trim();
+    return trimmed === '[object Object]' ? 'Other' : trimmed;
+  }
+  if (typeof cat === 'object') {
+    return (cat.name || cat.label || cat.title || cat.id || cat.slug || 'Other').trim();
+  }
+  return String(cat).trim();
+};
+
+const normalizeCategoriesList = (list: any[]): string[] => {
+  if (!Array.isArray(list)) return [];
+  const result: string[] = [];
+  list.forEach((item) => {
+    const name = getCategoryName(item);
+    if (name && name !== 'All' && !result.includes(name)) {
+      result.push(name);
+    }
+  });
+  return result;
+};
+
 export default function ShoppingPage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -430,9 +455,15 @@ export default function ShoppingPage() {
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
             >
               <option value="All">{t('allCategories', 'All Categories')}</option>
-              {categoriesList.map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
+              {categoriesList.map((cat: any, idx: number) => {
+                  const catName = getCategoryName(cat);
+                  if (!catName || catName === 'All') return null;
+                  return (
+                    <option key={`shopping_cat_${catName}_${idx}`} value={catName}>
+                      {catName}
+                    </option>
+                  );
+                })}
             </select>
 
             <button
@@ -701,9 +732,15 @@ export default function ShoppingPage() {
                   className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 >
-                  {categoriesList.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
+                  {categoriesList.map((cat: any, idx: number) => {
+                  const catName = getCategoryName(cat);
+                  if (!catName || catName === 'All') return null;
+                  return (
+                    <option key={`shopping_cat_${catName}_${idx}`} value={catName}>
+                      {catName}
+                    </option>
+                  );
+                })}
                 </select>
               </div>
 
@@ -820,9 +857,15 @@ export default function ShoppingPage() {
                   className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 >
-                  {categoriesList.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
+                  {categoriesList.map((cat: any, idx: number) => {
+                  const catName = getCategoryName(cat);
+                  if (!catName || catName === 'All') return null;
+                  return (
+                    <option key={`shopping_cat_${catName}_${idx}`} value={catName}>
+                      {catName}
+                    </option>
+                  );
+                })}
                 </select>
               </div>
 
