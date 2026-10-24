@@ -1,18 +1,7 @@
-'use client';
+// Unified hook re-export for useTranslation
+import { useTranslation as useBaseTranslation } from '@/components/LanguageProvider';
 
-import { useContext } from 'react';
-import { 
-  LanguageContext, 
-  LanguageProvider, 
-  useTranslation as useOriginalTranslation 
-} from '../components/LanguageProvider';
-
-export { LanguageContext, LanguageProvider };
-export type { LanguageContextType, SupportedLanguage } from '../components/LanguageProvider';
-
-export function useTranslation() {
-  const ctx = useContext(LanguageContext);
-  return ctx || useOriginalTranslation();
-}
-
-export default useTranslation;
+export const useTranslation = useBaseTranslation;
+export default useBaseTranslation;
+export { LanguageContext, LanguageProvider } from '@/components/LanguageProvider';
+export type { LanguageContextType, SupportedLanguage } from '@/components/LanguageProvider';
