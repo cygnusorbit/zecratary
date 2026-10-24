@@ -3,13 +3,46 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { 
-  LayoutDashboard, MessageSquare, UploadCloud, SquarePen, BookOpen, 
-  Book, Package, ShoppingCart, Calendar, LayoutTemplate, UserPlus, 
-  ShieldCheck, CreditCard, Tag, Utensils, Settings, LogOut, 
-  Menu, X, Wallet, Languages, Cpu, Moon, Sun, Key, Coins, 
-  Bell, BellRing, User as UserIcon, Plus, ChevronDown, ChevronRight, 
-  Layers, Check, Database, Receipt, Globe, HardDrive 
+import {
+  Bell,
+  BellRing,
+  Book,
+  BookOpen,
+  Calendar,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Coins,
+  Cpu,
+  CreditCard,
+  Database,
+  Globe,
+  HardDrive,
+  Key,
+  Landmark,
+  Languages,
+  Layers,
+  LayoutDashboard,
+  LayoutTemplate,
+  LogOut,
+  Menu,
+  MessageSquare,
+  Moon,
+  Package,
+  Plus,
+  Receipt,
+  Settings,
+  ShieldCheck,
+  ShoppingCart,
+  SquarePen,
+  Sun,
+  Tag,
+  UploadCloud,
+  User as UserIcon,
+  UserPlus,
+  Utensils,
+  Wallet,
+  X
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON } from '@/lib/siteConfig';
@@ -994,7 +1027,7 @@ export default function Sidebar() {
                     <CreditCard className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('plans', 'Subscription Plans')}</span>}
                   </Link>
-                  <Link href="/admin/payment" className={navClass('/admin/payment')} style={navStyle('/admin/payment')} title={t('payments', 'Payments')}>
+                  <Link href="/admin/payment-gateway" className={navClass('/admin/payment-gateway')} style={navStyle('/admin/payment')} title={t('payments', 'Payments')}>
                     <ShieldCheck className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('payments', 'Payment Gateway')}</span>}
                   </Link>
