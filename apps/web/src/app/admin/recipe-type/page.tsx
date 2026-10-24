@@ -1,581 +1,901 @@
 // @ts-nocheck
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
-  Utensils, Plus, Edit3, Trash2, Check, X, RotateCcw, 
-  CheckCircle, ArrowLeft, MoreVertical, GripVertical, 
-  ArrowUpDown, ArrowUp, ArrowDown, RefreshCw
+  UtensilsCrossed, Plus, Search, GripVertical, Pencil, Trash2, 
+  CheckCircle2, AlertCircle, RefreshCw, X, ArrowUpDown, ChevronUp, ChevronDown
 } from 'lucide-react';
-import { 
-  getStoredRecipeTypes, 
-  saveRecipeTypes, 
-  setMemoryRecipeTypes, 
-  DEFAULT_RECIPE_TYPES 
-} from '@/lib/recipe-types';
 import { useTranslation } from '@/components/LanguageProvider';
-import { 
-  purgeLegacyBrowserAdminStorage, 
-  fetchServerAdminSettings, 
-  persistServerAdminSettings 
-} from '@/lib/adminSync';
 
-export default function RecipeTypeAdminPage() {
-  const langContext = useTranslation();
-  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
-  const version = langContext?.version;
+interface RecipeTypeItem {
+  id: string;
+  name: string;
+  slug: string;
+  icon?: string;
+  description?: string;
+  isActive: boolean;
+  order?: number;
+}
 
-  const [recipeTypes, setRecipeTypes] = useState<string[]>([]);
-  const [newTypeName, setNewTypeName] = useState('');
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [editingValue, setEditingValue] = useState('');
-  const [feedback, setFeedback] = useState('');
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  
-  // Reposition / Reorder States
-  const [isReordering, setIsReordering] = useState(false);
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+const DEFAULT_RECIPE_TYPES: RecipeTypeItem[] = [
+  { id: 'rt_1', name: 'Breakfast', slug: 'breakfast', icon: '🍳', description: 'Morning meals, smoothies, eggs, and breakfast bowls', isActive: true, order: 1 },
+  { id: 'rt_2', name: 'Lunch', slug: 'lunch', icon: '🥪', description: 'Midday plates, wraps, light meals, and express bowls', isActive: true, order: 2 },
+  { id: 'rt_3', name: 'Dinner', slug: 'dinner', icon: '🍽️', description: 'Substantial evening entrees, roasts, and hearty dishes', isActive: true, order: 3 },
+  { id: 'rt_4', name: 'Main Dish', slug: 'main-dish', icon: '🥩', description: 'Culinary centerpieces and hero protein plates', isActive: true, order: 4 },
+  { id: 'rt_5', name: 'Appetizer', slug: 'appetizer', icon: '🥟', description: 'Finger foods, starters, tapas, and hors d’oeuvres', isActive: true, order: 5 },
+  { id: 'rt_6', name: 'Side Dish', slug: 'side-dish', icon: '🥔', description: 'Vegetables, grains, rice, and accompanying sides', isActive: true, order: 6 },
+  { id: 'rt_7', name: 'Salad', slug: 'salad', icon: '🥗', description: 'Fresh leafy bowls, grain salads, and vinaigrettes', isActive: true, order: 7 },
+  { id: 'rt_8', name: 'Soup', slug: 'soup', icon: '🍲', description: 'Warm broths, chowders, stews, and bisques', isActive: true, order: 8 },
+  { id: 'rt_9', name: 'Dessert', slug: 'dessert', icon: '🍰', description: 'Pastries, cakes, puddings, sweets, and confections', isActive: true, order: 9 },
+  { id: 'rt_10', name: 'Snacks', slug: 'snacks', icon: '🥨', description: 'Quick bites, chips, dips, and energy fuel', isActive: true, order: 10 },
+  { id: 'rt_11', name: 'Beverages', slug: 'beverages', icon: '🍹', description: 'Cocktails, mocktails, juices, teas, and specialty drinks', isActive: true, order: 11 }
+];
 
-  // Sync with global system dynamic CSS theme variables & Day Mode
-  const applyGlobalTheme = useCallback(() => {
-    try {
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
-    } catch (_) {}
-  }, []);
+export default function AdminRecipeTypePage() {
+  const { t } = useTranslation();
 
-  useEffect(() => {
-    applyGlobalTheme();
-    window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_updated', applyGlobalTheme);
-    window.addEventListener('storage', applyGlobalTheme);
+  const [recipeTypes, setRecipeTypes] = useState<RecipeTypeItem[]>(DEFAULT_RECIPE_TYPES);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [saving, setSaving] = useState<boolean>(false);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [reorderMode, setReorderMode] = useState<boolean>(false);
+  const [hasReordered, setHasReordered] = useState<boolean>(false);
 
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
-      window.removeEventListener('storage', applyGlobalTheme);
-    };
-  }, [applyGlobalTheme]);
+  // Modal Dialog States (Autofill Safe Accessible <div> Containers)
+  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [editingItem, setEditingItem] = useState<RecipeTypeItem | null>(null);
+  const [formData, setFormData] = useState<{
+    name: string;
+    slug: string;
+    icon: string;
+    description: string;
+    isActive: boolean;
+  }>({
+    name: '',
+    slug: '',
+    icon: '🍽️',
+    description: '',
+    isActive: true
+  });
 
-  // Hydrate Recipe Types Exclusively from PostgreSQL Server Storage
-  const loadTypesFromServer = useCallback(async () => {
-    setIsLoading(true);
-    purgeLegacyBrowserAdminStorage();
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState<boolean>(false);
+  const [itemToDelete, setItemToDelete] = useState<RecipeTypeItem | null>(null);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-    let loadedTypes: string[] | null = null;
+  // Self-update guard to prevent race conditions from own window events
+  const isSelfUpdatingRef = useRef<boolean>(false);
+  const draggedIndexRef = useRef<number | null>(null);
 
-    try {
-      const res = await fetch('/api/admin/recipe-type?t=' + Date.now(), { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        const list = Array.isArray(data) ? data : (data?.recipeTypes || data?.types);
-        if (Array.isArray(list) && list.length > 0) {
-          loadedTypes = list;
-        }
-      }
-    } catch (_) {}
-
-    if (!loadedTypes || loadedTypes.length === 0) {
-      try {
-        const serverData = await fetchServerAdminSettings();
-        const list = (Array.isArray(serverData) ? serverData : null) ||
-                     (Array.isArray(serverData?.recipeTypes) ? serverData.recipeTypes : null) ||
-                     (Array.isArray(serverData?.settings?.recipeTypes) ? serverData.settings.recipeTypes : null);
-        if (Array.isArray(list) && list.length > 0) {
-          loadedTypes = list;
-        }
-      } catch (_) {}
-    }
-
-    if (loadedTypes && loadedTypes.length > 0) {
-      setRecipeTypes(loadedTypes);
-      setMemoryRecipeTypes(loadedTypes);
-    } else {
-      const fallback = getStoredRecipeTypes();
-      const activeList = fallback && fallback.length > 0 ? fallback : DEFAULT_RECIPE_TYPES;
-      setRecipeTypes(activeList);
-      setMemoryRecipeTypes(activeList);
-    }
-
-    setIsLoading(false);
-  }, []);
-
-  useEffect(() => {
-    document.title = `${t('recipeTypeTitle', 'Recipe Types')} - ${t('adminConsole', 'Admin Console')}`;
-    loadTypesFromServer();
-
-    const handleSync = (e: any) => {
-      if (e?.detail && Array.isArray(e.detail) && e.detail.length > 0) {
-        setRecipeTypes(e.detail);
-        setMemoryRecipeTypes(e.detail);
-      }
-    };
-
-    window.addEventListener('zecratary_recipe_types_changed', handleSync);
-    window.addEventListener('zecratary_recipe_types_updated', handleSync);
-
-    return () => {
-      window.removeEventListener('zecratary_recipe_types_changed', handleSync);
-      window.removeEventListener('zecratary_recipe_types_updated', handleSync);
-    };
-  }, [t, version, loadTypesFromServer]);
-
-  const notify = (msg: string) => {
-    setFeedback(msg);
-    setTimeout(() => setFeedback(''), 3000);
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 3800);
   };
 
-  // Centralized Server-Backed Commit with Live Database Persistence
-  const commitRecipeTypes = async (updated: string[]) => {
-    setRecipeTypes(updated);
-    setMemoryRecipeTypes(updated);
+  const fetchRecipeTypes = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
+    try {
+      const res = await fetch(`/api/admin/recipe-type?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const types = Array.isArray(data) 
+          ? data 
+          : Array.isArray(data?.types) 
+            ? data.types 
+            : Array.isArray(data?.recipeTypes) 
+              ? data.recipeTypes 
+              : [];
+        if (types.length > 0) {
+          const normalized = types.map((item: any, idx: number) => ({
+            id: item.id || `rt_${idx + 1}`,
+            name: typeof item === 'string' ? item : item.name || item.title || item.label || 'Untitled',
+            slug: typeof item === 'string' 
+              ? item.toLowerCase().replace(/[^a-z0-9]+/g, '-') 
+              : item.slug || item.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-') || `type-${idx + 1}`,
+            icon: typeof item === 'object' && item.icon ? item.icon : '🍽️',
+            description: typeof item === 'object' && item.description ? item.description : '',
+            isActive: typeof item === 'object' && item.isActive !== undefined ? Boolean(item.isActive) : true,
+            order: typeof item === 'object' && item.order !== undefined ? Number(item.order) : idx + 1
+          }));
+          setRecipeTypes(normalized);
+          setHasReordered(false);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch recipe types:', err);
+    } finally {
+      if (!quiet) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    document.title = `${t('recipeTypesTitle', 'Recipe Types')} - Zecratary Admin`;
+    fetchRecipeTypes();
+
+    const handleExternalUpdates = () => {
+      if (isSelfUpdatingRef.current) return;
+      fetchRecipeTypes(true);
+    };
+
+    window.addEventListener('zecratary_recipe_types_updated', handleExternalUpdates);
+    window.addEventListener('zecratary_admin_settings_updated', handleExternalUpdates);
+    window.addEventListener('storage', handleExternalUpdates);
+
+    return () => {
+      window.removeEventListener('zecratary_recipe_types_updated', handleExternalUpdates);
+      window.removeEventListener('zecratary_admin_settings_updated', handleExternalUpdates);
+      window.removeEventListener('storage', handleExternalUpdates);
+    };
+  }, [fetchRecipeTypes, t]);
+
+  const filteredTypes = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return recipeTypes;
+    return recipeTypes.filter(item => 
+      item.name.toLowerCase().includes(q) || 
+      item.slug.toLowerCase().includes(q) ||
+      (item.description && item.description.toLowerCase().includes(q))
+    );
+  }, [recipeTypes, searchQuery]);
+
+  const stats = useMemo(() => {
+    const total = recipeTypes.length;
+    const active = recipeTypes.filter(t => t.isActive).length;
+    const inactive = total - active;
+    return { total, active, inactive };
+  }, [recipeTypes]);
+
+  const handleOpenAddModal = () => {
+    setEditingItem(null);
+    setFormData({
+      name: '',
+      slug: '',
+      icon: '🍽️',
+      description: '',
+      isActive: true
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEditModal = (item: RecipeTypeItem) => {
+    setEditingItem(item);
+    setFormData({
+      name: item.name,
+      slug: item.slug,
+      icon: item.icon || '🍽️',
+      description: item.description || '',
+      isActive: item.isActive
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleNameChange = (val: string) => {
+    setFormData(prev => {
+      const isAutoSlug = !editingItem || prev.slug === editingItem.slug || prev.slug === prev.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      const newSlug = isAutoSlug ? val.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') : prev.slug;
+      return { ...prev, name: val, slug: newSlug };
+    });
+  };
+
+  const handleSaveModal = async () => {
+    const cleanName = formData.name.trim();
+    if (!cleanName) return;
+
+    let cleanSlug = formData.slug.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    if (!cleanSlug) cleanSlug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+    const newItem: RecipeTypeItem = {
+      id: editingItem ? editingItem.id : `rt_${Date.now().toString(36)}`,
+      name: cleanName,
+      slug: cleanSlug,
+      icon: formData.icon.trim() || '🍽️',
+      description: formData.description.trim(),
+      isActive: formData.isActive,
+      order: editingItem?.order !== undefined ? editingItem.order : recipeTypes.length + 1
+    };
+
+    let updatedList: RecipeTypeItem[] = [];
+    if (editingItem) {
+      updatedList = recipeTypes.map(it => it.id === editingItem.id ? newItem : it);
+    } else {
+      updatedList = [...recipeTypes, newItem];
+    }
+
+    setSaving(true);
+    isSelfUpdatingRef.current = true;
 
     try {
       const res = await fetch('/api/admin/recipe-type', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipeTypes: updated })
+        body: JSON.stringify({ recipeTypes: updatedList })
       });
 
-      await saveRecipeTypes(updated);
+      if (!res.ok) throw new Error(t('recipeTypeSaveError', 'Failed to save recipe type.'));
 
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('zecratary_recipe_types_changed', { detail: updated }));
-        window.dispatchEvent(new CustomEvent('zecratary_recipe_types_updated', { detail: updated }));
-      }
+      setRecipeTypes(updatedList);
+      setIsModalOpen(false);
+      showToast(t('recipeTypeSavedSuccess', 'Recipe type saved successfully!'), 'success');
+
+      window.dispatchEvent(new Event('zecratary_recipe_types_updated'));
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      window.dispatchEvent(new Event('storage'));
     } catch (err: any) {
-      console.error('[RecipeTypeAdminPage] Save error:', err);
-      notify(t('errorSaving', 'Error saving to database'));
+      showToast(err.message || t('recipeTypeSaveError', 'Failed to save recipe type.'), 'error');
+    } finally {
+      setSaving(false);
+      setTimeout(() => { isSelfUpdatingRef.current = false; }, 400);
     }
   };
 
-  const handleDragStart = (index: number) => {
-    setDraggedIndex(index);
+  const handleConfirmDelete = async () => {
+    if (!itemToDelete) return;
+
+    const updatedList = recipeTypes.filter(it => it.id !== itemToDelete.id);
+    setSaving(true);
+    isSelfUpdatingRef.current = true;
+
+    try {
+      const res = await fetch(`/api/admin/recipe-type?id=${encodeURIComponent(itemToDelete.id)}&slug=${encodeURIComponent(itemToDelete.slug)}`, {
+        method: 'DELETE'
+      });
+
+      if (!res.ok) throw new Error('Failed to delete recipe type');
+
+      setRecipeTypes(updatedList);
+      setIsDeleteModalOpen(false);
+      setItemToDelete(null);
+      showToast(t('recipeTypeDeletedSuccess', 'Recipe type deleted successfully!'), 'success');
+
+      window.dispatchEvent(new Event('zecratary_recipe_types_updated'));
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      window.dispatchEvent(new Event('storage'));
+    } catch (err: any) {
+      showToast(err.message || 'Failed to delete recipe type', 'error');
+    } finally {
+      setSaving(false);
+      setTimeout(() => { isSelfUpdatingRef.current = false; }, 400);
+    }
   };
 
-  const handleDragOver = (e: React.DragEvent, index: number) => {
-    e.preventDefault();
-    if (draggedIndex === null || draggedIndex === index) return;
+  const handleToggleStatus = async (item: RecipeTypeItem) => {
+    const updated = recipeTypes.map(it => it.id === item.id ? { ...it, isActive: !it.isActive } : it);
+    setRecipeTypes(updated);
+    isSelfUpdatingRef.current = true;
 
-    const list = [...recipeTypes];
-    const draggedItem = list[draggedIndex];
-    list.splice(draggedIndex, 1);
-    list.splice(index, 0, draggedItem);
-    setRecipeTypes(list);
-    setDraggedIndex(index);
+    try {
+      await fetch('/api/admin/recipe-type', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipeTypes: updated })
+      });
+      window.dispatchEvent(new Event('zecratary_recipe_types_updated'));
+      window.dispatchEvent(new Event('storage'));
+    } catch (_) {} finally {
+      setTimeout(() => { isSelfUpdatingRef.current = false; }, 400);
+    }
   };
 
-  const handleDrop = () => {
-    setDraggedIndex(null);
-    commitRecipeTypes(recipeTypes);
-  };
-
-  const moveType = (index: number, direction: 'up' | 'down') => {
+  // Accessible Touch-Friendly Reordering Controls
+  const moveItem = (index: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= recipeTypes.length) return;
 
     const list = [...recipeTypes];
-    const temp = list[index];
-    list[index] = list[targetIndex];
-    list[targetIndex] = temp;
-    commitRecipeTypes(list);
+    const [moved] = list.splice(index, 1);
+    list.splice(targetIndex, 0, moved);
+
+    const reordered = list.map((it, idx) => ({ ...it, order: idx + 1 }));
+    setRecipeTypes(reordered);
+    setHasReordered(true);
   };
 
-  const toggleRepositionMode = () => {
-    if (isReordering) {
-      commitRecipeTypes(recipeTypes);
-      notify(t('recipeTypeOrderSaved', 'Recipe type order saved successfully!'));
-      setIsReordering(false);
-    } else {
-      setEditingIndex(null);
-      setIsReordering(true);
+  // Drag and Drop Handlers
+  const handleDragStart = (index: number) => {
+    draggedIndexRef.current = index;
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    if (draggedIndexRef.current === null || draggedIndexRef.current === index) return;
+
+    const list = [...recipeTypes];
+    const [dragged] = list.splice(draggedIndexRef.current, 1);
+    list.splice(index, 0, dragged);
+    draggedIndexRef.current = index;
+
+    const reordered = list.map((it, idx) => ({ ...it, order: idx + 1 }));
+    setRecipeTypes(reordered);
+    setHasReordered(true);
+  };
+
+  const handleDragEnd = () => {
+    draggedIndexRef.current = null;
+  };
+
+  const handleSaveOrder = async () => {
+    setSaving(true);
+    isSelfUpdatingRef.current = true;
+
+    try {
+      const res = await fetch('/api/admin/recipe-type', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recipeTypes })
+      });
+
+      if (!res.ok) throw new Error('Failed to save order');
+
+      setHasReordered(false);
+      showToast(t('recipeTypeOrderSuccess', 'Display order updated successfully!'), 'success');
+
+      window.dispatchEvent(new Event('zecratary_recipe_types_updated'));
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      window.dispatchEvent(new Event('storage'));
+    } catch (err: any) {
+      showToast(err.message || 'Failed to save order', 'error');
+    } finally {
+      setSaving(false);
+      setTimeout(() => { isSelfUpdatingRef.current = false; }, 400);
     }
-  };
-
-  const handleAddType = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
-    if (e && 'preventDefault' in e) e.preventDefault();
-    const clean = newTypeName.trim();
-    if (!clean) return;
-
-    if (recipeTypes.some((tKey) => tKey.toLowerCase() === clean.toLowerCase())) {
-      alert(t('recipeTypeExists', 'This recipe type already exists.'));
-      return;
-    }
-
-    const updated = [...recipeTypes, clean];
-    commitRecipeTypes(updated);
-    setNewTypeName('');
-    notify(`${t('recipeTypeAdded', 'Added recipe type')} "${clean}"`);
-  };
-
-  const handleSaveEdit = (index: number) => {
-    const clean = editingValue.trim();
-    if (!clean) return;
-
-    const duplicate = recipeTypes.some(
-      (tKey, i) => i !== index && tKey.toLowerCase() === clean.toLowerCase()
-    );
-    if (duplicate) {
-      alert(t('recipeTypeExists', 'This recipe type already exists.'));
-      return;
-    }
-
-    const updated = [...recipeTypes];
-    updated[index] = clean;
-    commitRecipeTypes(updated);
-    setEditingIndex(null);
-    setEditingValue('');
-    notify(`${t('recipeTypeUpdated', 'Updated recipe type')} "${clean}"`);
-  };
-
-  const handleDeleteType = (index: number, name: string) => {
-    const confirmMsg = t('confirmDeleteRecipeType', 'Are you sure you want to delete recipe type');
-    if (!confirm(`${confirmMsg} "${name}"?`)) return;
-    const updated = recipeTypes.filter((_, i) => i !== index);
-    commitRecipeTypes(updated);
-    notify(`${t('recipeTypeRemoved', 'Removed recipe type')} "${name}"`);
-  };
-
-  const handleResetDefaults = () => {
-    if (!confirm(t('resetRecipeTypesConfirm', 'Are you sure you want to reset recipe types to default?'))) return;
-    commitRecipeTypes(DEFAULT_RECIPE_TYPES);
-    setIsReordering(false);
-    notify(t('resetRecipeTypesSuccess', 'Recipe types reset to default successfully!'));
   };
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
-      {/* HEADER */}
-      <div 
-        className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-5 transition-colors duration-200"
-        style={{ borderColor: 'var(--color-border)' }}
-      >
+      {/* Toast Alert Banner */}
+      {toast && (
+        <div 
+          className="fixed top-20 right-4 z-50 p-4 rounded-2xl border shadow-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4"
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: toast.type === 'success' ? 'var(--color-emerald)' : '#ef4444',
+            color: toast.type === 'success' ? 'var(--color-emerald)' : '#ef4444'
+          }}
+        >
+          {toast.type === 'success' ? (
+            <CheckCircle2 className="h-5 w-5 shrink-0" style={{ color: 'var(--color-emerald)' }} />
+          ) : (
+            <AlertCircle className="h-5 w-5 shrink-0 text-red-500" />
+          )}
+          <span className="text-xs font-bold">{toast.message}</span>
+        </div>
+      )}
+
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
         <div>
-          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-            {t('recipeTypeTitle', 'Recipe Types')}
+          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2.5" style={{ color: 'var(--color-primary)' }}>
+            <UtensilsCrossed className="h-6 w-6" />
+            <span>{t('recipeTypesTitle', 'Recipe Types')}</span>
           </h1>
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('recipeTypeSubtitle', 'Manage custom recipe categories and types')}
+          <p className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('recipeTypesSubtitle', 'Manage recipe types and meal categories across the culinary platform.')}
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={loadTypesFromServer}
-            disabled={isLoading}
-            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+        {/* Global Statistics Chips */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div 
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+          >
+            <span style={{ color: 'var(--color-text-secondary)' }}>{t('totalTypesBadge', 'Total Types')}:</span>
+            <span className="font-mono" style={{ color: 'var(--color-primary)' }}>{stats.total}</span>
+          </div>
+          <div 
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+          >
+            <span style={{ color: 'var(--color-text-secondary)' }}>{t('activeTypesBadge', 'Active')}:</span>
+            <span className="font-mono text-emerald-500">{stats.active}</span>
+          </div>
+          <div 
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+          >
+            <span style={{ color: 'var(--color-text-secondary)' }}>{t('inactiveTypesBadge', 'Inactive')}:</span>
+            <span className="font-mono text-amber-500">{stats.inactive}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Action Bar (Search, Reorder Toggle, and Add Type) */}
+      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+        <div className="relative flex-1">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--color-text-secondary)' }} />
+          <input
+            type="text"
+            data-lpignore="true"
+            data-form-type="other"
+            autoComplete="off"
+            spellCheck="false"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder={t('searchRecipeTypesPlaceholder', 'Search recipe types by name or slug...')}
+            className="w-full pl-10 pr-9 py-2.5 text-xs font-medium rounded-xl border outline-none transition"
             style={{
-              backgroundColor: 'var(--color-card)',
+              backgroundColor: 'var(--color-inner-dark)',
               borderColor: 'var(--color-border)',
               color: 'var(--color-text)'
             }}
-            title="Reload from server store"
+            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-xs opacity-60 hover:opacity-100"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setReorderMode(!reorderMode)}
+            className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+            style={reorderMode ? {
+              backgroundColor: 'var(--color-primary)',
+              borderColor: 'var(--color-primary)',
+              color: '#ffffff'
+            } : {
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
-            <span>{t('refreshBtn', 'Reload')}</span>
+            <ArrowUpDown className="h-4 w-4" />
+            <span>{t('reorderModeBtn', 'Reorder Mode')}</span>
           </button>
+
+          {hasReordered && (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={handleSaveOrder}
+              className="px-3.5 py-2.5 rounded-xl text-white text-xs font-black flex items-center gap-1.5 shadow-md hover:opacity-95 transition cursor-pointer"
+              style={{ backgroundColor: 'var(--color-emerald)' }}
+            >
+              <CheckCircle2 className="h-4 w-4" />
+              <span>{saving ? t('savingOrder', 'Saving Order...') : t('saveOrderBtn', 'Save Order')}</span>
+            </button>
+          )}
 
           <button
             type="button"
-            onClick={handleResetDefaults}
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text-secondary)'
-            }}
+            onClick={handleOpenAddModal}
+            className="px-4 py-2.5 rounded-xl text-white text-xs font-black flex items-center gap-1.5 shadow-md hover:opacity-95 transition cursor-pointer"
+            style={{ backgroundColor: 'var(--color-primary)' }}
           >
-            <RotateCcw className="h-4 w-4" /> {t('resetDefaults', 'Reset Defaults')}
+            <Plus className="h-4 w-4 stroke-[2.5]" />
+            <span>{t('addRecipeTypeBtn', 'Add Recipe Type')}</span>
           </button>
         </div>
       </div>
 
-      {feedback && (
-        <div 
-          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-sm animate-in fade-in"
-          style={{
-            backgroundColor: 'var(--color-inner-dark)',
-            borderColor: 'var(--color-emerald)',
-            color: 'var(--color-emerald)'
-          }}
-        >
-          <CheckCircle className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} />
-          <span>{feedback}</span>
-        </div>
-      )}
-
-      {/* REPOSITION INSTRUCTION BANNER */}
-      {isReordering && (
-        <div 
-          className="p-4 rounded-2xl text-xs flex items-center justify-between shadow-inner border"
-          style={{
-            backgroundColor: 'var(--color-inner-dark)',
-            borderColor: 'var(--color-emerald)',
-            color: 'var(--color-emerald)'
-          }}
-        >
-          <div className="flex items-center gap-2.5">
-            <MoreVertical className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} />
-            <span>{t('repositionBannerRecipeType', 'Drag items or use arrows to reorder recipe types. Click Done when finished.')}</span>
-          </div>
-          <button
-            type="button"
-            onClick={toggleRepositionMode}
-            className="px-3 py-1 text-white font-bold rounded-lg transition text-[11px] shrink-0 cursor-pointer shadow-sm"
-            style={{ backgroundColor: 'var(--color-emerald)' }}
-          >
-            {t('done', 'Done')}
-          </button>
-        </div>
-      )}
-
-      {/* ADD RECIPE TYPE CONTAINER (NO FORM) */}
-      {!isReordering && (
-        <div 
-          className="border rounded-3xl p-6 shadow-sm space-y-3 transition-colors duration-200"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)'
-          }}
-        >
-          <h2 className="text-base font-extrabold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-            <Plus className="h-4 w-4" style={{ color: 'var(--color-primary)' }} /> {t('addNewRecipeType', 'Add New Recipe Type')}
-          </h2>
-          <div className="flex flex-col sm:flex-row gap-3">
-            <input
-              type="text"
-              required
-              placeholder={t('recipeTypePlaceholder', 'e.g. Soup, Salad, Curry...')}
-              value={newTypeName}
-              onChange={(e) => setNewTypeName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleAddType();
-                }
-              }}
-              className="flex-1 border rounded-xl px-4 py-3 text-sm outline-none transition"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-              onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-              onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-            />
-            <button
-              type="button"
-              onClick={() => handleAddType()}
-              className="text-white font-bold text-xs px-6 py-3 rounded-xl transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
-              style={{ backgroundColor: 'var(--color-primary)' }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-            >
-              <Plus className="h-4 w-4" /> {t('addRecipeTypeBtn', 'Add Recipe Type')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* RECIPE TYPES GRID */}
+      {/* Main Table / Card View (Autofill Safe Container) */}
       <div 
-        className="border rounded-3xl p-6 shadow-sm space-y-4 transition-colors duration-200"
+        role="region"
+        data-lpignore="true"
+        className="rounded-3xl border shadow-xl overflow-hidden transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
           borderColor: 'var(--color-border)'
         }}
       >
-        <div 
-          className="flex flex-wrap items-center justify-between border-b pb-3 gap-3"
-          style={{ borderColor: 'var(--color-border)' }}
-        >
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-extrabold" style={{ color: 'var(--color-text)' }}>
-              {t('activeRecipeTypes', 'Active Recipe Types')} ({recipeTypes.length})
-            </span>
-            <button
-              type="button"
-              onClick={toggleRepositionMode}
-              className="font-bold text-xs px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs border"
-              style={isReordering ? {
-                backgroundColor: 'var(--color-emerald)',
-                borderColor: 'var(--color-emerald)',
-                color: '#ffffff'
-              } : {
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text-secondary)'
-              }}
-            >
-              {isReordering ? (
-                <>
-                  <Check className="h-3.5 w-3.5 text-white" /> {t('doneRepositioning', 'Done Repositioning')}
-                </>
-              ) : (
-                <>
-                  <ArrowUpDown className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('reposition', 'Reposition')}
-                </>
-              )}
-            </button>
+        {loading ? (
+          <div className="py-20 flex flex-col items-center justify-center gap-3">
+            <RefreshCw className="h-6 w-6 animate-spin" style={{ color: 'var(--color-primary)' }} />
+            <p className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+              Loading recipe types...
+            </p>
           </div>
-          <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {isReordering ? t('repositionActive', 'Repositioning Mode Active') : t('recipeTypeRealtimeSync', 'Changes sync in real-time across recipe forms')}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {recipeTypes.map((type, idx) => {
-            const isEditing = editingIndex === idx;
-
-            return (
-              <div
-                key={`${type}-${idx}`}
-                draggable={isReordering}
-                onDragStart={() => handleDragStart(idx)}
-                onDragOver={(e) => handleDragOver(e, idx)}
-                onDrop={handleDrop}
-                className={`p-3 rounded-2xl flex items-center justify-between gap-2 transition select-none shadow-xs ${
-                  isReordering
-                    ? 'border-2 cursor-grab active:cursor-grabbing'
-                    : 'border'
-                }`}
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: isReordering ? 'var(--color-emerald)' : 'var(--color-border)'
-                }}
+        ) : filteredTypes.length === 0 ? (
+          <div className="py-16 text-center space-y-3 px-4">
+            <UtensilsCrossed className="h-10 w-10 mx-auto stroke-1" style={{ color: 'var(--color-text-secondary)' }} />
+            <p className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('noRecipeTypesFound', 'No recipe types found matching your search.')}
+            </p>
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white transition hover:opacity-90"
+                style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                {isEditing ? (
-                  <div className="flex items-center gap-2 flex-1">
-                    <input
-                      type="text"
-                      value={editingValue}
-                      autoFocus
-                      onChange={(e) => setEditingValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleSaveEdit(idx);
-                        if (e.key === 'Escape') setEditingIndex(null);
-                      }}
-                      className="w-full border rounded-lg px-2.5 py-1.5 text-xs outline-none"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-primary)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleSaveEdit(idx)}
-                      className="p-1.5 border rounded-lg transition cursor-pointer shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-emerald)',
-                        color: 'var(--color-emerald)'
-                      }}
-                      title={t('save', 'Save')}
-                    >
-                      <Check className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEditingIndex(null)}
-                      className="p-1.5 border rounded-lg transition cursor-pointer shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text-secondary)'
-                      }}
-                      title={t('cancel', 'Cancel')}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-2.5 truncate flex-1">
-                      {isReordering && (
-                        <div className="flex items-center gap-1 shrink-0" style={{ color: 'var(--color-text-secondary)' }}>
-                          <div className="flex flex-col gap-0.5">
+                {t('clearSearchBtn', 'Clear Search')}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr 
+                  className="border-b transition-colors"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)'
+                  }}
+                >
+                  {reorderMode && <th className="p-3.5 w-12 text-center">#</th>}
+                  <th className="p-3.5 font-bold">{t('typeNameColumn', 'Type Name')}</th>
+                  <th className="p-3.5 font-bold">{t('slugColumn', 'Slug / Identifier')}</th>
+                  <th className="p-3.5 font-bold hidden md:table-cell">{t('descriptionColumn', 'Description')}</th>
+                  <th className="p-3.5 font-bold text-center w-28">{t('statusColumn', 'Status')}</th>
+                  <th className="p-3.5 font-bold text-right pr-6 w-32">{t('actionsColumn', 'Actions')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
+                {filteredTypes.map((item, idx) => (
+                  <tr
+                    key={item.id}
+                    draggable={reorderMode}
+                    onDragStart={() => handleDragStart(idx)}
+                    onDragOver={(e) => handleDragOver(e, idx)}
+                    onDragEnd={handleDragEnd}
+                    className="group transition-colors duration-150 hover:bg-black/5 dark:hover:bg-white/5"
+                    style={{ borderColor: 'var(--color-border)' }}
+                  >
+                    {/* Reorder Touch & Drag Controls */}
+                    {reorderMode && (
+                      <td className="p-3.5 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <GripVertical className="h-4 w-4 cursor-grab text-gray-400" />
+                          <div className="flex flex-col">
                             <button
                               type="button"
-                              onClick={() => moveType(idx, 'up')}
                               disabled={idx === 0}
-                              className="p-0.5 hover:text-black disabled:opacity-20 cursor-pointer"
-                              title={t('moveUp', 'Move Up')}
+                              onClick={() => moveItem(idx, 'up')}
+                              title={t('moveUpTooltip', 'Move Up')}
+                              className="p-0.5 hover:text-white rounded disabled:opacity-20 cursor-pointer"
                             >
-                              <ArrowUp className="h-3 w-3" />
+                              <ChevronUp className="h-3 w-3" />
                             </button>
                             <button
                               type="button"
-                              onClick={() => moveType(idx, 'down')}
-                              disabled={idx === recipeTypes.length - 1}
-                              className="p-0.5 hover:text-black disabled:opacity-20 cursor-pointer"
-                              title={t('moveDown', 'Move Down')}
+                              disabled={idx === filteredTypes.length - 1}
+                              onClick={() => moveItem(idx, 'down')}
+                              title={t('moveDownTooltip', 'Move Down')}
+                              className="p-0.5 hover:text-white rounded disabled:opacity-20 cursor-pointer"
                             >
-                              <ArrowDown className="h-3 w-3" />
+                              <ChevronDown className="h-3 w-3" />
                             </button>
-                          </div>
-                          <div 
-                            className="cursor-grab active:cursor-grabbing p-1" 
-                            style={{ color: 'var(--color-emerald)' }}
-                            title={t('dragToReposition', 'Click and drag to reposition')}
-                          >
-                            <MoreVertical className="h-4 w-4" />
                           </div>
                         </div>
-                      )}
+                      </td>
+                    )}
 
-                      <span className="text-xs font-bold truncate" style={{ color: 'var(--color-text)' }}>
-                        {type}
-                      </span>
-                    </div>
+                    {/* Name & Icon */}
+                    <td className="p-3.5 font-semibold">
+                      <div className="flex items-center gap-3">
+                        <span className="w-8 h-8 rounded-xl border flex items-center justify-center text-sm shadow-xs shrink-0"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)'
+                          }}
+                        >
+                          {item.icon || '🍽️'}
+                        </span>
+                        <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>
+                          {item.name}
+                        </span>
+                      </div>
+                    </td>
 
-                    {!isReordering && (
-                      <div className="flex items-center gap-1 shrink-0">
+                    {/* Slug */}
+                    <td className="p-3.5 font-mono text-[11px]" style={{ color: 'var(--color-primary)' }}>
+                      {item.slug}
+                    </td>
+
+                    {/* Description */}
+                    <td className="p-3.5 hidden md:table-cell max-w-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>
+                      {item.description || '—'}
+                    </td>
+
+                    {/* Status Toggle */}
+                    <td className="p-3.5 text-center">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleStatus(item)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider transition cursor-pointer"
+                        style={item.isActive ? {
+                          backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                          color: 'var(--color-emerald)',
+                          borderColor: 'var(--color-emerald)',
+                          borderWidth: '1px'
+                        } : {
+                          backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                          color: '#ef4444',
+                          borderColor: 'rgba(239, 68, 68, 0.3)',
+                          borderWidth: '1px'
+                        }}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${item.isActive ? 'bg-emerald-500' : 'bg-red-400'}`} />
+                        <span>{item.isActive ? t('activeTypesBadge', 'Active') : t('inactiveTypesBadge', 'Inactive')}</span>
+                      </button>
+                    </td>
+
+                    {/* Actions */}
+                    <td className="p-3.5 text-right pr-6">
+                      <div className="flex items-center justify-end gap-1.5">
                         <button
                           type="button"
-                          onClick={() => {
-                            setEditingIndex(idx);
-                            setEditingValue(type);
-                          }}
-                          className="p-1.5 rounded-lg border transition cursor-pointer shadow-xs"
+                          onClick={() => handleOpenEditModal(item)}
+                          className="p-1.5 rounded-xl border transition hover:opacity-90 cursor-pointer"
                           style={{
-                            backgroundColor: 'var(--color-card)',
+                            backgroundColor: 'var(--color-inner-dark)',
                             borderColor: 'var(--color-border)',
-                            color: 'var(--color-text-secondary)'
+                            color: 'var(--color-text)'
                           }}
-                          title={t('editRecipeTypeTooltip', 'Edit Recipe Type')}
                         >
-                          <Edit3 className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+                          <Pencil className="h-3.5 w-3.5" />
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleDeleteType(idx, type)}
-                          className="p-1.5 rounded-lg border transition cursor-pointer hover:text-red-500 shadow-xs"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text-secondary)'
+                          onClick={() => {
+                            setItemToDelete(item);
+                            setIsDeleteModalOpen(true);
                           }}
-                          title={t('deleteRecipeTypeTooltip', 'Delete Recipe Type')}
+                          className="p-1.5 rounded-xl border border-red-500/20 text-red-500 hover:bg-red-500/10 transition cursor-pointer"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
-                    )}
-                  </>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
+
+      {/* Add / Edit Recipe Type Modal (Accessible <div> Container) */}
+      {isModalOpen && (
+        <div 
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setIsModalOpen(false);
+          }}
+        >
+          <div 
+            role="region"
+            data-lpignore="true"
+            data-form-type="other"
+            className="w-full max-w-lg rounded-3xl border shadow-2xl p-6 space-y-5 transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <h2 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+                <UtensilsCrossed className="h-5 w-5" />
+                <span>{editingItem ? t('editTypeModalTitle', 'Edit Recipe Type') : t('addNewTypeModalTitle', 'Add New Recipe Type')}</span>
+              </h2>
+              <button 
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs font-bold">
+              {/* Type Name */}
+              <div>
+                <label className="block mb-1.5">{t('typeNameLabel', 'Recipe Type Name *')}</label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  value={formData.name}
+                  onChange={(e) => handleNameChange(e.target.value)}
+                  placeholder={t('typeNamePlaceholder', 'e.g., Breakfast, Main Dish, Dessert')}
+                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-medium"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                />
+              </div>
+
+              {/* Slug & Icon Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block mb-1.5">{t('typeSlugLabel', 'Slug Identifier *')}</label>
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
+                    value={formData.slug}
+                    onChange={(e) => setFormData(prev => ({ ...prev, slug: e.target.value }))}
+                    placeholder={t('typeSlugPlaceholder', 'e.g., breakfast, main-dish, dessert')}
+                    className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-mono text-[11px]"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1.5">{t('typeIconLabel', 'Icon / Emoji')}</label>
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
+                    value={formData.icon}
+                    onChange={(e) => setFormData(prev => ({ ...prev, icon: e.target.value }))}
+                    placeholder={t('typeIconPlaceholder', 'e.g., 🍳, 🥗, 🍰')}
+                    className="w-full px-3.5 py-2.5 rounded-xl border outline-none text-center font-emoji"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  />
+                </div>
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="block mb-1.5">{t('typeDescriptionLabel', 'Description (Optional)')}</label>
+                <textarea
+                  rows={2}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  value={formData.description}
+                  onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder={t('typeDescriptionPlaceholder', 'Brief summary of this recipe type...')}
+                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none resize-none font-normal"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                />
+              </div>
+
+              {/* Active Toggle Switch */}
+              <div className="flex items-center gap-2.5 pt-1">
+                <input
+                  type="checkbox"
+                  id="recipe-type-active"
+                  checked={formData.isActive}
+                  onChange={(e) => setFormData(prev => ({ ...prev, isActive: e.target.checked }))}
+                  className="rounded cursor-pointer accent-[var(--color-primary)] h-4 w-4"
+                />
+                <label htmlFor="recipe-type-active" className="cursor-pointer text-xs font-semibold">
+                  {t('typeStatusActive', 'Active (Visible in recipe creators & filters)')}
+                </label>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                {t('cancelBtn', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                disabled={saving || !formData.name.trim()}
+                onClick={handleSaveModal}
+                className="px-5 py-2 rounded-xl text-white text-xs font-black shadow-md transition disabled:opacity-50 hover:opacity-95"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {saving ? '...' : t('saveBtn', 'Save Recipe Type')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal (Accessible <div> Container) */}
+      {isDeleteModalOpen && itemToDelete && (
+        <div 
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in"
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setIsDeleteModalOpen(false);
+          }}
+        >
+          <div 
+            role="region"
+            data-lpignore="true"
+            className="w-full max-w-md rounded-3xl border shadow-2xl p-6 space-y-4 transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <div className="flex items-center gap-3 text-red-500">
+              <Trash2 className="h-6 w-6 shrink-0" />
+              <h2 className="text-sm font-black">{t('deleteTypeModalTitle', 'Delete Recipe Type')}</h2>
+            </div>
+
+            <p className="text-xs font-medium leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+              {t('deleteTypeConfirmMsg', 'Are you sure you want to delete this recipe type? Recipes associated with this type will remain intact.')}
+            </p>
+
+            <div 
+              className="p-3 rounded-xl border font-bold text-xs flex items-center gap-2"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <span>{itemToDelete.icon}</span>
+              <span style={{ color: 'var(--color-text)' }}>{itemToDelete.name}</span>
+              <span className="font-mono text-[10px]" style={{ color: 'var(--color-primary)' }}>({itemToDelete.slug})</span>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsDeleteModalOpen(false);
+                  setItemToDelete(null);
+                }}
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-90"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                {t('cancelBtn', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={handleConfirmDelete}
+                className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-black shadow-md transition disabled:opacity-50"
+              >
+                {saving ? '...' : t('confirmDeleteBtn', 'Confirm Delete')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
