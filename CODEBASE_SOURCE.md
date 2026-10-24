@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.22",
+  "version": "8.1.24",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -20,23 +20,32 @@
     "postbuild": "node -e \"const fs=require('fs'),path=require('path');const src=path.join('apps','web','.next');if(fs.existsSync(src)){  const sa=path.join(src,'standalone');  const rootServer=path.join(process.cwd(),'server.js');  if(fs.existsSync(sa)&&fs.existsSync(rootServer)){    try{fs.cpSync(rootServer,path.join(sa,'server.js'));}catch(_){}    try{fs.cpSync(rootServer,path.join(sa,'apps','web','server_launcher.js'));}catch(_){}  }  const saStatic=path.join(sa,'apps','web','.next','static');  const srcStatic=path.join(src,'static');  if(fs.existsSync(srcStatic)){    try{fs.mkdirSync(path.dirname(saStatic),{recursive:true});fs.cpSync(srcStatic,saStatic,{recursive:true});}catch(_){}    try{const rStatic=path.join(sa,'.next','static');fs.mkdirSync(path.dirname(rStatic),{recursive:true});fs.cpSync(srcStatic,rStatic,{recursive:true});}catch(_){}  }  const saPublic=path.join(sa,'apps','web','public');  const srcPublic=path.join('apps','web','public');  if(fs.existsSync(srcPublic)){    try{fs.mkdirSync(path.dirname(saPublic),{recursive:true});fs.cpSync(srcPublic,saPublic,{recursive:true});}catch(_){}    try{const rPublic=path.join(sa,'public');fs.mkdirSync(path.dirname(rPublic),{recursive:true});fs.cpSync(srcPublic,rPublic,{recursive:true});}catch(_){}  }  ['.next','dist','build'].forEach(d=>{    try{      if(fs.existsSync(d)||fs.lstatSync?.(d,{throwIfNoEntry:false})){        if(fs.lstatSync(d).isSymbolicLink()){fs.unlinkSync(d);}else{fs.rmSync(d,{recursive:true,force:true});}      }      fs.cpSync(src,d,{recursive:true,dereference:true});      if(fs.existsSync(rootServer)){        try{fs.cpSync(rootServer,path.join(d,'standalone','server.js'));}catch(_){}      }    }catch(err){console.warn('Artifact copy notice for '+d+':',err.message);}  });  console.log('\u2713 Hostinger production standalone artifacts physically bridged with root server.js.');}\"",
     "start:web": "npm run start --workspace=web"
   },
-  "devDependencies": {},
   "packageManager": "npm@10.8.2",
   "dependencies": {
     "@prisma/client": "5.22.0",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.2",
+    "@types/pg": "^8.11.0",
     "mysql2": "^3.24.6",
-    "next": "^16.3.5",
+    "next": "^16.4.3",
     "pg": "^8.23.0",
-    "stripe": "^22.6.2",
-    "turbo": "^2.11.6",
-    "tailwindcss": "^3.4.17",
-    "postcss": "^8.4.49",
-    "autoprefixer": "^10.4.20",
     "prisma": "5.22.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "sharp": "^0.35.5",
+    "stripe": "^22.6.2",
     "typescript": "^5.7.3",
-    "@types/pg": "^8.11.0"
+    "undici": "^8.12.3"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "turbo": "2.11.10"
+  },
+  "overrides": {
+    "react": "$react",
+    "react-dom": "$react-dom"
   }
 }
 
@@ -120,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.22",
+  "version": "8.1.24",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -129,29 +138,32 @@
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.0",
+    "@prisma/client": "5.22.0",
+    "@types/node": "^20.17.19",
+    "@types/pg": "^8.11.0",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
     "@zecratary/ai-engine": "*",
     "@zecratary/database": "*",
+    "autoprefixer": "^10.4.20",
     "clsx": "^2.1.1",
     "lucide-react": "^0.475.0",
     "next": "^16.3.6",
     "openai": "^4.85.4",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "postcss": "^8.4.49",
+    "prisma": "5.22.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "stripe": "^16.12.0",
     "tailwind-merge": "^2.6.0",
+    "turbo": "^2.11.6",
+    "typescript": "^5.7.3"
+  },
+  "devDependencies": {
     "tailwindcss": "^3.4.17",
     "postcss": "^8.4.49",
-    "autoprefixer": "^10.4.20",
-    "turbo": "^2.11.6",
-    "@prisma/client": "5.22.0",
-    "prisma": "5.22.0",
-    "typescript": "^5.7.3",
-    "@types/node": "^20.17.19",
-    "@types/pg": "^8.11.0",
-    "@types/react": "^18.3.18",
-    "@types/react-dom": "^18.3.5"
-  },
-  "devDependencies": {}
+    "autoprefixer": "^10.4.20"
+  }
 }
 
 ```
@@ -380,10 +392,14 @@ export { useTranslation as default } from '@/components/LanguageProvider';
 ```typescript
 'use client';
 
-// Canonical bridge re-exporting localization context from @/components/LanguageProvider
-export { useTranslation, LanguageProvider } from '@/components/LanguageProvider';
-export type { LanguageContextType } from '@/components/LanguageProvider';
-export { useTranslation as default } from '@/components/LanguageProvider';
+export { 
+  LanguageContext, 
+  LanguageProvider, 
+  useTranslation, 
+  useTranslation as default 
+} from '@/components/LanguageProvider';
+
+export type { LanguageContextType, SupportedLanguage } from '@/components/LanguageProvider';
 
 ```
 
@@ -36260,6 +36276,584 @@ export default function AdminLanguagePage() {
 
 ```
 
+## File: `apps/web/src/app/admin/storage/page.tsx`
+```typescript
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { 
+  HardDrive, Cloud, Server, Check, AlertCircle, Save, 
+  Wifi, Copy, Eye, EyeOff, ShieldCheck, Zap, ArrowLeft, RefreshCw 
+} from 'lucide-react';
+import { useTranslation } from '@/components/LanguageProvider';
+
+interface StorageSettingsState {
+  provider: 'localhost' | 'supabase';
+  localhost: {
+    uploadDir: string;
+    publicPrefix: string;
+    maxSizeMb: number;
+    allowedTypes?: string;
+  };
+  supabase: {
+    enabled: boolean;
+    endpoint: string;
+    region: string;
+    accessKeyId: string;
+    secretAccessKey: string;
+    bucket: string;
+    publicUrl: string;
+  };
+}
+
+const SUPABASE_RECOMMENDED = {
+  endpoint: 'https://tnhrkjtujdfgvwhsuuxb.storage.supabase.co/storage/v1/s3',
+  region: 'us-west-1',
+  accessKeyId: 'f3e0affef5c74972a535153349eb24cc',
+  bucket: 'recipes',
+  publicUrl: 'https://tnhrkjtujdfgvwhsuuxb.supabase.co/storage/v1/object/public/recipes',
+};
+
+const LOCALHOST_RECOMMENDED = {
+  uploadDir: 'public/uploads/recipes',
+  publicPrefix: '/uploads/recipes',
+  maxSizeMb: 10,
+  allowedTypes: 'image/jpeg, image/png, image/webp, image/gif',
+};
+
+export default function AdminStorageSettingsPage() {
+  const { t } = useTranslation();
+
+  const [mounted, setMounted] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [saving, setSaving] = useState<boolean>(false);
+  const [testing, setTesting] = useState<boolean>(false);
+  const [showSecretKey, setShowSecretKey] = useState<boolean>(false);
+
+  // Status Alerts
+  const [saveSuccess, setSaveSuccess] = useState<string>('');
+  const [saveError, setSaveError] = useState<string>('');
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [copiedField, setCopiedField] = useState<string>('');
+
+  const [settings, setSettings] = useState<StorageSettingsState>({
+    provider: 'localhost',
+    localhost: LOCALHOST_RECOMMENDED,
+    supabase: {
+      enabled: true,
+      ...SUPABASE_RECOMMENDED,
+      secretAccessKey: '',
+    },
+  });
+
+  useEffect(() => {
+    setMounted(true);
+    async function loadSettings() {
+      try {
+        const res = await fetch('/api/admin/storage', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.settings) {
+            setSettings(prev => ({
+              ...prev,
+              ...data.settings,
+              localhost: { ...prev.localhost, ...(data.settings.localhost || {}) },
+              supabase: { ...prev.supabase, ...(data.settings.supabase || {}) },
+            }));
+          }
+        }
+      } catch (_) {} finally {
+        setLoading(false);
+      }
+    }
+    loadSettings();
+  }, []);
+
+  const handleCopy = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(''), 2000);
+  };
+
+  const handleLoadRecommendedSupabase = () => {
+    setSettings(prev => ({
+      ...prev,
+      supabase: {
+        ...prev.supabase,
+        endpoint: SUPABASE_RECOMMENDED.endpoint,
+        region: SUPABASE_RECOMMENDED.region,
+        accessKeyId: SUPABASE_RECOMMENDED.accessKeyId,
+        bucket: SUPABASE_RECOMMENDED.bucket,
+        publicUrl: SUPABASE_RECOMMENDED.publicUrl,
+      },
+    }));
+  };
+
+  const handleLoadRecommendedLocalhost = () => {
+    setSettings(prev => ({
+      ...prev,
+      localhost: { ...LOCALHOST_RECOMMENDED },
+    }));
+  };
+
+  // Test Supabase Connection
+  const handleTestConnection = async () => {
+    setTesting(true);
+    setTestResult(null);
+    setSaveError('');
+
+    try {
+      const res = await fetch('/api/admin/storage/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings.supabase),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setTestResult({ success: true, message: data.message });
+      } else {
+        setTestResult({ success: false, message: data.error || 'Connection failed' });
+      }
+    } catch (err: any) {
+      setTestResult({ success: false, message: err.message || 'Network error testing connection' });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  // Save Settings to PostgreSQL
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveSuccess('');
+    setSaveError('');
+
+    try {
+      const res = await fetch('/api/admin/storage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSaveSuccess(t('storageSettingsSaved', 'Storage settings saved successfully to PostgreSQL.'));
+        setTimeout(() => setSaveSuccess(''), 4000);
+      } else {
+        setSaveError(data.error || 'Failed to save storage settings');
+      }
+    } catch (err: any) {
+      setSaveError(err.message || 'Server error occurred while saving.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!mounted || loading) {
+    return (
+      <div className="py-20 text-center space-y-3">
+        <div className="animate-spin h-8 w-8 rounded-full border-2 border-t-transparent mx-auto" style={{ borderColor: 'var(--color-primary)' }} />
+        <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Loading storage settings...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-8 w-full min-w-0" style={{ color: 'var(--color-text)' }}>
+      {/* 1. TOP HEADER & ACTION BAR */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
+        <div>
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[var(--color-primary)]">
+            <Link href="/admin" className="hover:underline flex items-center gap-1">
+              <ArrowLeft className="h-3 w-3" />
+              <span>{t('adminDashboard', 'Admin')}</span>
+            </Link>
+            <span>/</span>
+            <span>{t('storage', 'Storage')}</span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-black tracking-tight pt-1 flex items-center gap-2.5">
+            <HardDrive className="h-7 w-7 text-[var(--color-primary)]" />
+            <span>{t('storageSettingsTitle', 'Storage & Media Configuration')}</span>
+          </h1>
+          <p className="text-xs sm:text-sm pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('storageSubtitle', 'Select where all images (scraped recipes, photo uploads, AI generated dishes, and branding logos) are stored.')}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs text-white shadow-xs transition cursor-pointer self-start sm:self-auto"
+          style={{ backgroundColor: 'var(--color-primary)', opacity: saving ? 0.7 : 1 }}
+        >
+          {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          <span>{saving ? t('saving', 'Saving...') : t('saveStorageSettings', 'Save to PostgreSQL')}</span>
+        </button>
+      </div>
+
+      {/* FEEDBACK ALERTS */}
+      {saveSuccess && (
+        <div className="p-4 rounded-2xl border flex items-center gap-2.5 text-xs font-bold text-emerald-400 bg-emerald-500/10 border-emerald-500/20 shadow-xs">
+          <Check className="h-4 w-4 shrink-0" />
+          <span>{saveSuccess}</span>
+        </div>
+      )}
+      {saveError && (
+        <div className="p-4 rounded-2xl border flex items-center gap-2.5 text-xs font-bold text-rose-400 bg-rose-500/10 border-rose-500/20 shadow-xs">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{saveError}</span>
+        </div>
+      )}
+
+      {/* 2. STORAGE PROVIDER SELECTOR CARDS */}
+      <div className="space-y-3">
+        <label className="block text-xs font-black uppercase tracking-wider text-[var(--color-primary)]">
+          {t('selectStorageProvider', 'Active Storage Location')}
+        </label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* LOCALHOST OPTION */}
+          <div
+            onClick={() => setSettings(prev => ({ ...prev, provider: 'localhost' }))}
+            className={`p-6 rounded-3xl border cursor-pointer transition flex flex-col justify-between space-y-4 ${
+              settings.provider === 'localhost' ? 'ring-2 ring-[var(--color-primary)] shadow-md' : 'hover:border-slate-700'
+            }`}
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: settings.provider === 'localhost' ? 'var(--color-primary)' : 'var(--color-border)',
+            }}
+          >
+            <div className="flex items-start justify-between">
+              <div className="p-3 rounded-2xl bg-[var(--color-inner-dark)] text-[var(--color-primary)]">
+                <Server className="h-6 w-6" />
+              </div>
+              <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                settings.provider === 'localhost' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'
+              }`}>
+                {settings.provider === 'localhost' ? 'Active' : 'Offline'}
+              </span>
+            </div>
+            <div>
+              <h3 className="font-extrabold text-base">Localhost (Server Disk)</h3>
+              <p className="text-xs pt-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                Stores images directly inside <code className="px-1.5 py-0.5 rounded bg-black/40">public/uploads/recipes</code> on your server filesystem.
+              </p>
+            </div>
+          </div>
+
+          {/* SUPABASE S3 OPTION */}
+          <div
+            onClick={() => setSettings(prev => ({ ...prev, provider: 'supabase' }))}
+            className={`p-6 rounded-3xl border cursor-pointer transition flex flex-col justify-between space-y-4 ${
+              settings.provider === 'supabase' ? 'ring-2 ring-[var(--color-primary)] shadow-md' : 'hover:border-slate-700'
+            }`}
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: settings.provider === 'supabase' ? 'var(--color-primary)' : 'var(--color-border)',
+            }}
+          >
+            <div className="flex items-start justify-between">
+              <div className="p-3 rounded-2xl bg-[var(--color-inner-dark)] text-[var(--color-primary)]">
+                <Cloud className="h-6 w-6" />
+              </div>
+              <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                settings.provider === 'supabase' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'
+              }`}>
+                {settings.provider === 'supabase' ? 'Active' : 'Cloud S3'}
+              </span>
+            </div>
+            <div>
+              <h3 className="font-extrabold text-base">Supabase Storage (S3 Protocol)</h3>
+              <p className="text-xs pt-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                Offloads images to your Supabase S3 bucket. Ideal for Hostinger and cloud deployments to keep server disk lightweight.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 3. PROVIDER SETTINGS DETAIL VIEW */}
+      {settings.provider === 'supabase' ? (
+        /* SUPABASE S3 CONFIGURATION */
+        <div
+          className="p-6 sm:p-8 rounded-3xl border space-y-6 shadow-xs"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
+            <div>
+              <h2 className="text-lg font-black flex items-center gap-2">
+                <Cloud className="h-5 w-5 text-[var(--color-primary)]" />
+                <span>Supabase S3 Configuration</span>
+              </h2>
+              <p className="text-xs pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                Connect to your bucket using Supabase Storage via the S3 protocol.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleLoadRecommendedSupabase}
+              className="px-3 py-1.5 rounded-xl border text-xs font-bold hover:bg-slate-800/40 transition cursor-pointer self-start sm:self-auto"
+              style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)' }}
+            >
+              Load Recommended Values
+            </button>
+          </div>
+
+          <div className="space-y-4 text-xs">
+            {/* S3 ENDPOINT */}
+            <div>
+              <label className="block font-bold mb-1">Endpoint (S3 Gateway)</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={settings.supabase.endpoint}
+                  onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, endpoint: e.target.value } }))}
+                  placeholder="https://<project-ref>.storage.supabase.co/storage/v1/s3"
+                  className="flex-1 px-3 py-2.5 rounded-xl border outline-hidden"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleCopy(settings.supabase.endpoint, 'endpoint')}
+                  className="p-2.5 rounded-xl border hover:bg-slate-800/40 cursor-pointer transition"
+                  style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)' }}
+                  title="Copy Endpoint"
+                >
+                  {copiedField === 'endpoint' ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* REGION & BUCKET */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-bold mb-1">Region</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={settings.supabase.region}
+                    onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, region: e.target.value } }))}
+                    placeholder="us-west-1"
+                    className="flex-1 px-3 py-2.5 rounded-xl border outline-hidden"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(settings.supabase.region, 'region')}
+                    className="p-2.5 rounded-xl border hover:bg-slate-800/40 cursor-pointer transition"
+                    style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)' }}
+                    title="Copy Region"
+                  >
+                    {copiedField === 'region' ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">Bucket Name</label>
+                <input
+                  type="text"
+                  value={settings.supabase.bucket}
+                  onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, bucket: e.target.value } }))}
+                  placeholder="recipes"
+                  className="w-full px-3 py-2.5 rounded-xl border outline-hidden"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+            </div>
+
+            {/* ACCESS KEY ID & SECRET KEY */}
+            <div className="space-y-4 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <label className="block font-bold mb-1">Access Key ID</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={settings.supabase.accessKeyId}
+                    onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, accessKeyId: e.target.value } }))}
+                    placeholder="f3e0affef5c74972a535153349eb24cc"
+                    className="flex-1 px-3 py-2.5 rounded-xl border outline-hidden font-mono"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(settings.supabase.accessKeyId, 'accessKey')}
+                    className="p-2.5 rounded-xl border hover:bg-slate-800/40 cursor-pointer transition"
+                    style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)' }}
+                    title="Copy Key ID"
+                  >
+                    {copiedField === 'accessKey' ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">Secret Access Key</label>
+                <div className="relative flex items-center">
+                  <input
+                    type={showSecretKey ? 'text' : 'password'}
+                    value={settings.supabase.secretAccessKey}
+                    onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, secretAccessKey: e.target.value } }))}
+                    placeholder="Enter Secret Key generated from Supabase S3 Access Keys"
+                    className="w-full px-3 py-2.5 pr-10 rounded-xl border outline-hidden font-mono"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowSecretKey(!showSecretKey)}
+                    className="absolute right-3 p-1 text-slate-400 hover:text-white"
+                  >
+                    {showSecretKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* PUBLIC CDN URL PREFIX */}
+              <div>
+                <label className="block font-bold mb-1">Public CDN / URL Prefix</label>
+                <input
+                  type="text"
+                  value={settings.supabase.publicUrl}
+                  onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, publicUrl: e.target.value } }))}
+                  placeholder="https://<project-ref>.supabase.co/storage/v1/object/public/recipes"
+                  className="w-full px-3 py-2.5 rounded-xl border outline-hidden"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+                <p className="text-[11px] pt-1 opacity-70">
+                  Ensure the bucket is configured as <strong>Public</strong> in Supabase Dashboard $\rightarrow$ Storage to allow direct browser image loading.
+                </p>
+              </div>
+            </div>
+
+            {/* 4. TEST CONNECTION SECTION */}
+            <div className="pt-4 border-t space-y-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-extrabold text-sm flex items-center gap-1.5">
+                    <Wifi className="h-4 w-4 text-[var(--color-primary)]" />
+                    <span>Connection Diagnostic</span>
+                  </h3>
+                  <p className="text-[11px] pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    Verify that your Key ID and Secret Key can authenticate and upload to the Supabase S3 bucket.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleTestConnection}
+                  disabled={testing || !settings.supabase.secretAccessKey}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border transition cursor-pointer self-start sm:self-auto shadow-xs"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    opacity: (testing || !settings.supabase.secretAccessKey) ? 0.6 : 1,
+                  }}
+                >
+                  {testing ? <RefreshCw className="h-3.5 w-3.5 animate-spin text-[var(--color-primary)]" /> : <Zap className="h-3.5 w-3.5 text-amber-400" />}
+                  <span>{testing ? 'Testing Connection...' : 'Test S3 Connection'}</span>
+                </button>
+              </div>
+
+              {testResult && (
+                <div className={`p-4 rounded-2xl border text-xs font-bold flex items-center gap-2.5 ${
+                  testResult.success ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                }`}>
+                  {testResult.success ? <Check className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
+                  <span>{testResult.message}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* LOCALHOST CONFIGURATION */
+        <div
+          className="p-6 sm:p-8 rounded-3xl border space-y-6 shadow-xs"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
+            <div>
+              <h2 className="text-lg font-black flex items-center gap-2">
+                <Server className="h-5 w-5 text-[var(--color-primary)]" />
+                <span>Localhost Server Disk Configuration</span>
+              </h2>
+              <p className="text-xs pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                Store uploaded and scraped images directly inside your server public directory.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleLoadRecommendedLocalhost}
+              className="px-3 py-1.5 rounded-xl border text-xs font-bold hover:bg-slate-800/40 transition cursor-pointer self-start sm:self-auto"
+              style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)' }}
+            >
+              Reset to Defaults
+            </button>
+          </div>
+
+          <div className="space-y-4 text-xs">
+            <div>
+              <label className="block font-bold mb-1">Upload Directory Path</label>
+              <input
+                type="text"
+                value={settings.localhost.uploadDir}
+                onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, uploadDir: e.target.value } }))}
+                placeholder="public/uploads/recipes"
+                className="w-full px-3 py-2.5 rounded-xl border outline-hidden"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+              <p className="text-[11px] pt-1 opacity-70">Relative path to your Next.js application workspace root.</p>
+            </div>
+
+            <div>
+              <label className="block font-bold mb-1">Serving URL Route Prefix</label>
+              <input
+                type="text"
+                value={settings.localhost.publicPrefix}
+                onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, publicPrefix: e.target.value } }))}
+                placeholder="/uploads/recipes"
+                className="w-full px-3 py-2.5 rounded-xl border outline-hidden"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-bold mb-1">Maximum File Size (MB)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  value={settings.localhost.maxSizeMb}
+                  onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, maxSizeMb: Number(e.target.value) || 10 } }))}
+                  className="w-full px-3 py-2.5 rounded-xl border outline-hidden"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">Allowed Image Formats</label>
+                <input
+                  type="text"
+                  value={settings.localhost.allowedTypes}
+                  onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, allowedTypes: e.target.value } }))}
+                  className="w-full px-3 py-2.5 rounded-xl border outline-hidden"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+```
+
 ## File: `apps/web/src/app/admin/users/page.tsx`
 ```typescript
 // Generated / Updated by AI Collaborator
@@ -38849,6 +39443,16 @@ export async function GET(
   } catch (err: any) {
     return new NextResponse(`Error retrieving asset: ${err.message}`, { status: 500 });
   }
+}
+
+```
+
+## File: `apps/web/src/app/language/page.tsx`
+```typescript
+import { redirect } from 'next/navigation';
+
+export default function LanguageRedirectPage() {
+  redirect('/admin/language');
 }
 
 ```
@@ -53811,97 +54415,131 @@ export async function DELETE(req: Request) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-const DEFAULT_LANGUAGES = [
-  { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸', isDefault: true },
-  { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸', isDefault: false },
-  { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷', isDefault: false },
-  { code: 'de', name: 'German', nativeName: 'Deutsch', flag: '🇩🇪', isDefault: false },
-  { code: 'it', name: 'Italian', nativeName: 'Italiano', flag: '🇮🇹', isDefault: false },
-  { code: 'pt', name: 'Portuguese', nativeName: 'Português', flag: '🇵🇹', isDefault: false },
-  { code: 'zh', name: 'Chinese', nativeName: '中文', flag: '🇨🇳', isDefault: false },
-  { code: 'ja', name: 'Japanese', nativeName: '日本語', flag: '🇯🇵', isDefault: false },
-  { code: 'ko', name: 'Korean', nativeName: '한국어', flag: '🇰🇷', isDefault: false },
-  { code: 'th', name: 'Thai', nativeName: 'ไทย', flag: '🇹🇭', isDefault: false },
+const DEFAULT_SYSTEM_LANGUAGES = [
+  { id: 'lang_en', code: 'en', name: 'English', native: 'English', flag: '🇺🇸', direction: 'ltr', status: 'active', is_default: true, file: 'en.ts' },
+  { id: 'lang_es', code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', direction: 'ltr', status: 'active', is_default: false, file: 'es.ts' },
+  { id: 'lang_fr', code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', direction: 'ltr', status: 'active', is_default: false, file: 'fr.ts' },
+  { id: 'lang_th', code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', direction: 'ltr', status: 'active', is_default: false, file: 'th.ts' }
 ];
 
-async function ensureLanguageSchema() {
-  try {
-    await query(`
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS supported_languages JSONB DEFAULT '["en", "es", "fr", "de", "it", "pt", "zh", "ja", "ko", "th"]'::jsonb;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS translations JSONB DEFAULT '{}'::jsonb;
-      ALTER TABLE admin_settings ADD COLUMN IF NOT EXISTS default_language VARCHAR(50) DEFAULT 'en';
-    `);
-  } catch (err: any) {
-    console.warn('[admin_settings language schema notice]:', err.message);
+function getLocalFileLanguages(): any[] | null {
+  for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
+    try {
+      const p = path.join(process.cwd(), rel);
+      if (fs.existsSync(p)) {
+        const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+        const langs = raw.supportedLanguages || raw.supported_languages;
+        if (Array.isArray(langs) && langs.length > 0) return langs;
+      }
+    } catch (_) {}
   }
+  return null;
 }
 
 export async function GET() {
-  await ensureLanguageSchema();
   try {
-    const rows: any = await query('SELECT * FROM admin_settings LIMIT 1;').catch(() => []);
-    const row = Array.isArray(rows) ? rows[0] : (rows?.rows?.[0] || null);
+    let languages = null;
+    let translations = {};
 
-    let activeLangs: any[] = DEFAULT_LANGUAGES;
-    let translations: Record<string, string> = {};
-    let defaultLang = 'en';
+    try {
+      const res: any = await query(`
+        SELECT supported_languages, settings, translations FROM admin_settings 
+        WHERE id = 'primary_settings' OR id = '1' 
+        ORDER BY updated_at DESC LIMIT 1;
+      `);
+      const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+      if (row) {
+        if (row.supported_languages) {
+          const parsed = typeof row.supported_languages === 'string'
+            ? JSON.parse(row.supported_languages)
+            : row.supported_languages;
+          if (Array.isArray(parsed) && parsed.length > 0) languages = parsed;
+        } else if (row.settings) {
+          const s = typeof row.settings === 'string' ? JSON.parse(row.settings) : row.settings;
+          const l = s?.supportedLanguages || s?.supported_languages;
+          if (Array.isArray(l) && l.length > 0) languages = l;
+        }
 
-    if (row) {
-      if (row.supported_languages) {
-        const raw = Array.isArray(row.supported_languages) ? row.supported_languages : (typeof row.supported_languages === 'string' ? JSON.parse(row.supported_languages) : null);
-        if (Array.isArray(raw)) {
-          activeLangs = raw.map((c: any) => typeof c === 'string' ? (DEFAULT_LANGUAGES.find(d => d.code === c) || { code: c, name: c }) : c);
+        if (row.translations) {
+          translations = typeof row.translations === 'string' ? JSON.parse(row.translations) : row.translations;
         }
       }
-      if (row.translations && typeof row.translations === 'object') {
-        translations = row.translations;
-      }
-      if (row.default_language) {
-        defaultLang = row.default_language;
-      }
+    } catch (_) {}
+
+    if (!languages) {
+      languages = getLocalFileLanguages() || DEFAULT_SYSTEM_LANGUAGES;
     }
 
-    return NextResponse.json({
-      success: true,
-      languages: activeLangs,
-      defaultLanguage: defaultLang,
-      translations,
-    });
+    return NextResponse.json(
+      { success: true, languages, translations },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
   } catch (err: any) {
-    console.warn('Fallback language response:', err.message);
-    return NextResponse.json({
-      success: true,
-      languages: DEFAULT_LANGUAGES,
-      defaultLanguage: 'en',
-      translations: {},
-    });
+    return NextResponse.json({ success: true, languages: DEFAULT_SYSTEM_LANGUAGES, translations: {} });
   }
 }
 
 export async function POST(req: NextRequest) {
-  await ensureLanguageSchema();
   try {
     const body = await req.json();
-    const languages = body.languages || body.supported_languages || body.supportedLanguages;
-    const defaultLanguage = body.defaultLanguage || body.default_language || 'en';
-    const translations = body.translations || {};
+    const languages = Array.isArray(body) ? body : (body.languages || body.supportedLanguages);
+    const translations = body.translations;
 
-    await query(`
-      UPDATE admin_settings 
-      SET 
-        supported_languages = $1,
-        default_language = $2,
-        translations = $3,
-        updated_at = NOW();
-    `, [JSON.stringify(languages || DEFAULT_LANGUAGES), defaultLanguage, JSON.stringify(translations)]);
+    if (Array.isArray(languages)) {
+      // Update Dual-Path Server JSON Files
+      for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
+        try {
+          const p = path.join(process.cwd(), rel);
+          osEnsureDir(path.dirname(p));
+          let existing: any = {};
+          if (fs.existsSync(p)) {
+            try { existing = JSON.parse(fs.readFileSync(p, 'utf8')); } catch (_) {}
+          }
+          existing.supportedLanguages = languages;
+          existing.supported_languages = languages;
+          fs.writeFileSync(p, JSON.stringify(existing, null, 2), 'utf8');
+        } catch (_) {}
+      }
 
-    return NextResponse.json({ success: true });
+      // Update PostgreSQL / MySQL
+      try {
+        await query(`
+          INSERT INTO admin_settings (id, supported_languages, updated_at)
+          VALUES ('primary_settings', $1::jsonb, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            supported_languages = EXCLUDED.supported_languages,
+            updated_at = NOW();
+        `, [JSON.stringify(languages)]);
+      } catch (_) {}
+    }
+
+    if (translations && typeof translations === 'object') {
+      try {
+        await query(`
+          INSERT INTO admin_settings (id, translations, updated_at)
+          VALUES ('primary_settings', $1::jsonb, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            translations = EXCLUDED.translations,
+            updated_at = NOW();
+        `, [JSON.stringify(translations)]);
+      } catch (_) {}
+    }
+
+    return NextResponse.json({ success: true, message: 'Languages synchronized successfully' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+function osEnsureDir(dirPath: string) {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
   }
 }
 
@@ -54248,105 +54886,213 @@ export async function POST(req: NextRequest) {
 
 ```
 
+## File: `apps/web/src/app/api/admin/storage/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { getStorageSettings, saveStorageSettings, DEFAULT_STORAGE_CONFIG } from '@/lib/storageService';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+export async function GET() {
+  try {
+    const settings = await getStorageSettings();
+    return NextResponse.json(
+      { success: true, settings },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
+  } catch (err: any) {
+    return NextResponse.json({ success: true, settings: DEFAULT_STORAGE_CONFIG });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const updated = await saveStorageSettings(body);
+    return NextResponse.json({ success: true, settings: updated, message: 'Storage settings saved successfully' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/api/admin/storage/test/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { uploadToSupabaseS3, StorageConfig } from '@/lib/storageService';
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+export async function POST(req: NextRequest) {
+  try {
+    const body: StorageConfig['supabase'] = await req.json();
+
+    if (!body.endpoint || !body.endpoint.startsWith('http')) {
+      return NextResponse.json({ success: false, error: 'Valid S3 endpoint URL is required.' }, { status: 400 });
+    }
+    if (!body.accessKeyId || !body.accessKeyId.trim()) {
+      return NextResponse.json({ success: false, error: 'Access Key ID is required.' }, { status: 400 });
+    }
+    if (!body.secretAccessKey || !body.secretAccessKey.trim()) {
+      return NextResponse.json({ success: false, error: 'Secret Access Key is required.' }, { status: 400 });
+    }
+    if (!body.bucket || !body.bucket.trim()) {
+      return NextResponse.json({ success: false, error: 'Bucket name is required.' }, { status: 400 });
+    }
+
+    // Run S3 probe test by writing and reading a lightweight healthcheck key
+    const testBuffer = Buffer.from('Zecratary S3 Connection Verification OK', 'utf-8');
+    const testKey = `_connection_test_${Date.now()}.txt`;
+
+    const publicUrl = await uploadToSupabaseS3(testBuffer, testKey, 'text/plain', body);
+
+    return NextResponse.json({
+      success: true,
+      message: `Successfully connected to Supabase S3! Bucket "${body.bucket}" is accessible.`,
+      verifiedUrl: publicUrl,
+    });
+  } catch (err: any) {
+    return NextResponse.json({
+      success: false,
+      error: err.message || 'Connection test failed. Please verify your S3 Endpoint, Bucket, and Secret Access Key.',
+    }, { status: 400 });
+  }
+}
+
+```
+
 ## File: `apps/web/src/app/api/admin/languages/route.ts`
 ```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
+
 export const dynamic = 'force-dynamic';
-import { NextResponse } from 'next/server';
-import { Pool } from 'pg';
+export const revalidate = 0;
 
-let pool: Pool | null = null;
+const DEFAULT_SYSTEM_LANGUAGES = [
+  { id: 'lang_en', code: 'en', name: 'English', native: 'English', flag: '🇺🇸', direction: 'ltr', status: 'active', is_default: true, file: 'en.ts' },
+  { id: 'lang_es', code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', direction: 'ltr', status: 'active', is_default: false, file: 'es.ts' },
+  { id: 'lang_fr', code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', direction: 'ltr', status: 'active', is_default: false, file: 'fr.ts' },
+  { id: 'lang_th', code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', direction: 'ltr', status: 'active', is_default: false, file: 'th.ts' }
+];
 
-function getDbPool() {
-  if (!pool) {
-    const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-    if (connectionString) {
-      pool = new Pool({ connectionString });
-    }
+function getLocalFileLanguages(): any[] | null {
+  for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
+    try {
+      const p = path.join(process.cwd(), rel);
+      if (fs.existsSync(p)) {
+        const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+        const langs = raw.supportedLanguages || raw.supported_languages;
+        if (Array.isArray(langs) && langs.length > 0) return langs;
+      }
+    } catch (_) {}
   }
-  return pool;
+  return null;
 }
 
-async function initTranslationsTable(client: any) {
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS app_translations (
-      lang_code VARCHAR(10) PRIMARY KEY,
-      lang_name VARCHAR(100) NOT NULL,
-      dictionary JSONB NOT NULL DEFAULT '{}',
-      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-}
-
-export async function GET(request: Request) {
+export async function GET() {
   try {
-    const { searchParams } = new URL(request.url);
-    const code = searchParams.get('code');
-    const db = getDbPool();
+    let languages = null;
+    let translations = {};
 
-    if (db) {
-      const client = await db.connect();
-      try {
-        await initTranslationsTable(client);
-        if (code) {
-          const res = await client.query('SELECT dictionary FROM app_translations WHERE lang_code = $1', [code.toLowerCase().trim()]);
-          const dictionary = res.rows[0]?.dictionary || {};
-          return NextResponse.json({ success: true, code, dictionary });
-        } else {
-          const res = await client.query('SELECT lang_code, lang_name, dictionary FROM app_translations');
-          const records: Record<string, any> = {};
-          res.rows.forEach((r: any) => { records[r.lang_code] = r.dictionary; });
-          return NextResponse.json({ success: true, translations: records });
+    try {
+      const res: any = await query(`
+        SELECT supported_languages, settings, translations FROM admin_settings 
+        WHERE id = 'primary_settings' OR id = '1' 
+        ORDER BY updated_at DESC LIMIT 1;
+      `);
+      const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+      if (row) {
+        if (row.supported_languages) {
+          const parsed = typeof row.supported_languages === 'string'
+            ? JSON.parse(row.supported_languages)
+            : row.supported_languages;
+          if (Array.isArray(parsed) && parsed.length > 0) languages = parsed;
+        } else if (row.settings) {
+          const s = typeof row.settings === 'string' ? JSON.parse(row.settings) : row.settings;
+          const l = s?.supportedLanguages || s?.supported_languages;
+          if (Array.isArray(l) && l.length > 0) languages = l;
         }
-      } finally {
-        client.release();
+
+        if (row.translations) {
+          translations = typeof row.translations === 'string' ? JSON.parse(row.translations) : row.translations;
+        }
       }
+    } catch (_) {}
+
+    if (!languages) {
+      languages = getLocalFileLanguages() || DEFAULT_SYSTEM_LANGUAGES;
     }
 
-    return NextResponse.json({ success: true, translations: {}, fallback: true });
-  } catch (error: any) {
-    console.error('[API /api/admin/languages GET error]:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { success: true, languages, translations },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
+  } catch (err: any) {
+    return NextResponse.json({ success: true, languages: DEFAULT_SYSTEM_LANGUAGES, translations: {} });
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await request.json();
-    const { code, name, dictionary } = body;
+    const body = await req.json();
+    const languages = Array.isArray(body) ? body : (body.languages || body.supportedLanguages);
+    const translations = body.translations;
 
-    if (!code) {
-      return NextResponse.json({ success: false, error: 'Language code is required' }, { status: 400 });
-    }
-
-    const cleanCode = code.toLowerCase().trim();
-    const cleanName = (name || cleanCode).trim();
-    const dictObj = dictionary || {};
-
-    const db = getDbPool();
-    if (db) {
-      const client = await db.connect();
-      try {
-        await initTranslationsTable(client);
-        await client.query(`
-          INSERT INTO app_translations (lang_code, lang_name, dictionary, updated_at)
-          VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-          ON CONFLICT (lang_code) 
-          DO UPDATE SET 
-            lang_name = EXCLUDED.lang_name,
-            dictionary = EXCLUDED.dictionary,
-            updated_at = CURRENT_TIMESTAMP;
-        `, [cleanCode, cleanName, JSON.stringify(dictObj)]);
-        
-        return NextResponse.json({ success: true, message: `Translations for ${cleanCode} stored in PostgreSQL` });
-      } finally {
-        client.release();
+    if (Array.isArray(languages)) {
+      // Update Dual-Path Server JSON Files
+      for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
+        try {
+          const p = path.join(process.cwd(), rel);
+          osEnsureDir(path.dirname(p));
+          let existing: any = {};
+          if (fs.existsSync(p)) {
+            try { existing = JSON.parse(fs.readFileSync(p, 'utf8')); } catch (_) {}
+          }
+          existing.supportedLanguages = languages;
+          existing.supported_languages = languages;
+          fs.writeFileSync(p, JSON.stringify(existing, null, 2), 'utf8');
+        } catch (_) {}
       }
+
+      // Update PostgreSQL / MySQL
+      try {
+        await query(`
+          INSERT INTO admin_settings (id, supported_languages, updated_at)
+          VALUES ('primary_settings', $1::jsonb, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            supported_languages = EXCLUDED.supported_languages,
+            updated_at = NOW();
+        `, [JSON.stringify(languages)]);
+      } catch (_) {}
     }
 
-    return NextResponse.json({ success: true, message: 'Processed without PostgreSQL connection' });
-  } catch (error: any) {
-    console.error('[API /api/admin/languages POST error]:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    if (translations && typeof translations === 'object') {
+      try {
+        await query(`
+          INSERT INTO admin_settings (id, translations, updated_at)
+          VALUES ('primary_settings', $1::jsonb, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            translations = EXCLUDED.translations,
+            updated_at = NOW();
+        `, [JSON.stringify(translations)]);
+      } catch (_) {}
+    }
+
+    return NextResponse.json({ success: true, message: 'Languages synchronized successfully' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+function osEnsureDir(dirPath: string) {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
   }
 }
 
@@ -58484,21 +59230,36 @@ export async function POST(req: Request) {
 ## File: `apps/web/src/app/api/recipes/save-remote-image/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { downloadAndSaveImage } from '@/lib/imageDownloader';
+import { uploadMediaFile } from '@/lib/storageService';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const imageUrl = body.imageUrl || body.url || body.image;
+    const { imageUrl, filename } = await req.json();
 
-    if (!imageUrl || typeof imageUrl !== 'string') {
-      return NextResponse.json({ success: false, error: 'Valid imageUrl required' }, { status: 400 });
+    if (!imageUrl || !imageUrl.startsWith('http')) {
+      return NextResponse.json({ success: false, error: 'Valid image URL is required' }, { status: 400 });
     }
 
-    const localUrl = await downloadAndSaveImage(imageUrl, 'scraped');
-    return NextResponse.json({ success: true, localUrl });
+    const response = await fetch(imageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!response.ok) {
+      return NextResponse.json({ success: false, error: `Failed to fetch remote image: HTTP ${response.status}` }, { status: 400 });
+    }
+
+    const contentType = response.headers.get('content-type') || 'image/jpeg';
+    const buffer = Buffer.from(await response.arrayBuffer());
+
+    const savedUrl = await uploadMediaFile(buffer, filename || 'scraped.jpg', contentType);
+
+    return NextResponse.json({ success: true, localUrl: savedUrl, url: savedUrl });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -66489,132 +67250,384 @@ export default CATEGORIES;
 
 ## File: `apps/web/src/components/LanguageProvider.tsx`
 ```typescript
-// Global Language Localization Provider
-// GitHub: cygnusorbit/zecratary
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useTransition } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+
+export interface SupportedLanguage {
+  id?: string;
+  code: string;
+  name: string;
+  native?: string;
+  flag?: string;
+  direction?: 'ltr' | 'rtl';
+  status?: string;
+  is_default?: boolean;
+  isDefault?: boolean;
+  file?: string;
+}
 
 export interface LanguageContextType {
-  language: string;
-  setLanguage: (lang: string) => void;
   locale: string;
-  setLocale: (loc: string) => void;
-  version: string | number;
+  currentLanguage?: string;
+  language?: string;
+  setLocale: (locale: string) => void;
+  setLanguage?: (lang: string) => void;
+  changeLanguage?: (lang: string) => void;
   t: (key: string, fallback?: string) => string;
-  translations: Record<string, string>;
-  availableLanguages: Array<{ code: string; name: string; nativeName?: string; flag?: string }>;
-  isLoaded: boolean;
+  version: number;
+  availableLanguages: SupportedLanguage[];
+  languages: SupportedLanguage[];
+  direction: 'ltr' | 'rtl';
   [key: string]: any;
 }
 
-const DEFAULT_LANGUAGES = [
-  { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸' },
-  { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸' },
-  { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷' },
-  { code: 'de', name: 'German', nativeName: 'Deutsch', flag: '🇩🇪' },
-  { code: 'it', name: 'Italian', nativeName: 'Italiano', flag: '🇮🇹' },
-  { code: 'pt', name: 'Portuguese', nativeName: 'Português', flag: '🇵🇹' },
-  { code: 'zh', name: 'Chinese', nativeName: '中文', flag: '🇨🇳' },
-  { code: 'ja', name: 'Japanese', nativeName: '日本語', flag: '🇯🇵' },
-  { code: 'ko', name: 'Korean', nativeName: '한국어', flag: '🇰🇷' },
-  { code: 'th', name: 'Thai', nativeName: 'ไทย', flag: '🇹🇭' },
+export const DEFAULT_SYSTEM_LANGUAGES: SupportedLanguage[] = [
+  { id: 'lang_en', code: 'en', name: 'English', native: 'English', flag: '🇺🇸', direction: 'ltr', status: 'active', is_default: true, file: 'en.ts' },
+  { id: 'lang_es', code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', direction: 'ltr', status: 'active', is_default: false, file: 'es.ts' },
+  { id: 'lang_fr', code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', direction: 'ltr', status: 'active', is_default: false, file: 'fr.ts' },
+  { id: 'lang_th', code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', direction: 'ltr', status: 'active', is_default: false, file: 'th.ts' },
 ];
 
+export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
+  en: {
+    dashboard: 'Dashboard',
+    cookbooks: 'Cookbooks',
+    savedRecipes: 'Saved Recipes',
+    aiChef: 'AI Assistant',
+    manualEntry: 'Add Recipe',
+    importRecipe: 'Import Recipe',
+    pantryInventory: 'Pantry Inventory',
+    mealPlanner: 'Meal Planner',
+    templates: 'Meal Blueprints',
+    shoppingList: 'Shopping List',
+    tokenPortal: 'Token Portal',
+    walletPortal: 'Store Wallet',
+    subscriptions: 'Subscriptions',
+    billing: 'Billing History',
+    adminAccess: 'Admin Access',
+    adminOverview: 'Overview',
+    pageBuilder: 'Page Builder',
+    users: 'User Accounts',
+    plans: 'Subscription Plans',
+    payments: 'Payment Gateway',
+    storage: 'Storage Settings',
+    tokens: 'Token Pricing',
+    wallet: 'Wallet Settings',
+    notifications: 'Notifications',
+    languages: 'Languages',
+    languageSettings: 'Language Settings',
+    aiModels: 'AI Engine',
+    recipeTypes: 'Recipe Types',
+    categories: 'Categories',
+    socialLogin: 'Social Login',
+    database: 'Database',
+    switchToDayMode: 'Day Mode',
+    switchToDarkMode: 'Dark Mode',
+    profile: 'User Profile',
+    logOut: 'Log Out',
+    signIn: 'Sign In',
+    availableLanguages: 'Languages',
+    manageLanguages: 'Configure Languages',
+    selectLanguage: 'Select Language',
+    tokenAndWallet: 'Token & Wallet Balance',
+    availableTokens: 'Available Tokens',
+    walletCredits: 'Wallet Credits',
+    manageWallet: 'Top Up & Wallet Portal',
+    manageTokens: 'Token Bundles & Quotas',
+    noNotifications: 'No unread notifications',
+    settings: 'Settings',
+    createSection: 'Create',
+    manageSection: 'Manage',
+    planSection: 'Plan',
+    financeSection: 'Finance & Hub'
+  },
+  th: {
+    dashboard: 'แดชบอร์ด',
+    cookbooks: 'ตำราอาหาร',
+    savedRecipes: 'สูตรอาหารที่บันทึกไว้',
+    aiChef: 'ผู้ช่วยเชฟ AI',
+    manualEntry: 'เพิ่มสูตรอาหาร',
+    importRecipe: 'นำเข้าสูตรอาหาร',
+    pantryInventory: 'คลังวัตถุดิบ',
+    mealPlanner: 'วางแผนมื้ออาหาร',
+    templates: 'แบบแปลนมื้ออาหาร',
+    shoppingList: 'รายการซื้อของ',
+    tokenPortal: 'พอร์ทัลโทเค็น',
+    walletPortal: 'กระเป๋าเงินระบบ',
+    subscriptions: 'แผนการสมัครสมาชิก',
+    billing: 'ประวัติการชำระเงิน',
+    adminAccess: 'การจัดการระบบ',
+    adminOverview: 'ภาพรวมระบบ',
+    pageBuilder: 'สร้างหน้าเว็บ',
+    users: 'บัญชีผู้ใช้งาน',
+    plans: 'แผนแพ็กเกจ',
+    payments: 'ช่องทางชำระเงิน',
+    storage: 'การตั้งค่าพื้นที่จัดเก็บ',
+    tokens: 'กำหนดราคาโทเค็น',
+    wallet: 'ตั้งค่ากระเป๋าเงิน',
+    notifications: 'การแจ้งเตือน',
+    languages: 'ภาษา',
+    languageSettings: 'การตั้งค่าภาษา',
+    aiModels: 'ระบบโมเดล AI',
+    recipeTypes: 'ประเภทสูตรอาหาร',
+    categories: 'หมวดหมู่วัตถุดิบ',
+    socialLogin: 'เข้าสู่ระบบด้วยโซเชียล',
+    database: 'ฐานข้อมูล',
+    switchToDayMode: 'เปลี่ยนเป็นโหมดกลางวัน',
+    switchToDarkMode: 'เปลี่ยนเป็นโหมดกลางคืน',
+    profile: 'โปรไฟล์ผู้ใช้',
+    logOut: 'ออกจากระบบ',
+    signIn: 'เข้าสู่ระบบ',
+    availableLanguages: 'ภาษาที่รองรับ',
+    manageLanguages: 'จัดการภาษา',
+    selectLanguage: 'เลือกภาษา',
+    tokenAndWallet: 'ยอดโทเค็นและกระเป๋าเงิน',
+    availableTokens: 'โทเค็นคงเหลือ',
+    walletCredits: 'ยอดเงินในกระเป๋า',
+    manageWallet: 'เติมเงินและจัดการกระเป๋า',
+    manageTokens: 'แพ็กเกจโทเค็น',
+    noNotifications: 'ไม่มีการแจ้งเตือนใหม่',
+    settings: 'ตั้งค่า',
+    createSection: 'สร้างสรรค์',
+    manageSection: 'จัดการ',
+    planSection: 'วางแผน',
+    financeSection: 'การเงินและพอร์ทัล'
+  },
+  es: {
+    dashboard: 'Panel de Control',
+    cookbooks: 'Recetarios',
+    savedRecipes: 'Recetas Guardadas',
+    aiChef: 'Asistente IA',
+    manualEntry: 'Añadir Receta',
+    importRecipe: 'Importar Receta',
+    pantryInventory: 'Despensa',
+    mealPlanner: 'Planificador de Comidas',
+    templates: 'Plantillas de Menú',
+    shoppingList: 'Lista de Compras',
+    tokenPortal: 'Portal de Tokens',
+    walletPortal: 'Billetera',
+    subscriptions: 'Suscripciones',
+    billing: 'Historial de Facturación',
+    adminAccess: 'Acceso de Administrador',
+    adminOverview: 'Resumen',
+    pageBuilder: 'Creador de Páginas',
+    users: 'Cuentas de Usuario',
+    plans: 'Planes de Suscripción',
+    payments: 'Pasarela de Pago',
+    storage: 'Configuración de Almacenamiento',
+    tokens: 'Precios de Tokens',
+    wallet: 'Ajustes de Billetera',
+    notifications: 'Notificaciones',
+    languages: 'Idiomas',
+    languageSettings: 'Ajustes de Idioma',
+    aiModels: 'Motor de IA',
+    recipeTypes: 'Tipos de Receta',
+    categories: 'Categorías',
+    socialLogin: 'Inicio Social',
+    database: 'Base de Datos',
+    switchToDayMode: 'Modo Día',
+    switchToDarkMode: 'Modo Oscuro',
+    profile: 'Perfil de Usuario',
+    logOut: 'Cerrar Sesión',
+    signIn: 'Iniciar Sesión',
+    availableLanguages: 'Idiomas Disponibles',
+    manageLanguages: 'Configurar Idiomas',
+    selectLanguage: 'Seleccionar Idioma',
+    tokenAndWallet: 'Balance de Tokens y Billetera',
+    availableTokens: 'Tokens Disponibles',
+    walletCredits: 'Crédito de Billetera',
+    manageWallet: 'Recargar Billetera',
+    manageTokens: 'Paquetes de Tokens',
+    noNotifications: 'Sin notificaciones pendientes',
+    settings: 'Ajustes',
+    createSection: 'Crear',
+    manageSection: 'Gestionar',
+    planSection: 'Planificar',
+    financeSection: 'Finanzas'
+  },
+  fr: {
+    dashboard: 'Tableau de bord',
+    cookbooks: 'Livres de Cuisine',
+    savedRecipes: 'Recettes Enregistrées',
+    aiChef: 'Assistant IA',
+    manualEntry: 'Ajouter une Recette',
+    importRecipe: 'Importer une Recette',
+    pantryInventory: 'Garde-manger',
+    mealPlanner: 'Planificateur de repas',
+    templates: 'Modèles de repas',
+    shoppingList: 'Liste de courses',
+    tokenPortal: 'Portail de Jetons',
+    walletPortal: 'Portefeuille',
+    subscriptions: 'Abonnements',
+    billing: 'Facturation',
+    adminAccess: 'Accès Administrateur',
+    adminOverview: 'Aperçu',
+    pageBuilder: 'Créateur de pages',
+    users: 'Comptes utilisateurs',
+    plans: 'Plans d’abonnement',
+    payments: 'Passerelle de paiement',
+    storage: 'Paramètres de stockage',
+    tokens: 'Tarification des jetons',
+    wallet: 'Paramètres du portefeuille',
+    notifications: 'Notifications',
+    languages: 'Langues',
+    languageSettings: 'Gestion des langues',
+    aiModels: 'Moteur IA',
+    recipeTypes: 'Types de recettes',
+    categories: 'Catégories',
+    socialLogin: 'Connexion sociale',
+    database: 'Base de données',
+    switchToDayMode: 'Mode Jour',
+    switchToDarkMode: 'Mode Sombre',
+    profile: 'Profil Utilisateur',
+    logOut: 'Déconnexion',
+    signIn: 'Connexion',
+    availableLanguages: 'Langues disponibles',
+    manageLanguages: 'Configurer les langues',
+    selectLanguage: 'Choisir la langue',
+    tokenAndWallet: 'Solde Jetons & Portefeuille',
+    availableTokens: 'Jetons disponibles',
+    walletCredits: 'Crédits portefeuille',
+    manageWallet: 'Recharger le portefeuille',
+    manageTokens: 'Forfaits de jetons',
+    noNotifications: 'Aucune notification',
+    settings: 'Paramètres',
+    createSection: 'Créer',
+    manageSection: 'Gérer',
+    planSection: 'Planifier',
+    financeSection: 'Finance'
+  }
+};
+
 export const LanguageContext = createContext<LanguageContextType>({
-  language: 'en',
-  setLanguage: () => {},
   locale: 'en',
+  currentLanguage: 'en',
+  language: 'en',
   setLocale: () => {},
-  version: '2.1.0',
-  t: (key: string, fallback?: string) => fallback || key,
-  translations: {},
-  availableLanguages: DEFAULT_LANGUAGES,
-  isLoaded: true,
+  setLanguage: () => {},
+  changeLanguage: () => {},
+  t: (key, fallback) => fallback || key,
+  version: 1,
+  availableLanguages: DEFAULT_SYSTEM_LANGUAGES,
+  languages: DEFAULT_SYSTEM_LANGUAGES,
+  direction: 'ltr',
 });
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [language, setLanguageState] = useState<string>('en');
-  const [translations, setTranslations] = useState<Record<string, string>>({});
-  const [availableLanguages, setAvailableLanguages] = useState(DEFAULT_LANGUAGES);
-  const [isLoaded, setIsLoaded] = useState<boolean>(true);
-  const [, startTransition] = useTransition();
+  const [currentLocale, setCurrentLocale] = useState<string>('en');
+  const [languagesList, setLanguagesList] = useState<SupportedLanguage[]>(DEFAULT_SYSTEM_LANGUAGES);
+  const [customTranslations, setCustomTranslations] = useState<Record<string, Record<string, string>>>({});
+  const [version, setVersion] = useState<number>(1);
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const match = document.cookie.match(/(?:^|; )zecratary_lang=([^;]*)/);
-      const saved = match ? decodeURIComponent(match[1]) : (navigator.language?.split('-')[0] || 'en');
-      setLanguageState(saved);
-
-      fetch('/api/admin/language')
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (data?.languages && Array.isArray(data.languages) && data.languages.length > 0) {
-            setAvailableLanguages(data.languages);
-          }
-          if (data?.translations && typeof data.translations === 'object') {
-            setTranslations(data.translations);
-          }
-        })
-        .catch(() => {});
-    }
+  const fetchLanguagesAndPhrases = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/languages?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.languages) && data.languages.length > 0) {
+          setLanguagesList(data.languages);
+        }
+        if (data.translations && typeof data.translations === 'object') {
+          setCustomTranslations(data.translations);
+        }
+      }
+    } catch (_) {}
   }, []);
 
-  const setLanguage = (newLang: string) => {
-    startTransition(() => {
-      setLanguageState(newLang);
-      if (typeof window !== 'undefined') {
-        document.cookie = `zecratary_lang=${encodeURIComponent(newLang)}; path=/; max-age=31536000; SameSite=Lax`;
-        document.documentElement.lang = newLang;
-      }
-    });
-  };
+  useEffect(() => {
+    let saved = 'en';
+    if (typeof window !== 'undefined') {
+      try {
+        saved = localStorage.getItem('zecratary_locale') || 'en';
+      } catch (_) {}
+    }
+    const cleanLocale = saved.toLowerCase().trim();
+    setCurrentLocale(cleanLocale);
 
-  const t = (key: string, fallback?: string): string => {
-    if (translations[key]) return translations[key];
-    if (fallback !== undefined) return fallback;
-    return key
-      .replace(/([A-Z])/g, ' $1')
-      .replace(/_/g, ' ')
-      .replace(/^./, (str) => str.toUpperCase())
-      .trim();
-  };
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = cleanLocale;
+    }
 
-  const contextValue: LanguageContextType = {
-    language,
-    setLanguage,
-    locale: language,
-    setLocale: setLanguage,
-    version: '2.1.0',
-    t,
-    translations,
-    availableLanguages,
-    isLoaded,
-  };
+    fetchLanguagesAndPhrases();
+
+    const handleSync = () => fetchLanguagesAndPhrases();
+    window.addEventListener('zecratary_languages_updated', handleSync);
+    window.addEventListener('zecratary_dictionary_updated', handleSync);
+    window.addEventListener('storage', handleSync);
+    window.addEventListener('focus', handleSync);
+
+    return () => {
+      window.removeEventListener('zecratary_languages_updated', handleSync);
+      window.removeEventListener('zecratary_dictionary_updated', handleSync);
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('focus', handleSync);
+    };
+  }, [fetchLanguagesAndPhrases]);
+
+  const handleSetLocale = useCallback((newLocale: string) => {
+    if (!newLocale) return;
+    const clean = newLocale.toLowerCase().trim();
+    setCurrentLocale(clean);
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('zecratary_locale', clean);
+        if (typeof document !== 'undefined') {
+          document.documentElement.lang = clean;
+          const matched = languagesList.find(l => (l.code || '').toLowerCase() === clean);
+          const dir = matched?.direction || (clean === 'ar' || clean === 'he' ? 'rtl' : 'ltr');
+          document.documentElement.dir = dir;
+        }
+      } catch (_) {}
+      window.dispatchEvent(new CustomEvent('zecratary_locale_changed', { detail: { locale: clean } }));
+      window.dispatchEvent(new Event('zecratary_languages_updated'));
+    }
+    setVersion(v => v + 1);
+  }, [languagesList]);
+
+  const t = useCallback((key: string, fallback?: string): string => {
+    if (!key) return fallback || '';
+    const lang = currentLocale.toLowerCase().trim();
+
+    if (customTranslations[lang] && customTranslations[lang][key]) {
+      return customTranslations[lang][key];
+    }
+    if (BUILTIN_DICTIONARIES[lang] && BUILTIN_DICTIONARIES[lang][key]) {
+      return BUILTIN_DICTIONARIES[lang][key];
+    }
+    if (BUILTIN_DICTIONARIES['en'] && BUILTIN_DICTIONARIES['en'][key]) {
+      return BUILTIN_DICTIONARIES['en'][key];
+    }
+    return fallback !== undefined ? fallback : key;
+  }, [currentLocale, customTranslations]);
+
+  const activeDirection: 'ltr' | 'rtl' = useMemo(() => {
+    const matched = languagesList.find(l => (l.code || '').toLowerCase() === currentLocale);
+    return (matched?.direction === 'rtl' || currentLocale === 'ar' || currentLocale === 'he') ? 'rtl' : 'ltr';
+  }, [languagesList, currentLocale]);
 
   return (
-    <LanguageContext.Provider value={contextValue}>
+    <LanguageContext.Provider value={{
+      locale: currentLocale,
+      currentLanguage: currentLocale,
+      language: currentLocale,
+      setLocale: handleSetLocale,
+      setLanguage: handleSetLocale,
+      changeLanguage: handleSetLocale,
+      t,
+      version,
+      availableLanguages: languagesList,
+      languages: languagesList,
+      direction: activeDirection,
+    }}>
       {children}
     </LanguageContext.Provider>
   );
 }
 
 export function useTranslation() {
-  const context = useContext(LanguageContext);
-  if (!context) {
-    return {
-      language: 'en',
-      setLanguage: () => {},
-      locale: 'en',
-      setLocale: () => {},
-      version: '2.1.0',
-      t: (key: string, fallback?: string) => fallback || key,
-      translations: {},
-      availableLanguages: DEFAULT_LANGUAGES,
-      isLoaded: true,
-    };
-  }
-  return context;
+  return useContext(LanguageContext);
 }
 
 export default LanguageProvider;
@@ -66877,7 +67890,7 @@ export function useTheme() {
 ```typescript
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
@@ -66886,11 +67899,11 @@ import {
   ShieldCheck, CreditCard, Tag, Utensils, Settings, LogOut, 
   Menu, X, Wallet, Languages, Cpu, Moon, Sun, Key, Coins, 
   Bell, BellRing, User as UserIcon, Plus, ChevronDown, ChevronRight, 
-  Layers, Check, Database, Receipt, Globe
+  Layers, Check, Database, Receipt, Globe, HardDrive 
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON } from '@/lib/siteConfig';
-import { useTranslation } from '@/components/LanguageProvider';
+import { useTranslation, SupportedLanguage, DEFAULT_SYSTEM_LANGUAGES } from '@/components/LanguageProvider';
 
 interface InAppNotification {
   id: string;
@@ -66912,7 +67925,7 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   JPY: '¥'
 };
 
-const LANGUAGE_FLAG_MAP: Record<string, string> = {
+const DEFAULT_FLAG_MAP: Record<string, string> = {
   en: '🇺🇸',
   es: '🇪🇸',
   fr: '🇫🇷',
@@ -66924,17 +67937,53 @@ const LANGUAGE_FLAG_MAP: Record<string, string> = {
   ko: '🇰🇷',
   pt: '🇵🇹',
   ru: '🇷🇺',
-  ar: '🇸🇦',
-  nl: '🇳🇱',
-  hi: '🇮🇳',
-  vi: '🇻🇳',
-  id: '🇮🇩',
-  tr: '🇹🇷'
+  ar: '🇸🇦'
 };
 
-const getLanguageFlag = (code: string): string => {
-  if (!code) return '🌐';
-  return LANGUAGE_FLAG_MAP[code.toLowerCase().trim()] || '🌐';
+const getLanguageFlag = (code?: string, explicitFlag?: string): string => {
+  if (explicitFlag && explicitFlag !== '🌐') return explicitFlag;
+  if (!code || typeof code !== 'string') return '🌐';
+  return DEFAULT_FLAG_MAP[code.toLowerCase().trim()] || '🌐';
+};
+
+const normalizeLanguageItem = (item: any): SupportedLanguage => {
+  if (!item) {
+    return { id: 'lang_en', code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active', is_default: true };
+  }
+  if (typeof item === 'string') {
+    const code = item.toLowerCase().trim();
+    return {
+      id: `lang_${code}`,
+      code,
+      name: code.toUpperCase(),
+      native: code.toUpperCase(),
+      flag: getLanguageFlag(code),
+      status: 'active',
+      is_default: code === 'en'
+    };
+  }
+  const rawCode = item.code || item.locale || item.lang || item.id || 'en';
+  const code = typeof rawCode === 'string' ? rawCode.toLowerCase().trim() : 'en';
+  const name = item.name || item.label || code.toUpperCase();
+  const native = item.native || item.nativeName || name;
+  const flag = getLanguageFlag(code, item.flag);
+  const status = typeof item.status === 'string' ? item.status.toLowerCase().trim() : 'active';
+  return {
+    id: item.id || `lang_${code}`,
+    code,
+    name,
+    native,
+    flag,
+    direction: item.direction || (code === 'ar' || code === 'he' ? 'rtl' : 'ltr'),
+    status: status || 'active',
+    is_default: Boolean(item.is_default || item.isDefault)
+  };
+};
+
+const isCodeMatch = (item: any, target: string): boolean => {
+  if (!item || !target) return false;
+  const itemCode = typeof item === 'string' ? item : (item.code || item.locale || item.lang || '');
+  return typeof itemCode === 'string' && itemCode.toLowerCase().trim() === target.toLowerCase().trim();
 };
 
 const isImageIcon = (icon?: unknown): icon is string =>
@@ -66946,11 +67995,12 @@ const isImageIcon = (icon?: unknown): icon is string =>
   );
 
 export default function Sidebar() {
-  // 1. ALL REACT HOOKS UNCONDITIONALLY AT THE TOP LEVEL (REACT 19 COMPLIANT)
   const pathname = usePathname() || '';
   const langContext = useTranslation();
   const t = langContext?.t || ((k: string, fb?: string) => fb || k);
-  const currentLanguage = (langContext as any)?.currentLanguage || (langContext as any)?.locale || (langContext as any)?.language || 'en';
+
+  const rawLang = (langContext as any)?.currentLanguage || (langContext as any)?.locale || (langContext as any)?.language || 'en';
+  const currentLanguage = typeof rawLang === 'string' && rawLang.trim() ? rawLang.trim().toLowerCase() : 'en';
   const changeLanguage = (langContext as any)?.changeLanguage || (langContext as any)?.setLocale || (langContext as any)?.setLanguage || (() => {});
 
   const [mounted, setMounted] = useState<boolean>(false);
@@ -66960,6 +68010,9 @@ export default function Sidebar() {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
+
+  // Dynamic Languages directly synced with /admin/language
+  const [availableLanguages, setAvailableLanguages] = useState<SupportedLanguage[]>(DEFAULT_SYSTEM_LANGUAGES);
 
   // Accordion Sections State
   const [openSections, setOpenSections] = useState<{
@@ -66982,7 +68035,7 @@ export default function Sidebar() {
   const [langDropdownOpen, setLangDropdownOpen] = useState<boolean>(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState<boolean>(false);
 
-  // Live Balances & Telemetry
+  // Balances
   const [tokenBalance, setTokenBalance] = useState<number>(50);
   const [walletBalance, setWalletBalance] = useState<number>(0.00);
   const [currencySymbol, setCurrencySymbol] = useState<string>('$');
@@ -66990,7 +68043,6 @@ export default function Sidebar() {
 
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Route Suppression Checks
   const isAuthRoute = Boolean(
     pathname === '/login' ||
     pathname === '/register' ||
@@ -67006,7 +68058,6 @@ export default function Sidebar() {
     pathname === '/index'
   );
 
-  // Layout Clearance Token Synchronization
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
@@ -67030,6 +68081,25 @@ export default function Sidebar() {
     window.addEventListener('resize', updateLayoutMetrics);
     return () => window.removeEventListener('resize', updateLayoutMetrics);
   }, [isAuthRoute, isHomePage, isCollapsed]);
+
+  // Synchronize available system languages from /api/admin/languages & Context
+  const syncLanguages = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/languages?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data.languages) ? data.languages : [];
+        if (list.length > 0) {
+          setAvailableLanguages(list.map(normalizeLanguageItem));
+          return;
+        }
+      }
+    } catch (_) {}
+
+    if (Array.isArray((langContext as any)?.availableLanguages) && (langContext as any).availableLanguages.length > 0) {
+      setAvailableLanguages((langContext as any).availableLanguages.map(normalizeLanguageItem));
+    }
+  }, [langContext]);
 
   const syncUserState = useCallback(() => {
     try {
@@ -67068,7 +68138,6 @@ export default function Sidebar() {
     } catch (_) {}
   }, []);
 
-  // Route-Aware Auto-Expansion
   useEffect(() => {
     if (!pathname) return;
     if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
@@ -67087,14 +68156,23 @@ export default function Sidebar() {
   useEffect(() => {
     setMounted(true);
     syncUserState();
+    syncLanguages();
 
     const handleSync = () => syncUserState();
+    const handleLangSync = () => syncLanguages();
+
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('zecratary_site_settings_changed', handleSync);
     window.addEventListener('zecratary_theme_mode_changed', handleSync);
     window.addEventListener('zecratary_wallet_updated', handleSync);
     window.addEventListener('zecratary_tokens_updated', handleSync);
+
+    // Dynamic Language Synchronization Events from /admin/language
+    window.addEventListener('zecratary_languages_updated', handleLangSync);
+    window.addEventListener('zecratary_locale_changed', handleLangSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleLangSync);
+    window.addEventListener('focus', handleLangSync);
 
     return () => {
       window.removeEventListener('storage', handleSync);
@@ -67103,10 +68181,14 @@ export default function Sidebar() {
       window.removeEventListener('zecratary_theme_mode_changed', handleSync);
       window.removeEventListener('zecratary_wallet_updated', handleSync);
       window.removeEventListener('zecratary_tokens_updated', handleSync);
-    };
-  }, [syncUserState]);
 
-  // Click outside listener for dropdowns
+      window.removeEventListener('zecratary_languages_updated', handleLangSync);
+      window.removeEventListener('zecratary_locale_changed', handleLangSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleLangSync);
+      window.removeEventListener('focus', handleLangSync);
+    };
+  }, [syncUserState, syncLanguages]);
+
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -67166,6 +68248,33 @@ export default function Sidebar() {
     }
   };
 
+  // Only render ACTIVE system languages from /admin/language
+  const activeLanguages = useMemo(() => {
+    const rawList = Array.isArray(availableLanguages) && availableLanguages.length > 0 
+      ? availableLanguages 
+      : DEFAULT_SYSTEM_LANGUAGES;
+    return rawList
+      .map(normalizeLanguageItem)
+      .filter(l => l.status === 'active' || l.status === '');
+  }, [availableLanguages]);
+
+  // Safe Resolution of Active Language Object
+  const currentLangObj = useMemo(() => {
+    const safeLang = typeof currentLanguage === 'string' && currentLanguage ? currentLanguage.toLowerCase().trim() : 'en';
+    const found = activeLanguages.find(l => isCodeMatch(l, safeLang)) || 
+                  availableLanguages.map(normalizeLanguageItem).find(l => isCodeMatch(l, safeLang));
+    
+    if (found) return found;
+    return { 
+      id: `lang_${safeLang}`,
+      code: safeLang, 
+      name: safeLang.toUpperCase(),
+      native: safeLang.toUpperCase(), 
+      flag: getLanguageFlag(safeLang),
+      status: 'active'
+    };
+  }, [activeLanguages, availableLanguages, currentLanguage]);
+
   if (!mounted || isAuthRoute || isHomePage) {
     return null;
   }
@@ -67176,18 +68285,14 @@ export default function Sidebar() {
     currentUser?.email?.includes('admin')
   );
 
-  // ACCURATE ROUTE MATCHER: Eliminates dual-highlighting between /admin and /admin/*
   const isRouteActive = (route: string): boolean => {
     if (!pathname) return false;
     const cleanPath = pathname === '/' ? '/' : pathname.replace(/\/+$/, '');
     const cleanRoute = route === '/' ? '/' : route.replace(/\/+$/, '');
 
-    // Root and Admin Overview require exact match so child modules don't activate them
     if (cleanRoute === '/' || cleanRoute === '/admin') {
       return cleanPath === cleanRoute;
     }
-
-    // Sibling routes require exact match or explicit sub-path boundary ('/route/...')
     return cleanPath === cleanRoute || cleanPath.startsWith(`${cleanRoute}/`);
   };
 
@@ -67376,7 +68481,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* LANGUAGE PICKER */}
+          {/* DYNAMIC TOP BAR LANGUAGE PICKER (SYNCS WITH /admin/language) */}
           <div className="relative">
             <button
               type="button"
@@ -67394,36 +68499,74 @@ export default function Sidebar() {
               }}
               title={t('selectLanguage', 'Select Language')}
             >
-              <span className="text-sm">{getLanguageFlag(currentLanguage || 'en')}</span>
-              <span className="uppercase text-[11px] font-extrabold">{currentLanguage || 'EN'}</span>
+              <span className="text-sm">{currentLangObj.flag || getLanguageFlag(currentLanguage)}</span>
+              <span className="uppercase text-[11px] font-extrabold">{currentLangObj.code}</span>
+              <ChevronDown className="h-3 w-3 opacity-60" />
             </button>
 
             {langDropdownOpen && (
               <div
-                className="absolute right-0 mt-2 w-44 border rounded-2xl p-2 shadow-xl z-50 space-y-1 text-xs"
+                className="absolute right-0 mt-2 w-60 border rounded-2xl p-2.5 shadow-xl z-50 space-y-1.5 text-xs"
                 style={{
                   backgroundColor: 'var(--color-card)',
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text)'
                 }}
               >
-                {Object.keys(LANGUAGE_FLAG_MAP).map((code) => (
-                  <button
-                    key={code}
-                    type="button"
-                    onClick={() => {
-                      if (typeof changeLanguage === 'function') changeLanguage(code);
-                      setLangDropdownOpen(false);
-                    }}
-                    className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg hover:bg-slate-800/40 text-xs font-semibold cursor-pointer transition"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span>{LANGUAGE_FLAG_MAP[code]}</span>
-                      <span className="uppercase">{code}</span>
-                    </span>
-                    {currentLanguage === code && <Check className="h-3.5 w-3.5 text-emerald-400" />}
-                  </button>
-                ))}
+                <div 
+                  className="px-2 py-1 text-[10px] font-black uppercase tracking-wider text-muted-foreground opacity-70 border-b mb-1 flex items-center justify-between"
+                  style={{ borderColor: 'var(--color-border)' }}
+                >
+                  <span>{t('availableLanguages', 'LANGUAGES')}</span>
+                  <span className="text-[10px] font-extrabold text-[var(--color-primary)]">
+                    {activeLanguages.length} ACTIVE
+                  </span>
+                </div>
+
+                <div className="max-h-64 overflow-y-auto space-y-1 pr-0.5">
+                  {activeLanguages.map((rawLang, idx) => {
+                    const lang = normalizeLanguageItem(rawLang);
+                    const isSelected = isCodeMatch(lang.code, currentLanguage);
+                    return (
+                      <button
+                        key={lang.code || `lang_key_${idx}`}
+                        type="button"
+                        onClick={() => {
+                          if (typeof changeLanguage === 'function' && lang.code) {
+                            changeLanguage(lang.code);
+                          }
+                          setLangDropdownOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition ${
+                          isSelected ? 'bg-slate-800/60 shadow-xs' : 'hover:bg-slate-800/30'
+                        }`}
+                        style={isSelected ? { color: 'var(--color-primary)' } : {}}
+                      >
+                        <span className="flex items-center gap-2.5 truncate">
+                          <span className="text-base shrink-0 leading-none">{lang.flag || getLanguageFlag(lang.code)}</span>
+                          <span className="truncate">{lang.native || lang.name}</span>
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                          <span className="text-[10px] font-black uppercase opacity-60">{lang.code}</span>
+                          {isSelected && <Check className="h-3.5 w-3.5 text-emerald-400" />}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {isAdmin && (
+                  <div className="pt-2 border-t mt-1" style={{ borderColor: 'var(--color-border)' }}>
+                    <Link
+                      href="/admin/language"
+                      onClick={() => setLangDropdownOpen(false)}
+                      className="flex items-center justify-between px-2.5 py-1.5 rounded-xl text-[11px] font-bold text-[var(--color-primary)] hover:bg-slate-800/20 transition"
+                    >
+                      <span>{t('manageLanguages', 'Configure Languages')}</span>
+                      <Languages className="h-3.5 w-3.5" />
+                    </Link>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -67559,7 +68702,6 @@ export default function Sidebar() {
         }}
       >
         <div className="flex-1 overflow-y-auto p-3 space-y-4">
-          {/* DASHBOARD LINK */}
           <div>
             <Link
               href="/dashboard"
@@ -67572,7 +68714,7 @@ export default function Sidebar() {
             </Link>
           </div>
 
-          {/* 1. CREATE ACCORDION GROUP */}
+          {/* 1. CREATE GROUP */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -67605,7 +68747,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 2. MANAGE ACCORDION GROUP */}
+          {/* 2. MANAGE GROUP */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -67638,7 +68780,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 3. PLAN ACCORDION GROUP */}
+          {/* 3. PLAN GROUP */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -67671,7 +68813,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 4. FINANCIAL & UTILITY GROUP */}
+          {/* 4. FINANCE & UTILITY GROUP */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -67708,7 +68850,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 5. ADMIN MANAGEMENT ACCORDION GROUP */}
+          {/* 5. ADMIN MANAGEMENT ACCORDION (With Notification Settings directly above Languages) */}
           {isAdmin && (
             <div className="space-y-1 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               {!isCollapsed ? (
@@ -67746,6 +68888,10 @@ export default function Sidebar() {
                     <ShieldCheck className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('payments', 'Payment Gateway')}</span>}
                   </Link>
+                  <Link href="/admin/storage" className={navClass('/admin/storage')} style={navStyle('/admin/storage')} title={t('storage', 'Storage')}>
+                    <HardDrive className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('storage', 'Storage Settings')}</span>}
+                  </Link>
                   <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} style={navStyle('/admin/token-setting')} title={t('tokens', 'Tokens')}>
                     <Coins className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('tokens', 'Token Pricing')}</span>}
@@ -67754,9 +68900,13 @@ export default function Sidebar() {
                     <Wallet className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('wallet', 'Wallet Settings')}</span>}
                   </Link>
-                  <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} style={navStyle('/admin/notification-settings')} title={t('notifications', 'Alerts')}>
+                  <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} style={navStyle('/admin/notification-settings')} title={t('notifications', 'Notifications')}>
                     <BellRing className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('notifications', 'Notifications')}</span>}
+                  </Link>
+                  <Link href="/admin/language" className={navClass('/admin/language')} style={navStyle('/admin/language')} title={t('languages', 'Languages')}>
+                    <Languages className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('languageSettings', 'Languages')}</span>}
                   </Link>
                   <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} style={navStyle('/admin/ai-settings')} title={t('aiModels', 'AI Models')}>
                     <Cpu className="h-4 w-4 shrink-0" />
@@ -67845,14 +68995,17 @@ export default function Sidebar() {
                 <Link href="/admin" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin')} style={navStyle('/admin')}>
                   <Settings className="h-4 w-4" /> <span>{t('adminOverview', 'Admin Overview')}</span>
                 </Link>
-                <Link href="/admin/frontend" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/frontend')} style={navStyle('/admin/frontend')}>
-                  <Globe className="h-4 w-4" /> <span>{t('pageBuilder', 'Page Builder')}</span>
+                <Link href="/admin/notification-settings" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/notification-settings')} style={navStyle('/admin/notification-settings')}>
+                  <BellRing className="h-4 w-4" /> <span>{t('notifications', 'Notifications')}</span>
+                </Link>
+                <Link href="/admin/language" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/language')} style={navStyle('/admin/language')}>
+                  <Languages className="h-4 w-4" /> <span>{t('languageSettings', 'Languages')}</span>
+                </Link>
+                <Link href="/admin/storage" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/storage')} style={navStyle('/admin/storage')}>
+                  <HardDrive className="h-4 w-4" /> <span>{t('storage', 'Storage Settings')}</span>
                 </Link>
                 <Link href="/admin/users" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/users')} style={navStyle('/admin/users')}>
                   <UserPlus className="h-4 w-4" /> <span>{t('users', 'User Accounts')}</span>
-                </Link>
-                <Link href="/admin/payment" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/payment')} style={navStyle('/admin/payment')}>
-                  <ShieldCheck className="h-4 w-4" /> <span>{t('payments', 'Payment Gateway')}</span>
                 </Link>
               </div>
             )}
@@ -68189,8 +69342,24 @@ export default function GlobalThemeSync() {
 
 ## File: `apps/web/src/hooks/useTranslation.ts`
 ```typescript
-export { useTranslation, LanguageProvider, LanguageContext } from '../components/LanguageProvider';
-export { useTranslation as default } from '../components/LanguageProvider';
+'use client';
+
+import { useContext } from 'react';
+import { 
+  LanguageContext, 
+  LanguageProvider, 
+  useTranslation as useOriginalTranslation 
+} from '../components/LanguageProvider';
+
+export { LanguageContext, LanguageProvider };
+export type { LanguageContextType, SupportedLanguage } from '../components/LanguageProvider';
+
+export function useTranslation() {
+  const ctx = useContext(LanguageContext);
+  return ctx || useOriginalTranslation();
+}
+
+export default useTranslation;
 
 ```
 
@@ -69979,6 +71148,245 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
 
 ```
 
+## File: `apps/web/src/lib/storageService.ts`
+```typescript
+// Centralized Media Storage Engine (Localhost & Supabase S3)
+// GitHub: cygnusorbit/zecratary (Constraints 8, 10)
+
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { query } from '@/lib/db';
+
+export interface StorageConfig {
+  provider: 'localhost' | 'supabase';
+  localhost: {
+    uploadDir: string;
+    publicPrefix: string;
+    maxSizeMb: number;
+    allowedTypes?: string;
+  };
+  supabase: {
+    enabled: boolean;
+    endpoint: string;
+    region: string;
+    accessKeyId: string;
+    secretAccessKey: string;
+    bucket: string;
+    publicUrl: string;
+  };
+}
+
+export const DEFAULT_STORAGE_CONFIG: StorageConfig = {
+  provider: 'localhost',
+  localhost: {
+    uploadDir: 'public/uploads/recipes',
+    publicPrefix: '/uploads/recipes',
+    maxSizeMb: 10,
+    allowedTypes: 'image/jpeg, image/png, image/webp, image/gif',
+  },
+  supabase: {
+    enabled: true,
+    endpoint: 'https://tnhrkjtujdfgvwhsuuxb.storage.supabase.co/storage/v1/s3',
+    region: 'us-west-1',
+    accessKeyId: 'f3e0affef5c74972a535153349eb24cc',
+    secretAccessKey: '',
+    bucket: 'recipes',
+    publicUrl: 'https://tnhrkjtujdfgvwhsuuxb.supabase.co/storage/v1/object/public/recipes',
+  },
+};
+
+let memoryStorageConfig: StorageConfig = { ...DEFAULT_STORAGE_CONFIG };
+
+export async function getStorageSettings(): Promise<StorageConfig> {
+  try {
+    const res: any = await query('SELECT storage_settings FROM admin_settings WHERE id = $1;', ['primary_settings']);
+    const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+    if (row && row.storage_settings) {
+      const parsed = typeof row.storage_settings === 'string'
+        ? JSON.parse(row.storage_settings)
+        : row.storage_settings;
+      memoryStorageConfig = {
+        ...DEFAULT_STORAGE_CONFIG,
+        ...parsed,
+        localhost: { ...DEFAULT_STORAGE_CONFIG.localhost, ...(parsed.localhost || {}) },
+        supabase: { ...DEFAULT_STORAGE_CONFIG.supabase, ...(parsed.supabase || {}) },
+      };
+      return memoryStorageConfig;
+    }
+  } catch (_) {}
+
+  // Fallback to local server JSON store
+  try {
+    const jsonPath = path.join(process.cwd(), 'data', 'admin_settings.json');
+    if (fs.existsSync(jsonPath)) {
+      const fileData = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+      if (fileData.storage_settings) {
+        memoryStorageConfig = { ...DEFAULT_STORAGE_CONFIG, ...fileData.storage_settings };
+        return memoryStorageConfig;
+      }
+    }
+  } catch (_) {}
+
+  return memoryStorageConfig;
+}
+
+export async function saveStorageSettings(config: Partial<StorageConfig>): Promise<StorageConfig> {
+  const merged: StorageConfig = {
+    ...memoryStorageConfig,
+    ...config,
+    localhost: { ...memoryStorageConfig.localhost, ...(config.localhost || {}) },
+    supabase: { ...memoryStorageConfig.supabase, ...(config.supabase || {}) },
+  };
+
+  memoryStorageConfig = merged;
+
+  // 1. Commit to PostgreSQL
+  try {
+    await query(`
+      INSERT INTO admin_settings (id, storage_settings, updated_at)
+      VALUES ('primary_settings', $1::jsonb, NOW())
+      ON CONFLICT (id) DO UPDATE SET
+        storage_settings = EXCLUDED.storage_settings,
+        updated_at = NOW();
+    `, [JSON.stringify(merged)]);
+  } catch (err: any) {
+    console.warn('[StorageService] PostgreSQL commit notice:', err.message);
+  }
+
+  // 2. Mirror to Server JSON stores
+  const jsonPaths = [
+    path.join(process.cwd(), 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+  ];
+
+  for (const jp of jsonPaths) {
+    try {
+      const dir = path.dirname(jp);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      let existing = {};
+      if (fs.existsSync(jp)) {
+        try { existing = JSON.parse(fs.readFileSync(jp, 'utf8')); } catch (_) {}
+      }
+      (existing as any).storage_settings = merged;
+      fs.writeFileSync(jp, JSON.stringify(existing, null, 2), 'utf8');
+    } catch (_) {}
+  }
+
+  return merged;
+}
+
+// Native AWS S3 SigV4 Upload Implementation (Zero external dependency bloat)
+export async function uploadToSupabaseS3(
+  buffer: Buffer,
+  filename: string,
+  contentType: string,
+  config: StorageConfig['supabase']
+): Promise<string> {
+  const endpoint = config.endpoint.replace(/\/+$/, '');
+  const bucket = config.bucket.trim();
+  const region = config.region.trim() || 'us-west-1';
+  const accessKey = config.accessKeyId.trim();
+  const secretKey = config.secretAccessKey.trim();
+
+  if (!accessKey || !secretKey) {
+    throw new Error('Supabase S3 Access Key ID or Secret Access Key is missing');
+  }
+
+  const endpointUrl = new URL(endpoint);
+  const host = endpointUrl.host;
+  const canonicalUri = `${endpointUrl.pathname}/${bucket}/${encodeURIComponent(filename)}`.replace(/\/+/g, '/');
+
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '');
+  const dateStamp = amzDate.slice(0, 8);
+
+  const payloadHash = crypto.createHash('sha256').update(buffer).digest('hex');
+
+  const canonicalHeaders = `content-type:${contentType}\nhost:${host}\nx-amz-content-sha256:${payloadHash}\nx-amz-date:${amzDate}\n`;
+  const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
+
+  const canonicalRequest = `PUT\n${canonicalUri}\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
+
+  const algorithm = 'AWS4-HMAC-SHA256';
+  const credentialScope = `${dateStamp}/${region}/s3/aws4_request`;
+  const stringToSign = `${algorithm}\n${amzDate}\n${credentialScope}\n${crypto.createHash('sha256').update(canonicalRequest).digest('hex')}`;
+
+  function getSignatureKey(key: string, date: string, reg: string, service: string) {
+    const kDate = crypto.createHmac('sha256', 'AWS4' + key).update(date).digest();
+    const kRegion = crypto.createHmac('sha256', kDate).update(reg).digest();
+    const kService = crypto.createHmac('sha256', kRegion).update(service).digest();
+    return crypto.createHmac('sha256', kService).update('aws4_request').digest();
+  }
+
+  const signingKey = getSignatureKey(secretKey, dateStamp, region, 's3');
+  const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
+
+  const authorizationHeader = `${algorithm} Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+  const uploadTargetUrl = `${endpointUrl.protocol}//${host}${canonicalUri}`;
+
+  // Fixed TS2769: BodyInit expects Uint8Array (ArrayBufferView / BufferSource)
+  const res = await fetch(uploadTargetUrl, {
+    method: 'PUT',
+    headers: {
+      'Host': host,
+      'Content-Type': contentType,
+      'x-amz-date': amzDate,
+      'x-amz-content-sha256': payloadHash,
+      'Authorization': authorizationHeader,
+    },
+    body: new Uint8Array(buffer),
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text().catch(() => res.statusText);
+    throw new Error(`Supabase S3 upload failed (HTTP ${res.status}): ${errorText}`);
+  }
+
+  // Return public CDN url if configured, otherwise fallback to S3 URL
+  if (config.publicUrl) {
+    const base = config.publicUrl.replace(/\/+$/, '');
+    return `${base}/${filename}`;
+  }
+
+  return uploadTargetUrl;
+}
+
+export async function uploadMediaFile(
+  buffer: Buffer,
+  originalFilename: string,
+  contentType: string = 'image/jpeg'
+): Promise<string> {
+  const settings = await getStorageSettings();
+  const ext = path.extname(originalFilename) || '.jpg';
+  const cleanName = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}${ext}`;
+
+  if (settings.provider === 'supabase' && settings.supabase.enabled) {
+    try {
+      return await uploadToSupabaseS3(buffer, cleanName, contentType, settings.supabase);
+    } catch (err: any) {
+      console.warn('[Storage] Supabase S3 failed, falling back to localhost:', err.message);
+    }
+  }
+
+  // Localhost Disk Storage Fallback / Default
+  const uploadDir = path.join(process.cwd(), settings.localhost.uploadDir || 'public/uploads/recipes');
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+
+  const filePath = path.join(uploadDir, cleanName);
+  fs.writeFileSync(filePath, buffer);
+
+  const prefix = settings.localhost.publicPrefix || '/uploads/recipes';
+  return `${prefix}/${cleanName}`;
+}
+
+```
+
 ## File: `apps/web/src/lib/theme.tsx`
 ```typescript
 'use client';
@@ -71055,7 +72463,8 @@ export default {
 ```typescript
 // Universal Multi-Dialect Database Client (PostgreSQL & MySQL)
 // GitHub: cygnusorbit/zecratary
-// Satisfies Constraint 8: Direct persistence to PostgreSQL & MySQL with SSL resilience
+// Satisfies Constraint 8: Direct persistence to PostgreSQL & MySQL with driver-scoped SSL
+// Fully exports getPool, query, closePool, and backward-compatible pool proxy
 
 import { Pool } from 'pg';
 import type { PoolConfig } from 'pg';
@@ -71108,10 +72517,12 @@ export function getPool(): Pool | null {
     return null;
   }
 
+  // Reuse existing pool instance if connection string is unchanged
   if (globalThis.__zecratary_pg_pool && globalThis.__zecratary_current_conn === rawConnStr) {
     return globalThis.__zecratary_pg_pool;
   }
 
+  // Cleanly close prior pool on connection change
   if (globalThis.__zecratary_pg_pool) {
     try {
       globalThis.__zecratary_pg_pool.end().catch(() => {});
@@ -71128,23 +72539,19 @@ export function getPool(): Pool | null {
     rawConnStr.includes('aws-0') ||
     rawConnStr.includes('sslmode=require');
 
+  // Strip conflicting sslmode query parameters to allow explicit driver-scoped SSL configuration
   const cleanConnStr = rawConnStr
     .replace(/([?&])sslmode=[^&]+(&|$)/, '$1')
     .replace(/[?&]$/, '');
-
-  if (isSupabaseOrPooler && typeof process !== 'undefined' && process.env) {
-    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  }
 
   const poolConfig: PoolConfig = {
     connectionString: cleanConnStr,
     connectionTimeoutMillis: 10000,
     idleTimeoutMillis: 30000,
     max: 10,
-    keepAlive: true,
-    keepAliveInitialDelayMillis: 10000,
   };
 
+  // Driver-scoped SSL: Bypasses pooler CA chain verification without polluting global process.env
   if (isRemote || isSupabaseOrPooler) {
     poolConfig.ssl = {
       rejectUnauthorized: false,
@@ -71161,18 +72568,28 @@ export function getPool(): Pool | null {
   return newPool;
 }
 
-export const pool = new Proxy({} as Pool, {
+/**
+ * Backward-compatible pool proxy:
+ * Allows routes to access pool.query(), pool.connect(), db.pool, etc.
+ * Supports TS2339 in src/app/api/pantry/route.ts and other legacy endpoints.
+ */
+export const pool: Pool & { [key: string]: any } = new Proxy({} as any, {
   get(_target, prop) {
     const activePool = getPool();
     if (!activePool) {
-      if (prop === 'query') {
-        return async () => ({ rows: [], rowCount: 0 });
-      }
+      if (prop === 'then') return undefined;
+      if (prop === 'connect') return async () => ({
+        query: async () => ({ rows: [], rowCount: 0 }),
+        release: () => {},
+      });
+      if (prop === 'query') return async () => ({ rows: [], rowCount: 0 });
+      if (prop === 'on') return () => {};
+      if (prop === 'end') return async () => {};
       return undefined;
     }
     const val = (activePool as any)[prop];
     return typeof val === 'function' ? val.bind(activePool) : val;
-  },
+  }
 });
 
 export async function query(sql: string, params: any[] = []): Promise<any> {
@@ -71190,18 +72607,8 @@ export async function query(sql: string, params: any[] = []): Promise<any> {
     let client: any = null;
     try {
       client = await activePool.connect();
-      // CRITICAL PROTOCOL FIX:
-      // If params are present and non-empty, use Extended Query Protocol (client.query(sql, params)).
-      // If params are empty/omitted, use Simple Query Protocol (client.query(sql)), which natively supports
-      // multiple semicolon-separated DDL statements without throwing "cannot insert multiple commands into a prepared statement".
-      const res = (params && params.length > 0)
-        ? await client.query(sql, params)
-        : await client.query(sql);
-
-      const rows = Array.isArray(res) ? res : (res?.rows || []);
-      (rows as any).rows = rows;
-      (rows as any).rowCount = res?.rowCount ?? rows.length;
-      return rows;
+      const res = await client.query(sql, params);
+      return Array.isArray(res) ? res : (res?.rows || []);
     } catch (err: any) {
       console.warn('[PostgreSQL Query Notice]:', err.message);
       throw err;
@@ -71213,7 +72620,7 @@ export async function query(sql: string, params: any[] = []): Promise<any> {
       }
     }
   } else {
-    // MySQL query executor
+    // MySQL query executor with isolated runtime loader
     try {
       let mysqlModule: any = null;
       try {
@@ -71231,9 +72638,7 @@ export async function query(sql: string, params: any[] = []): Promise<any> {
       const connection = await mysqlModule.createConnection(connStr);
       try {
         const [rows] = await connection.execute(sql, params);
-        const result = Array.isArray(rows) ? rows : [rows];
-        (result as any).rows = result;
-        return result;
+        return rows;
       } finally {
         await connection.end().catch(() => {});
       }
@@ -71253,17 +72658,19 @@ export async function closePool(): Promise<void> {
   }
 }
 
-export default {
-  pool,
+const dbModule = {
   query,
   getDatabaseDialect,
   getConnectionString,
   getPool,
+  pool,
   isPostgres,
   isMySQL,
   parseDbRows,
   closePool,
 };
+
+export default dbModule;
 
 ```
 
