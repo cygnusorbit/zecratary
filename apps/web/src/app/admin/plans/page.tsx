@@ -1,2532 +1,1231 @@
 // @ts-nocheck
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { 
-  ArrowLeft, Plus, Check, Trash2, Edit3, 
-  RefreshCw, CheckCircle2, AlertCircle, 
-  Coins, Zap, Eye, Save, Layers, 
-  History, Search, X, CheckCircle,
-  Ban, AlertTriangle, ChevronLeft, ChevronRight,
-  Pencil, Lock, Sparkles, Activity
+  CreditCard, Sparkles, Plus, Trash2, Edit3, Check, RefreshCw, 
+  RotateCcw, CheckCircle2, AlertCircle, Shield, Zap, Flame, 
+  Lock, Eye, Cpu, Database
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
-interface PlanConfig {
+export interface PlanConfig {
   id: string;
   name: string;
   slug: string;
-  planGroupId?: string;
-  monthlyPlanId?: string;
-  annualPlanId?: string;
+  badge?: string;
   monthlyPriceDollars: number;
   annualPriceDollars: number;
-  monthlyBadge?: string;
-  annualBadge?: string;
-  trialBadge?: string;
   descriptionMonthly?: string;
   descriptionAnnual?: string;
+  tokensMonthly: number;
+  tokensAnnual: number;
+  maxSavedRecipes: number;
+  allowedModels: string[];
   features: string[];
-  tokenLimit: number;
   canViewMacros: boolean;
   isFree?: boolean;
   isDefault?: boolean;
 }
 
-interface PaymentTransaction {
-  id: string;
-  customerName: string;
-  customerEmail: string;
-  planName: string;
-  planSlug?: string;
-  amount: number;
-  currency: string;
-  gateway: 'stripe' | 'paypal' | 'manual' | string;
-  status: 'succeeded' | 'failed' | 'refunded' | 'pending' | 'canceled';
-  failureReason?: string;
-  testMode?: boolean;
-  createdAt: string;
-  expiryDate?: string;
-  isRecurring?: boolean;
-  recurringInterval?: 'MONTH' | 'YEAR';
-  autoRenew?: boolean;
-  gatewayTransactionId?: string;
-}
+const AVAILABLE_AI_MODELS = [
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+  { id: 'gpt-4o', name: 'GPT-4o' },
+  { id: 'claude-3-7-sonnet', name: 'Claude 3.7 Sonnet' },
+  { id: 'deepseek-r1', name: 'DeepSeek R1' }
+];
 
-interface AppUser {
-  id: string;
-  name: string;
-  email: string;
-  role: 'admin' | 'user';
-  subscriptionPlan?: string;
-}
-
-interface PlanOption {
-  id: string;
-  name: string;
-  slug: string;
-  priceFormatted: string;
-  priceDollars: number;
-  interval?: 'MONTH' | 'YEAR';
-  isFree?: boolean;
-}
-
-const SUPPORTED_CURRENCIES: Record<string, string> = {
-  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$',
-  JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
-};
-
-const sanitizeSinglePlan = (planInput?: string | string[]): string => {
-  if (!planInput) return 'taster';
-  if (Array.isArray(planInput)) return planInput[0] ? String(planInput[0]).trim() : 'taster';
-  if (typeof planInput === 'string') {
-    if (planInput.includes(',')) {
-      const parts = planInput.split(',').map((s) => s.trim()).filter(Boolean);
-      return parts[0] || 'taster';
-    }
-    return planInput.trim() || 'taster';
+const DEFAULT_PLANS: PlanConfig[] = [
+  {
+    id: 'preset_taster',
+    name: 'Taster',
+    slug: 'taster',
+    badge: 'Free Tier',
+    monthlyPriceDollars: 0,
+    annualPriceDollars: 0,
+    descriptionMonthly: 'Essential culinary companion for exploring AI recipes.',
+    descriptionAnnual: 'Essential culinary companion for exploring AI recipes.',
+    tokensMonthly: 25000,
+    tokensAnnual: 25000,
+    maxSavedRecipes: 15,
+    allowedModels: ['gemini-2.5-flash'],
+    features: [
+      'Basic AI Recipe Generation',
+      'Pantry Spoilage Alerts',
+      'Community Cookbooks Access'
+    ],
+    canViewMacros: false,
+    isFree: true,
+    isDefault: true
+  },
+  {
+    id: 'preset_nutrition_pro',
+    name: 'Nutrition Pro',
+    slug: 'nutrition-pro',
+    badge: 'Most Popular',
+    monthlyPriceDollars: 8.99,
+    annualPriceDollars: 59.99,
+    descriptionMonthly: 'Advanced meal planning with macro telemetry and custom diets.',
+    descriptionAnnual: 'Ultimate savings on personalized culinary formulation.',
+    tokensMonthly: 250000,
+    tokensAnnual: 3000000,
+    maxSavedRecipes: 250,
+    allowedModels: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gpt-4o'],
+    features: [
+      'Everything in Taster',
+      'Full Macronutrient Tracking (Macros)',
+      'Automated Aisle Grocery Consolidation',
+      'AI Smart Sub-Recipe Formulator'
+    ],
+    canViewMacros: true,
+    isFree: false
+  },
+  {
+    id: 'preset_executive_chef',
+    name: 'Executive Chef',
+    slug: 'executive-chef',
+    badge: 'Best Value',
+    monthlyPriceDollars: 19.99,
+    annualPriceDollars: 149.99,
+    descriptionMonthly: 'Unrestricted culinary power for chefs and nutritionists.',
+    descriptionAnnual: 'VIP annual pass with maximum token allowances.',
+    tokensMonthly: 1000000,
+    tokensAnnual: 12000000,
+    maxSavedRecipes: -1,
+    allowedModels: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gpt-4o', 'claude-3-7-sonnet', 'deepseek-r1'],
+    features: [
+      'Everything in Nutrition Pro',
+      'Unlimited Saved Recipes',
+      'Priority High-Tier Model Access',
+      'Custom Dietary Export to PDF & CSV',
+      'Direct Concierge Culinary Advice'
+    ],
+    canViewMacros: true,
+    isFree: false
   }
-  return 'taster';
-};
-
-const parseAmount = (val: any): number => {
-  if (typeof val === 'number') return isNaN(val) ? 0 : val;
-  if (!val) return 0;
-  const cleaned = String(val).replace(/[^0-9.-]+/g, '');
-  const num = parseFloat(cleaned);
-  return isNaN(num) ? 0 : num;
-};
-
-const isSucceeded = (status?: string): boolean => {
-  if (!status) return false;
-  const s = String(status).toLowerCase().trim();
-  return s === 'succeeded' || s === 'succeded' || s === 'success' || s === 'paid' || s === 'completed';
-};
-
-const isCanceled = (status?: string): boolean => {
-  if (!status) return false;
-  const s = String(status).toLowerCase().trim();
-  return s === 'canceled' || s === 'cancelled';
-};
-
-const isRefunded = (status?: string): boolean => {
-  if (!status) return false;
-  const s = String(status).toLowerCase().trim();
-  return s === 'refunded' || s === 'refund';
-};
-
-const isFailed = (status?: string): boolean => {
-  if (!status) return false;
-  const s = String(status).toLowerCase().trim();
-  return s === 'failed' || s === 'declined' || s === 'fail' || s === 'error';
-};
-
-const calculateDefaultExpiry = (startDateStr: string, interval?: string): string => {
-  if (!interval) return '';
-  const date = startDateStr ? new Date(startDateStr) : new Date();
-  if (isNaN(date.getTime())) return '';
-  if (interval === 'MONTH') {
-    date.setMonth(date.getMonth() + 1);
-    return date.toISOString().slice(0, 10);
-  }
-  if (interval === 'YEAR') {
-    date.setFullYear(date.getFullYear() + 1);
-    return date.toISOString().slice(0, 10);
-  }
-  return '';
-};
-
-const normalizeTransaction = (raw: any, defaultCurrency: string): PaymentTransaction => {
-  const rawRecurring = raw.isRecurring !== undefined ? raw.isRecurring : raw.is_recurring;
-  const isRecurring = rawRecurring !== undefined 
-    ? (rawRecurring === true || rawRecurring === 'true' || rawRecurring === 't' || rawRecurring === 1 || rawRecurring === '1') 
-    : true;
-
-  const rawAutoRenew = raw.autoRenew !== undefined ? raw.autoRenew : raw.auto_renew;
-  const autoRenew = rawAutoRenew !== undefined 
-    ? (rawAutoRenew === true || rawAutoRenew === 'true' || rawAutoRenew === 't' || rawAutoRenew === 1 || rawAutoRenew === '1') 
-    : isRecurring;
-
-  return {
-    id: String(raw.id || 'tx_' + Math.random().toString(36).substring(2, 8)),
-    customerName: String(raw.customerName || raw.customer_name || 'Customer'),
-    customerEmail: String(raw.customerEmail || raw.customer_email || '').toLowerCase().trim(),
-    planName: String(raw.planName || raw.plan_name || 'Plan'),
-    planSlug: sanitizeSinglePlan(raw.planSlug || raw.plan_slug || ''),
-    amount: parseAmount(raw.amount),
-    currency: String(raw.currency || defaultCurrency || 'USD'),
-    gateway: (raw.gateway || 'stripe') as any,
-    status: (raw.status || 'succeeded') as any,
-    failureReason: raw.failureReason || raw.failure_reason || undefined,
-    testMode: Boolean(raw.testMode !== undefined ? raw.testMode : raw.test_mode),
-    createdAt: raw.createdAt || raw.created_at || new Date().toISOString(),
-    expiryDate: raw.expiryDate || raw.expiry_date || undefined,
-    isRecurring,
-    recurringInterval: (raw.recurringInterval || raw.recurring_interval || (String(raw.planSlug || raw.plan_slug || '').includes('annual') ? 'YEAR' : 'MONTH')) as any,
-    autoRenew,
-    gatewayTransactionId: raw.gatewayTransactionId || raw.gateway_transaction_id || raw.transaction_id || undefined
-  };
-};
+];
 
 export default function AdminPlansPage() {
-  const langContext = useTranslation();
-  const t = useCallback((key: string, fallback?: string): string => {
-    if (typeof langContext === 'function') {
-      try {
-        const val = (langContext as any)(key, fallback);
-        if (val && val !== key) return val;
-      } catch (_) {}
-    } else if (langContext && typeof langContext.t === 'function') {
-      try {
-        const val = langContext.t(key, fallback);
-        if (val && val !== key) return val;
-      } catch (_) {}
+  const { t, locale } = useTranslation();
+
+  const tr = useCallback((key: string, fallback: string): string => {
+    if (typeof t === 'function') {
+      const val = t(key);
+      if (val && val !== key) return val;
     }
-    return fallback || key;
-  }, [langContext]);
-  
-  const [activeMainTab, setActiveMainTab] = useState<'plans' | 'transactions'>('plans');
+    return fallback;
+  }, [t]);
 
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
+  const [plans, setPlans] = useState<PlanConfig[]>(DEFAULT_PLANS);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [saving, setSaving] = useState<boolean>(false);
+  const [status, setStatus] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
-  const [plans, setPlans] = useState<PlanConfig[]>([]);
-  const [previewInterval, setPreviewInterval] = useState<'MONTH' | 'YEAR'>('MONTH');
-
-  const [tokenSymbol, setTokenSymbol] = useState('🪙');
-  const [currencyCode, setCurrencyCode] = useState('USD');
+  // Dynamic Currency & Token Telemetry
   const [currencySymbol, setCurrencySymbol] = useState('$');
+  const [currencyCode, setCurrencyCode] = useState('USD');
+  const [tokenSymbol, setTokenSymbol] = useState('🪙');
+  const [tokenName, setTokenName] = useState('Tokens');
 
-  // Plan Form State (Tab 1: Plans)
+  // Plan Form State (for Add or Edit)
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [name, setName] = useState('');
-  const [slug, setSlug] = useState('');
-  const [planGroupId, setPlanGroupId] = useState('');
-  const [monthlyPlanId, setMonthlyPlanId] = useState('');
-  const [annualPlanId, setAnnualPlanId] = useState('');
-  const [monthlyPrice, setMonthlyPrice] = useState<number>(8.99);
-  const [annualPrice, setAnnualPrice] = useState<number>(59.99);
-  const [tokenLimit, setTokenLimit] = useState<number>(500);
+  const [name, setName] = useState('Culinary Pro');
+  const [slug, setSlug] = useState('culinary-pro');
+  const [badge, setBadge] = useState('Most Popular');
+  const [monthlyPriceDollars, setMonthlyPriceDollars] = useState<number>(9.99);
+  const [annualPriceDollars, setAnnualPriceDollars] = useState<number>(79.99);
+  const [descriptionMonthly, setDescriptionMonthly] = useState('Ideal for passionate home cooks.');
+  const [descriptionAnnual, setDescriptionAnnual] = useState('Maximum savings with yearly billing.');
+  const [tokensMonthly, setTokensMonthly] = useState<number>(250000);
+  const [tokensAnnual, setTokensAnnual] = useState<number>(3000000);
+  const [maxSavedRecipes, setMaxSavedRecipes] = useState<number>(200);
+  const [allowedModels, setAllowedModels] = useState<string[]>(['gemini-2.5-flash', 'gemini-2.5-pro']);
+  const [features, setFeatures] = useState<string[]>([
+    'Full Macronutrient Tracking (Macros)',
+    'Automated Aisle Grocery Consolidation',
+    'AI Smart Recipe Formulator'
+  ]);
   const [canViewMacros, setCanViewMacros] = useState<boolean>(true);
-  const [monthlyBadge, setMonthlyBadge] = useState('');
-  const [annualBadge, setAnnualBadge] = useState('Best Value');
-  const [trialBadge, setTrialBadge] = useState('');
-  const [descriptionMonthly, setDescriptionMonthly] = useState('');
-  const [descriptionAnnual, setDescriptionAnnual] = useState('');
-  const [featuresText, setFeaturesText] = useState('Personal recipe library\nSmart ingredient repurposing\nAutomated shopping list creation');
-  const [isFree, setIsFree] = useState(false);
+  const [isFree, setIsFree] = useState<boolean>(false);
 
-  // Transactions State (Tab 2: Plan Transactions)
-  const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
-  const [registeredUsers, setRegisteredUsers] = useState<AppUser[]>([]);
-  const [loadingTransactions, setLoadingTransactions] = useState<boolean>(false);
-  const [txSearchQuery, setTxSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'succeeded' | 'canceled' | 'failed' | 'refunded' | 'pending'>('all');
-  const [gatewayFilter, setGatewayFilter] = useState<'all' | 'stripe' | 'paypal' | 'manual'>('all');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-  const [togglingTxId, setTogglingTxId] = useState<string | null>(null);
+  // Live Card Mockup Billing Toggle
+  const [mockupBillingInterval, setMockupBillingInterval] = useState<'monthly' | 'annual'>('monthly');
 
-  // Selection & Bulk Operations State
-  const [selectedTxIds, setSelectedTxIds] = useState<string[]>([]);
-  const [deletingTxId, setDeletingTxId] = useState<string | null>(null);
-  const [bulkDeleting, setBulkDeleting] = useState<boolean>(false);
+  // Feature Input State
+  const [newFeatureText, setNewFeatureText] = useState('');
 
-  // Modal States for Transactions
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [modalSubmitting, setModalSubmitting] = useState(false);
-  const [modalError, setModalError] = useState('');
-
-  // Add Transaction Form States
-  const [selectedUserId, setSelectedUserId] = useState('');
-  const [selectedPlanSlug, setSelectedPlanSlug] = useState('');
-  const [paymentAmount, setPaymentAmount] = useState<number>(8.99);
-  const [paymentDate, setPaymentDate] = useState('');
-  const [paymentExpiryDate, setPaymentExpiryDate] = useState('');
-  const [paymentGateway, setPaymentGateway] = useState<'stripe' | 'paypal' | 'manual'>('stripe');
-  const [paymentStatus, setPaymentStatus] = useState<'succeeded' | 'pending'>('succeeded');
-  const [isPaymentRecurring, setIsPaymentRecurring] = useState(true);
-
-  // Edit Transaction Form States
-  const [editingTx, setEditingTx] = useState<PaymentTransaction | null>(null);
-  const [editCustomerName, setEditCustomerName] = useState('');
-  const [editCustomerEmail, setEditCustomerEmail] = useState('');
-  const [editPlanSlug, setEditPlanSlug] = useState('');
-  const [editPlanName, setEditPlanName] = useState('');
-  const [editAmount, setEditAmount] = useState<number>(0);
-  const [editGateway, setEditGateway] = useState<string>('stripe');
-  const [editStatus, setEditStatus] = useState<string>('succeeded');
-  const [editFailureReason, setEditFailureReason] = useState('');
-  const [editDate, setEditDate] = useState('');
-  const [editExpiryDate, setEditExpiryDate] = useState('');
-  const [editIsRecurring, setEditIsRecurring] = useState(true);
-
-  const applySavedTheme = useCallback(() => {
+  // Fetch token settings from /api/admin/token-setting
+  const fetchTokenSetting = useCallback(async () => {
     try {
-      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const root = typeof document !== 'undefined' ? document.documentElement : null;
-      const isDay = mode === 'light' || mode === 'day' || (root && root.classList.contains('light'));
-      if (root) {
-        if (isDay) {
-          root.style.setProperty('--color-bg', '#f8fafc');
-          root.style.setProperty('--color-card', '#ffffff');
-          root.style.setProperty('--color-inner-dark', '#f1f5f9');
-          root.style.setProperty('--color-border', '#e2e8f0');
-          root.style.setProperty('--color-text', '#0f172a');
-          root.style.setProperty('--color-text-secondary', '#64748b');
-        } else {
-          root.style.setProperty('--color-bg', '#070b13');
-          root.style.setProperty('--color-card', '#111726');
-          root.style.setProperty('--color-inner-dark', '#0B101D');
-          root.style.setProperty('--color-border', '#1e293b');
-          root.style.setProperty('--color-text', '#ffffff');
-          root.style.setProperty('--color-text-secondary', '#94a3b8');
-        }
+      const res = await fetch('/api/admin/token-setting?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.tokenSymbol) setTokenSymbol(data.tokenSymbol);
+        if (data.tokenName) setTokenName(data.tokenName);
       }
     } catch (_) {}
   }, []);
 
-  useEffect(() => {
-    applySavedTheme();
-    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
-    window.addEventListener('zecratary_theme_changed', applySavedTheme);
-    window.addEventListener('storage', applySavedTheme);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
-      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
-      window.removeEventListener('storage', applySavedTheme);
-    };
-  }, [applySavedTheme]);
-
-  const fetchSettings = useCallback(async () => {
+  // Fetch system currency from /api/system-settings
+  const fetchSystemSettings = useCallback(async () => {
     try {
-      const tRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
-      if (tRes.ok) {
-        const tData = await tRes.json();
-        const cfg = tData.settings || tData.config || tData;
-        if (cfg?.tokenSymbol || cfg?.symbol) setTokenSymbol(cfg.tokenSymbol || cfg.symbol);
-      }
-    } catch (_) {}
-
-    try {
-      const sRes = await fetch('/api/system-settings', { cache: 'no-store' });
-      if (sRes.ok) {
-        const sData = await sRes.json();
-        const curr = sData?.settings?.currency || sData?.currency;
-        if (curr) {
-          setCurrencyCode(curr);
-          setCurrencySymbol(SUPPORTED_CURRENCIES[curr.toUpperCase()] || '$');
-        }
+      const res = await fetch('/api/system-settings?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.currency) setCurrencyCode(data.currency);
+        if (data.currencySymbol) setCurrencySymbol(data.currencySymbol);
       }
     } catch (_) {}
   }, []);
 
-  useEffect(() => {
-    fetchSettings();
-  }, [fetchSettings]);
-
-  const normalizePlan = (p: any): PlanConfig => {
-    const isFreePlan = Boolean(
-      p.isFree || p.is_free || p.free || 
-      p.slug === 'taster' || p.id === 'preset_taster' ||
-      (Number(p.monthlyPriceDollars ?? p.monthly_price_dollars ?? 0) === 0 && 
-       Number(p.annualPriceDollars ?? p.annual_price_dollars ?? 0) === 0)
-    );
-
-    let rawFeatures: string[] = [];
-    if (Array.isArray(p.features)) {
-      rawFeatures = p.features.map(String).filter(Boolean);
-    } else if (typeof p.features === 'string') {
-      try {
-        const parsed = JSON.parse(p.features);
-        if (Array.isArray(parsed)) rawFeatures = parsed.map(String).filter(Boolean);
-        else rawFeatures = p.features.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
-      } catch (_) {
-        rawFeatures = p.features.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
-      }
-    }
-
-    const mPrice = Number(p.monthlyPriceDollars ?? p.monthly_price_dollars ?? p.price ?? 0);
-    const aPrice = Number(p.annualPriceDollars ?? p.annual_price_dollars ?? (mPrice > 0 ? mPrice * 10 : 0));
-    const cleanSlug = String(p.slug || p.id || 'plan').toLowerCase().trim();
-
-    return {
-      id: String(p.id || cleanSlug),
-      name: String(p.name || cleanSlug),
-      slug: cleanSlug,
-      planGroupId: p.planGroupId || p.plan_group_id || `group_${cleanSlug}`,
-      monthlyPlanId: p.monthlyPlanId || p.monthly_plan_id || `plan_${cleanSlug}_monthly`,
-      annualPlanId: p.annualPlanId || p.annual_plan_id || `plan_${cleanSlug}_annual`,
-      monthlyPriceDollars: isFreePlan ? 0 : (isNaN(mPrice) ? 0 : mPrice),
-      annualPriceDollars: isFreePlan ? 0 : (isNaN(aPrice) ? 0 : aPrice),
-      monthlyBadge: p.monthlyBadge || p.monthly_badge || '',
-      annualBadge: p.annualBadge || p.annual_badge || '',
-      trialBadge: p.trialBadge || p.trial_badge || '',
-      descriptionMonthly: p.descriptionMonthly || p.description_monthly || '',
-      descriptionAnnual: p.descriptionAnnual || p.description_annual || '',
-      features: rawFeatures,
-      tokenLimit: p.tokenLimit !== undefined ? Number(p.tokenLimit) : (p.token_limit !== undefined ? Number(p.token_limit) : (isFreePlan ? 50000 : 500)),
-      canViewMacros: p.canViewMacros !== undefined ? Boolean(p.canViewMacros) : (p.can_view_macros !== undefined ? Boolean(p.can_view_macros) : !isFreePlan),
-      isFree: isFreePlan,
-      isDefault: Boolean(p.isDefault || p.is_default || cleanSlug === 'taster' || p.id === 'preset_taster')
-    };
-  };
-
-  const fetchPlans = useCallback(async () => {
+  // Fetch plans from /api/admin/plans with universal normalization
+  const loadPlans = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
-      const data = await res.json();
-      if (!res.ok || data.success === false) {
-        throw new Error(data.error || 'Failed to fetch plans');
+      if (res.ok) {
+        const data = await res.json();
+        const rawList = Array.isArray(data) ? data : (data.configs || data.plans || data.packages || []);
+        if (Array.isArray(rawList) && rawList.length > 0) {
+          const normalized: PlanConfig[] = rawList.map((p: any) => ({
+            id: p.id || ('plan_' + p.slug),
+            name: p.name || 'Custom Plan',
+            slug: (p.slug || p.id || 'plan').toLowerCase().replace(/[^a-z0-9-]/g, ''),
+            badge: p.badge || '',
+            monthlyPriceDollars: Number(p.monthlyPriceDollars ?? p.monthly_price ?? p.price ?? 0),
+            annualPriceDollars: Number(p.annualPriceDollars ?? p.annual_price ?? 0),
+            descriptionMonthly: p.descriptionMonthly || p.description_monthly || '',
+            descriptionAnnual: p.descriptionAnnual || p.description_annual || '',
+            tokensMonthly: Number(p.tokensMonthly ?? p.tokens_monthly ?? p.tokensPerMonth ?? 0),
+            tokensAnnual: Number(p.tokensAnnual ?? p.tokens_annual ?? 0),
+            maxSavedRecipes: Number(p.maxSavedRecipes ?? p.max_saved_recipes ?? 50),
+            allowedModels: Array.isArray(p.allowedModels || p.allowed_models) ? (p.allowedModels || p.allowed_models) : ['gemini-2.5-flash'],
+            features: Array.isArray(p.features) ? p.features : [],
+            canViewMacros: Boolean(p.canViewMacros ?? p.can_view_macros),
+            isFree: Boolean(p.isFree ?? p.is_free ?? (Number(p.monthlyPriceDollars ?? p.monthly_price ?? 0) === 0 && Number(p.annualPriceDollars ?? p.annual_price ?? 0))),
+            isDefault: Boolean(p.isDefault ?? p.is_default ?? p.slug === 'taster')
+          }));
+          setPlans(normalized);
+          return;
+        }
       }
-      const rawList = Array.isArray(data) 
-        ? data 
-        : (data.configs || data.plans || data.packages || data.subscriptionPlans || data.data || []);
-      
-      if (Array.isArray(rawList)) {
-        setPlans(rawList.map(normalizePlan));
-      }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to fetch plans');
+      setPlans(DEFAULT_PLANS);
+    } catch (err) {
+      console.warn('Notice loading /admin/plans:', err);
+      setPlans(DEFAULT_PLANS);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const fetchUsers = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/users?t=' + Date.now(), { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && Array.isArray(data.users)) {
-          setRegisteredUsers(data.users);
-          if (data.users.length > 0 && !selectedUserId) {
-            setSelectedUserId(data.users[0].id);
-          }
-        }
-      }
-    } catch (_) {}
-  }, [selectedUserId]);
-
-  const fetchTransactions = useCallback(async () => {
-    setLoadingTransactions(true);
-    try {
-      const res = await fetch('/api/admin/payment?t=' + Date.now(), { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && Array.isArray(data.transactions)) {
-          const list = data.transactions.map((tx: any) => normalizeTransaction(tx, currencyCode));
-          setTransactions(list);
-        }
-      }
-    } catch (_) {
-    } finally {
-      setLoadingTransactions(false);
-    }
-  }, [currencyCode]);
-
   useEffect(() => {
-    fetchPlans();
-    fetchUsers();
-    fetchTransactions();
-  }, [fetchPlans, fetchUsers, fetchTransactions]);
+    document.title = tr('adminPlansDocTitle', 'Subscription Plans - Admin Console');
+    fetchTokenSetting();
+    fetchSystemSettings();
+    loadPlans();
 
-  const availablePlanOptions = useMemo<PlanOption[]>(() => {
-    const list: PlanOption[] = [];
-    plans.forEach((p) => {
-      if (p.isFree || p.slug === 'taster') return;
-      if (p.monthlyPriceDollars > 0) {
-        list.push({
-          id: p.monthlyPlanId || `${p.slug}-monthly`,
-          name: `${p.name} (Monthly)`,
-          slug: `${p.slug}-monthly`,
-          priceFormatted: `${currencySymbol}${p.monthlyPriceDollars.toFixed(2)}/mo`,
-          priceDollars: p.monthlyPriceDollars,
-          interval: 'MONTH',
-          isFree: false
-        });
-      }
-      if (p.annualPriceDollars > 0) {
-        list.push({
-          id: p.annualPlanId || `${p.slug}-annual`,
-          name: `${p.name} (Annual)`,
-          slug: `${p.slug}-annual`,
-          priceFormatted: `${currencySymbol}${p.annualPriceDollars.toFixed(2)}/yr`,
-          priceDollars: p.annualPriceDollars,
-          interval: 'YEAR',
-          isFree: false
-        });
-      }
-    });
-    return list;
-  }, [plans, currencySymbol]);
+    const handleSync = () => {
+      fetchTokenSetting();
+      fetchSystemSettings();
+      loadPlans();
+    };
 
-  const handleSlugChange = (val: string) => {
-    const clean = val.toLowerCase().replace(/[^a-z0-9_-]/g, '');
-    setSlug(clean);
-    if (!editingId) {
-      setPlanGroupId(`group_${clean}`);
-      setMonthlyPlanId(`plan_${clean}_monthly`);
-      setAnnualPlanId(`plan_${clean}_annual`);
+    window.addEventListener('zecratary_plans_updated', handleSync);
+    window.addEventListener('zecratary_languages_updated', handleSync);
+    window.addEventListener('zecratary_dictionary_updated', handleSync);
+    window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('storage', handleSync);
+
+    return () => {
+      window.removeEventListener('zecratary_plans_updated', handleSync);
+      window.removeEventListener('zecratary_languages_updated', handleSync);
+      window.removeEventListener('zecratary_dictionary_updated', handleSync);
+      window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
+  }, [fetchTokenSetting, fetchSystemSettings, loadPlans, tr]);
+
+  // Load plan into the editor
+  const handleEditPlan = (plan: PlanConfig) => {
+    setEditingId(plan.id);
+    setName(plan.name);
+    setSlug(plan.slug);
+    setBadge(plan.badge || '');
+    setMonthlyPriceDollars(Number(plan.monthlyPriceDollars || 0));
+    setAnnualPriceDollars(Number(plan.annualPriceDollars || 0));
+    setDescriptionMonthly(plan.descriptionMonthly || '');
+    setDescriptionAnnual(plan.descriptionAnnual || '');
+    setTokensMonthly(Number(plan.tokensMonthly || 0));
+    setTokensAnnual(Number(plan.tokensAnnual || 0));
+    setMaxSavedRecipes(Number(plan.maxSavedRecipes || 50));
+    setAllowedModels(plan.allowedModels || ['gemini-2.5-flash']);
+    setFeatures(plan.features || []);
+    setCanViewMacros(Boolean(plan.canViewMacros));
+    setIsFree(Boolean(plan.isFree));
+    setStatus(null);
+  };
+
+  const handleResetForm = () => {
+    setEditingId(null);
+    setName('Culinary Pro');
+    setSlug('culinary-pro');
+    setBadge('Most Popular');
+    setMonthlyPriceDollars(9.99);
+    setAnnualPriceDollars(79.99);
+    setDescriptionMonthly('Ideal for passionate home cooks.');
+    setDescriptionAnnual('Maximum savings with yearly billing.');
+    setTokensMonthly(250000);
+    setTokensAnnual(3000000);
+    setMaxSavedRecipes(200);
+    setAllowedModels(['gemini-2.5-flash', 'gemini-2.5-pro']);
+    setFeatures([
+      'Full Macronutrient Tracking (Macros)',
+      'Automated Aisle Grocery Consolidation',
+      'AI Smart Recipe Formulator'
+    ]);
+    setCanViewMacros(true);
+    setIsFree(false);
+  };
+
+  // Toggle model selection
+  const handleToggleModel = (modelId: string) => {
+    if (allowedModels.includes(modelId)) {
+      if (allowedModels.length > 1) {
+        setAllowedModels(allowedModels.filter(m => m !== modelId));
+      }
+    } else {
+      setAllowedModels([...allowedModels, modelId]);
     }
   };
 
-  const handleEdit = (p: PlanConfig) => {
-    setActiveMainTab('plans');
-    setEditingId(p.id);
-    setName(p.name);
-    setSlug(p.slug);
-    setPlanGroupId(p.planGroupId || `group_${p.slug}`);
-    setMonthlyPlanId(p.monthlyPlanId || `plan_${p.slug}_monthly`);
-    setAnnualPlanId(p.annualPlanId || `plan_${p.slug}_annual`);
-    setMonthlyPrice(Number(p.monthlyPriceDollars || 0));
-    setAnnualPrice(Number(p.annualPriceDollars || 0));
-    setTokenLimit(Number(p.tokenLimit ?? 500));
-    setCanViewMacros(Boolean(p.canViewMacros));
-    setMonthlyBadge(p.monthlyBadge || '');
-    setAnnualBadge(p.annualBadge || '');
-    setTrialBadge(p.trialBadge || '');
-    setDescriptionMonthly(p.descriptionMonthly || '');
-    setDescriptionAnnual(p.descriptionAnnual || '');
-    setFeaturesText(Array.isArray(p.features) ? p.features.join('\n') : '');
-    setIsFree(Boolean(p.isFree));
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  // Add feature item
+  const handleAddFeature = () => {
+    if (!newFeatureText.trim()) return;
+    setFeatures([...features, newFeatureText.trim()]);
+    setNewFeatureText('');
   };
 
-  const resetForm = () => {
-    setEditingId(null);
-    setName('');
-    setSlug('');
-    setPlanGroupId('');
-    setMonthlyPlanId('');
-    setAnnualPlanId('');
-    setMonthlyPrice(8.99);
-    setAnnualPrice(59.99);
-    setTokenLimit(500);
-    setCanViewMacros(true);
-    setMonthlyBadge('');
-    setAnnualBadge('Best Value');
-    setTrialBadge('');
-    setDescriptionMonthly('');
-    setDescriptionAnnual('');
-    setFeaturesText('Personal recipe library\nSmart ingredient repurposing\nAutomated shopping list creation');
-    setIsFree(false);
+  const handleRemoveFeature = (idx: number) => {
+    setFeatures(features.filter((_, i) => i !== idx));
   };
 
-  const handleApplyPresetTaster = () => {
-    setEditingId('preset_taster');
-    setName('Taster');
-    setSlug('taster');
-    setPlanGroupId('group_taster');
-    setMonthlyPlanId('plan_taster_monthly');
-    setAnnualPlanId('plan_taster_annual');
-    setMonthlyPrice(0);
-    setAnnualPrice(0);
-    setTokenLimit(50000);
-    setIsFree(true);
-    setCanViewMacros(false);
-    setMonthlyBadge('');
-    setAnnualBadge('');
-    setTrialBadge('');
-    setDescriptionMonthly('Free tier with limited features');
-    setDescriptionAnnual('Free tier with limited features');
-    setFeaturesText('Create up to 5 AI-powered recipes per month\nPersonal recipe library (25 total recipes)\nSmart ingredient repurposing\nAutomated shopping list creation\nDirect online grocery shopping links\nMeal planner');
-  };
-
-  const handleApplyPresetNutritionPro = () => {
-    setEditingId(null);
-    setName('Nutrition Pro');
-    setSlug('nutrition-pro');
-    setPlanGroupId('group_nutrition-pro');
-    setMonthlyPlanId('plan_nutrition-pro_monthly');
-    setAnnualPlanId('plan_nutrition-pro_annual');
-    setMonthlyPrice(8.99);
-    setAnnualPrice(59.99);
-    setTokenLimit(1000000);
-    setIsFree(false);
-    setCanViewMacros(true);
-    setMonthlyBadge('Billed Immediately');
-    setAnnualBadge('Save 44%');
-    setTrialBadge('7-Day Free Trial');
-    setDescriptionMonthly('Full premium access, billed monthly');
-    setDescriptionAnnual('Best value - all premium features, billed annually');
-    setFeaturesText('Unlimited AI-powered recipe generation\nUnlimited recipe library\nComprehensive nutritional analysis (calories, protein, fat, fiber, sugar, sodium, carbohydrates)\nMacro Analysis Gating Unlocked');
-  };
-
+  // Persist plan to PostgreSQL & MySQL via /api/admin/plans
   const handleSavePlan = async () => {
-    if (!name.trim()) return;
     setSaving(true);
-    setErrorMsg('');
-    setSuccessMsg('');
+    setStatus(null);
+
+    const cleanSlug = slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '') || name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const finalMonthlyPrice = isFree ? 0 : Number(monthlyPriceDollars || 0);
+    const finalAnnualPrice = isFree ? 0 : Number(annualPriceDollars || 0);
+
+    const targetPlan: PlanConfig = {
+      id: editingId || ('plan_' + cleanSlug + '_' + Date.now().toString(36)),
+      name: name.trim(),
+      slug: cleanSlug,
+      badge: badge.trim(),
+      monthlyPriceDollars: finalMonthlyPrice,
+      annualPriceDollars: finalAnnualPrice,
+      descriptionMonthly: descriptionMonthly.trim(),
+      descriptionAnnual: descriptionAnnual.trim(),
+      tokensMonthly: Number(tokensMonthly || 0),
+      tokensAnnual: Number(tokensAnnual || 0),
+      maxSavedRecipes: Number(maxSavedRecipes || 50),
+      allowedModels,
+      features,
+      canViewMacros: isFree ? false : Boolean(canViewMacros),
+      isFree: Boolean(isFree),
+      isDefault: cleanSlug === 'taster'
+    };
+
+    const nextPlans = editingId 
+      ? plans.map(p => p.id === editingId ? targetPlan : p)
+      : [...plans.filter(p => p.slug !== cleanSlug), targetPlan];
 
     try {
-      const parsedFeatures = featuresText.split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
-      const cleanSlug = slug.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
-      const planId = editingId || (cleanSlug ? `plan_${cleanSlug}` : `plan_${Date.now()}`);
-
-      const payload = {
-        id: planId,
-        name: name.trim(),
-        slug: cleanSlug,
-        planGroupId: planGroupId.trim() || `group_${cleanSlug}`,
-        monthlyPlanId: monthlyPlanId.trim() || `plan_${cleanSlug}_monthly`,
-        annualPlanId: annualPlanId.trim() || `plan_${cleanSlug}_annual`,
-        monthlyPriceDollars: isFree ? 0 : Number(monthlyPrice || 0),
-        annualPriceDollars: isFree ? 0 : Number(annualPrice || 0),
-        tokenLimit: Number(tokenLimit || 0),
-        canViewMacros: Boolean(canViewMacros),
-        monthlyBadge: monthlyBadge.trim(),
-        annualBadge: annualBadge.trim(),
-        trialBadge: trialBadge.trim(),
-        descriptionMonthly: descriptionMonthly.trim(),
-        descriptionAnnual: descriptionAnnual.trim(),
-        features: parsedFeatures,
-        isFree: Boolean(isFree),
-        isDefault: Boolean(editingId === 'preset_taster' || cleanSlug === 'taster')
-      };
-
       const res = await fetch('/api/admin/plans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({
+          action: 'save_plan',
+          plan: targetPlan,
+          plans: nextPlans
+        })
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed saving plan configuration');
+      if (!res.ok) {
+        throw new Error('Failed to persist plan to database.');
       }
 
-      setSuccessMsg(t('planSavedSuccess', 'Subscription Plan & Token Quotas saved and synchronized with PostgreSQL!'));
-      resetForm();
-      await fetchPlans();
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_plans_updated'));
-      }
-      setTimeout(() => setSuccessMsg(''), 4000);
+      setPlans(nextPlans);
+      setEditingId(null);
+
+      // Broadcast update across /subscriptions, /profile, /admin/users, /admin/payment
+      window.dispatchEvent(new Event('zecratary_plans_updated'));
+      localStorage.setItem('zecratary_plans_updated_at', Date.now().toString());
+
+      setStatus({
+        type: 'success',
+        msg: tr('adminPlansSaveSuccess', 'Subscription plan saved and synchronized to PostgreSQL & MySQL!')
+      });
     } catch (err: any) {
-      setErrorMsg(err.message || 'Error occurred while saving');
+      setStatus({
+        type: 'error',
+        msg: err.message || 'Error saving subscription plan.'
+      });
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDeletePlan = async (p: PlanConfig) => {
-    if (p.isDefault || p.slug === 'taster' || p.id === 'preset_taster') {
-      alert(t('cannotDeleteDefaultPlan', 'The default free plan (Taster) is required by the system and cannot be deleted.'));
+  // Delete plan safely (protecting taster default)
+  const handleDeletePlan = async (plan: PlanConfig) => {
+    if (plan.slug === 'taster' || plan.isDefault) {
+      alert(tr('adminPlansCannotDeleteDefault', 'Cannot delete default free plan (taster)'));
       return;
     }
 
-    const confirmMsg = `${t('confirmDeletePlan', 'Are you sure you want to permanently delete plan')} "${p.name}"?`;
-    if (!confirm(confirmMsg)) return;
-
-    setDeletingId(p.id);
-    setErrorMsg('');
-    setSuccessMsg('');
+    if (!confirm(tr('adminPlansDeleteConfirm', 'Are you sure you want to delete this subscription plan? Users on this plan will revert to the Free Tier.'))) {
+      return;
+    }
 
     try {
-      const queryParams = new URLSearchParams();
-      if (p.id) queryParams.set('id', p.id);
-      if (p.slug) queryParams.set('slug', p.slug);
-
-      const res = await fetch(`/api/admin/plans?${queryParams.toString()}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: p.id, slug: p.slug })
+      const res = await fetch(`/api/admin/plans?id=${encodeURIComponent(plan.id)}&slug=${encodeURIComponent(plan.slug)}`, {
+        method: 'DELETE'
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || t('failedDeletePlan', 'Failed to delete plan from database.'));
+      const updated = plans.filter(p => p.id !== plan.id && p.slug !== plan.slug);
+      setPlans(updated);
+
+      if (editingId === plan.id) {
+        handleResetForm();
       }
 
-      setPlans((prev) => prev.filter((item) => item.id !== p.id && item.slug !== p.slug));
-      if (editingId === p.id || editingId === p.slug) resetForm();
+      window.dispatchEvent(new Event('zecratary_plans_updated'));
+      localStorage.setItem('zecratary_plans_updated_at', Date.now().toString());
 
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_plans_updated'));
-      }
-
-      setSuccessMsg(`"${p.name}" ${t('planDeletedSuccess', 'has been permanently deleted from PostgreSQL.')}`);
-      setTimeout(() => setSuccessMsg(''), 4000);
+      setStatus({
+        type: 'success',
+        msg: tr('adminPlansDeleteSuccess', 'Plan deleted successfully!')
+      });
     } catch (err: any) {
-      setErrorMsg(err.message || t('errorDeletingPlan', 'Error deleting plan.'));
-      fetchPlans();
-    } finally {
-      setDeletingId(null);
+      setStatus({ type: 'error', msg: err.message || 'Failed to delete plan.' });
     }
   };
 
-  const filteredTransactions = useMemo(() => {
-    const q = txSearchQuery.toLowerCase().trim();
-    return transactions.filter((tx) => {
-      const matchesSearch = !q || 
-        (tx.customerName && tx.customerName.toLowerCase().includes(q)) ||
-        (tx.customerEmail && tx.customerEmail.toLowerCase().includes(q)) ||
-        (tx.planName && tx.planName.toLowerCase().includes(q)) ||
-        (tx.planSlug && tx.planSlug.toLowerCase().includes(q)) ||
-        (tx.id && tx.id.toLowerCase().includes(q));
-
-      const s = String(tx.status || '').toLowerCase().trim();
-      let matchesStatus = true;
-      if (statusFilter !== 'all') {
-        if (statusFilter === 'succeeded') matchesStatus = isSucceeded(s);
-        else if (statusFilter === 'canceled') matchesStatus = isCanceled(s);
-        else if (statusFilter === 'refunded') matchesStatus = isRefunded(s);
-        else if (statusFilter === 'failed') matchesStatus = isFailed(s);
-        else matchesStatus = s === statusFilter;
-      }
-
-      const g = String(tx.gateway || '').toLowerCase().trim();
-      const matchesGateway = gatewayFilter === 'all' || g === gatewayFilter;
-
-      return matchesSearch && matchesStatus && matchesGateway;
-    });
-  }, [transactions, txSearchQuery, statusFilter, gatewayFilter]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / pageSize));
-  const paginatedTransactions = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredTransactions.slice(start, start + pageSize);
-  }, [filteredTransactions, currentPage, pageSize]);
-
-  // Master Checkbox Select-All Logic
-  const isAllSelected = useMemo(() => {
-    if (paginatedTransactions.length === 0) return false;
-    return paginatedTransactions.every((tx) => selectedTxIds.includes(tx.id));
-  }, [paginatedTransactions, selectedTxIds]);
-
-  const isIndeterminate = useMemo(() => {
-    if (paginatedTransactions.length === 0) return false;
-    const count = paginatedTransactions.filter((tx) => selectedTxIds.includes(tx.id)).length;
-    return count > 0 && count < paginatedTransactions.length;
-  }, [paginatedTransactions, selectedTxIds]);
-
-  const headerCheckboxRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (headerCheckboxRef.current) {
-      headerCheckboxRef.current.indeterminate = isIndeterminate;
-    }
-  }, [isIndeterminate]);
-
-  const handleToggleSelectAll = () => {
-    if (isAllSelected) {
-      const pageIds = new Set(paginatedTransactions.map((tx) => tx.id));
-      setSelectedTxIds((prev) => prev.filter((id) => !pageIds.has(id)));
-    } else {
-      const newSelected = new Set(selectedTxIds);
-      paginatedTransactions.forEach((tx) => newSelected.add(tx.id));
-      setSelectedTxIds(Array.from(newSelected));
-    }
-  };
-
-  const handleSelectAllMatching = () => {
-    setSelectedTxIds(filteredTransactions.map((tx) => tx.id));
-  };
-
-  const handleToggleRecurring = async (tx: PaymentTransaction) => {
-    const nextVal = !tx.autoRenew;
-    setTogglingTxId(tx.id);
-
+  // Restore Default Seeded Plans
+  const handleResetDefaults = async () => {
+    if (!confirm('Restore default subscription packages (Taster, Nutrition Pro, Executive Chef)?')) return;
+    setSaving(true);
     try {
-      const updatedTx = {
-        ...tx,
-        autoRenew: nextVal,
-        isRecurring: nextVal
-      };
-
-      const res = await fetch('/api/admin/payment', {
+      const res = await fetch('/api/admin/plans', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'update_transaction',
-          transaction: updatedTx
+          action: 'reset_defaults',
+          plans: DEFAULT_PLANS
         })
       });
 
-      if (!res.ok) throw new Error('Failed to update recurring state');
+      setPlans(DEFAULT_PLANS);
+      handleResetForm();
 
-      setTransactions((prev) => prev.map((tItem) => tItem.id === tx.id ? updatedTx : tItem));
-      setSuccessMsg(t('recurringUpdated', `Recurring renewal updated for ${tx.customerName}`));
-      setTimeout(() => setSuccessMsg(''), 3000);
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Error updating recurring auto-renew status');
-      setTimeout(() => setErrorMsg(''), 4000);
-    } finally {
-      setTogglingTxId(null);
-    }
-  };
+      window.dispatchEvent(new Event('zecratary_plans_updated'));
+      localStorage.setItem('zecratary_plans_updated_at', Date.now().toString());
 
-  const handleOpenAddModal = () => {
-    setModalError('');
-    const today = new Date().toISOString().slice(0, 10);
-    setPaymentDate(today);
-
-    if (registeredUsers.length > 0 && !selectedUserId) {
-      setSelectedUserId(registeredUsers[0].id);
-    }
-
-    if (availablePlanOptions.length > 0) {
-      const first = availablePlanOptions[0];
-      setSelectedPlanSlug(first.slug);
-      setPaymentAmount(first.priceDollars);
-      setPaymentExpiryDate(calculateDefaultExpiry(today, first.interval || 'MONTH'));
-    }
-
-    setIsPaymentRecurring(true);
-    setPaymentGateway('stripe');
-    setPaymentStatus('succeeded');
-    setShowAddModal(true);
-  };
-
-  const handlePlanSelectChange = (slugVal: string) => {
-    setSelectedPlanSlug(slugVal);
-    const matched = availablePlanOptions.find((p) => p.slug === slugVal);
-    if (matched) {
-      setPaymentAmount(matched.priceDollars);
-      setPaymentExpiryDate(calculateDefaultExpiry(paymentDate || new Date().toISOString().slice(0, 10), matched.interval || 'MONTH'));
-    }
-  };
-
-  const handleSaveAddPayment = async () => {
-    setModalSubmitting(true);
-    setModalError('');
-
-    try {
-      const targetUser = registeredUsers.find((u) => u.id === selectedUserId);
-      if (!targetUser) throw new Error('Please select a valid user');
-
-      const matchedPlan = availablePlanOptions.find((p) => p.slug === selectedPlanSlug);
-      const planTitle = matchedPlan ? matchedPlan.name : selectedPlanSlug;
-
-      const newTx: PaymentTransaction = {
-        id: 'tx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
-        customerName: targetUser.name || 'Customer',
-        customerEmail: (targetUser.email || '').toLowerCase().trim(),
-        planName: planTitle,
-        planSlug: selectedPlanSlug,
-        amount: Number(paymentAmount || 0),
-        currency: currencyCode,
-        gateway: paymentGateway,
-        status: paymentStatus,
-        createdAt: paymentDate ? new Date(paymentDate).toISOString() : new Date().toISOString(),
-        expiryDate: paymentExpiryDate ? new Date(paymentExpiryDate).toISOString() : undefined,
-        isRecurring: isPaymentRecurring,
-        recurringInterval: selectedPlanSlug.includes('annual') ? 'YEAR' : 'MONTH',
-        autoRenew: isPaymentRecurring
-      };
-
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'add_transaction',
-          transaction: newTx
-        })
+      setStatus({
+        type: 'success',
+        msg: tr('adminPlansResetSuccess', 'Default plans restored and synchronized!')
       });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to record transaction');
-      }
-
-      setShowAddModal(false);
-      setSuccessMsg(t('paymentRecordedSuccess', `Payment recorded successfully in PostgreSQL!`));
-      setTimeout(() => setSuccessMsg(''), 4000);
-      await fetchTransactions();
     } catch (err: any) {
-      setModalError(err.message || 'Error recording transaction');
+      setStatus({ type: 'error', msg: err.message });
     } finally {
-      setModalSubmitting(false);
+      setSaving(false);
     }
   };
 
-  const handleOpenEditModal = (tx: PaymentTransaction) => {
-    setEditingTx(tx);
-    setEditCustomerName(tx.customerName || '');
-    setEditCustomerEmail(tx.customerEmail || '');
-    setEditPlanSlug(tx.planSlug || '');
-    setEditPlanName(tx.planName || '');
-    setEditAmount(parseAmount(tx.amount));
-    setEditGateway(tx.gateway || 'stripe');
-    setEditStatus(isSucceeded(tx.status) ? 'succeeded' : isCanceled(tx.status) ? 'canceled' : isFailed(tx.status) ? 'failed' : isRefunded(tx.status) ? 'refunded' : 'pending');
-    setEditFailureReason(tx.failureReason || '');
-    setEditDate(tx.createdAt ? new Date(tx.createdAt).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
-    setEditExpiryDate(tx.expiryDate ? new Date(tx.expiryDate).toISOString().slice(0, 10) : '');
-    setEditIsRecurring(tx.isRecurring !== undefined ? Boolean(tx.isRecurring) : true);
-    setModalError('');
-    setShowEditModal(true);
-  };
-
-  const handleSaveEditPayment = async () => {
-    if (!editingTx) return;
-    setModalSubmitting(true);
-    setModalError('');
-
-    try {
-      const updatedTx = {
-        ...editingTx,
-        customerName: editCustomerName.trim(),
-        customerEmail: editCustomerEmail.trim().toLowerCase(),
-        planName: editPlanName.trim(),
-        planSlug: editPlanSlug.trim(),
-        amount: Number(editAmount || 0),
-        gateway: editGateway,
-        status: editStatus as any,
-        failureReason: editFailureReason.trim() || undefined,
-        createdAt: editDate ? new Date(editDate).toISOString() : editingTx.createdAt,
-        expiryDate: editExpiryDate ? new Date(editExpiryDate).toISOString() : undefined,
-        isRecurring: editIsRecurring,
-        autoRenew: editIsRecurring
-      };
-
-      const res = await fetch('/api/admin/payment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'update_transaction',
-          transaction: updatedTx
-        })
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to update transaction');
-      }
-
-      setShowEditModal(false);
-      setSuccessMsg(t('paymentUpdatedSuccess', 'Transaction successfully updated in PostgreSQL!'));
-      setTimeout(() => setSuccessMsg(''), 4000);
-      await fetchTransactions();
-    } catch (err: any) {
-      setModalError(err.message || 'Error updating transaction');
-    } finally {
-      setModalSubmitting(false);
-    }
-  };
-
-  // Fixed Transaction Deletion
-  const handleDeleteTransaction = async (tx: PaymentTransaction) => {
-    if (!confirm(`${t('confirmDeleteTx', 'Are you sure you want to permanently delete transaction')} "${tx.id}"?`)) return;
-
-    setDeletingTxId(tx.id);
-    setErrorMsg('');
-    setSuccessMsg('');
-
-    try {
-      const res = await fetch(`/api/admin/payment?id=${encodeURIComponent(tx.id)}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: tx.id, ids: [tx.id] })
-      });
-
-      const data = await res.json().catch(() => null);
-      if (!res.ok || (data && data.success === false)) {
-        throw new Error(data?.error || t('failedDeleteTx', 'Failed to delete transaction from database'));
-      }
-
-      setTransactions((prev) => prev.filter((item) => item.id !== tx.id));
-      setSelectedTxIds((prev) => prev.filter((item) => item !== tx.id));
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-      }
-
-      setSuccessMsg(t('txDeletedSuccess', 'Transaction permanently removed from PostgreSQL.'));
-      setTimeout(() => setSuccessMsg(''), 3000);
-    } catch (err: any) {
-      setErrorMsg(err.message || t('errorDeletingTx', 'Error deleting transaction'));
-      setTimeout(() => setErrorMsg(''), 4000);
-      await fetchTransactions();
-    } finally {
-      setDeletingTxId(null);
-    }
-  };
-
-  // Bulk Delete Transactions
-  const handleBulkDeleteTransactions = async () => {
-    if (selectedTxIds.length === 0) return;
-    const confirmMsg = t('confirmBulkDeleteTx', 'Are you sure you want to permanently delete {count} selected transaction(s)?')
-      .replace('{count}', String(selectedTxIds.length));
-    if (!confirm(confirmMsg)) return;
-
-    setBulkDeleting(true);
-    setErrorMsg('');
-    setSuccessMsg('');
-
-    try {
-      const res = await fetch('/api/admin/payment', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: selectedTxIds })
-      });
-
-      const data = await res.json().catch(() => null);
-      if (!res.ok || (data && data.success === false)) {
-        throw new Error(data?.error || t('failedBulkDeleteTx', 'Failed to delete selected transactions.'));
-      }
-
-      const deletedCount = selectedTxIds.length;
-      setTransactions((prev) => prev.filter((item) => !selectedTxIds.includes(item.id)));
-      setSelectedTxIds([]);
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_payment_updated'));
-        window.dispatchEvent(new Event('zecratary_users_updated'));
-      }
-
-      setSuccessMsg(t('bulkTxDeletedSuccess', `Successfully deleted {count} transaction(s) from PostgreSQL.`).replace('{count}', String(deletedCount)));
-      setTimeout(() => setSuccessMsg(''), 4000);
-    } catch (err: any) {
-      setErrorMsg(err.message || t('errorDeletingTx', 'Error deleting transactions'));
-      setTimeout(() => setErrorMsg(''), 4000);
-      await fetchTransactions();
-    } finally {
-      setBulkDeleting(false);
-    }
-  };
+  // Calculate live savings percentage on the mockup
+  const savingsPercent = useMemo(() => {
+    if (isFree || monthlyPriceDollars <= 0) return 0;
+    const yearlyEquivalent = monthlyPriceDollars * 12;
+    if (annualPriceDollars >= yearlyEquivalent) return 0;
+    const diff = yearlyEquivalent - annualPriceDollars;
+    return Math.round((diff / yearlyEquivalent) * 100);
+  }, [monthlyPriceDollars, annualPriceDollars, isFree]);
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 sm:px-6 pt-4 font-sans transition-colors duration-200 min-h-screen"
-      style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}
+      className="max-w-7xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
+      style={{ color: 'var(--color-text)' }}
     >
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Link 
-              href="/admin" 
-              className="p-1.5 rounded-lg border hover:opacity-80 transition cursor-pointer"
-              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-            <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-              <Zap className="h-6 w-6" style={{ color: 'var(--color-primary)' }} /> 
-              {activeMainTab === 'plans' ? t('adminPlansTitle', 'Subscription Plans & Token Allocations') : t('planTransactionsTitle', 'Plan Transactions Ledger')}
-            </h1>
-          </div>
+      {/* Top Header with Telemetry Badges & Action Bar */}
+      <div 
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" 
+        style={{ borderColor: 'var(--color-border)' }}
+      >
+        <div>
+          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+            <CreditCard className="h-6 w-6" /> {tr('adminPlansTitle', 'Subscription Plans & Pricing Packages')}
+          </h1>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {activeMainTab === 'plans' 
-              ? t('adminPlansSubtitle', 'Configure subscription intervals, macro analysis gating (can_view_macros), and automated AI token purchase grants.')
-              : t('planTransactionsSubtitle', 'Audit customer subscription plan purchase receipts, auto-renewals, and lifecycle status.')}
+            {tr('adminPlansSubtitle', 'Configure billing intervals, token quotas, AI model access, and feature limits synced to PostgreSQL & MySQL.')}
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {activeMainTab === 'transactions' && (
-            <button
-              type="button"
-              onClick={handleOpenAddModal}
-              className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs text-white cursor-pointer hover:opacity-90"
-              style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
-            >
-              <Plus className="h-3.5 w-3.5" /> {t('addPaymentBtn', 'Add Payment')}
-            </button>
-          )}
-
-          <Link
-            href="/admin/token-setting"
-            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer hover:opacity-80"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div 
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)', 
+              color: 'var(--color-text)' 
+            }}
           >
-            <Coins className="h-3.5 w-3.5 text-amber-500" /> {t('viewTokenTransactions', 'Token Transactions Ledger')}
-          </Link>
+            <Database className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
+            <span>{tr('adminPlansSyncBadge', 'Synced with PostgreSQL & MySQL')}</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={loadPlans}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer shadow-sm disabled:opacity-50"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>{tr('adminPlansReloadBtn', 'Reload')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleResetDefaults}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer shadow-sm"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-secondary)'
+            }}
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            <span>{tr('adminPlansResetDefaults', 'Reset Defaults')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleResetForm}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition hover:opacity-90 cursor-pointer shadow-sm"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-emerald, #10b981)',
+              color: 'var(--color-emerald, #10b981)'
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            <span>{tr('adminPlansAddNewPlanBtn', '+ Add New Plan')}</span>
+          </button>
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="flex border-b gap-3 sm:gap-6" style={{ borderColor: 'var(--color-border)' }}>
-        <button
-          type="button"
-          onClick={() => setActiveMainTab('plans')}
-          className="pb-3 px-2 text-sm font-black border-b-2 flex items-center gap-2 transition cursor-pointer"
+      {/* Main 2-Column Responsive Layout: Editor (Left) & Live Card Mockup (Right) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* LEFT COLUMN: PLAN CONFIGURATION EDITOR (7 Cols) */}
+        <div 
+          role="region"
+          data-lpignore="true"
+          className="lg:col-span-7 rounded-3xl p-6 space-y-5 border shadow-xl transition-colors duration-200"
           style={{
-            borderColor: activeMainTab === 'plans' ? 'var(--color-primary)' : 'transparent',
-            color: activeMainTab === 'plans' ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+            backgroundColor: 'var(--color-card)',
+            borderColor: 'var(--color-border)'
           }}
         >
-          <Zap className="h-4 w-4" />
-          <span>{t('tabSubscriptionPlans', 'Subscription Plans')}</span>
-        </button>
+          <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+            <div>
+              <h2 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                {tr('adminPlansEditorHeading', 'Plan Configuration & Parameters')}
+              </h2>
+              <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                {tr('adminPlansEditorSubtitle', 'Define pricing tiers, token allowances, model permissions, and feature lists.')}
+              </p>
+            </div>
 
-        <button
-          type="button"
-          onClick={() => setActiveMainTab('transactions')}
-          className="pb-3 px-2 text-sm font-black border-b-2 flex items-center gap-2 transition cursor-pointer"
-          style={{
-            borderColor: activeMainTab === 'transactions' ? 'var(--color-primary)' : 'transparent',
-            color: activeMainTab === 'transactions' ? 'var(--color-primary)' : 'var(--color-text-secondary)'
-          }}
-        >
-          <History className="h-4 w-4" />
-          <span>{t('tabPlanTransactions', 'Plan Transactions')}</span>
-          <span 
-            className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border shadow-xs ml-1"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          >
-            {transactions.length}
-          </span>
-        </button>
-      </div>
-
-      {/* Quick Fill Presets Bar */}
-      {activeMainTab === 'plans' && (
-        <div 
-          className="p-3.5 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs transition-colors duration-200"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-            <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-              {t('quickPresets', 'Quick Presets:')}
-            </span>
+            {editingId && (
+              <span className="px-2.5 py-1 rounded-xl text-[10px] font-mono font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                Editing: {name}
+              </span>
+            )}
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={handleApplyPresetTaster}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs hover:border-[var(--color-primary)]"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-            >
-              Preset: Taster (Free, Macros Locked)
-            </button>
-            <button
-              type="button"
-              onClick={handleApplyPresetNutritionPro}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs hover:border-[var(--color-emerald)]"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
-            >
-              Preset: Nutrition Pro (Paid, Macros Active)
-            </button>
-            <button
-              type="button"
-              onClick={resetForm}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer shadow-xs"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
-            >
-              {t('blankCustomPlan', 'Blank Custom Plan')}
-            </button>
-          </div>
-        </div>
-      )}
 
-      {/* Notifications */}
-      {errorMsg && (
-        <div 
-          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
-          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'rgba(239, 68, 68, 0.4)', color: '#ef4444' }}
-        >
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>{errorMsg}</span>
-        </div>
-      )}
-
-      {successMsg && (
-        <div 
-          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
-          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
-        >
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>{successMsg}</span>
-        </div>
-      )}
-
-      {/* TAB 1: SUBSCRIPTION PLANS */}
-      {activeMainTab === 'plans' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Form-Free Accessible Container */}
-            <div 
-              role="region"
-              aria-label="Subscription Plan Editor"
-              tabIndex={0}
-              className="lg:col-span-7 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200 outline-none"
-              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-            >
-              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-                <h2 className="text-sm font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                  <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                  <span>{editingId ? t('editPlanHeader', 'Edit Subscription Plan') : t('createNewPlanHeader', 'Create New Plan')}</span>
-                </h2>
-                {editingId && (
-                  <div className="flex items-center gap-3">
-                    {editingId !== 'preset_taster' && slug !== 'taster' && (
-                      <button
-                        type="button"
-                        disabled={deletingId === editingId}
-                        onClick={() => {
-                          const matched = plans.find((p) => p.id === editingId || p.slug === editingId);
-                          if (matched) handleDeletePlan(matched);
-                        }}
-                        className="text-xs text-red-400 hover:text-red-300 cursor-pointer font-bold flex items-center gap-1 transition"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        <span>{t('deletePlan', 'Delete Plan')}</span>
-                      </button>
-                    )}
-                    <button 
-                      type="button" 
-                      onClick={resetForm} 
-                      className="text-xs opacity-70 hover:opacity-100 cursor-pointer font-bold transition"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                    >
-                      {t('cancelEdit', 'Cancel Edit')}
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Autofill Guardrails on Inputs */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('planNameLabel', 'Plan Name *')}
-                  </label>
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Nutrition Pro"
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    spellCheck="false"
-                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-bold outline-none transition"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('planSlugLabel', 'Plan Slug *')}
-                  </label>
-                  <input
-                    type="text"
-                    value={slug}
-                    onChange={(e) => handleSlugChange(e.target.value)}
-                    placeholder="e.g. nutrition-pro"
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    spellCheck="false"
-                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none transition"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-              </div>
-
-              {/* Group & Interval Identifiers */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 rounded-2xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                <div className="space-y-1">
-                  <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('planGroupIdLabel', 'Plan Group ID')}
-                  </label>
-                  <input
-                    type="text"
-                    value={planGroupId}
-                    onChange={(e) => setPlanGroupId(e.target.value)}
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none"
-                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('monthlyPlanIdLabel', 'Monthly Plan ID')}
-                  </label>
-                  <input
-                    type="text"
-                    value={monthlyPlanId}
-                    onChange={(e) => setMonthlyPlanId(e.target.value)}
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none"
-                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block text-[10px] font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('annualPlanIdLabel', 'Annual Plan ID')}
-                  </label>
-                  <input
-                    type="text"
-                    value={annualPlanId}
-                    onChange={(e) => setAnnualPlanId(e.target.value)}
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    className="w-full border rounded-lg px-2.5 py-1.5 text-xs font-mono outline-none"
-                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-              </div>
-
-              {/* Pricing & AI Token Allowance */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('monthlyPriceLabel', 'Monthly Price')} ({currencySymbol} {currencyCode})
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    disabled={isFree}
-                    value={isFree ? 0 : monthlyPrice}
-                    onChange={(e) => setMonthlyPrice(parseFloat(e.target.value) || 0)}
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none disabled:opacity-50"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('annualPriceLabel', 'Annual Price')} ({currencySymbol} {currencyCode})
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    disabled={isFree}
-                    value={isFree ? 0 : annualPrice}
-                    onChange={(e) => setAnnualPrice(parseFloat(e.target.value) || 0)}
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold outline-none disabled:opacity-50"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
-                    <span>{t('tokenAllowanceLabel', 'Token Grant on Purchase')}</span>
-                    <span className="text-amber-500 font-bold">{tokenSymbol}</span>
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={tokenLimit}
-                    onChange={(e) => setTokenLimit(Math.max(0, parseInt(e.target.value) || 0))}
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs font-mono font-black outline-none"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-              </div>
-
-              {/* Macro Analysis Gating (can_view_macros) */}
-              <div 
-                className="p-4 rounded-2xl border flex items-center justify-between transition-colors shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: canViewMacros ? 'var(--color-emerald)' : 'var(--color-border)'
+          {/* Basic Plan Attributes */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div>
+              <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                {tr('adminPlansLabelName', 'Plan Name *')}
+              </label>
+              <input
+                type="text"
+                autoComplete="off"
+                data-lpignore="true"
+                data-form-type="other"
+                spellCheck="false"
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (!editingId && (!slug || slug === name.toLowerCase().replace(/[^a-z0-9]+/g, '-'))) {
+                    setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
+                  }
                 }}
-              >
-                <div className="space-y-0.5 pr-4">
-                  <div className="flex items-center gap-2">
-                    <Activity className="h-4 w-4" style={{ color: canViewMacros ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }} />
-                    <span className="text-xs font-black" style={{ color: 'var(--color-text)' }}>
-                      {t('macroGatingTitle', 'Macro Analysis Gating (can_view_macros)')}
-                    </span>
-                  </div>
-                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                    {canViewMacros 
-                      ? t('macrosActiveDesc', 'Subscribers view unblurred nutritional macros (Calories, Protein, Carbs, Fat) with "Macros Active" badge.')
-                      : t('macrosLockedDesc', 'Subscribers see blurred numbers via blur-[4px] with an Upgrade link.')}
-                  </p>
-                </div>
+                placeholder={tr('adminPlansPlaceholderName', 'e.g. Culinary Pro')}
+                className="w-full px-3 py-2 rounded-xl border font-bold outline-none"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
 
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={canViewMacros}
-                    onClick={() => setCanViewMacros(!canViewMacros)}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      canViewMacros ? 'bg-emerald-500' : 'bg-slate-700'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                        canViewMacros ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                  <span className="text-xs font-bold font-mono" style={{ color: canViewMacros ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}>
-                    {canViewMacros ? 'Active' : 'Locked'}
-                  </span>
-                </div>
-              </div>
+            <div>
+              <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                {tr('adminPlansLabelSlug', 'Slug Identifier *')}
+              </label>
+              <input
+                type="text"
+                autoComplete="off"
+                data-lpignore="true"
+                data-form-type="other"
+                spellCheck="false"
+                value={slug}
+                onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                placeholder={tr('adminPlansPlaceholderSlug', 'e.g. culinary-pro')}
+                className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
 
-              <div className="space-y-1">
-                <label className="block text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('planFeaturesListLabel', 'Plan Features (One per line)')}
+            <div>
+              <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                {tr('adminPlansLabelBadge', 'Badge / Ribbon Tag')}
+              </label>
+              <input
+                type="text"
+                autoComplete="off"
+                data-lpignore="true"
+                data-form-type="other"
+                spellCheck="false"
+                value={badge}
+                onChange={(e) => setBadge(e.target.value)}
+                placeholder={tr('adminPlansPlaceholderBadge', 'e.g. Most Popular, Best Value')}
+                className="w-full px-3 py-2 rounded-xl border font-bold outline-none"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
+          </div>
+
+          {/* Pricing Controls */}
+          <div className="p-4 rounded-2xl border space-y-3" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+                Billing & Pricing ({currencyCode})
+              </span>
+
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-bold">
+                <input
+                  type="checkbox"
+                  checked={isFree}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setIsFree(checked);
+                    if (checked) {
+                      setMonthlyPriceDollars(0);
+                      setAnnualPriceDollars(0);
+                      setCanViewMacros(false);
+                    }
+                  }}
+                  className="rounded border"
+                />
+                <span>{tr('adminPlansLabelFreeTier', 'Mark as Free Tier (Taster)')}</span>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="block font-bold mb-1 opacity-80">
+                  {tr('adminPlansLabelMonthlyPrice', 'Monthly Price ({currency}) *').replace('{currency}', currencySymbol)}
                 </label>
-                <textarea
-                  rows={3}
-                  value={featuresText}
-                  onChange={(e) => setFeaturesText(e.target.value)}
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  disabled={isFree}
                   autoComplete="off"
                   data-lpignore="true"
-                  className="w-full border rounded-xl p-3 text-xs font-medium outline-none transition"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  value={monthlyPriceDollars}
+                  onChange={(e) => setMonthlyPriceDollars(parseFloat(e.target.value) || 0)}
+                  className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none disabled:opacity-40"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
 
-              {/* Action Bar with "Mark as Free Tier" Slide Button */}
-              <div className="flex items-center justify-between pt-2">
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={isFree}
-                    onClick={() => {
-                      const val = !isFree;
-                      setIsFree(val);
-                      if (val) {
-                        setMonthlyPrice(0);
-                        setAnnualPrice(0);
-                        setCanViewMacros(false);
-                      } else {
-                        setCanViewMacros(true);
-                      }
-                    }}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      isFree ? 'bg-emerald-500' : 'bg-slate-700'
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                        isFree ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                  <span
-                    className="text-xs font-bold cursor-pointer select-none transition-colors"
-                    onClick={() => {
-                      const val = !isFree;
-                      setIsFree(val);
-                      if (val) {
-                        setMonthlyPrice(0);
-                        setAnnualPrice(0);
-                        setCanViewMacros(false);
-                      } else {
-                        setCanViewMacros(true);
-                      }
-                    }}
-                    style={{ color: isFree ? 'var(--color-emerald)' : 'var(--color-text)' }}
-                  >
-                    {t('isFreeTierLabel', 'Mark as Free Tier')}
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleSavePlan}
-                  disabled={saving || !name.trim()}
-                  className="px-6 py-2.5 rounded-xl text-white font-extrabold text-xs flex items-center gap-2 shadow-lg transition cursor-pointer disabled:opacity-50 hover:opacity-90"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                >
-                  {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  <span>{editingId ? t('updatePlanBtn', 'Update Plan & Tokens') : t('createPlanBtn', 'Create Plan & Publish')}</span>
-                </button>
+              <div>
+                <label className="block font-bold mb-1 opacity-80">
+                  {tr('adminPlansLabelAnnualPrice', 'Annual Price ({currency}) *').replace('{currency}', currencySymbol)}
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  disabled={isFree}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  value={annualPriceDollars}
+                  onChange={(e) => setAnnualPriceDollars(parseFloat(e.target.value) || 0)}
+                  className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none disabled:opacity-40"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
               </div>
             </div>
 
-            {/* LIVE CARD MOCKUP PREVIEW */}
-            <div 
-              className="lg:col-span-5 border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200 flex flex-col justify-between"
-              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-            >
-              <div className="space-y-4">
-                <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2">
-                    <Eye className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
-                    <h3 className="text-sm font-black" style={{ color: 'var(--color-text)' }}>
-                      {t('planCardMockup', 'Live Card Mockup')}
-                    </h3>
-                  </div>
-                  <div className="flex p-0.5 rounded-lg border text-[10px] font-bold" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                    <button
-                      type="button"
-                      onClick={() => setPreviewInterval('MONTH')}
-                      className="px-2.5 py-1 rounded-md transition cursor-pointer"
-                      style={previewInterval === 'MONTH' ? {
-                        backgroundColor: 'var(--color-primary)',
-                        color: '#ffffff'
-                      } : {
-                        color: 'var(--color-text-secondary)'
-                      }}
-                    >
-                      Monthly
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPreviewInterval('YEAR')}
-                      className="px-2.5 py-1 rounded-md transition cursor-pointer"
-                      style={previewInterval === 'YEAR' ? {
-                        backgroundColor: 'var(--color-primary)',
-                        color: '#ffffff'
-                      } : {
-                        color: 'var(--color-text-secondary)'
-                      }}
-                    >
-                      Annual
-                    </button>
-                  </div>
-                </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="block font-bold mb-1 opacity-80">{tr('adminPlansLabelMonthlyDesc', 'Monthly Tagline')}</label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  value={descriptionMonthly}
+                  onChange={(e) => setDescriptionMonthly(e.target.value)}
+                  placeholder={tr('adminPlansPlaceholderMonthlyDesc', 'e.g. Ideal for passionate home cooks.')}
+                  className="w-full px-3 py-2 rounded-xl border outline-none font-medium"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
 
-                <div 
-                  className="p-5 rounded-2xl border space-y-4 relative shadow-inner"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h4 className="text-lg font-black" style={{ color: 'var(--color-text)' }}>
-                        {name || 'Plan Preview'}
-                      </h4>
-                      <p className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
-                        ID: {previewInterval === 'MONTH' ? (monthlyPlanId || 'plan_monthly') : (annualPlanId || 'plan_annual')}
-                      </p>
-                    </div>
-                    <span 
-                      className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full border shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-primary)',
-                        color: 'var(--color-primary)'
-                      }}
-                    >
-                      {previewInterval === 'MONTH' ? (monthlyBadge || 'Monthly') : (annualBadge || 'Annual')}
-                    </span>
-                  </div>
+              <div>
+                <label className="block font-bold mb-1 opacity-80">{tr('adminPlansLabelAnnualDesc', 'Annual Tagline')}</label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  value={descriptionAnnual}
+                  onChange={(e) => setDescriptionAnnual(e.target.value)}
+                  placeholder={tr('adminPlansPlaceholderAnnualDesc', 'e.g. Maximum savings with yearly billing.')}
+                  className="w-full px-3 py-2 rounded-xl border outline-none font-medium"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+            </div>
+          </div>
 
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-3xl font-black" style={{ color: 'var(--color-text)' }}>
-                      {currencySymbol}{previewInterval === 'MONTH' 
-                        ? (isFree ? '0.00' : Number(monthlyPrice || 0).toFixed(2)) 
-                        : (isFree ? '0.00' : Number(annualPrice || 0).toFixed(2))}
-                    </span>
-                    <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                      /{previewInterval === 'MONTH' ? 'mo' : 'yr'}
-                    </span>
-                  </div>
+          {/* Tokens & Recipe Capacity */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div>
+              <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                {tr('adminPlansLabelMonthlyTokens', 'Monthly Token Grant ({symbol})').replace('{symbol}', tokenSymbol)}
+              </label>
+              <input
+                type="number"
+                step="5000"
+                min="0"
+                autoComplete="off"
+                data-lpignore="true"
+                value={tokensMonthly}
+                onChange={(e) => setTokensMonthly(parseInt(e.target.value, 10) || 0)}
+                className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
 
-                  <div className="flex items-center gap-2 p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
-                    <Coins className="h-4 w-4 text-amber-500 shrink-0" />
-                    <div className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
-                      <span>+{Number(tokenLimit || 0).toLocaleString()} {tokenSymbol}</span>{' '}
-                      <span className="text-[10px] font-normal" style={{ color: 'var(--color-text-secondary)' }}>
-                        {t('creditedUponPurchase', 'credited instantly on purchase')}
-                      </span>
-                    </div>
-                  </div>
+            <div>
+              <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                {tr('adminPlansLabelAnnualTokens', 'Annual Token Grant ({symbol})').replace('{symbol}', tokenSymbol)}
+              </label>
+              <input
+                type="number"
+                step="25000"
+                min="0"
+                autoComplete="off"
+                data-lpignore="true"
+                value={tokensAnnual}
+                onChange={(e) => setTokensAnnual(parseInt(e.target.value, 10) || 0)}
+                className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
 
-                  {/* Macro Demo */}
-                  <div 
-                    className="p-3.5 rounded-2xl border space-y-2.5 transition-colors duration-200 shadow-xs"
-                    style={{
-                      backgroundColor: 'var(--color-card)',
-                      borderColor: canViewMacros ? 'var(--color-emerald)' : 'var(--color-border)'
+            <div>
+              <label className="block font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                {tr('adminPlansLabelMaxSaved', 'Max Saved Recipes Limit')}
+              </label>
+              <input
+                type="number"
+                min="-1"
+                autoComplete="off"
+                data-lpignore="true"
+                value={maxSavedRecipes}
+                onChange={(e) => setMaxSavedRecipes(parseInt(e.target.value, 10) || 0)}
+                className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+              <span className="text-[10px] opacity-60 mt-0.5 block">(-1 = Unlimited)</span>
+            </div>
+          </div>
+
+          {/* Model Permissions & Macronutrients Tracking */}
+          <div className="space-y-3 pt-1">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                {tr('adminPlansLabelAllowedModels', 'Allowed AI Chef Models')}
+              </label>
+
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-bold">
+                <input
+                  type="checkbox"
+                  checked={canViewMacros}
+                  disabled={isFree}
+                  onChange={(e) => setCanViewMacros(e.target.checked)}
+                  className="rounded border"
+                />
+                <span className={isFree ? 'opacity-40' : ''}>
+                  {tr('adminPlansLabelMacros', 'Enable Macronutrient Tracking')}
+                </span>
+              </label>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {AVAILABLE_AI_MODELS.map(model => {
+                const isSelected = allowedModels.includes(model.id);
+                return (
+                  <button
+                    key={model.id}
+                    type="button"
+                    onClick={() => handleToggleModel(model.id)}
+                    className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                    style={isSelected ? {
+                      backgroundColor: 'var(--color-primary)',
+                      borderColor: 'var(--color-primary)',
+                      color: '#ffffff'
+                    } : {
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)'
                     }}
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 text-xs font-bold" style={{ color: 'var(--color-text)' }}>
-                        <span>🔥</span>
-                        <span>{t('macroGatingPreview', 'Daily Average Macros')}</span>
-                      </div>
+                    <Cpu className="h-3.5 w-3.5" />
+                    <span>{model.name}</span>
+                    {isSelected && <Check className="h-3.5 w-3.5" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
-                      {canViewMacros ? (
+          {/* Features Checklist Builder */}
+          <div className="space-y-2 pt-2">
+            <label className="block text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+              {tr('adminPlansLabelFeatures', 'Features & Entitlements Checklist')}
+            </label>
+
+            <div className="flex gap-2">
+              <input
+                type="text"
+                autoComplete="off"
+                data-lpignore="true"
+                data-form-type="other"
+                value={newFeatureText}
+                onChange={(e) => setNewFeatureText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleAddFeature(); }}
+                placeholder={tr('adminPlansPlaceholderFeature', 'e.g. Real-time ingredient nutritional breakdowns')}
+                className="flex-1 px-3 py-2 rounded-xl border text-xs outline-none font-medium"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+              <button
+                type="button"
+                onClick={handleAddFeature}
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
+              >
+                {tr('adminPlansAddFeatureBtn', '+ Add Feature')}
+              </button>
+            </div>
+
+            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 pt-1">
+              {features.map((feat, idx) => (
+                <div 
+                  key={idx}
+                  className="px-3 py-2 rounded-xl border text-xs flex items-center justify-between gap-2 shadow-xs"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                >
+                  <div className="flex items-center gap-2">
+                    <Check className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                    <span style={{ color: 'var(--color-text)' }}>{feat}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveFeature(idx)}
+                    className="text-red-400 hover:text-red-300 p-1 cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Form Actions */}
+          <div className="flex items-center justify-end gap-2.5 pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
+            {editingId && (
+              <button
+                type="button"
+                onClick={handleResetForm}
+                className="px-4 py-2.5 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+              >
+                {tr('adminPlansBtnCancelEdit', 'Cancel Edit')}
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handleSavePlan}
+              disabled={saving || !name.trim()}
+              className="px-6 py-2.5 rounded-xl text-xs font-bold text-white shadow-lg transition hover:opacity-90 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+            >
+              <Check className={`h-4 w-4 ${saving ? 'animate-spin' : ''}`} />
+              <span>{saving ? tr('adminPlansSaving', 'Saving...') : tr('adminPlansBtnSavePlan', 'Save & Synchronize Plan')}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: INTERACTIVE LIVE PRICING CARD MOCKUP (5 Cols) */}
+        <div className="lg:col-span-5 space-y-4">
+          <div className="space-y-1">
+            <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+              <Eye className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+              {tr('adminPlansMockupHeading', 'Live Pricing Card Mockup')}
+            </h3>
+            <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+              {tr('adminPlansMockupSubtitle', 'Real-time interactive preview of how this card renders on /subscriptions and landing pages.')}
+            </p>
+          </div>
+
+          {/* Interactive Billing Interval Switcher */}
+          <div 
+            className="flex p-1.5 rounded-2xl border transition-colors duration-200"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+          >
+            <button
+              type="button"
+              onClick={() => setMockupBillingInterval('monthly')}
+              className="flex-1 py-2 text-xs font-bold rounded-xl transition cursor-pointer"
+              style={mockupBillingInterval === 'monthly' ? {
+                backgroundColor: 'var(--color-card)',
+                color: 'var(--color-primary)',
+                borderColor: 'var(--color-primary)',
+                borderWidth: '1px'
+              } : { color: 'var(--color-text-secondary)' }}
+            >
+              {tr('adminPlansMockupMonthly', 'Monthly Billing')}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMockupBillingInterval('annual')}
+              className="flex-1 py-2 text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer"
+              style={mockupBillingInterval === 'annual' ? {
+                backgroundColor: 'var(--color-card)',
+                color: 'var(--color-primary)',
+                borderColor: 'var(--color-primary)',
+                borderWidth: '1px'
+              } : { color: 'var(--color-text-secondary)' }}
+            >
+              <span>{tr('adminPlansMockupAnnual', 'Annual Billing')}</span>
+              {savingsPercent > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-500/20 text-emerald-400">
+                  {tr('adminPlansMockupSaveBadge', 'Save ~{pct}%').replace('{pct}', String(savingsPercent))}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* The Live Card Replica */}
+          <div 
+            className="p-6 rounded-3xl border shadow-2xl space-y-5 transition-all duration-200 relative overflow-hidden"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: badge ? 'var(--color-primary)' : 'var(--color-border)',
+              borderWidth: badge ? '2px' : '1px'
+            }}
+          >
+            {/* Ribbon Badge */}
+            {badge && (
+              <div className="flex justify-between items-center">
+                <span 
+                  className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider shadow-sm text-white"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                >
+                  {badge}
+                </span>
+                <span className="text-[10px] font-mono opacity-60">
+                  {slug}
+                </span>
+              </div>
+            )}
+
+            <div>
+              <h4 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                {name || 'Plan Title'}
+              </h4>
+              <p className="text-xs mt-1 font-medium leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                {mockupBillingInterval === 'monthly' ? descriptionMonthly : descriptionAnnual}
+              </p>
+            </div>
+
+            {/* Price Display */}
+            <div className="border-t border-b py-4" style={{ borderColor: 'var(--color-border)' }}>
+              {isFree ? (
+                <div className="text-3xl font-black text-emerald-400">
+                  Free
+                </div>
+              ) : (
+                <div className="flex items-baseline gap-1">
+                  <span className="text-3xl font-black" style={{ color: 'var(--color-primary)' }}>
+                    {currencySymbol}{mockupBillingInterval === 'monthly' ? monthlyPriceDollars.toFixed(2) : annualPriceDollars.toFixed(2)}
+                  </span>
+                  <span className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                    {mockupBillingInterval === 'monthly' ? tr('adminPlansMockupPerMonth', '/ month') : tr('adminPlansMockupBilledAnnually', 'billed annually')}
+                  </span>
+                </div>
+              )}
+
+              {/* Token Grant Badge */}
+              <div className="flex items-center gap-2 mt-2">
+                <span className="px-2.5 py-1 rounded-xl text-[11px] font-black font-mono border flex items-center gap-1.5" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                  <span>{tokenSymbol}</span>
+                  <span>
+                    {(tr('adminPlansMockupTokensPerCycle', '{tokens} {symbol} / cycle')).replace('{tokens}', (mockupBillingInterval === 'monthly' ? tokensMonthly : tokensAnnual).toLocaleString()).replace('{symbol}', tokenName)}
+                  </span>
+                </span>
+                {canViewMacros && !isFree && (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                    Macros Active
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Models Access Tags */}
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider opacity-60">
+                Included AI Models
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {allowedModels.map(m => (
+                  <span 
+                    key={m} 
+                    className="px-2 py-0.5 rounded-lg border text-[10px] font-bold"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  >
+                    {AVAILABLE_AI_MODELS.find(x => x.id === m)?.name || m}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Features Checklist */}
+            <div className="space-y-2">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider opacity-60">
+                Features & Quotas
+              </span>
+              <ul className="space-y-1.5 text-xs font-medium" style={{ color: 'var(--color-text)' }}>
+                <li className="flex items-center gap-2">
+                  <Check className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                  <span>
+                    {maxSavedRecipes === -1 ? tr('adminPlansUnlimitedRecipes', 'Unlimited Recipes') : `${maxSavedRecipes} Saved Recipes Capacity`}
+                  </span>
+                </li>
+                {features.map((feat, idx) => (
+                  <li key={idx} className="flex items-center gap-2">
+                    <Check className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
+                    <span>{feat}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Simulated Action CTA Button */}
+            <button
+              type="button"
+              className="w-full py-3 rounded-2xl text-xs font-extrabold text-white shadow-lg transition hover:opacity-90 cursor-pointer"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+            >
+              {tr('adminPlansMockupGetStarted', 'Get Started Now')}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* BOTTOM SECTION: PUBLISHED PLANS TABLE */}
+      <div className="space-y-3 pt-4">
+        <div>
+          <h2 className="text-lg font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+            {tr('adminPlansTableHeading', 'Published Subscription Packages')}
+          </h2>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            {tr('adminPlansTableSubtitle', 'Authoritative plan records currently active and available across the system.')}
+          </p>
+        </div>
+
+        <div 
+          className="border rounded-3xl overflow-hidden shadow-xl transition-colors"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead 
+                className="border-b uppercase font-bold text-[10px] tracking-wider"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+              >
+                <tr>
+                  <th className="px-5 py-4">{tr('adminPlansColPlan', 'Plan Tier & Badge')}</th>
+                  <th className="px-5 py-4">{tr('adminPlansColSlug', 'Slug')}</th>
+                  <th className="px-5 py-4">{tr('adminPlansColPricing', 'Monthly / Annual')}</th>
+                  <th className="px-5 py-4">{tr('adminPlansColTokens', 'Token Quota')}</th>
+                  <th className="px-5 py-4">{tr('adminPlansColStatus', 'Tier Type')}</th>
+                  <th className="px-5 py-4 text-right">{tr('adminPlansColActions', 'Actions')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+                {plans.map((p) => {
+                  const isCurrentEditing = editingId === p.id;
+                  return (
+                    <tr 
+                      key={p.id}
+                      className="transition"
+                      style={{
+                        borderColor: 'var(--color-border)',
+                        backgroundColor: isCurrentEditing ? 'var(--color-inner-dark)' : undefined
+                      }}
+                    >
+                      <td className="px-5 py-4 font-bold flex items-center gap-3">
                         <div 
-                          className="flex items-center gap-1 border px-2 py-0.5 rounded-lg text-[10px] font-bold shadow-xs"
+                          className="w-8 h-8 rounded-xl border flex items-center justify-center font-black text-xs shrink-0"
                           style={{
                             backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-emerald)',
-                            color: 'var(--color-emerald)'
+                            borderColor: p.badge ? 'var(--color-primary)' : 'var(--color-border)',
+                            color: p.badge ? 'var(--color-primary)' : 'var(--color-text)'
                           }}
                         >
-                          <Check className="h-3 w-3" />
-                          <span>{t('macrosActiveBadge', 'Macros Active')}</span>
+                          {p.name.charAt(0).toUpperCase()}
                         </div>
-                      ) : (
-                        <div 
-                          className="flex items-center gap-1 border px-2 py-0.5 rounded-lg text-[10px] font-bold shadow-xs"
-                          style={{
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-extrabold" style={{ color: 'var(--color-text)' }}>{p.name}</span>
+                            {p.badge && (
+                              <span 
+                                className="px-2 py-0.5 rounded text-[9px] font-black uppercase text-white shadow-xs"
+                                style={{ backgroundColor: 'var(--color-primary)' }}
+                              >
+                                {p.badge}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] font-normal" style={{ color: 'var(--color-text-secondary)' }}>
+                            {p.descriptionMonthly || p.descriptionAnnual}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="px-5 py-4 font-mono font-bold text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                        {p.slug}
+                      </td>
+
+                      <td className="px-5 py-4 font-mono font-bold">
+                        {p.isFree ? (
+                          <span className="text-emerald-400 font-extrabold">Free</span>
+                        ) : (
+                          <span>
+                            {currencySymbol}{p.monthlyPriceDollars.toFixed(2)} / {currencySymbol}{p.annualPriceDollars.toFixed(2)}
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="px-5 py-4 font-mono font-semibold" style={{ color: 'var(--color-text)' }}>
+                        {tokenSymbol} {p.tokensMonthly.toLocaleString()} / mo
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <span 
+                          className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border flex items-center gap-1 w-fit"
+                          style={p.isFree ? {
                             backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
+                            borderColor: 'var(--color-emerald, #10b981)',
+                            color: 'var(--color-emerald, #10b981)'
+                          } : {
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-primary)',
                             color: 'var(--color-primary)'
                           }}
                         >
-                          <Lock className="h-3 w-3" />
-                          <span>{t('upgradeBtn', 'Upgrade')}</span>
+                          {p.isFree ? tr('adminPlansStatusFree', 'Free Tier') : tr('adminPlansStatusPaid', 'Paid Premium')}
+                        </span>
+                      </td>
+
+                      <td className="px-5 py-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleEditPlan(p)}
+                            className="p-2 rounded-xl border transition shadow-xs cursor-pointer hover:opacity-85"
+                            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                            title={tr('adminPlansEditTooltip', 'Edit Plan')}
+                          >
+                            <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={p.slug === 'taster' || p.isDefault}
+                            onClick={() => handleDeletePlan(p)}
+                            className={`p-2 rounded-xl border transition shadow-xs ${p.slug === 'taster' || p.isDefault ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer hover:bg-red-500/10'}`}
+                            style={{ 
+                              backgroundColor: 'var(--color-card)', 
+                              borderColor: 'var(--color-border)', 
+                              color: p.slug === 'taster' || p.isDefault ? 'var(--color-text-secondary)' : '#ef4444' 
+                            }}
+                            title={p.slug === 'taster' ? tr('adminPlansCannotDeleteDefault', 'Cannot delete default free plan (taster)') : tr('adminPlansDeleteTooltip', 'Delete Plan')}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                         </div>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-4 gap-2 text-center text-xs">
-                      <div className="p-1.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                        <span className="block text-[9px] font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>Calories</span>
-                        <span className={`text-xs font-black block mt-0.5 ${!canViewMacros ? 'blur-[4px] select-none opacity-60' : ''}`} style={{ color: 'var(--color-text)' }}>
-                          520 kcal
-                        </span>
-                      </div>
-                      <div className="p-1.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                        <span className="block text-[9px] font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>Protein</span>
-                        <span className={`text-xs font-black block mt-0.5 ${!canViewMacros ? 'blur-[4px] select-none opacity-60' : ''}`} style={{ color: 'var(--color-text)' }}>
-                          32g
-                        </span>
-                      </div>
-                      <div className="p-1.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                        <span className="block text-[9px] font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>Carbs</span>
-                        <span className={`text-xs font-black block mt-0.5 ${!canViewMacros ? 'blur-[4px] select-none opacity-60' : ''}`} style={{ color: 'var(--color-text)' }}>
-                          45g
-                        </span>
-                      </div>
-                      <div className="p-1.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                        <span className="block text-[9px] font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>Fat</span>
-                        <span className={`text-xs font-black block mt-0.5 ${!canViewMacros ? 'blur-[4px] select-none opacity-60' : ''}`} style={{ color: 'var(--color-text)' }}>
-                          18g
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <ul className="space-y-1.5 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                    {featuresText.split(/\r?\n/).slice(0, 4).map((f: string, i: number) => (
-                      <li key={i} className="flex items-center gap-2">
-                        <Check className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-emerald)' }} />
-                        <span>{f}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-
-              <div className="pt-2 border-t text-[11px] flex items-center justify-between" style={{ borderColor: 'var(--color-border)' }}>
-                <span style={{ color: 'var(--color-text-secondary)' }}>Parent Group: {planGroupId || 'None'}</span>
-                <span className="font-mono font-bold" style={{ color: 'var(--color-emerald)' }}>PostgreSQL Synced</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Configured Plans List Table */}
-          <div 
-            className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-          >
-            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <div className="flex items-center gap-2">
-                <Layers className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                <h2 className="text-sm font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                  {t('publishedPlansTable', 'Configured Subscription Plans in PostgreSQL')}
-                </h2>
-              </div>
-              <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full border shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
-                {plans.length} {t('plansCount', 'Plans')}
-              </span>
-            </div>
-
-            <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="border-b font-extrabold uppercase text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                    <th className="p-3.5">Plan Name / Slug</th>
-                    <th className="p-3.5">Interval IDs</th>
-                    <th className="p-3.5">Pricing</th>
-                    <th className="p-3.5">AI Token Allowance</th>
-                    <th className="p-3.5">Macro Access</th>
-                    <th className="p-3.5 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
-                  {loading ? (
-                    <tr>
-                      <td colSpan={6} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                        <RefreshCw className="h-4 w-4 animate-spin inline mr-2" style={{ color: 'var(--color-primary)' }} /> Loading plans...
                       </td>
                     </tr>
-                  ) : plans.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="p-8 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                        No subscription plans configured yet.
-                      </td>
-                    </tr>
-                  ) : (
-                    plans.map((p) => {
-                      const isProtected = p.isDefault || p.slug === 'taster' || p.id === 'preset_taster';
-                      return (
-                        <tr key={p.id} className="hover:bg-slate-500/5 transition">
-                          <td className="p-3.5">
-                            <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{p.name}</div>
-                            <div className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>{p.slug}</div>
-                          </td>
-
-                          <td className="p-3.5">
-                            <div className="space-y-0.5 text-[10px] font-mono">
-                              <div style={{ color: '#60a5fa' }}>M: {p.monthlyPlanId || `plan_${p.slug}_monthly`}</div>
-                              <div style={{ color: '#c084fc' }}>A: {p.annualPlanId || `plan_${p.slug}_annual`}</div>
-                            </div>
-                          </td>
-
-                          <td className="p-3.5 font-mono font-bold">
-                            {p.isFree ? (
-                              <span className="font-bold" style={{ color: 'var(--color-emerald)' }}>Free</span>
-                            ) : (
-                              <div>
-                                <div>{currencySymbol}{Number(p.monthlyPriceDollars || 0).toFixed(2)}/mo</div>
-                                <div className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
-                                  {currencySymbol}{Number(p.annualPriceDollars || 0).toFixed(2)}/yr
-                                </div>
-                              </div>
-                            )}
-                          </td>
-
-                          <td className="p-3.5">
-                            <span 
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-black border font-mono shadow-xs"
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark)',
-                                borderColor: 'var(--color-border)',
-                                color: 'var(--color-primary)'
-                              }}
-                            >
-                              <Coins className="h-3 w-3 text-amber-500" /> +{Number(p.tokenLimit ?? 500).toLocaleString()} {tokenSymbol}
-                            </span>
-                          </td>
-
-                          <td className="p-3.5">
-                            {p.canViewMacros ? (
-                              <span 
-                                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border"
-                                style={{
-                                  backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                                  borderColor: 'var(--color-emerald)',
-                                  color: 'var(--color-emerald)'
-                                }}
-                              >
-                                <Check className="h-3 w-3" /> Macros Active
-                              </span>
-                            ) : (
-                              <span 
-                                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border"
-                                style={{
-                                  backgroundColor: 'var(--color-inner-dark)',
-                                  borderColor: 'var(--color-border)',
-                                  color: 'var(--color-text-secondary)'
-                                }}
-                              >
-                                <Lock className="h-3 w-3" /> Locked (blur)
-                              </span>
-                            )}
-                          </td>
-
-                          <td className="p-3.5 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <button
-                                type="button"
-                                onClick={() => handleEdit(p)}
-                                className="px-3 py-1.5 rounded-lg border text-xs font-bold transition hover:opacity-80 cursor-pointer flex items-center gap-1 shadow-xs"
-                                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
-                              >
-                                <Edit3 className="h-3.5 w-3.5" />
-                                <span>{t('edit', 'Edit')}</span>
-                              </button>
-
-                              {!isProtected && (
-                                <button
-                                  type="button"
-                                  disabled={deletingId === p.id}
-                                  onClick={() => handleDeletePlan(p)}
-                                  className="px-2.5 py-1.5 rounded-lg border text-xs font-bold transition hover:bg-red-500/10 text-red-400 border-red-500/30 hover:text-red-300 cursor-pointer disabled:opacity-50 flex items-center gap-1 shadow-xs"
-                                  style={{ backgroundColor: 'var(--color-inner-dark)' }}
-                                  title={t('deletePlan', 'Delete Plan')}
-                                >
-                                  {deletingId === p.id ? (
-                                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                                  ) : (
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  )}
-                                  <span className="hidden sm:inline">{t('delete', 'Delete')}</span>
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
-      )}
+      </div>
 
-      {/* TAB 2: PLAN TRANSACTIONS */}
-      {activeMainTab === 'transactions' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="border rounded-2xl p-4 shadow-sm" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
-              <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('totalVolume', 'Total Volume')}
-              </div>
-              <div className="text-xl font-black mt-1" style={{ color: 'var(--color-emerald)' }}>
-                {currencySymbol}{transactions
-                  .filter((tItem) => isSucceeded(tItem.status))
-                  .reduce((acc, curr) => acc + (curr.amount || 0), 0)
-                  .toFixed(2)}
-              </div>
-            </div>
-
-            <div className="border rounded-2xl p-4 shadow-sm" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
-              <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('succeededCount', 'Succeeded')}
-              </div>
-              <div className="text-xl font-black mt-1" style={{ color: 'var(--color-primary)' }}>
-                {transactions.filter((tItem) => isSucceeded(tItem.status)).length}
-              </div>
-            </div>
-
-            <div className="border rounded-2xl p-4 shadow-sm" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
-              <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('activeRecurring', 'Auto-Renew ON')}
-              </div>
-              <div className="text-xl font-black mt-1 text-blue-400">
-                {transactions.filter((tItem) => tItem.autoRenew && isSucceeded(tItem.status)).length}
-              </div>
-            </div>
-
-            <div className="border rounded-2xl p-4 shadow-sm" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
-              <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('refundedOrCanceled', 'Canceled / Refunded')}
-              </div>
-              <div className="text-xl font-black mt-1 text-amber-500">
-                {transactions.filter((tItem) => isCanceled(tItem.status) || isRefunded(tItem.status)).length}
-              </div>
-            </div>
-          </div>
-
-          <div 
-            className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-          >
-            {/* Search, Filter & Controls */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
-              <div className="relative flex-1">
-                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 opacity-40" />
-                <input
-                  type="text"
-                  placeholder={t('searchTransactionsPlaceholder', 'Search customer, email, plan, or ID...')}
-                  value={txSearchQuery}
-                  onChange={(e) => {
-                    setTxSearchQuery(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                  autoComplete="off"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  className="w-full pl-10 pr-4 py-2 rounded-xl border text-xs outline-none transition"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
-              </div>
-
-              <div className="flex items-center gap-2">
-                <select
-                  value={statusFilter}
-                  onChange={(e) => {
-                    setStatusFilter(e.target.value as any);
-                    setCurrentPage(1);
-                  }}
-                  className="px-3 py-2 rounded-xl border text-xs font-bold outline-none cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                >
-                  <option value="all">{t('allStatuses', 'All Statuses')}</option>
-                  <option value="succeeded">{t('succeeded', 'Succeeded')}</option>
-                  <option value="canceled">{t('canceled', 'Canceled')}</option>
-                  <option value="refunded">{t('refunded', 'Refunded')}</option>
-                  <option value="failed">{t('failed', 'Failed')}</option>
-                  <option value="pending">{t('pending', 'Pending')}</option>
-                </select>
-
-                <select
-                  value={gatewayFilter}
-                  onChange={(e) => {
-                    setGatewayFilter(e.target.value as any);
-                    setCurrentPage(1);
-                  }}
-                  className="px-3 py-2 rounded-xl border text-xs font-bold outline-none cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                >
-                  <option value="all">{t('allGateways', 'All Gateways')}</option>
-                  <option value="stripe">Stripe</option>
-                  <option value="paypal">PayPal</option>
-                  <option value="manual">Manual</option>
-                </select>
-
-                <button
-                  type="button"
-                  onClick={fetchTransactions}
-                  disabled={loadingTransactions}
-                  className="p-2 rounded-xl border transition cursor-pointer hover:opacity-80"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  title={t('refreshTransactions', 'Refresh Transactions')}
-                >
-                  <RefreshCw className={`h-4 w-4 ${loadingTransactions ? 'animate-spin' : ''}`} />
-                </button>
-              </div>
-            </div>
-
-            {/* Active Bulk Actions Bar */}
-            {selectedTxIds.length > 0 && (
-              <div 
-                className="p-3 rounded-2xl border flex flex-wrap items-center justify-between gap-3 shadow-md animate-in fade-in"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold" style={{ color: 'var(--color-primary)' }}>
-                    {selectedTxIds.length} {t('selected', 'Selected')}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedTxIds([])}
-                    className="text-[11px] underline opacity-70 hover:opacity-100 cursor-pointer ml-1"
-                    style={{ color: 'var(--color-text-secondary)' }}
-                  >
-                    {t('clearSelection', 'Clear selection')}
-                  </button>
-                  {selectedTxIds.length < filteredTransactions.length && (
-                    <button
-                      type="button"
-                      onClick={handleSelectAllMatching}
-                      className="text-[11px] font-bold underline cursor-pointer ml-2"
-                      style={{ color: 'var(--color-emerald)' }}
-                    >
-                      {t('selectAllMatching', 'Select all {count} matching transactions').replace('{count}', String(filteredTransactions.length))}
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={bulkDeleting}
-                    onClick={handleBulkDeleteTransactions}
-                    className="px-3.5 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20 transition cursor-pointer disabled:opacity-50"
-                  >
-                    {bulkDeleting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                    <span>{t('deleteSelectedBtn', 'Delete Selected')} ({selectedTxIds.length})</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Transactions Table with Select All Checkbox */}
-            <div className="overflow-x-auto rounded-2xl border" style={{ borderColor: 'var(--color-border)' }}>
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="border-b font-extrabold uppercase text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                    <th className="p-3.5 w-10 text-center">
-                      <input
-                        type="checkbox"
-                        ref={headerCheckboxRef}
-                        checked={isAllSelected}
-                        onChange={handleToggleSelectAll}
-                        className="rounded w-4 h-4 cursor-pointer accent-[#10b981]"
-                        title={t('selectAll', 'Select All')}
-                      />
-                    </th>
-                    <th className="p-3.5">{t('colDate', 'Date')}</th>
-                    <th className="p-3.5">{t('colCustomer', 'Customer')}</th>
-                    <th className="p-3.5">{t('colPlan', 'Plan')}</th>
-                    <th className="p-3.5">{t('colAmount', 'Amount')}</th>
-                    <th className="p-3.5">{t('colGateway', 'Gateway')}</th>
-                    <th className="p-3.5">{t('colStatus', 'Status')}</th>
-                    <th className="p-3.5">{t('colRecurring', 'Auto-Renew')}</th>
-                    <th className="p-3.5">{t('colExpiry', 'Billing Expiry')}</th>
-                    <th className="p-3.5 text-right">{t('colActions', 'Actions')}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
-                  {loadingTransactions ? (
-                    <tr>
-                      <td colSpan={10} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                        <RefreshCw className="h-4 w-4 animate-spin inline mr-2" style={{ color: 'var(--color-primary)' }} /> Loading plan transactions...
-                      </td>
-                    </tr>
-                  ) : paginatedTransactions.length === 0 ? (
-                    <tr>
-                      <td colSpan={10} className="p-8 text-center text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                        No subscription plan transactions found.
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedTransactions.map((tx) => {
-                      const succeeded = isSucceeded(tx.status);
-                      const canceled = isCanceled(tx.status);
-                      const refunded = isRefunded(tx.status);
-                      const failed = isFailed(tx.status);
-                      const isSelected = selectedTxIds.includes(tx.id);
-
-                      return (
-                        <tr key={tx.id} className={`hover:bg-slate-500/5 transition ${isSelected ? 'bg-primary/5' : ''}`}>
-                          <td className="p-3.5 w-10 text-center">
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={(e) => {
-                                e.stopPropagation();
-                                setSelectedTxIds((prev) =>
-                                  prev.includes(tx.id) ? prev.filter((id) => id !== tx.id) : [...prev, tx.id]
-                                );
-                              }}
-                              className="rounded w-4 h-4 cursor-pointer accent-[#10b981]"
-                            />
-                          </td>
-
-                          <td className="p-3.5 font-mono text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                            {new Date(tx.createdAt).toLocaleDateString()}
-                          </td>
-
-                          <td className="p-3.5">
-                            <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{tx.customerName}</div>
-                            <div className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>{tx.customerEmail}</div>
-                          </td>
-
-                          <td className="p-3.5">
-                            <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{tx.planName}</div>
-                            {tx.planSlug && (
-                              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                                {tx.planSlug}
-                              </span>
-                            )}
-                          </td>
-
-                          <td className="p-3.5 font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                            {currencySymbol}{Number(tx.amount || 0).toFixed(2)}
-                            <span className="text-[10px] font-normal ml-1 opacity-70">{tx.currency}</span>
-                          </td>
-
-                          <td className="p-3.5 uppercase font-bold text-[10px] tracking-wider" style={{ color: 'var(--color-text-secondary)' }}>
-                            {tx.gateway}
-                          </td>
-
-                          <td className="p-3.5">
-                            {succeeded && (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border border-emerald-500/30 text-emerald-400 bg-emerald-500/10">
-                                <CheckCircle className="h-3 w-3" /> Succeeded
-                              </span>
-                            )}
-                            {canceled && (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border border-orange-500/30 text-orange-400 bg-orange-500/10">
-                                <Ban className="h-3 w-3" /> Canceled
-                              </span>
-                            )}
-                            {refunded && (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border border-amber-500/30 text-amber-400 bg-amber-500/10">
-                                <RefreshCw className="h-3 w-3" /> Refunded
-                              </span>
-                            )}
-                            {failed && (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border border-red-500/30 text-red-400 bg-red-500/10">
-                                <AlertTriangle className="h-3 w-3" /> Failed
-                              </span>
-                            )}
-                            {!succeeded && !canceled && !refunded && !failed && (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border border-slate-500/30 text-slate-400 bg-slate-500/10">
-                                {tx.status}
-                              </span>
-                            )}
-                          </td>
-
-                          <td className="p-3.5">
-                            <button
-                              type="button"
-                              disabled={togglingTxId === tx.id}
-                              onClick={() => handleToggleRecurring(tx)}
-                              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                                tx.autoRenew ? 'bg-emerald-500' : 'bg-slate-700'
-                              }`}
-                            >
-                              <span
-                                className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                                  tx.autoRenew ? 'translate-x-4' : 'translate-x-0'
-                                }`}
-                              />
-                            </button>
-                          </td>
-
-                          <td className="p-3.5 font-mono text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                            {tx.expiryDate ? new Date(tx.expiryDate).toLocaleDateString() : '—'}
-                          </td>
-
-                          <td className="p-3.5 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => handleOpenEditModal(tx)}
-                                className="p-1.5 rounded-lg border transition hover:opacity-80 cursor-pointer shadow-xs"
-                                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
-                                title={t('edit', 'Edit')}
-                              >
-                                <Pencil className="h-3 w-3" />
-                              </button>
-
-                              <button
-                                type="button"
-                                disabled={deletingTxId === tx.id}
-                                onClick={() => handleDeleteTransaction(tx)}
-                                className="p-1.5 rounded-lg border transition hover:bg-red-500/10 text-red-400 border-red-500/30 hover:text-red-300 cursor-pointer shadow-xs disabled:opacity-50"
-                                style={{ backgroundColor: 'var(--color-inner-dark)' }}
-                                title={t('delete', 'Delete')}
-                              >
-                                {deletingTxId === tx.id ? (
-                                  <RefreshCw className="h-3 w-3 animate-spin" />
-                                ) : (
-                                  <Trash2 className="h-3 w-3" />
-                                )}
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Pagination Controls */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs pt-2" style={{ color: 'var(--color-text-secondary)' }}>
-              <span>
-                {t('showingCount', 'Showing')} {Math.min(filteredTransactions.length, (currentPage - 1) * pageSize + 1)} - {Math.min(filteredTransactions.length, currentPage * pageSize)} {t('ofTotal', 'of')} {filteredTransactions.length}
-              </span>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  disabled={currentPage <= 1}
-                  className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer hover:opacity-80"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                </button>
-                <span className="px-2 font-mono font-bold">
-                  {currentPage} / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={currentPage >= totalPages}
-                  className="p-1.5 rounded-lg border disabled:opacity-30 transition cursor-pointer hover:opacity-80"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                >
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Accessible Dialog Container: Add Payment */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div 
-            role="dialog"
-            aria-modal="true"
-            aria-label="Record Plan Payment Modal"
-            className="w-full max-w-lg rounded-3xl border p-6 space-y-4 shadow-2xl relative animate-in fade-in zoom-in-95"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-          >
-            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="text-sm font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                <Plus className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                <span>{t('recordPaymentModalTitle', 'Record Plan Payment & Activate')}</span>
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowAddModal(false)}
-                className="p-1 rounded-lg border hover:opacity-80 transition cursor-pointer"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            {modalError && (
-              <div className="p-3 border rounded-xl text-xs text-red-400 border-red-500/30 bg-red-500/10">
-                {modalError}
-              </div>
-            )}
-
-            <div className="space-y-3 text-xs">
-              <div className="space-y-1">
-                <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('selectCustomerLabel', 'Select Registered User')}
-                </label>
-                <select
-                  value={selectedUserId}
-                  onChange={(e) => setSelectedUserId(e.target.value)}
-                  className="w-full border rounded-xl px-3.5 py-2.5 font-bold outline-none cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                >
-                  {registeredUsers.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} ({u.email})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('selectPlanTierLabel', 'Select Subscription Plan')}
-                </label>
-                <select
-                  value={selectedPlanSlug}
-                  onChange={(e) => handlePlanSelectChange(e.target.value)}
-                  className="w-full border rounded-xl px-3.5 py-2.5 font-bold outline-none cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                >
-                  {availablePlanOptions.map((opt) => (
-                    <option key={opt.slug} value={opt.slug}>
-                      {opt.name} — {opt.priceFormatted}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('amountLabel', 'Payment Amount')} ({currencySymbol})
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={paymentAmount}
-                    onChange={(e) => setPaymentAmount(parseFloat(e.target.value) || 0)}
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    className="w-full border rounded-xl px-3.5 py-2.5 font-mono font-bold outline-none"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('gatewayLabel', 'Payment Gateway')}
-                  </label>
-                  <select
-                    value={paymentGateway}
-                    onChange={(e) => setPaymentGateway(e.target.value as any)}
-                    className="w-full border rounded-xl px-3.5 py-2.5 font-bold outline-none cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  >
-                    <option value="stripe">Stripe</option>
-                    <option value="paypal">PayPal</option>
-                    <option value="manual">Manual / Bank</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('paymentDateLabel', 'Payment Date')}
-                  </label>
-                  <input
-                    type="date"
-                    value={paymentDate}
-                    onChange={(e) => {
-                      setPaymentDate(e.target.value);
-                      const matched = availablePlanOptions.find((p) => p.slug === selectedPlanSlug);
-                      if (matched) {
-                        setPaymentExpiryDate(calculateDefaultExpiry(e.target.value, matched.interval || 'MONTH'));
-                      }
-                    }}
-                    autoComplete="off"
-                    data-lpignore="true"
-                    className="w-full border rounded-xl px-3.5 py-2 font-mono outline-none"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('expiryDateLabel', 'Billing Expiry Date')}
-                  </label>
-                  <input
-                    type="date"
-                    value={paymentExpiryDate}
-                    onChange={(e) => setPaymentExpiryDate(e.target.value)}
-                    autoComplete="off"
-                    data-lpignore="true"
-                    className="w-full border rounded-xl px-3.5 py-2 font-mono outline-none"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-2">
-                <label className="flex items-center gap-2 cursor-pointer select-none font-bold">
-                  <input
-                    type="checkbox"
-                    checked={isPaymentRecurring}
-                    onChange={(e) => setIsPaymentRecurring(e.target.checked)}
-                    className="rounded w-4 h-4 cursor-pointer accent-[#10b981]"
-                  />
-                  <span>{t('recurringRenewalLabel', 'Recurring Auto-Renew Enabled')}</span>
-                </label>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-              <button
-                type="button"
-                onClick={() => setShowAddModal(false)}
-                className="px-4 py-2 rounded-xl text-xs font-bold border transition cursor-pointer hover:opacity-80"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
-              >
-                {t('cancel', 'Cancel')}
-              </button>
-              <button
-                type="button"
-                disabled={modalSubmitting}
-                onClick={handleSaveAddPayment}
-                className="px-5 py-2 rounded-xl text-xs font-extrabold text-white transition cursor-pointer shadow-lg disabled:opacity-50 flex items-center gap-2 hover:opacity-90"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-              >
-                {modalSubmitting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                <span>{t('recordPaymentBtn', 'Record & Sync PostgreSQL')}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Accessible Dialog Container: Edit Payment */}
-      {showEditModal && editingTx && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-          <div 
-            role="dialog"
-            aria-modal="true"
-            aria-label="Edit Payment Transaction Modal"
-            className="w-full max-w-lg rounded-3xl border p-6 space-y-4 shadow-2xl relative animate-in fade-in zoom-in-95"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-          >
-            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="text-sm font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                <Pencil className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                <span>{t('editPaymentModalTitle', 'Edit Transaction Record')}</span>
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowEditModal(false)}
-                className="p-1 rounded-lg border hover:opacity-80 transition cursor-pointer"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            {modalError && (
-              <div className="p-3 border rounded-xl text-xs text-red-400 border-red-500/30 bg-red-500/10">
-                {modalError}
-              </div>
-            )}
-
-            <div className="space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Customer Name</label>
-                  <input
-                    type="text"
-                    value={editCustomerName}
-                    onChange={(e) => setEditCustomerName(e.target.value)}
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    className="w-full border rounded-xl px-3 py-2 font-bold outline-none"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Customer Email</label>
-                  <input
-                    type="text"
-                    inputMode="email"
-                    value={editCustomerEmail}
-                    onChange={(e) => setEditCustomerEmail(e.target.value)}
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    className="w-full border rounded-xl px-3 py-2 font-mono outline-none"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Plan Name</label>
-                  <input
-                    type="text"
-                    value={editPlanName}
-                    onChange={(e) => setEditPlanName(e.target.value)}
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    className="w-full border rounded-xl px-3 py-2 font-bold outline-none"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Plan Slug</label>
-                  <input
-                    type="text"
-                    value={editPlanSlug}
-                    onChange={(e) => setEditPlanSlug(e.target.value)}
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    className="w-full border rounded-xl px-3 py-2 font-mono outline-none"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Amount</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editAmount}
-                    onChange={(e) => setEditAmount(parseFloat(e.target.value) || 0)}
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    className="w-full border rounded-xl px-3 py-2 font-mono font-bold outline-none"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Gateway</label>
-                  <select
-                    value={editGateway}
-                    onChange={(e) => setEditGateway(e.target.value)}
-                    className="w-full border rounded-xl px-3 py-2 font-bold outline-none cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  >
-                    <option value="stripe">Stripe</option>
-                    <option value="paypal">PayPal</option>
-                    <option value="manual">Manual</option>
-                  </select>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Status</label>
-                  <select
-                    value={editStatus}
-                    onChange={(e) => setEditStatus(e.target.value)}
-                    className="w-full border rounded-xl px-3 py-2 font-bold outline-none cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  >
-                    <option value="succeeded">Succeeded</option>
-                    <option value="canceled">Canceled</option>
-                    <option value="refunded">Refunded</option>
-                    <option value="failed">Failed</option>
-                    <option value="pending">Pending</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Created Date</label>
-                  <input
-                    type="date"
-                    value={editDate}
-                    onChange={(e) => setEditDate(e.target.value)}
-                    autoComplete="off"
-                    data-lpignore="true"
-                    className="w-full border rounded-xl px-3 py-2 font-mono outline-none"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>Expiry Date</label>
-                  <input
-                    type="date"
-                    value={editExpiryDate}
-                    onChange={(e) => setEditExpiryDate(e.target.value)}
-                    autoComplete="off"
-                    data-lpignore="true"
-                    className="w-full border rounded-xl px-3 py-2 font-mono outline-none"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-2">
-                <label className="flex items-center gap-2 cursor-pointer select-none font-bold">
-                  <input
-                    type="checkbox"
-                    checked={editIsRecurring}
-                    onChange={(e) => setEditIsRecurring(e.target.checked)}
-                    className="rounded w-4 h-4 cursor-pointer accent-[#10b981]"
-                  />
-                  <span>{t('recurringRenewalLabel', 'Recurring Auto-Renew Enabled')}</span>
-                </label>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-              <button
-                type="button"
-                onClick={() => setShowEditModal(false)}
-                className="px-4 py-2 rounded-xl text-xs font-bold border transition cursor-pointer hover:opacity-80"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
-              >
-                {t('cancel', 'Cancel')}
-              </button>
-              <button
-                type="button"
-                disabled={modalSubmitting}
-                onClick={handleSaveEditPayment}
-                className="px-5 py-2 rounded-xl text-xs font-extrabold text-white transition cursor-pointer shadow-lg disabled:opacity-50 flex items-center gap-2 hover:opacity-90"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-              >
-                {modalSubmitting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                <span>{t('updateRecordBtn', 'Update & Save Changes')}</span>
-              </button>
-            </div>
-          </div>
+      {/* Status Toast Banner */}
+      {status && (
+        <div
+          className="p-4 rounded-2xl border text-xs font-semibold flex items-center gap-2 animate-in fade-in"
+          style={{
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: status.type === 'success' ? 'var(--color-emerald, #10b981)' : 'rgba(239, 68, 68, 0.4)',
+            color: status.type === 'success' ? 'var(--color-emerald, #10b981)' : '#ef4444'
+          }}
+        >
+          {status.type === 'success' ? (
+            <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
+          ) : (
+            <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
+          )}
+          <span>{status.msg}</span>
         </div>
       )}
     </div>
