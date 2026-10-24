@@ -1,770 +1,813 @@
 // @ts-nocheck
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { 
-  ArrowLeft, Key, Save, RefreshCw, CheckCircle2, 
-  AlertCircle, Eye, EyeOff, Copy, Check, Zap 
+  Shield, Key, Globe, Check, Copy, Eye, EyeOff, RotateCcw, 
+  ArrowLeft, CheckCircle2, AlertCircle, RefreshCw, Sparkles, ExternalLink
 } from 'lucide-react';
-import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
-import { applyThemeToDocument } from '@/lib/themeConfig';
-import { 
-  purgeLegacyBrowserAdminStorage, 
-  fetchServerAdminSettings, 
-  persistServerAdminSettings 
-} from '@/lib/adminSync';
 
-interface SocialConfig {
-  googleEnabled: boolean;
-  googleClientId: string;
-  googleClientSecret: string;
-  facebookEnabled: boolean;
-  facebookClientId: string;
-  facebookClientSecret: string;
-  appleEnabled: boolean;
-  appleClientId: string;
-  appleTeamId: string;
-  appleKeyId: string;
+interface ProviderConfig {
+  enabled: boolean;
+  clientId?: string;
+  clientSecret?: string;
+  appId?: string;
+  appSecret?: string;
+  teamId?: string;
+  keyId?: string;
+  privateKey?: string;
+  callbackUrl: string;
 }
 
-const DEFAULT_CONFIG: SocialConfig = {
-  googleEnabled: true,
-  googleClientId: '',
-  googleClientSecret: '',
-  facebookEnabled: true,
-  facebookClientId: '',
-  facebookClientSecret: '',
-  appleEnabled: false,
-  appleClientId: '',
-  appleTeamId: '',
-  appleKeyId: ''
+interface SocialLoginSettings {
+  google: ProviderConfig;
+  facebook: ProviderConfig;
+  apple: ProviderConfig;
+}
+
+const DEFAULT_SETTINGS: SocialLoginSettings = {
+  google: {
+    enabled: true,
+    clientId: '',
+    clientSecret: '',
+    callbackUrl: '/api/auth/callback/google'
+  },
+  facebook: {
+    enabled: true,
+    appId: '',
+    appSecret: '',
+    callbackUrl: '/api/auth/callback/facebook'
+  },
+  apple: {
+    enabled: true,
+    clientId: '',
+    teamId: '',
+    keyId: '',
+    privateKey: '',
+    callbackUrl: '/api/auth/callback/apple'
+  }
 };
 
 export default function SocialLoginSettingPage() {
-  const router = useRouter();
-  const langContext = useTranslation();
-  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
+  const { t } = useTranslation();
 
-  const [user, setUser] = useState<User | null>(null);
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
-  const [config, setConfig] = useState<SocialConfig>(DEFAULT_CONFIG);
-  const [showSecrets, setShowSecrets] = useState<{ [k: string]: boolean }>({});
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [syncingEnv, setSyncingEnv] = useState<boolean>(false);
-  const [statusMsg, setStatusMsg] = useState<{ text: string; success: boolean } | null>(null);
-  const [diagnostics, setDiagnostics] = useState<{ [provider: string]: string }>({});
+  const [settings, setSettings] = useState<SocialLoginSettings>(DEFAULT_SETTINGS);
+  const [initialSettings, setInitialSettings] = useState<SocialLoginSettings>(DEFAULT_SETTINGS);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [saving, setSaving] = useState<boolean>(false);
+  const [testingProvider, setTestingProvider] = useState<string | null>(null);
 
-  const originUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+  // Field visibility toggles (secret eye / eye-off)
+  const [showGoogleSecret, setShowGoogleSecret] = useState<boolean>(false);
+  const [showFacebookSecret, setShowFacebookSecret] = useState<boolean>(false);
+  const [showApplePrivateKey, setShowApplePrivateKey] = useState<boolean>(false);
 
-  // Dynamic Theme Synchronization
-  const syncTheme = useCallback(() => {
-    try {
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
-    } catch (_) {}
+  // Toast feedback
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [originUrl, setOriginUrl] = useState<string>('');
+
+  // Self-update guard to eliminate race conditions
+  const isSelfUpdatingRef = useRef<boolean>(false);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 3800);
+  };
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setOriginUrl(window.location.origin);
+    }
   }, []);
 
-  useEffect(() => {
-    syncTheme();
-    purgeLegacyBrowserAdminStorage();
-
-    window.addEventListener('zecratary_theme_mode_changed', syncTheme);
-    window.addEventListener('zecratary_theme_changed', syncTheme);
-    window.addEventListener('zecratary_theme_updated', syncTheme);
-    window.addEventListener('storage', syncTheme);
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', syncTheme);
-      window.removeEventListener('zecratary_theme_changed', syncTheme);
-      window.removeEventListener('zecratary_theme_updated', syncTheme);
-      window.removeEventListener('storage', syncTheme);
-    };
-  }, [syncTheme]);
-
-  useEffect(() => {
-    initAuthStorage();
-    const active = getCurrentUser();
-    if (!active) {
-      router.replace('/login');
-      return;
-    }
-    if (active.role !== 'admin' && !active.email.includes('admin')) {
-      router.replace('/profile');
-      return;
-    }
-    setUser(active);
-  }, [router]);
-
-  // Hydrate configurations directly from Server Storage (Zero LocalStorage)
-  const loadConfig = useCallback(async () => {
-    purgeLegacyBrowserAdminStorage();
+  const fetchSettings = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
-      const serverData = await fetchServerAdminSettings();
-      if (serverData && serverData.socialLogin) {
-        const sl = serverData.socialLogin;
-        setConfig(prev => ({
-          ...prev,
-          googleEnabled: sl.googleEnabled ?? prev.googleEnabled,
-          googleClientId: sl.googleClientId ?? prev.googleClientId,
-          googleClientSecret: sl.googleClientSecret ?? prev.googleClientSecret,
-          facebookEnabled: sl.facebookEnabled ?? prev.facebookEnabled,
-          facebookClientId: sl.facebookClientId ?? sl.facebookAppId ?? prev.facebookClientId,
-          facebookClientSecret: sl.facebookClientSecret ?? sl.facebookAppSecret ?? prev.facebookClientSecret,
-          appleEnabled: sl.appleEnabled ?? prev.appleEnabled,
-          appleClientId: sl.appleClientId ?? prev.appleClientId,
-          appleTeamId: sl.appleTeamId ?? prev.appleTeamId,
-          appleKeyId: sl.appleKeyId ?? prev.appleKeyId
-        }));
-        return;
-      }
-
-      const envRes = await fetch('/api/admin/social-env?t=' + Date.now(), { cache: 'no-store' });
-      if (envRes.ok) {
-        const envJson = await envRes.json();
-        if (envJson.success && envJson.config) {
-          const c = envJson.config;
-          setConfig(prev => ({
-            ...prev,
-            googleEnabled: c.googleEnabled ?? prev.googleEnabled,
-            googleClientId: c.googleClientId ?? prev.googleClientId,
-            googleClientSecret: c.googleClientSecret ?? prev.googleClientSecret,
-            facebookEnabled: c.facebookEnabled ?? prev.facebookEnabled,
-            facebookClientId: c.facebookClientId ?? c.facebookAppId ?? prev.facebookClientId,
-            facebookClientSecret: c.facebookClientSecret ?? c.facebookAppSecret ?? prev.facebookClientSecret,
-            appleEnabled: c.appleEnabled ?? prev.appleEnabled,
-            appleClientId: c.appleClientId ?? prev.appleClientId,
-            appleTeamId: c.appleTeamId ?? prev.appleTeamId,
-            appleKeyId: c.appleKeyId ?? prev.appleKeyId
-          }));
+      const res = await fetch(`/api/admin/social-login?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const conf = data.socialLogin || data.settings?.socialLogin || data;
+        if (conf && typeof conf === 'object') {
+          const merged: SocialLoginSettings = {
+            google: { ...DEFAULT_SETTINGS.google, ...(conf.google || {}) },
+            facebook: { ...DEFAULT_SETTINGS.facebook, ...(conf.facebook || {}) },
+            apple: { ...DEFAULT_SETTINGS.apple, ...(conf.apple || {}) }
+          };
+          setSettings(merged);
+          setInitialSettings(JSON.parse(JSON.stringify(merged)));
+          return;
         }
       }
     } catch (err) {
-      console.error('[social-login-setting] Failed to fetch server config:', err);
+      console.warn('Failed to fetch social login settings:', err);
+    } finally {
+      if (!quiet) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadConfig();
+    document.title = `${t('socialLoginTitle', 'Social Login Settings')} - Zecratary Admin`;
+    fetchSettings();
 
-    const handleSync = () => {
-      loadConfig();
+    const handleExternalUpdates = () => {
+      if (isSelfUpdatingRef.current) return;
+      fetchSettings(true);
     };
 
-    window.addEventListener('zecratary_social_login_updated', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    window.addEventListener('zecratary_social_login_updated', handleExternalUpdates);
+    window.addEventListener('zecratary_admin_settings_updated', handleExternalUpdates);
+    window.addEventListener('storage', handleExternalUpdates);
+
     return () => {
-      window.removeEventListener('zecratary_social_login_updated', handleSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+      window.removeEventListener('zecratary_social_login_updated', handleExternalUpdates);
+      window.removeEventListener('zecratary_admin_settings_updated', handleExternalUpdates);
+      window.removeEventListener('storage', handleExternalUpdates);
     };
-  }, [loadConfig]);
+  }, [fetchSettings, t]);
 
-  const handleCopy = (text: string, id: string) => {
-    if (typeof navigator !== 'undefined' && navigator.clipboard) {
-      navigator.clipboard.writeText(text);
-      setCopiedKey(id);
-      setTimeout(() => setCopiedKey(null), 2000);
-    }
-  };
+  const isDirty = useMemo(() => {
+    return JSON.stringify(settings) !== JSON.stringify(initialSettings);
+  }, [settings, initialSettings]);
 
-  const handleSaveAndSync = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    setLoading(true);
-    setStatusMsg(null);
-
-    const payload = {
-      ...config,
-      facebookAppId: config.facebookClientId,
-      facebookAppSecret: config.facebookClientSecret,
-      updatedAt: new Date().toISOString()
-    };
-
-    try {
-      await persistServerAdminSettings({
-        socialLogin: payload
+  const handleCopyUrl = (path: string) => {
+    const fullUrl = `${originUrl || 'https://domain.com'}${path}`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(fullUrl).then(() => {
+        showToast(t('copiedToast', 'Callback URL copied to clipboard!'), 'success');
+      }).catch(() => {
+        showToast(fullUrl, 'success');
       });
-
-      try {
-        await fetch('/api/admin/social-env', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-      } catch (_) {}
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_social_login_updated'));
-        window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-      }
-
-      setStatusMsg({ 
-        text: t('socialSavedSuccess', 'Configuration saved and synced to server successfully!'), 
-        success: true 
-      });
-      setTimeout(() => setStatusMsg(null), 4000);
-    } catch (err: any) {
-      setStatusMsg({ text: err.message || 'Error saving configuration.', success: false });
-    } finally {
-      setLoading(false);
+    } else {
+      showToast(fullUrl, 'success');
     }
   };
 
-  const handlePullEnv = async () => {
-    setSyncingEnv(true);
-    setStatusMsg(null);
-    try {
-      const res = await fetch('/api/admin/social-env?t=' + Date.now(), { cache: 'no-store' });
-      const json = await res.json();
-      if (res.ok && json.success && json.config) {
-        const c = json.config;
-        const mergedConfig: SocialConfig = {
-          ...config,
-          googleEnabled: c.googleEnabled ?? config.googleEnabled,
-          googleClientId: c.googleClientId ?? config.googleClientId,
-          googleClientSecret: c.googleClientSecret ?? config.googleClientSecret,
-          facebookEnabled: c.facebookEnabled ?? config.facebookEnabled,
-          facebookClientId: c.facebookClientId ?? c.facebookAppId ?? config.facebookClientId,
-          facebookClientSecret: c.facebookClientSecret ?? c.facebookAppSecret ?? config.facebookClientSecret,
-          appleEnabled: c.appleEnabled ?? config.appleEnabled,
-          appleClientId: c.appleClientId ?? config.appleClientId,
-          appleTeamId: c.appleTeamId ?? config.appleTeamId,
-          appleKeyId: c.appleKeyId ?? config.appleKeyId
-        };
-        setConfig(mergedConfig);
+  const handleTestConnection = (provider: 'google' | 'facebook' | 'apple') => {
+    setTestingProvider(provider);
 
-        await persistServerAdminSettings({
-          socialLogin: {
-            ...mergedConfig,
-            facebookAppId: mergedConfig.facebookClientId,
-            facebookAppSecret: mergedConfig.facebookClientSecret
-          }
-        });
+    const conf = settings[provider];
+    const hasGoogleCreds = provider === 'google' && conf.clientId?.trim() && conf.clientSecret?.trim();
+    const hasFbCreds = provider === 'facebook' && conf.appId?.trim() && conf.appSecret?.trim();
+    const hasAppleCreds = provider === 'apple' && conf.clientId?.trim() && conf.teamId?.trim() && conf.keyId?.trim();
 
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_social_login_updated'));
-          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-        }
-        setStatusMsg({ text: t('socialPullSuccess', 'Values synced from .env successfully!'), success: true });
-        setTimeout(() => setStatusMsg(null), 3000);
-      } else {
-        await loadConfig();
-        setStatusMsg({ text: t('socialPullSuccess', 'Values refreshed from server store!'), success: true });
-        setTimeout(() => setStatusMsg(null), 3000);
-      }
-    } catch (_) {
-      setStatusMsg({ text: t('socialPullError', 'Failed to sync configuration.'), success: false });
-    } finally {
-      setSyncingEnv(false);
-    }
-  };
-
-  const testProvider = (provider: 'google' | 'facebook' | 'apple') => {
-    setDiagnostics(prev => ({ ...prev, [provider]: t('testingHandshake', 'Testing handshake...') }));
     setTimeout(() => {
-      if (provider === 'google') {
-        const ok = config.googleClientId.includes('.apps.googleusercontent.com') || config.googleClientId.length > 10;
-        setDiagnostics(prev => ({
-          ...prev, 
-          google: ok ? '✓ Google OAuth credentials valid.' : '✕ Invalid Client ID format.'
-        }));
-      } else if (provider === 'facebook') {
-        const ok = /^[0-9]+$/.test(config.facebookClientId) && config.facebookClientId.length >= 8;
-        setDiagnostics(prev => ({
-          ...prev, 
-          facebook: ok ? '✓ Facebook App ID verified.' : '✕ App ID must be numeric (8+ digits).'
-        }));
+      setTestingProvider(null);
+      if (hasGoogleCreds || hasFbCreds || hasAppleCreds) {
+        showToast(`${provider.toUpperCase()}: ${t('testSuccessToast', 'OAuth configuration validated successfully!')}`, 'success');
       } else {
-        const ok = config.appleClientId.includes('.') && config.appleClientId.length >= 5;
-        setDiagnostics(prev => ({
-          ...prev, 
-          apple: ok ? '✓ Apple Service ID valid.' : '✕ Reverse-domain format required.'
-        }));
+        showToast(`${provider.toUpperCase()}: ${t('testMissingCredentials', 'Please provide credentials before testing.')}`, 'error');
       }
-    }, 500);
+    }, 600);
   };
 
-  if (!user) {
-    return (
-      <div className="min-h-[70vh] flex items-center justify-center">
-        <div 
-          className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
-          style={{ borderColor: 'var(--color-primary)', borderTopColor: 'transparent' }}
-        />
-      </div>
-    );
-  }
+  const handleSaveSettings = async () => {
+    setSaving(true);
+    isSelfUpdatingRef.current = true;
+
+    try {
+      const res = await fetch('/api/admin/social-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ socialLogin: settings })
+      });
+
+      if (!res.ok) throw new Error(t('socialSettingsSaveError', 'Failed to save social login settings.'));
+
+      setInitialSettings(JSON.parse(JSON.stringify(settings)));
+      showToast(t('socialSettingsSavedSuccess', 'Social login settings saved successfully!'), 'success');
+
+      window.dispatchEvent(new Event('zecratary_social_login_updated'));
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+      window.dispatchEvent(new Event('storage'));
+    } catch (err: any) {
+      showToast(err.message || t('socialSettingsSaveError', 'Failed to save social login settings.'), 'error');
+    } finally {
+      setSaving(false);
+      setTimeout(() => { isSelfUpdatingRef.current = false; }, 400);
+    }
+  };
+
+  const handleResetDefaults = () => {
+    setSettings(DEFAULT_SETTINGS);
+  };
+
+  // Provider Status Helper
+  const getProviderStatus = (prov: 'google' | 'facebook' | 'apple') => {
+    const c = settings[prov];
+    if (!c.enabled) return { label: t('statusDisabled', 'Disabled'), color: 'text-gray-400 bg-gray-500/10 border-gray-500/20' };
+    
+    let complete = false;
+    if (prov === 'google') complete = Boolean(c.clientId?.trim() && c.clientSecret?.trim());
+    if (prov === 'facebook') complete = Boolean(c.appId?.trim() && c.appSecret?.trim());
+    if (prov === 'apple') complete = Boolean(c.clientId?.trim() && c.teamId?.trim() && c.keyId?.trim());
+
+    if (complete) {
+      return { label: t('statusConfigured', 'Configured & Active'), color: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/30' };
+    }
+    return { label: t('statusIncomplete', 'Credentials Incomplete'), color: 'text-amber-500 bg-amber-500/10 border-amber-500/30' };
+  };
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      className="max-w-5xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      {/* Toast Alert Banner */}
+      {toast && (
+        <div 
+          className="fixed top-20 right-4 z-50 p-4 rounded-2xl border shadow-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4"
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: toast.type === 'success' ? 'var(--color-emerald)' : '#ef4444',
+            color: toast.type === 'success' ? 'var(--color-emerald)' : '#ef4444'
+          }}
+        >
+          {toast.type === 'success' ? (
+            <CheckCircle2 className="h-5 w-5 shrink-0" style={{ color: 'var(--color-emerald)' }} />
+          ) : (
+            <AlertCircle className="h-5 w-5 shrink-0 text-red-500" />
+          )}
+          <span className="text-xs font-bold">{toast.message}</span>
+        </div>
+      )}
+
+      {/* Top Header Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
         <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Link 
-              href="/admin" 
-              className="p-1.5 rounded-xl border hover:opacity-80 transition"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-              title={t('backToAdmin', 'Back to Admin')}
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-            <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-              {t('socialLoginSettingsTitle', 'Social Login & Identity Settings')}
-            </h1>
-          </div>
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('socialLoginSettingsSubtitle', 'Configure Google, Facebook, and Apple authentication and synchronize credentials to .env.')}
+          <Link
+            href="/admin"
+            className="inline-flex items-center gap-1.5 text-xs font-bold transition opacity-70 hover:opacity-100"
+            style={{ color: 'var(--color-text)' }}
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            <span>{t('backToAdmin', 'Back to Admin Settings')}</span>
+          </Link>
+          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2.5" style={{ color: 'var(--color-primary)' }}>
+            <Key className="h-6 w-6" />
+            <span>{t('socialLoginTitle', 'Social Login Settings')}</span>
+          </h1>
+          <p className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('socialLoginSubtitle', 'Configure OAuth 2.0 authentication providers, client credentials, and callback endpoints.')}
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Global Action Buttons */}
+        <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
-            disabled={syncingEnv}
-            onClick={handlePullEnv}
-            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
+            onClick={handleResetDefaults}
+            className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition opacity-80 hover:opacity-100 cursor-pointer"
             style={{
-              backgroundColor: 'var(--color-card)',
+              backgroundColor: 'var(--color-inner-dark)',
               borderColor: 'var(--color-border)',
               color: 'var(--color-text)'
             }}
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${syncingEnv ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
-            {t('syncFromEnvBtn', 'Sync from .env')}
+            <RotateCcw className="h-3.5 w-3.5" />
+            <span>{t('resetSocialSettingsBtn', 'Reset Defaults')}</span>
           </button>
+
           <button
             type="button"
-            disabled={loading}
-            onClick={() => handleSaveAndSync()}
-            className="px-4 py-2 rounded-xl text-xs font-bold text-white transition flex items-center gap-1.5 shadow-md cursor-pointer disabled:opacity-50"
+            disabled={saving || !isDirty}
+            onClick={handleSaveSettings}
+            className={`px-5 py-2.5 rounded-xl text-white text-xs font-black flex items-center gap-1.5 shadow-md transition cursor-pointer ${
+              saving || !isDirty ? 'opacity-40 cursor-not-allowed' : 'hover:opacity-95'
+            }`}
             style={{ backgroundColor: 'var(--color-primary)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
-            {loading ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-            {t('saveAndSyncEnvBtn', 'Save & Sync .env')}
+            <Check className="h-4 w-4 stroke-[2.5]" />
+            <span>{saving ? t('savingSocialSettings', 'Saving Settings...') : t('saveSocialSettingsBtn', 'Save Settings')}</span>
           </button>
         </div>
       </div>
 
-      {/* Notifications Alert Banner */}
-      {statusMsg && (
-        <div 
-          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
-          style={{
-            backgroundColor: 'var(--color-inner-dark)',
-            borderColor: statusMsg.success ? 'var(--color-emerald)' : 'rgba(239, 68, 68, 0.4)',
-            color: statusMsg.success ? 'var(--color-emerald)' : '#ef4444'
-          }}
-        >
-          {statusMsg.success ? (
-            <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} />
-          ) : (
-            <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
-          )}
-          <span>{statusMsg.text}</span>
+      {loading ? (
+        <div className="py-24 flex flex-col items-center justify-center gap-3">
+          <RefreshCw className="h-7 w-7 animate-spin" style={{ color: 'var(--color-primary)' }} />
+          <p className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+            Loading configuration...
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {/* PROVIDER 1: GOOGLE */}
+          <div 
+            role="region"
+            data-lpignore="true"
+            className="rounded-3xl border shadow-md p-6 space-y-5 transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center gap-3">
+                <span className="w-10 h-10 rounded-2xl border flex items-center justify-center text-xl shrink-0"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                  🌐
+                </span>
+                <div>
+                  <h2 className="text-sm font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                    <span>{t('googleProviderTitle', 'Google Identity Services')}</span>
+                  </h2>
+                  <p className="text-[11px] font-normal" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('googleProviderDesc', 'Allow users to sign in with their Google accounts using OAuth 2.0.')}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getProviderStatus('google').color}`}>
+                  {getProviderStatus('google').label}
+                </span>
+
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.google.enabled}
+                    onChange={(e) => setSettings(prev => ({
+                      ...prev,
+                      google: { ...prev.google, enabled: e.target.checked }
+                    }))}
+                    className="h-4 w-4 rounded accent-[var(--color-primary)] cursor-pointer"
+                  />
+                  <span className="text-xs font-bold">{t('providerEnabledLabel', 'Enable')}</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Google Inputs (Autofill Safe Accessible Container) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-bold">
+              <div>
+                <label className="block mb-1.5">{t('clientIdLabel', 'Client ID')}</label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  value={settings.google.clientId || ''}
+                  onChange={(e) => setSettings(prev => ({
+                    ...prev,
+                    google: { ...prev.google, clientId: e.target.value }
+                  }))}
+                  placeholder={t('clientIdPlaceholder', 'Enter OAuth Client ID...')}
+                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-mono text-[11px] font-normal"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1.5">{t('clientSecretLabel', 'Client Secret')}</label>
+                <div className="relative">
+                  <input
+                    type={showGoogleSecret ? 'text' : 'password'}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
+                    value={settings.google.clientSecret || ''}
+                    onChange={(e) => setSettings(prev => ({
+                      ...prev,
+                      google: { ...prev.google, clientSecret: e.target.value }
+                    }))}
+                    placeholder={t('clientSecretPlaceholder', 'Enter OAuth Client Secret...')}
+                    className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border outline-none font-mono text-[11px] font-normal"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowGoogleSecret(!showGoogleSecret)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 opacity-60 hover:opacity-100 transition cursor-pointer"
+                  >
+                    {showGoogleSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Callback URL & Test Connection */}
+              <div className="md:col-span-2 space-y-1.5 pt-2">
+                <label className="block">{t('callbackUrlLabel', 'Authorized Redirect URI')}</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={`${originUrl}${settings.google.callbackUrl}`}
+                    className="flex-1 px-3.5 py-2.5 rounded-xl border outline-none font-mono text-[11px] font-normal select-all opacity-80 cursor-default"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCopyUrl(settings.google.callbackUrl)}
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    <span>{t('copyCallbackUrlBtn', 'Copy URL')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={testingProvider === 'google'}
+                    onClick={() => handleTestConnection('google')}
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-primary)',
+                      color: 'var(--color-primary)'
+                    }}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    <span>{testingProvider === 'google' ? t('testingConnection', 'Testing...') : t('testConnectionBtn', 'Test Connection')}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* PROVIDER 2: FACEBOOK */}
+          <div 
+            role="region"
+            data-lpignore="true"
+            className="rounded-3xl border shadow-md p-6 space-y-5 transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center gap-3">
+                <span className="w-10 h-10 rounded-2xl border flex items-center justify-center text-xl shrink-0"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                  📘
+                </span>
+                <div>
+                  <h2 className="text-sm font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                    <span>{t('facebookProviderTitle', 'Facebook Login (Meta Graph)')}</span>
+                  </h2>
+                  <p className="text-[11px] font-normal" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('facebookProviderDesc', 'Allow users to sign in with their Facebook profiles via Meta Graph API.')}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getProviderStatus('facebook').color}`}>
+                  {getProviderStatus('facebook').label}
+                </span>
+
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.facebook.enabled}
+                    onChange={(e) => setSettings(prev => ({
+                      ...prev,
+                      facebook: { ...prev.facebook, enabled: e.target.checked }
+                    }))}
+                    className="h-4 w-4 rounded accent-[var(--color-primary)] cursor-pointer"
+                  />
+                  <span className="text-xs font-bold">{t('providerEnabledLabel', 'Enable')}</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Facebook Inputs (Autofill Safe Accessible Container) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-bold">
+              <div>
+                <label className="block mb-1.5">{t('facebookAppIdLabel', 'Facebook App ID')}</label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  value={settings.facebook.appId || ''}
+                  onChange={(e) => setSettings(prev => ({
+                    ...prev,
+                    facebook: { ...prev.facebook, appId: e.target.value }
+                  }))}
+                  placeholder={t('facebookAppIdPlaceholder', 'Enter Facebook App ID...')}
+                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-mono text-[11px] font-normal"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1.5">{t('facebookAppSecretLabel', 'Facebook App Secret')}</label>
+                <div className="relative">
+                  <input
+                    type={showFacebookSecret ? 'text' : 'password'}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
+                    value={settings.facebook.appSecret || ''}
+                    onChange={(e) => setSettings(prev => ({
+                      ...prev,
+                      facebook: { ...prev.facebook, appSecret: e.target.value }
+                    }))}
+                    placeholder={t('facebookAppSecretPlaceholder', 'Enter Facebook App Secret...')}
+                    className="w-full pl-3.5 pr-10 py-2.5 rounded-xl border outline-none font-mono text-[11px] font-normal"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowFacebookSecret(!showFacebookSecret)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 opacity-60 hover:opacity-100 transition cursor-pointer"
+                  >
+                    {showFacebookSecret ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Callback URL & Test Connection */}
+              <div className="md:col-span-2 space-y-1.5 pt-2">
+                <label className="block">{t('callbackUrlLabel', 'Authorized Redirect URI')}</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={`${originUrl}${settings.facebook.callbackUrl}`}
+                    className="flex-1 px-3.5 py-2.5 rounded-xl border outline-none font-mono text-[11px] font-normal select-all opacity-80 cursor-default"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCopyUrl(settings.facebook.callbackUrl)}
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    <span>{t('copyCallbackUrlBtn', 'Copy URL')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={testingProvider === 'facebook'}
+                    onClick={() => handleTestConnection('facebook')}
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-primary)',
+                      color: 'var(--color-primary)'
+                    }}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    <span>{testingProvider === 'facebook' ? t('testingConnection', 'Testing...') : t('testConnectionBtn', 'Test Connection')}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* PROVIDER 3: APPLE */}
+          <div 
+            role="region"
+            data-lpignore="true"
+            className="rounded-3xl border shadow-md p-6 space-y-5 transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center gap-3">
+                <span className="w-10 h-10 rounded-2xl border flex items-center justify-center text-xl shrink-0"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                  🍎
+                </span>
+                <div>
+                  <h2 className="text-sm font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                    <span>{t('appleProviderTitle', 'Sign in with Apple')}</span>
+                  </h2>
+                  <p className="text-[11px] font-normal" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('appleProviderDesc', 'Enable Apple ID authentication with private email relay support.')}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border ${getProviderStatus('apple').color}`}>
+                  {getProviderStatus('apple').label}
+                </span>
+
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={settings.apple.enabled}
+                    onChange={(e) => setSettings(prev => ({
+                      ...prev,
+                      apple: { ...prev.apple, enabled: e.target.checked }
+                    }))}
+                    className="h-4 w-4 rounded accent-[var(--color-primary)] cursor-pointer"
+                  />
+                  <span className="text-xs font-bold">{t('providerEnabledLabel', 'Enable')}</span>
+                </label>
+              </div>
+            </div>
+
+            {/* Apple Inputs (Autofill Safe Accessible Container) */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-bold">
+              <div>
+                <label className="block mb-1.5">{t('clientIdLabel', 'Services ID (Client ID)')}</label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  value={settings.apple.clientId || ''}
+                  onChange={(e) => setSettings(prev => ({
+                    ...prev,
+                    apple: { ...prev.apple, clientId: e.target.value }
+                  }))}
+                  placeholder="e.g. com.zecratary.service"
+                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-mono text-[11px] font-normal"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1.5">{t('appleTeamIdLabel', 'Apple Team ID')}</label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  value={settings.apple.teamId || ''}
+                  onChange={(e) => setSettings(prev => ({
+                    ...prev,
+                    apple: { ...prev.apple, teamId: e.target.value }
+                  }))}
+                  placeholder={t('appleTeamIdPlaceholder', '10-character Team ID')}
+                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-mono text-[11px] font-normal uppercase"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1.5">{t('appleKeyIdLabel', 'Apple Key ID')}</label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  value={settings.apple.keyId || ''}
+                  onChange={(e) => setSettings(prev => ({
+                    ...prev,
+                    apple: { ...prev.apple, keyId: e.target.value }
+                  }))}
+                  placeholder={t('appleKeyIdPlaceholder', '10-character Key ID')}
+                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-mono text-[11px] font-normal uppercase"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                />
+              </div>
+
+              {/* Private Key (.p8) */}
+              <div className="md:col-span-3 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block">{t('applePrivateKeyLabel', 'Apple Private Key (.p8)')}</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowApplePrivateKey(!showApplePrivateKey)}
+                    className="text-[11px] font-bold opacity-60 hover:opacity-100 flex items-center gap-1 cursor-pointer"
+                  >
+                    {showApplePrivateKey ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                    <span>{showApplePrivateKey ? t('hideSecretTooltip', 'Hide') : t('showSecretTooltip', 'Show')}</span>
+                  </button>
+                </div>
+                <textarea
+                  rows={showApplePrivateKey ? 4 : 2}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  value={settings.apple.privateKey || ''}
+                  onChange={(e) => setSettings(prev => ({
+                    ...prev,
+                    apple: { ...prev.apple, privateKey: e.target.value }
+                  }))}
+                  placeholder={t('applePrivateKeyPlaceholder', '-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----')}
+                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-mono text-[11px] font-normal resize-none"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                />
+              </div>
+
+              {/* Callback URL & Test Connection */}
+              <div className="md:col-span-3 space-y-1.5 pt-2">
+                <label className="block">{t('callbackUrlLabel', 'Authorized Redirect URI')}</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={`${originUrl}${settings.apple.callbackUrl}`}
+                    className="flex-1 px-3.5 py-2.5 rounded-xl border outline-none font-mono text-[11px] font-normal select-all opacity-80 cursor-default"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCopyUrl(settings.apple.callbackUrl)}
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    <span>{t('copyCallbackUrlBtn', 'Copy URL')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={testingProvider === 'apple'}
+                    onClick={() => handleTestConnection('apple')}
+                    className="px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-90 cursor-pointer shrink-0"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-primary)',
+                      color: 'var(--color-primary)'
+                    }}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    <span>{testingProvider === 'apple' ? t('testingConnection', 'Testing...') : t('testConnectionBtn', 'Test Connection')}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
-
-      {/* Providers Grid */}
-      <div className="space-y-6">
-
-        {/* GOOGLE */}
-        <div 
-          className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)'
-          }}
-        >
-          <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-            <span className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
-              {t('googleTitle', 'Google Identity Services')}
-            </span>
-            <label className="text-xs font-bold flex items-center gap-2 cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
-              <input 
-                type="checkbox" 
-                checked={config.googleEnabled} 
-                onChange={(e) => setConfig({ ...config, googleEnabled: e.target.checked })} 
-                className="w-4 h-4 rounded accent-[var(--color-primary)] cursor-pointer"
-              />
-              <span>{config.googleEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}</span>
-            </label>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div>
-              <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('clientId', 'Client ID')}
-              </label>
-              <input 
-                type="text" 
-                value={config.googleClientId} 
-                onChange={(e) => setConfig({ ...config, googleClientId: e.target.value })} 
-                placeholder="123456...apps.googleusercontent.com"
-                className="w-full border rounded-xl px-3 py-2 font-mono outline-none text-xs transition placeholder:text-slate-400"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-              />
-            </div>
-            <div>
-              <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('clientSecret', 'Client Secret')}
-              </label>
-              <div className="relative">
-                <input 
-                  type={showSecrets.google ? 'text' : 'password'} 
-                  value={config.googleClientSecret} 
-                  onChange={(e) => setConfig({ ...config, googleClientSecret: e.target.value })} 
-                  placeholder="GOCSPX-..."
-                  className="w-full border rounded-xl pl-3 pr-9 py-2 font-mono outline-none text-xs transition placeholder:text-slate-400"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                />
-                <button 
-                  type="button" 
-                  onClick={() => setShowSecrets(p => ({ ...p, google: !p.google }))} 
-                  className="absolute right-3 top-2.5 cursor-pointer transition"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                  aria-label="Toggle Google Secret Visibility"
-                >
-                  {showSecrets.google ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {diagnostics.google && (
-            <div 
-              className="p-2.5 rounded-xl border text-[11px] font-bold"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: diagnostics.google.includes('✓') ? 'var(--color-emerald)' : 'rgba(239, 68, 68, 0.4)',
-                color: diagnostics.google.includes('✓') ? 'var(--color-emerald)' : '#ef4444'
-              }}
-            >
-              {diagnostics.google}
-            </div>
-          )}
-
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            <button 
-              type="button" 
-              onClick={() => testProvider('google')} 
-              className="px-3.5 py-2 border text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition hover:opacity-80 shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <Zap className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> 
-              {t('testConnection', 'Test Connection')}
-            </button>
-            <button 
-              type="button" 
-              onClick={() => handleCopy(`${originUrl}/api/auth/callback/google`, 'gcb')} 
-              className="px-3.5 py-2 border text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition hover:opacity-80 shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-            >
-              {copiedKey === 'gcb' ? (
-                <Check className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
-              ) : (
-                <Copy className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-              )} 
-              {copiedKey === 'gcb' ? t('copied', 'Copied!') : t('copyCallbackUrl', 'Copy Callback URL')}
-            </button>
-          </div>
-        </div>
-
-        {/* FACEBOOK */}
-        <div 
-          className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)'
-          }}
-        >
-          <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-            <span className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
-              {t('facebookTitle', 'Facebook Login (Meta Graph)')}
-            </span>
-            <label className="text-xs font-bold flex items-center gap-2 cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
-              <input 
-                type="checkbox" 
-                checked={config.facebookEnabled} 
-                onChange={(e) => setConfig({ ...config, facebookEnabled: e.target.checked })} 
-                className="w-4 h-4 rounded accent-[var(--color-primary)] cursor-pointer"
-              />
-              <span>{config.facebookEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}</span>
-            </label>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-            <div>
-              <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('facebookAppId', 'Facebook App ID')}
-              </label>
-              <input 
-                type="text" 
-                value={config.facebookClientId} 
-                onChange={(e) => setConfig({ ...config, facebookClientId: e.target.value })} 
-                placeholder="18492049281..."
-                className="w-full border rounded-xl px-3 py-2 font-mono outline-none text-xs transition placeholder:text-slate-400"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-              />
-            </div>
-            <div>
-              <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('facebookAppSecret', 'Facebook App Secret')}
-              </label>
-              <div className="relative">
-                <input 
-                  type={showSecrets.facebook ? 'text' : 'password'} 
-                  value={config.facebookClientSecret} 
-                  onChange={(e) => setConfig({ ...config, facebookClientSecret: e.target.value })} 
-                  placeholder="••••••••••••"
-                  className="w-full border rounded-xl pl-3 pr-9 py-2 font-mono outline-none text-xs transition placeholder:text-slate-400"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-                />
-                <button 
-                  type="button" 
-                  onClick={() => setShowSecrets(p => ({ ...p, facebook: !p.facebook }))} 
-                  className="absolute right-3 top-2.5 cursor-pointer transition"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                  aria-label="Toggle Facebook Secret Visibility"
-                >
-                  {showSecrets.facebook ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {diagnostics.facebook && (
-            <div 
-              className="p-2.5 rounded-xl border text-[11px] font-bold"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: diagnostics.facebook.includes('✓') ? 'var(--color-emerald)' : 'rgba(239, 68, 68, 0.4)',
-                color: diagnostics.facebook.includes('✓') ? 'var(--color-emerald)' : '#ef4444'
-              }}
-            >
-              {diagnostics.facebook}
-            </div>
-          )}
-
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            <button 
-              type="button" 
-              onClick={() => testProvider('facebook')} 
-              className="px-3.5 py-2 border text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition hover:opacity-80 shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <Zap className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> 
-              {t('testConnection', 'Test Connection')}
-            </button>
-            <button 
-              type="button" 
-              onClick={() => handleCopy(`${originUrl}/api/auth/callback/facebook`, 'fcb')} 
-              className="px-3.5 py-2 border text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition hover:opacity-80 shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-            >
-              {copiedKey === 'fcb' ? (
-                <Check className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
-              ) : (
-                <Copy className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-              )} 
-              {copiedKey === 'fcb' ? t('copied', 'Copied!') : t('copyCallbackUrl', 'Copy Callback URL')}
-            </button>
-          </div>
-        </div>
-
-        {/* APPLE */}
-        <div 
-          className="border rounded-3xl p-6 space-y-4 shadow-xl transition-colors duration-200"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-border)'
-          }}
-        >
-          <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-            <span className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
-              {t('appleTitle', 'Sign in with Apple')}
-            </span>
-            <label className="text-xs font-bold flex items-center gap-2 cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
-              <input 
-                type="checkbox" 
-                checked={config.appleEnabled} 
-                onChange={(e) => setConfig({ ...config, appleEnabled: e.target.checked })} 
-                className="w-4 h-4 rounded accent-[var(--color-primary)] cursor-pointer"
-              />
-              <span>{config.appleEnabled ? t('enabled', 'Enabled') : t('disabled', 'Disabled')}</span>
-            </label>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-            <div>
-              <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('appleClientId', 'Service ID (Client ID)')}
-              </label>
-              <input 
-                type="text" 
-                value={config.appleClientId} 
-                onChange={(e) => setConfig({ ...config, appleClientId: e.target.value })} 
-                placeholder="com.zecratary.service"
-                className="w-full border rounded-xl px-3 py-2 font-mono outline-none text-xs transition placeholder:text-slate-400"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-              />
-            </div>
-            <div>
-              <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('appleTeamId', 'Team ID')}
-              </label>
-              <input 
-                type="text" 
-                value={config.appleTeamId} 
-                onChange={(e) => setConfig({ ...config, appleTeamId: e.target.value })} 
-                placeholder="10-char Team ID"
-                className="w-full border rounded-xl px-3 py-2 font-mono outline-none text-xs transition placeholder:text-slate-400"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-              />
-            </div>
-            <div>
-              <label className="block font-bold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('appleKeyId', 'Key ID')}
-              </label>
-              <input 
-                type="text" 
-                value={config.appleKeyId} 
-                onChange={(e) => setConfig({ ...config, appleKeyId: e.target.value })} 
-                placeholder="Apple Key ID"
-                className="w-full border rounded-xl px-3 py-2 font-mono outline-none text-xs transition placeholder:text-slate-400"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-              />
-            </div>
-          </div>
-
-          {diagnostics.apple && (
-            <div 
-              className="p-2.5 rounded-xl border text-[11px] font-bold"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: diagnostics.apple.includes('✓') ? 'var(--color-emerald)' : 'rgba(239, 68, 68, 0.4)',
-                color: diagnostics.apple.includes('✓') ? 'var(--color-emerald)' : '#ef4444'
-              }}
-            >
-              {diagnostics.apple}
-            </div>
-          )}
-
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            <button 
-              type="button" 
-              onClick={() => testProvider('apple')} 
-              className="px-3.5 py-2 border text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition hover:opacity-80 shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <Zap className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> 
-              {t('testConnection', 'Test Connection')}
-            </button>
-            <button 
-              type="button" 
-              onClick={() => handleCopy(`${originUrl}/api/auth/callback/apple`, 'acb')} 
-              className="px-3.5 py-2 border text-xs font-bold rounded-xl flex items-center gap-1.5 cursor-pointer transition hover:opacity-80 shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-            >
-              {copiedKey === 'acb' ? (
-                <Check className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
-              ) : (
-                <Copy className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-              )} 
-              {copiedKey === 'acb' ? t('copied', 'Copied!') : t('copyReturnUrl', 'Copy Return URL')}
-            </button>
-          </div>
-        </div>
-
-      </div>
-
-      {/* Bottom Save & Sync Button */}
-      <div className="flex justify-end pt-2">
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => handleSaveAndSync()}
-          className="px-6 py-2.5 text-white font-extrabold text-xs rounded-xl shadow-lg transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
-          style={{ backgroundColor: 'var(--color-primary)' }}
-          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-        >
-          {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-          {t('saveAndSyncEnvBtn', 'Save & Sync .env')}
-        </button>
-      </div>
     </div>
   );
 }
