@@ -1,14 +1,13 @@
 // @ts-nocheck
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { 
   Wallet, CreditCard, Plus, RefreshCw, CheckCircle2, AlertCircle, 
-  Gift, ShieldCheck, ArrowRight, History, Search, Filter, 
-  ArrowUpRight, ArrowDownLeft, ChevronLeft, ChevronRight, 
-  Layers, Coins, Shield, ExternalLink, Info, Sparkles
+  Gift, ShieldCheck, ArrowRight, Search, ChevronLeft, ChevronRight, 
+  Coins, Sparkles, Check 
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -26,8 +25,8 @@ interface WalletSettings {
 
 interface WalletTx {
   id: string;
-  amount: number;
-  balance_after: number;
+  amount: number | string;
+  balance_after: number | string;
   type: string;
   gateway: string;
   gateway_tx_id?: string;
@@ -462,7 +461,7 @@ function WalletContent() {
             </div>
           </div>
 
-          {/* Payment Gateway Options */}
+          {/* Payment Gateway Options with Explicit Check Icon */}
           <div className="space-y-2">
             <label className="block text-xs font-bold opacity-80">{t('paymentGateway', 'Payment Gateway')}</label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
