@@ -22,16 +22,16 @@ export default function RootLayout({
           <ThemeInitializer />
           <Sidebar />
           <main
-            id="zecratary-main-content"
-            className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 min-w-0"
-            style={{
-              marginLeft: 'var(--sidebar-width, 16rem)',
-              paddingTop: 'calc(var(--topbar-height, 4rem) + 1.25rem)',
-              width: 'calc(100% - var(--sidebar-width, 16rem))',
-              minHeight: '100vh',
-              boxSizing: 'border-box',
-            }}
-          >
+          id="zecratary-main-content"
+          className="min-h-screen transition-all duration-200 ease-in-out relative z-10 box-border"
+          style={{
+            marginLeft: "var(--sidebar-width, 16rem)",
+            width: "calc(100% - var(--sidebar-width, 16rem))",
+            paddingTop: "calc(var(--topbar-height, 4rem) + 1.25rem)",
+            minHeight: "100vh",
+            boxSizing: "border-box"
+          }}
+        >
             {children}
           </main>
         </LanguageProvider>

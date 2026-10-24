@@ -348,6 +348,26 @@ export default function Sidebar() {
   // 3. Primary Component Mounting Lifecycle
   useEffect(() => {
     setMounted(true);
+  // Dynamically synchronize CSS custom properties for main content clearance
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const isMobile = window.innerWidth < 768;
+    const currentSidebarWidth = isMobile ? '0px' : (showCollapsed ? '5rem' : '16rem');
+    const currentTopbarHeight = isMobile ? '3.5rem' : '4rem';
+    
+    document.documentElement.style.setProperty('--sidebar-width', currentSidebarWidth);
+    document.documentElement.style.setProperty('--topbar-height', currentTopbarHeight);
+
+    const handleResize = () => {
+      const mob = window.innerWidth < 768;
+      document.documentElement.style.setProperty('--sidebar-width', mob ? '0px' : (showCollapsed ? '5rem' : '16rem'));
+      document.documentElement.style.setProperty('--topbar-height', mob ? '3.5rem' : '4rem');
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [showCollapsed]);
+
 
     if (typeof window !== 'undefined') {
       try {
@@ -1663,7 +1683,7 @@ export default function Sidebar() {
 
       {/* SIDEBAR CONTAINER */}
       <aside className={`
-        fixed md:sticky top-0 left-0 z-50 h-screen bg-[var(--color-card)] border-r border-[var(--color-border)] 
+        fixed top-0 left-0 z-50 h-screen bg-[var(--color-card)] border-r border-[var(--color-border)] 
         flex flex-col justify-between shrink-0 select-none transition-all duration-300 ease-in-out
         ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}
         ${isOpen ? 'translate-x-0 w-64 p-5' : '-translate-x-full md:translate-x-0'}
