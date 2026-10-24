@@ -6,45 +6,59 @@ import path from 'path';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-const DEFAULT_LANGUAGES = [
-  { id: 'lang_en', code: 'en', name: 'English', flag: '🇺🇸', direction: 'ltr', status: 'active', is_default: true },
-  { id: 'lang_es', code: 'es', name: 'Español', flag: '🇪🇸', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_fr', code: 'fr', name: 'Français', flag: '🇫🇷', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_th', code: 'th', name: 'ภาษาไทย (Thai)', flag: '🇹🇭', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_de', code: 'de', name: 'Deutsch', flag: '🇩🇪', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_it', code: 'it', name: 'Italiano', flag: '🇮🇹', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_ja', code: 'ja', name: '日本語', flag: '🇯🇵', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_zh', code: 'zh', name: '中文 (Chinese)', flag: '🇨🇳', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_ko', code: 'ko', name: '한국어 (Korean)', flag: '🇰🇷', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_pt', code: 'pt', name: 'Português', flag: '🇵🇹', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_ru', code: 'ru', name: 'Русский', flag: '🇷🇺', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_ar', code: 'ar', name: 'العربية (Arabic)', flag: '🇸🇦', direction: 'rtl', status: 'active', is_default: false }
+const DEFAULT_SYSTEM_LANGUAGES = [
+  { id: 'lang_en', code: 'en', name: 'English', native: 'English', flag: '🇺🇸', direction: 'ltr', status: 'active', is_default: true, file: 'en.ts' },
+  { id: 'lang_es', code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', direction: 'ltr', status: 'active', is_default: false, file: 'es.ts' },
+  { id: 'lang_fr', code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', direction: 'ltr', status: 'active', is_default: false, file: 'fr.ts' },
+  { id: 'lang_th', code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', direction: 'ltr', status: 'active', is_default: false, file: 'th.ts' }
 ];
+
+function getLocalFileLanguages(): any[] | null {
+  for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
+    try {
+      const p = path.join(process.cwd(), rel);
+      if (fs.existsSync(p)) {
+        const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+        const langs = raw.supportedLanguages || raw.supported_languages;
+        if (Array.isArray(langs) && langs.length > 0) return langs;
+      }
+    } catch (_) {}
+  }
+  return null;
+}
 
 export async function GET() {
   try {
-    const res: any = await query(`
-      SELECT supported_languages, translations FROM admin_settings 
-      WHERE id = 'primary_settings' OR id = '1' 
-      ORDER BY updated_at DESC LIMIT 1;
-    `);
-    const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
-
-    let languages = DEFAULT_LANGUAGES;
+    let languages = null;
     let translations = {};
 
-    if (row) {
-      if (row.supported_languages) {
-        const parsed = typeof row.supported_languages === 'string'
-          ? JSON.parse(row.supported_languages)
-          : row.supported_languages;
-        if (Array.isArray(parsed) && parsed.length > 0) languages = parsed;
+    try {
+      const res: any = await query(`
+        SELECT supported_languages, settings, translations FROM admin_settings 
+        WHERE id = 'primary_settings' OR id = '1' 
+        ORDER BY updated_at DESC LIMIT 1;
+      `);
+      const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+      if (row) {
+        if (row.supported_languages) {
+          const parsed = typeof row.supported_languages === 'string'
+            ? JSON.parse(row.supported_languages)
+            : row.supported_languages;
+          if (Array.isArray(parsed) && parsed.length > 0) languages = parsed;
+        } else if (row.settings) {
+          const s = typeof row.settings === 'string' ? JSON.parse(row.settings) : row.settings;
+          const l = s?.supportedLanguages || s?.supported_languages;
+          if (Array.isArray(l) && l.length > 0) languages = l;
+        }
+
+        if (row.translations) {
+          translations = typeof row.translations === 'string' ? JSON.parse(row.translations) : row.translations;
+        }
       }
-      if (row.translations) {
-        translations = typeof row.translations === 'string'
-          ? JSON.parse(row.translations)
-          : row.translations;
-      }
+    } catch (_) {}
+
+    if (!languages) {
+      languages = getLocalFileLanguages() || DEFAULT_SYSTEM_LANGUAGES;
     }
 
     return NextResponse.json(
@@ -52,7 +66,7 @@ export async function GET() {
       { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
     );
   } catch (err: any) {
-    return NextResponse.json({ success: true, languages: DEFAULT_LANGUAGES, translations: {} });
+    return NextResponse.json({ success: true, languages: DEFAULT_SYSTEM_LANGUAGES, translations: {} });
   }
 }
 
@@ -62,34 +76,54 @@ export async function POST(req: NextRequest) {
     const languages = Array.isArray(body) ? body : (body.languages || body.supportedLanguages);
     const translations = body.translations;
 
-    const updates: string[] = [];
-    const params: any[] = [];
-    let pIdx = 1;
-
     if (Array.isArray(languages)) {
-      updates.push(`supported_languages = $${pIdx}::jsonb`);
-      params.push(JSON.stringify(languages));
-      pIdx++;
+      // Update Dual-Path Server JSON Files
+      for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
+        try {
+          const p = path.join(process.cwd(), rel);
+          osEnsureDir(path.dirname(p));
+          let existing: any = {};
+          if (fs.existsSync(p)) {
+            try { existing = JSON.parse(fs.readFileSync(p, 'utf8')); } catch (_) {}
+          }
+          existing.supportedLanguages = languages;
+          existing.supported_languages = languages;
+          fs.writeFileSync(p, JSON.stringify(existing, null, 2), 'utf8');
+        } catch (_) {}
+      }
+
+      // Update PostgreSQL / MySQL
+      try {
+        await query(`
+          INSERT INTO admin_settings (id, supported_languages, updated_at)
+          VALUES ('primary_settings', $1::jsonb, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            supported_languages = EXCLUDED.supported_languages,
+            updated_at = NOW();
+        `, [JSON.stringify(languages)]);
+      } catch (_) {}
     }
 
     if (translations && typeof translations === 'object') {
-      updates.push(`translations = $${pIdx}::jsonb`);
-      params.push(JSON.stringify(translations));
-      pIdx++;
+      try {
+        await query(`
+          INSERT INTO admin_settings (id, translations, updated_at)
+          VALUES ('primary_settings', $1::jsonb, NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            translations = EXCLUDED.translations,
+            updated_at = NOW();
+        `, [JSON.stringify(translations)]);
+      } catch (_) {}
     }
 
-    if (updates.length > 0) {
-      await query(`
-        INSERT INTO admin_settings (id, updated_at)
-        VALUES ('primary_settings', NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          ${updates.join(', ')},
-          updated_at = NOW();
-      `, params);
-    }
-
-    return NextResponse.json({ success: true, message: 'Languages & translations updated successfully' });
+    return NextResponse.json({ success: true, message: 'Languages synchronized successfully' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+function osEnsureDir(dirPath: string) {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
   }
 }

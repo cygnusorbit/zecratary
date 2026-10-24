@@ -6,11 +6,13 @@ export interface SupportedLanguage {
   id?: string;
   code: string;
   name: string;
+  native?: string;
   flag?: string;
   direction?: 'ltr' | 'rtl';
   status?: string;
   is_default?: boolean;
   isDefault?: boolean;
+  file?: string;
 }
 
 export interface LanguageContextType {
@@ -28,47 +30,17 @@ export interface LanguageContextType {
   [key: string]: any;
 }
 
-export const DEFAULT_SUPPORTED_LANGUAGES: SupportedLanguage[] = [
-  { id: 'lang_en', code: 'en', name: 'English', flag: '🇺🇸', direction: 'ltr', status: 'active', is_default: true },
-  { id: 'lang_es', code: 'es', name: 'Español', flag: '🇪🇸', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_fr', code: 'fr', name: 'Français', flag: '🇫🇷', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_th', code: 'th', name: 'ภาษาไทย (Thai)', flag: '🇹🇭', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_de', code: 'de', name: 'Deutsch', flag: '🇩🇪', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_it', code: 'it', name: 'Italiano', flag: '🇮🇹', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_ja', code: 'ja', name: '日本語', flag: '🇯🇵', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_zh', code: 'zh', name: '中文 (Chinese)', flag: '🇨🇳', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_ko', code: 'ko', name: '한국어 (Korean)', flag: '🇰🇷', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_pt', code: 'pt', name: 'Português', flag: '🇵🇹', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_ru', code: 'ru', name: 'Русский', flag: '🇷🇺', direction: 'ltr', status: 'active', is_default: false },
-  { id: 'lang_ar', code: 'ar', name: 'العربية (Arabic)', flag: '🇸🇦', direction: 'rtl', status: 'active', is_default: false },
+export const DEFAULT_SYSTEM_LANGUAGES: SupportedLanguage[] = [
+  { id: 'lang_en', code: 'en', name: 'English', native: 'English', flag: '🇺🇸', direction: 'ltr', status: 'active', is_default: true, file: 'en.ts' },
+  { id: 'lang_es', code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', direction: 'ltr', status: 'active', is_default: false, file: 'es.ts' },
+  { id: 'lang_fr', code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', direction: 'ltr', status: 'active', is_default: false, file: 'fr.ts' },
+  { id: 'lang_th', code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', direction: 'ltr', status: 'active', is_default: false, file: 'th.ts' },
 ];
 
-// Built-in dictionaries for global site navigation & core features
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   en: {
     dashboard: 'Dashboard',
-    culinaryCollections: 'Culinary Collections',
     cookbooks: 'Cookbooks',
-    cookbooksSubtitle: 'Curate, organize, and categorize your saved recipes into dedicated digital books permanently stored in PostgreSQL.',
-    newCookbook: 'New Cookbook',
-    searchCookbooks: 'Search books...',
-    noCookbooksFound: 'No Cookbooks Found',
-    emptyCookbooksHint: 'Create your first cookbook collection to group and organize your dishes.',
-    viewCollection: 'View Collection',
-    edit: 'Edit',
-    delete: 'Delete',
-    editCookbook: 'Edit Cookbook',
-    createCookbook: 'New Cookbook',
-    cookbookTitle: 'Cookbook Title',
-    description: 'Description',
-    cookbookColor: 'Cookbook Color Theme',
-    cancel: 'Cancel',
-    saveCookbook: 'Save to PostgreSQL',
-    assignedRecipes: 'Assigned Recipes',
-    browseMoreInSaved: 'Add More from Saved',
-    noRecipesInBook: 'No recipes assigned to this cookbook yet. Assign them from the Saved Recipes page.',
-    view: 'View',
-    done: 'Done',
     savedRecipes: 'Saved Recipes',
     aiChef: 'AI Assistant',
     manualEntry: 'Add Recipe',
@@ -103,7 +75,6 @@ export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
     profile: 'User Profile',
     logOut: 'Log Out',
     signIn: 'Sign In',
-    getStarted: 'Get Started',
     availableLanguages: 'Languages',
     manageLanguages: 'Configure Languages',
     selectLanguage: 'Select Language',
@@ -121,28 +92,7 @@ export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   },
   th: {
     dashboard: 'แดชบอร์ด',
-    culinaryCollections: 'คอลเลกชันทำอาหาร',
     cookbooks: 'ตำราอาหาร',
-    cookbooksSubtitle: 'รวบรวม จัดระเบียบ และแบ่งหมวดหมู่สูตรอาหารที่คุณบันทึกไว้ในตำราดิจิทัลที่บันทึกไว้ใน PostgreSQL',
-    newCookbook: 'สร้างตำราอาหารใหม่',
-    searchCookbooks: 'ค้นหาตำราอาหาร...',
-    noCookbooksFound: 'ไม่พบตำราอาหาร',
-    emptyCookbooksHint: 'สร้างคอลเลกชันตำราอาหารแรกของคุณเพื่อจัดระเบียบสูตรอาหาร',
-    viewCollection: 'ดูคอลเลกชัน',
-    edit: 'แก้ไข',
-    delete: 'ลบ',
-    editCookbook: 'แก้ไขตำราอาหาร',
-    createCookbook: 'สร้างตำราอาหารใหม่',
-    cookbookTitle: 'ชื่อตำราอาหาร',
-    description: 'คำอธิบาย',
-    cookbookColor: 'ธีมสีของตำราอาหาร',
-    cancel: 'ยกเลิก',
-    saveCookbook: 'บันทึกลงใน PostgreSQL',
-    assignedRecipes: 'สูตรอาหารในเล่มนี้',
-    browseMoreInSaved: 'เพิ่มสูตรอาหารจากที่บันทึกไว้',
-    noRecipesInBook: 'ยังไม่มีสูตรอาหารในตำราอาหารเล่มนี้ คุณสามารถเพิ่มได้จากหน้ารายการสูตรอาหาร',
-    view: 'ดูข้อมูล',
-    done: 'เสร็จสิ้น',
     savedRecipes: 'สูตรอาหารที่บันทึกไว้',
     aiChef: 'ผู้ช่วยเชฟ AI',
     manualEntry: 'เพิ่มสูตรอาหาร',
@@ -177,7 +127,6 @@ export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
     profile: 'โปรไฟล์ผู้ใช้',
     logOut: 'ออกจากระบบ',
     signIn: 'เข้าสู่ระบบ',
-    getStarted: 'เริ่มต้นใช้งาน',
     availableLanguages: 'ภาษาที่รองรับ',
     manageLanguages: 'จัดการภาษา',
     selectLanguage: 'เลือกภาษา',
@@ -195,28 +144,7 @@ export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   },
   es: {
     dashboard: 'Panel de Control',
-    culinaryCollections: 'Colecciones Culinarias',
     cookbooks: 'Recetarios',
-    cookbooksSubtitle: 'Organice sus recetas guardadas en libros de cocina digitales almacenados en PostgreSQL.',
-    newCookbook: 'Nuevo Recetario',
-    searchCookbooks: 'Buscar recetarios...',
-    noCookbooksFound: 'No se encontraron recetarios',
-    emptyCookbooksHint: 'Cree su primer libro de cocina para organizar sus recetas.',
-    viewCollection: 'Ver Colección',
-    edit: 'Editar',
-    delete: 'Eliminar',
-    editCookbook: 'Editar Recetario',
-    createCookbook: 'Nuevo Recetario',
-    cookbookTitle: 'Título del Recetario',
-    description: 'Descripción',
-    cookbookColor: 'Color del Tema',
-    cancel: 'Cancelar',
-    saveCookbook: 'Guardar en PostgreSQL',
-    assignedRecipes: 'Recetas Asignadas',
-    browseMoreInSaved: 'Añadir más desde guardadas',
-    noRecipesInBook: 'Aún no hay recetas asignadas a este libro.',
-    view: 'Ver',
-    done: 'Listo',
     savedRecipes: 'Recetas Guardadas',
     aiChef: 'Asistente IA',
     manualEntry: 'Añadir Receta',
@@ -251,7 +179,6 @@ export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
     profile: 'Perfil de Usuario',
     logOut: 'Cerrar Sesión',
     signIn: 'Iniciar Sesión',
-    getStarted: 'Comenzar',
     availableLanguages: 'Idiomas Disponibles',
     manageLanguages: 'Configurar Idiomas',
     selectLanguage: 'Seleccionar Idioma',
@@ -269,28 +196,7 @@ export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   },
   fr: {
     dashboard: 'Tableau de bord',
-    culinaryCollections: 'Collections Culinaires',
     cookbooks: 'Livres de Cuisine',
-    cookbooksSubtitle: 'Organisez vos recettes préférées dans des livres de cuisine stockés dans PostgreSQL.',
-    newCookbook: 'Nouveau Livre',
-    searchCookbooks: 'Rechercher des livres...',
-    noCookbooksFound: 'Aucun livre trouvé',
-    emptyCookbooksHint: 'Créez votre premier livre pour regrouper vos plats préférés.',
-    viewCollection: 'Voir la collection',
-    edit: 'Modifier',
-    delete: 'Supprimer',
-    editCookbook: 'Modifier le livre',
-    createCookbook: 'Nouveau livre de cuisine',
-    cookbookTitle: 'Titre du livre',
-    description: 'Description',
-    cookbookColor: 'Couleur du thème',
-    cancel: 'Annuler',
-    saveCookbook: 'Enregistrer dans PostgreSQL',
-    assignedRecipes: 'Recettes associées',
-    browseMoreInSaved: 'Ajouter depuis les recettes',
-    noRecipesInBook: 'Aucune recette dans ce livre pour le moment.',
-    view: 'Voir',
-    done: 'Terminé',
     savedRecipes: 'Recettes Enregistrées',
     aiChef: 'Assistant IA',
     manualEntry: 'Ajouter une Recette',
@@ -325,7 +231,6 @@ export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
     profile: 'Profil Utilisateur',
     logOut: 'Déconnexion',
     signIn: 'Connexion',
-    getStarted: 'Démarrer',
     availableLanguages: 'Langues disponibles',
     manageLanguages: 'Configurer les langues',
     selectLanguage: 'Choisir la langue',
@@ -352,18 +257,17 @@ export const LanguageContext = createContext<LanguageContextType>({
   changeLanguage: () => {},
   t: (key, fallback) => fallback || key,
   version: 1,
-  availableLanguages: DEFAULT_SUPPORTED_LANGUAGES,
-  languages: DEFAULT_SUPPORTED_LANGUAGES,
+  availableLanguages: DEFAULT_SYSTEM_LANGUAGES,
+  languages: DEFAULT_SYSTEM_LANGUAGES,
   direction: 'ltr',
 });
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [currentLocale, setCurrentLocale] = useState<string>('en');
-  const [languagesList, setLanguagesList] = useState<SupportedLanguage[]>(DEFAULT_SUPPORTED_LANGUAGES);
+  const [languagesList, setLanguagesList] = useState<SupportedLanguage[]>(DEFAULT_SYSTEM_LANGUAGES);
   const [customTranslations, setCustomTranslations] = useState<Record<string, Record<string, string>>>({});
   const [version, setVersion] = useState<number>(1);
 
-  // Synchronize dynamic languages and custom database phrases from PostgreSQL
   const fetchLanguagesAndPhrases = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/languages?t=' + Date.now(), { cache: 'no-store' });
@@ -409,7 +313,6 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     };
   }, [fetchLanguagesAndPhrases]);
 
-  // Set Locale dynamically: updates HTML lang & dir, local storage, and triggers re-renders
   const handleSetLocale = useCallback((newLocale: string) => {
     if (!newLocale) return;
     const clean = newLocale.toLowerCase().trim();
@@ -420,7 +323,7 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem('zecratary_locale', clean);
         if (typeof document !== 'undefined') {
           document.documentElement.lang = clean;
-          const matched = languagesList.find(l => l.code.toLowerCase() === clean);
+          const matched = languagesList.find(l => (l.code || '').toLowerCase() === clean);
           const dir = matched?.direction || (clean === 'ar' || clean === 'he' ? 'rtl' : 'ltr');
           document.documentElement.dir = dir;
         }
@@ -431,32 +334,24 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
     setVersion(v => v + 1);
   }, [languagesList]);
 
-  // Reactive Translation Lookup (Custom PostgreSQL > Builtin Locale > Builtin English > Fallback)
   const t = useCallback((key: string, fallback?: string): string => {
     if (!key) return fallback || '';
     const lang = currentLocale.toLowerCase().trim();
 
-    // 1. Check custom database dictionary for active locale
     if (customTranslations[lang] && customTranslations[lang][key]) {
       return customTranslations[lang][key];
     }
-
-    // 2. Check built-in translations for active locale
     if (BUILTIN_DICTIONARIES[lang] && BUILTIN_DICTIONARIES[lang][key]) {
       return BUILTIN_DICTIONARIES[lang][key];
     }
-
-    // 3. Fallback to English dictionary
     if (BUILTIN_DICTIONARIES['en'] && BUILTIN_DICTIONARIES['en'][key]) {
       return BUILTIN_DICTIONARIES['en'][key];
     }
-
-    // 4. Default to supplied fallback or key itself
     return fallback !== undefined ? fallback : key;
   }, [currentLocale, customTranslations]);
 
   const activeDirection: 'ltr' | 'rtl' = useMemo(() => {
-    const matched = languagesList.find(l => l.code.toLowerCase() === currentLocale);
+    const matched = languagesList.find(l => (l.code || '').toLowerCase() === currentLocale);
     return (matched?.direction === 'rtl' || currentLocale === 'ar' || currentLocale === 'he') ? 'rtl' : 'ltr';
   }, [languagesList, currentLocale]);
 

@@ -4024,5 +4024,115 @@
     "failure_reason": "",
     "transfer_reference": ""
   },
-  "currency": "USD"
+  "currency": "USD",
+  "storage_settings": {
+    "provider": "supabase",
+    "localhost": {
+      "uploadDir": "public/uploads/recipes",
+      "publicPrefix": "/uploads/recipes",
+      "maxSizeMb": 10,
+      "allowedTypes": "image/jpeg, image/png, image/webp, image/gif"
+    },
+    "supabase": {
+      "enabled": true,
+      "endpoint": "https://tnhrkjtujdfgvwhsuuxb.storage.supabase.co/storage/v1/s3",
+      "region": "us-west-1",
+      "accessKeyId": "f3e0affef5c74972a535153349eb24cc",
+      "secretAccessKey": "254a87503f1f1ab95bcaffea64517cca785feec11976a8be4ee8ed2a032fa9ed",
+      "bucket": "recipes",
+      "publicUrl": "https://tnhrkjtujdfgvwhsuuxb.supabase.co/storage/v1/object/public/recipes"
+    }
+  },
+  "supportedLanguages": [
+    {
+      "id": "lang_en",
+      "code": "en",
+      "name": "English",
+      "native": "English",
+      "flag": "🇺🇸",
+      "direction": "ltr",
+      "status": "active",
+      "is_default": true,
+      "file": "en.ts"
+    },
+    {
+      "id": "lang_es",
+      "code": "es",
+      "name": "Spanish",
+      "native": "Español",
+      "flag": "🇪🇸",
+      "direction": "ltr",
+      "status": "active",
+      "is_default": false,
+      "file": "es.ts"
+    },
+    {
+      "id": "lang_fr",
+      "code": "fr",
+      "name": "French",
+      "native": "Français",
+      "flag": "🇫🇷",
+      "direction": "ltr",
+      "status": "active",
+      "is_default": false,
+      "file": "fr.ts"
+    },
+    {
+      "id": "lang_th",
+      "code": "th",
+      "name": "Thai",
+      "native": "ไทย",
+      "flag": "🇹🇭",
+      "direction": "ltr",
+      "status": "active",
+      "is_default": false,
+      "file": "th.ts"
+    }
+  ],
+  "supported_languages": [
+    {
+      "id": "lang_en",
+      "code": "en",
+      "name": "English",
+      "native": "English",
+      "flag": "🇺🇸",
+      "direction": "ltr",
+      "status": "active",
+      "is_default": true,
+      "file": "en.ts"
+    },
+    {
+      "id": "lang_es",
+      "code": "es",
+      "name": "Spanish",
+      "native": "Español",
+      "flag": "🇪🇸",
+      "direction": "ltr",
+      "status": "active",
+      "is_default": false,
+      "file": "es.ts"
+    },
+    {
+      "id": "lang_fr",
+      "code": "fr",
+      "name": "French",
+      "native": "Français",
+      "flag": "🇫🇷",
+      "direction": "ltr",
+      "status": "active",
+      "is_default": false,
+      "file": "fr.ts"
+    },
+    {
+      "id": "lang_th",
+      "code": "th",
+      "name": "Thai",
+      "native": "ไทย",
+      "flag": "🇹🇭",
+      "direction": "ltr",
+      "status": "active",
+      "is_default": false,
+      "file": "th.ts"
+    }
+  ]
 }

@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON } from '@/lib/siteConfig';
-import { useTranslation, SupportedLanguage } from '@/components/LanguageProvider';
+import { useTranslation, SupportedLanguage, DEFAULT_SYSTEM_LANGUAGES } from '@/components/LanguageProvider';
 
 interface InAppNotification {
   id: string;
@@ -35,7 +35,7 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   JPY: '¥'
 };
 
-const DEFAULT_FALLBACK_FLAG_MAP: Record<string, string> = {
+const DEFAULT_FLAG_MAP: Record<string, string> = {
   en: '🇺🇸',
   es: '🇪🇸',
   fr: '🇫🇷',
@@ -47,38 +47,18 @@ const DEFAULT_FALLBACK_FLAG_MAP: Record<string, string> = {
   ko: '🇰🇷',
   pt: '🇵🇹',
   ru: '🇷🇺',
-  ar: '🇸🇦',
-  nl: '🇳🇱',
-  hi: '🇮🇳',
-  vi: '🇻🇳',
-  id: '🇮🇩',
-  tr: '🇹🇷'
+  ar: '🇸🇦'
 };
 
-const DEFAULT_FALLBACK_LANGUAGES: SupportedLanguage[] = [
-  { id: 'lang_en', code: 'en', name: 'English', flag: '🇺🇸', status: 'active', is_default: true },
-  { id: 'lang_es', code: 'es', name: 'Español', flag: '🇪🇸', status: 'active', is_default: false },
-  { id: 'lang_fr', code: 'fr', name: 'Français', flag: '🇫🇷', status: 'active', is_default: false },
-  { id: 'lang_th', code: 'th', name: 'ภาษาไทย (Thai)', flag: '🇹🇭', status: 'active', is_default: false },
-  { id: 'lang_de', code: 'de', name: 'Deutsch', flag: '🇩🇪', status: 'active', is_default: false },
-  { id: 'lang_it', code: 'it', name: 'Italiano', flag: '🇮🇹', status: 'active', is_default: false },
-  { id: 'lang_ja', code: 'ja', name: '日本語', flag: '🇯🇵', status: 'active', is_default: false },
-  { id: 'lang_zh', code: 'zh', name: '中文 (Chinese)', flag: '🇨🇳', status: 'active', is_default: false },
-  { id: 'lang_ko', code: 'ko', name: '한국어 (Korean)', flag: '🇰🇷', status: 'active', is_default: false },
-  { id: 'lang_pt', code: 'pt', name: 'Português', flag: '🇵🇹', status: 'active', is_default: false },
-  { id: 'lang_ru', code: 'ru', name: 'Русский', flag: '🇷🇺', status: 'active', is_default: false },
-  { id: 'lang_ar', code: 'ar', name: 'العربية (Arabic)', flag: '🇸🇦', direction: 'rtl', status: 'active', is_default: false },
-];
-
-const getLanguageFlag = (code?: string): string => {
+const getLanguageFlag = (code?: string, explicitFlag?: string): string => {
+  if (explicitFlag && explicitFlag !== '🌐') return explicitFlag;
   if (!code || typeof code !== 'string') return '🌐';
-  return DEFAULT_FALLBACK_FLAG_MAP[code.toLowerCase().trim()] || '🌐';
+  return DEFAULT_FLAG_MAP[code.toLowerCase().trim()] || '🌐';
 };
 
-// Safe Normalizer for any raw language payload (prevents undefined.toLowerCase() crash)
 const normalizeLanguageItem = (item: any): SupportedLanguage => {
   if (!item) {
-    return { id: 'lang_en', code: 'en', name: 'English', flag: '🇺🇸', status: 'active', is_default: true };
+    return { id: 'lang_en', code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active', is_default: true };
   }
   if (typeof item === 'string') {
     const code = item.toLowerCase().trim();
@@ -86,6 +66,7 @@ const normalizeLanguageItem = (item: any): SupportedLanguage => {
       id: `lang_${code}`,
       code,
       name: code.toUpperCase(),
+      native: code.toUpperCase(),
       flag: getLanguageFlag(code),
       status: 'active',
       is_default: code === 'en'
@@ -94,12 +75,14 @@ const normalizeLanguageItem = (item: any): SupportedLanguage => {
   const rawCode = item.code || item.locale || item.lang || item.id || 'en';
   const code = typeof rawCode === 'string' ? rawCode.toLowerCase().trim() : 'en';
   const name = item.name || item.label || code.toUpperCase();
-  const flag = item.flag || getLanguageFlag(code);
+  const native = item.native || item.nativeName || name;
+  const flag = getLanguageFlag(code, item.flag);
   const status = typeof item.status === 'string' ? item.status.toLowerCase().trim() : 'active';
   return {
     id: item.id || `lang_${code}`,
     code,
     name,
+    native,
     flag,
     direction: item.direction || (code === 'ar' || code === 'he' ? 'rtl' : 'ltr'),
     status: status || 'active',
@@ -107,7 +90,6 @@ const normalizeLanguageItem = (item: any): SupportedLanguage => {
   };
 };
 
-// Safe code comparison helper (never throws TypeError on undefined)
 const isCodeMatch = (item: any, target: string): boolean => {
   if (!item || !target) return false;
   const itemCode = typeof item === 'string' ? item : (item.code || item.locale || item.lang || '');
@@ -126,8 +108,7 @@ export default function Sidebar() {
   const pathname = usePathname() || '';
   const langContext = useTranslation();
   const t = langContext?.t || ((k: string, fb?: string) => fb || k);
-  
-  // Safe resolution of current active language
+
   const rawLang = (langContext as any)?.currentLanguage || (langContext as any)?.locale || (langContext as any)?.language || 'en';
   const currentLanguage = typeof rawLang === 'string' && rawLang.trim() ? rawLang.trim().toLowerCase() : 'en';
   const changeLanguage = (langContext as any)?.changeLanguage || (langContext as any)?.setLocale || (langContext as any)?.setLanguage || (() => {});
@@ -140,8 +121,8 @@ export default function Sidebar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
 
-  // Dynamic Languages List (Synced from /admin/language and /api/admin/languages)
-  const [availableLanguages, setAvailableLanguages] = useState<SupportedLanguage[]>(DEFAULT_FALLBACK_LANGUAGES);
+  // Dynamic Languages directly synced with /admin/language
+  const [availableLanguages, setAvailableLanguages] = useState<SupportedLanguage[]>(DEFAULT_SYSTEM_LANGUAGES);
 
   // Accordion Sections State
   const [openSections, setOpenSections] = useState<{
@@ -164,7 +145,7 @@ export default function Sidebar() {
   const [langDropdownOpen, setLangDropdownOpen] = useState<boolean>(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState<boolean>(false);
 
-  // Live Balances & Telemetry
+  // Balances
   const [tokenBalance, setTokenBalance] = useState<number>(50);
   const [walletBalance, setWalletBalance] = useState<number>(0.00);
   const [currencySymbol, setCurrencySymbol] = useState<string>('$');
@@ -172,7 +153,6 @@ export default function Sidebar() {
 
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Route Suppression Checks
   const isAuthRoute = Boolean(
     pathname === '/login' ||
     pathname === '/register' ||
@@ -188,7 +168,6 @@ export default function Sidebar() {
     pathname === '/index'
   );
 
-  // Layout Clearance Token Synchronization
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
@@ -213,7 +192,7 @@ export default function Sidebar() {
     return () => window.removeEventListener('resize', updateLayoutMetrics);
   }, [isAuthRoute, isHomePage, isCollapsed]);
 
-  // Dynamic Languages Fetcher (Direct API & LanguageProvider Sync)
+  // Synchronize available system languages from /api/admin/languages & Context
   const syncLanguages = useCallback(async () => {
     try {
       const res = await fetch('/api/admin/languages?t=' + Date.now(), { cache: 'no-store' });
@@ -269,7 +248,6 @@ export default function Sidebar() {
     } catch (_) {}
   }, []);
 
-  // Route-Aware Auto-Expansion
   useEffect(() => {
     if (!pathname) return;
     if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
@@ -300,7 +278,7 @@ export default function Sidebar() {
     window.addEventListener('zecratary_wallet_updated', handleSync);
     window.addEventListener('zecratary_tokens_updated', handleSync);
 
-    // Dynamic Language Synchronization Events
+    // Dynamic Language Synchronization Events from /admin/language
     window.addEventListener('zecratary_languages_updated', handleLangSync);
     window.addEventListener('zecratary_locale_changed', handleLangSync);
     window.addEventListener('zecratary_admin_settings_updated', handleLangSync);
@@ -321,7 +299,6 @@ export default function Sidebar() {
     };
   }, [syncUserState, syncLanguages]);
 
-  // Click outside listener for dropdowns
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -381,29 +358,28 @@ export default function Sidebar() {
     }
   };
 
-  // Filter Active Languages Safely & Dynamically
+  // Only render ACTIVE system languages from /admin/language
   const activeLanguages = useMemo(() => {
     const rawList = Array.isArray(availableLanguages) && availableLanguages.length > 0 
       ? availableLanguages 
-      : DEFAULT_FALLBACK_LANGUAGES;
+      : DEFAULT_SYSTEM_LANGUAGES;
     return rawList
       .map(normalizeLanguageItem)
       .filter(l => l.status === 'active' || l.status === '');
   }, [availableLanguages]);
 
-  // Safe Resolution of Active Language Object (Eliminates undefined.toLowerCase() error)
+  // Safe Resolution of Active Language Object
   const currentLangObj = useMemo(() => {
     const safeLang = typeof currentLanguage === 'string' && currentLanguage ? currentLanguage.toLowerCase().trim() : 'en';
     const found = activeLanguages.find(l => isCodeMatch(l, safeLang)) || 
-                  (Array.isArray(availableLanguages) ? availableLanguages.map(normalizeLanguageItem).find(l => isCodeMatch(l, safeLang)) : null);
+                  availableLanguages.map(normalizeLanguageItem).find(l => isCodeMatch(l, safeLang));
     
-    if (found) {
-      return found;
-    }
+    if (found) return found;
     return { 
       id: `lang_${safeLang}`,
       code: safeLang, 
-      name: safeLang.toUpperCase(), 
+      name: safeLang.toUpperCase(),
+      native: safeLang.toUpperCase(), 
       flag: getLanguageFlag(safeLang),
       status: 'active'
     };
@@ -419,7 +395,6 @@ export default function Sidebar() {
     currentUser?.email?.includes('admin')
   );
 
-  // Exact path matching for /admin to prevent dual highlighting
   const isRouteActive = (route: string): boolean => {
     if (!pathname) return false;
     const cleanPath = pathname === '/' ? '/' : pathname.replace(/\/+$/, '');
@@ -428,7 +403,6 @@ export default function Sidebar() {
     if (cleanRoute === '/' || cleanRoute === '/admin') {
       return cleanPath === cleanRoute;
     }
-
     return cleanPath === cleanRoute || cleanPath.startsWith(`${cleanRoute}/`);
   };
 
@@ -617,7 +591,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* DYNAMIC TOP BAR LANGUAGE PICKER (FULLY TYPE-SAFE & NULL-TOLERANT) */}
+          {/* DYNAMIC TOP BAR LANGUAGE PICKER (SYNCS WITH /admin/language) */}
           <div className="relative">
             <button
               type="button"
@@ -642,18 +616,24 @@ export default function Sidebar() {
 
             {langDropdownOpen && (
               <div
-                className="absolute right-0 mt-2 w-56 border rounded-2xl p-2 shadow-xl z-50 space-y-1 text-xs"
+                className="absolute right-0 mt-2 w-60 border rounded-2xl p-2.5 shadow-xl z-50 space-y-1.5 text-xs"
                 style={{
                   backgroundColor: 'var(--color-card)',
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text)'
                 }}
               >
-                <div className="px-2 py-1 text-[10px] font-black uppercase tracking-wider text-muted-foreground opacity-70 border-b mb-1 flex items-center justify-between" style={{ borderColor: 'var(--color-border)' }}>
-                  <span>{t('availableLanguages', 'Languages')}</span>
-                  <span className="text-[9px] font-bold text-[var(--color-primary)]">{activeLanguages.length} active</span>
+                <div 
+                  className="px-2 py-1 text-[10px] font-black uppercase tracking-wider text-muted-foreground opacity-70 border-b mb-1 flex items-center justify-between"
+                  style={{ borderColor: 'var(--color-border)' }}
+                >
+                  <span>{t('availableLanguages', 'LANGUAGES')}</span>
+                  <span className="text-[10px] font-extrabold text-[var(--color-primary)]">
+                    {activeLanguages.length} ACTIVE
+                  </span>
                 </div>
-                <div className="max-h-64 overflow-y-auto space-y-0.5 pr-1">
+
+                <div className="max-h-64 overflow-y-auto space-y-1 pr-0.5">
                   {activeLanguages.map((rawLang, idx) => {
                     const lang = normalizeLanguageItem(rawLang);
                     const isSelected = isCodeMatch(lang.code, currentLanguage);
@@ -662,30 +642,35 @@ export default function Sidebar() {
                         key={lang.code || `lang_key_${idx}`}
                         type="button"
                         onClick={() => {
-                          if (typeof changeLanguage === 'function' && lang.code) changeLanguage(lang.code);
+                          if (typeof changeLanguage === 'function' && lang.code) {
+                            changeLanguage(lang.code);
+                          }
                           setLangDropdownOpen(false);
                         }}
-                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold cursor-pointer transition hover:bg-slate-800/40"
-                        style={isSelected ? { backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-primary)' } : {}}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition ${
+                          isSelected ? 'bg-slate-800/60 shadow-xs' : 'hover:bg-slate-800/30'
+                        }`}
+                        style={isSelected ? { color: 'var(--color-primary)' } : {}}
                       >
                         <span className="flex items-center gap-2.5 truncate">
-                          <span className="text-base shrink-0">{lang.flag || getLanguageFlag(lang.code)}</span>
-                          <span className="font-bold truncate">{lang.name || (lang.code || '').toUpperCase()}</span>
+                          <span className="text-base shrink-0 leading-none">{lang.flag || getLanguageFlag(lang.code)}</span>
+                          <span className="truncate">{lang.native || lang.name}</span>
                         </span>
                         <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                          <span className="text-[10px] font-extrabold uppercase opacity-60">{lang.code}</span>
+                          <span className="text-[10px] font-black uppercase opacity-60">{lang.code}</span>
                           {isSelected && <Check className="h-3.5 w-3.5 text-emerald-400" />}
                         </div>
                       </button>
                     );
                   })}
                 </div>
+
                 {isAdmin && (
-                  <div className="pt-1.5 border-t mt-1" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="pt-2 border-t mt-1" style={{ borderColor: 'var(--color-border)' }}>
                     <Link
                       href="/admin/language"
                       onClick={() => setLangDropdownOpen(false)}
-                      className="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-[var(--color-primary)] hover:bg-slate-800/20 transition"
+                      className="flex items-center justify-between px-2.5 py-1.5 rounded-xl text-[11px] font-bold text-[var(--color-primary)] hover:bg-slate-800/20 transition"
                     >
                       <span>{t('manageLanguages', 'Configure Languages')}</span>
                       <Languages className="h-3.5 w-3.5" />
@@ -827,7 +812,6 @@ export default function Sidebar() {
         }}
       >
         <div className="flex-1 overflow-y-auto p-3 space-y-4">
-          {/* DASHBOARD LINK */}
           <div>
             <Link
               href="/dashboard"
@@ -840,7 +824,7 @@ export default function Sidebar() {
             </Link>
           </div>
 
-          {/* 1. CREATE ACCORDION GROUP */}
+          {/* 1. CREATE GROUP */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -873,7 +857,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 2. MANAGE ACCORDION GROUP */}
+          {/* 2. MANAGE GROUP */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -906,7 +890,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 3. PLAN ACCORDION GROUP */}
+          {/* 3. PLAN GROUP */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -939,7 +923,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 4. FINANCIAL & UTILITY GROUP */}
+          {/* 4. FINANCE & UTILITY GROUP */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -976,7 +960,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 5. ADMIN MANAGEMENT ACCORDION GROUP */}
+          {/* 5. ADMIN MANAGEMENT ACCORDION (With Notification Settings directly above Languages) */}
           {isAdmin && (
             <div className="space-y-1 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               {!isCollapsed ? (
@@ -1026,7 +1010,7 @@ export default function Sidebar() {
                     <Wallet className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('wallet', 'Wallet Settings')}</span>}
                   </Link>
-                  <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} style={navStyle('/admin/notification-settings')} title={t('notifications', 'Alerts')}>
+                  <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} style={navStyle('/admin/notification-settings')} title={t('notifications', 'Notifications')}>
                     <BellRing className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('notifications', 'Notifications')}</span>}
                   </Link>
@@ -1121,8 +1105,8 @@ export default function Sidebar() {
                 <Link href="/admin" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin')} style={navStyle('/admin')}>
                   <Settings className="h-4 w-4" /> <span>{t('adminOverview', 'Admin Overview')}</span>
                 </Link>
-                <Link href="/admin/frontend" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/frontend')} style={navStyle('/admin/frontend')}>
-                  <Globe className="h-4 w-4" /> <span>{t('pageBuilder', 'Page Builder')}</span>
+                <Link href="/admin/notification-settings" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/notification-settings')} style={navStyle('/admin/notification-settings')}>
+                  <BellRing className="h-4 w-4" /> <span>{t('notifications', 'Notifications')}</span>
                 </Link>
                 <Link href="/admin/language" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/language')} style={navStyle('/admin/language')}>
                   <Languages className="h-4 w-4" /> <span>{t('languageSettings', 'Languages')}</span>
@@ -1132,9 +1116,6 @@ export default function Sidebar() {
                 </Link>
                 <Link href="/admin/users" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/users')} style={navStyle('/admin/users')}>
                   <UserPlus className="h-4 w-4" /> <span>{t('users', 'User Accounts')}</span>
-                </Link>
-                <Link href="/admin/payment" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/payment')} style={navStyle('/admin/payment')}>
-                  <ShieldCheck className="h-4 w-4" /> <span>{t('payments', 'Payment Gateway')}</span>
                 </Link>
               </div>
             )}

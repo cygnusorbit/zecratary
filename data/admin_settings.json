@@ -1,8 +1,8 @@
 {
   "siteName": "Zecratary",
   "siteDescription": "Smart Meal Planning & Recipe Assistant",
-  "titlebarEmoji": "\ud83c\udf73",
-  "faviconEmoji": "\ud83c\udf73",
+  "titlebarEmoji": "🍳",
+  "faviconEmoji": "🍳",
   "aiProvider": "openai",
   "aiModel": "gpt-4o",
   "currency": "USD",
@@ -142,44 +142,48 @@
   ],
   "supportedLanguages": [
     {
+      "id": "lang_en",
       "code": "en",
       "name": "English",
-      "nativeName": "English",
-      "flag": "\ud83c\uddfa\ud83c\uddf8",
+      "native": "English",
+      "flag": "🇺🇸",
       "direction": "ltr",
-      "isDefault": true,
       "status": "active",
-      "lastUpdated": "2026-09-15T00:00:00.000Z"
+      "is_default": true,
+      "file": "en.ts"
     },
     {
+      "id": "lang_es",
       "code": "es",
       "name": "Spanish",
-      "nativeName": "Espa\u00f1ol",
-      "flag": "\ud83c\uddea\ud83c\uddf8",
+      "native": "Español",
+      "flag": "🇪🇸",
       "direction": "ltr",
-      "isDefault": false,
       "status": "active",
-      "lastUpdated": "2026-09-15T00:00:00.000Z"
+      "is_default": false,
+      "file": "es.ts"
     },
     {
+      "id": "lang_fr",
       "code": "fr",
       "name": "French",
-      "nativeName": "Fran\u00e7ais",
-      "flag": "\ud83c\uddeb\ud83c\uddf7",
+      "native": "Français",
+      "flag": "🇫🇷",
       "direction": "ltr",
-      "isDefault": false,
       "status": "active",
-      "lastUpdated": "2026-09-15T00:00:00.000Z"
+      "is_default": false,
+      "file": "fr.ts"
     },
     {
+      "id": "lang_th",
       "code": "th",
       "name": "Thai",
-      "nativeName": "\u0e44\u0e17\u0e22",
-      "flag": "\ud83c\uddf9\ud83c\udded",
+      "native": "ไทย",
+      "flag": "🇹🇭",
       "direction": "ltr",
-      "isDefault": false,
       "status": "active",
-      "lastUpdated": "2026-09-15T00:00:00.000Z"
+      "is_default": false,
+      "file": "th.ts"
     }
   ],
   "titlebarImage": "",
@@ -230,5 +234,51 @@
     "Soup",
     "Side Dish",
     "Baking"
+  ],
+  "supported_languages": [
+    {
+      "id": "lang_en",
+      "code": "en",
+      "name": "English",
+      "native": "English",
+      "flag": "🇺🇸",
+      "direction": "ltr",
+      "status": "active",
+      "is_default": true,
+      "file": "en.ts"
+    },
+    {
+      "id": "lang_es",
+      "code": "es",
+      "name": "Spanish",
+      "native": "Español",
+      "flag": "🇪🇸",
+      "direction": "ltr",
+      "status": "active",
+      "is_default": false,
+      "file": "es.ts"
+    },
+    {
+      "id": "lang_fr",
+      "code": "fr",
+      "name": "French",
+      "native": "Français",
+      "flag": "🇫🇷",
+      "direction": "ltr",
+      "status": "active",
+      "is_default": false,
+      "file": "fr.ts"
+    },
+    {
+      "id": "lang_th",
+      "code": "th",
+      "name": "Thai",
+      "native": "ไทย",
+      "flag": "🇹🇭",
+      "direction": "ltr",
+      "status": "active",
+      "is_default": false,
+      "file": "th.ts"
+    }
   ]
 }
