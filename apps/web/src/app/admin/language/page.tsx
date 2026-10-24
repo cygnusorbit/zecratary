@@ -1,898 +1,688 @@
 // @ts-nocheck
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import Link from 'next/link';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
-  Globe, Languages, Plus, Edit3, Trash2, Shield, 
-  Check, CheckCircle, X, AlertCircle, Search, 
-  ShieldAlert, Star, Type, Sliders, RotateCcw, Flag, RefreshCw
+  Languages, Globe, Plus, Search, Check, Trash2, Edit2, 
+  RefreshCw, CheckCircle2, AlertCircle, Save, Undo2, ArrowRightLeft,
+  Database, ShieldCheck
 } from 'lucide-react';
-import { getCurrentUser, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
-import { 
-  getMergedDictionary, 
-  saveCustomDictionary
-} from '@/lib/i18n';
-import { en } from '@/lib/lang/en';
-import { es } from '@/lib/lang/es';
-import { fr } from '@/lib/lang/fr';
-import { th } from '@/lib/lang/th';
-import { DEFAULT_DICTIONARIES } from '@/lib/lang';
-import { 
-  purgeLegacyBrowserAdminStorage, 
-  fetchServerAdminSettings, 
-  persistServerAdminSettings 
-} from '@/lib/adminSync';
 
 interface SupportedLanguage {
   code: string;
   name: string;
-  nativeName: string;
-  flag?: string;
-  direction: 'ltr' | 'rtl';
-  isDefault: boolean;
-  status: 'active' | 'inactive';
-  lastUpdated: string;
-}
-
-interface CountryOption {
-  name: string;
-  code: string;
+  native: string;
   flag: string;
+  dir: 'ltr' | 'rtl';
+  status: 'active' | 'inactive';
+  isDefault?: boolean;
 }
 
-const COMMON_COUNTRIES: CountryOption[] = [
-  { name: 'United States', code: 'en', flag: '🇺🇸' },
-  { name: 'United Kingdom', code: 'en', flag: '🇬🇧' },
-  { name: 'Spain', code: 'es', flag: '🇪🇸' },
-  { name: 'France', code: 'fr', flag: '🇫🇷' },
-  { name: 'Thailand', code: 'th', flag: '🇹🇭' },
-  { name: 'Germany', code: 'de', flag: '🇩🇪' },
-  { name: 'Italy', code: 'it', flag: '🇮🇹' },
-  { name: 'Japan', code: 'ja', flag: '🇯🇵' },
-  { name: 'China', code: 'zh', flag: '🇨🇳' },
-  { name: 'South Korea', code: 'ko', flag: '🇰🇷' },
-  { name: 'Portugal', code: 'pt', flag: '🇵🇹' },
-  { name: 'Brazil', code: 'pt', flag: '🇧🇷' },
-  { name: 'Russia', code: 'ru', flag: '🇷🇺' },
-  { name: 'Saudi Arabia', code: 'ar', flag: '🇸🇦' },
-  { name: 'Netherlands', code: 'nl', flag: '🇳🇱' },
-  { name: 'India', code: 'hi', flag: '🇮🇳' },
-  { name: 'Vietnam', code: 'vi', flag: '🇻🇳' },
-  { name: 'Indonesia', code: 'id', flag: '🇮🇩' },
-  { name: 'Turkey', code: 'tr', flag: '🇹🇷' },
-  { name: 'Mexico', code: 'es', flag: '🇲🇽' },
-  { name: 'Canada', code: 'en', flag: '🇨🇦' },
-  { name: 'Australia', code: 'en', flag: '🇦🇺' },
-  { name: 'Sweden', code: 'sv', flag: '🇸🇪' },
-  { name: 'Norway', code: 'no', flag: '🇳🇴' },
-  { name: 'Denmark', code: 'da', flag: '🇩🇰' },
-  { name: 'Finland', code: 'fi', flag: '🇫🇮' },
-  { name: 'Poland', code: 'pl', flag: '🇵🇱' },
-  { name: 'Greece', code: 'el', flag: '🇬🇷' },
-  { name: 'Egypt', code: 'ar', flag: '🇪🇬' },
-  { name: 'Argentina', code: 'es', flag: '🇦🇷' },
-  { name: 'Philippines', code: 'fil', flag: '🇵🇭' },
-  { name: 'Malaysia', code: 'ms', flag: '🇲🇾' },
-  { name: 'Singapore', code: 'en', flag: '🇸🇬' },
-  { name: 'Switzerland', code: 'de', flag: '🇨🇭' },
-  { name: 'Belgium', code: 'nl', flag: '🇧🇪' },
-  { name: 'Austria', code: 'de', flag: '🇦🇹' },
-  { name: 'Ireland', code: 'ga', flag: '🇮🇪' },
-  { name: 'New Zealand', code: 'en', flag: '🇳🇿' },
-  { name: 'South Africa', code: 'af', flag: '🇿🇦' },
-  { name: 'United Arab Emirates', code: 'ar', flag: '🇦🇪' },
-  { name: 'Israel', code: 'he', flag: '🇮🇱' },
-  { name: 'Ukraine', code: 'uk', flag: '🇺🇦' },
-  { name: 'Czech Republic', code: 'cs', flag: '🇨🇿' },
-  { name: 'Hungary', code: 'hu', flag: '🇭🇺' },
-  { name: 'Romania', code: 'ro', flag: '🇷🇴' },
-  { name: 'Colombia', code: 'es', flag: '🇨🇴' },
-  { name: 'Chile', code: 'es', flag: '🇨🇱' },
-  { name: 'Peru', code: 'es', flag: '🇵🇪' },
-  { name: 'Taiwan', code: 'zh', flag: '🇹🇼' },
-  { name: 'Hong Kong', code: 'zh', flag: '🇭🇰' },
-];
-
-const getLanguageFlag = (code?: string, explicitFlag?: string): string => {
-  if (explicitFlag) return explicitFlag;
-  if (!code) return '🌐';
-  const c = code.toLowerCase().trim();
-  const match = COMMON_COUNTRIES.find((item) => item.code.toLowerCase() === c);
-  return match ? match.flag : '🌐';
-};
-
-const DEFAULT_LANGUAGES: SupportedLanguage[] = [
-  { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸', direction: 'ltr', isDefault: true, status: 'active', lastUpdated: new Date().toISOString() },
-  { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸', direction: 'ltr', isDefault: false, status: 'active', lastUpdated: new Date().toISOString() },
-  { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷', direction: 'ltr', isDefault: false, status: 'active', lastUpdated: new Date().toISOString() },
-  { code: 'th', name: 'Thai', nativeName: 'ไทย', flag: '🇹🇭', direction: 'ltr', isDefault: false, status: 'active', lastUpdated: new Date().toISOString() },
+const DEFAULT_LOCALES: SupportedLanguage[] = [
+  { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', dir: 'ltr', status: 'active', isDefault: true },
+  { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', dir: 'ltr', status: 'active', isDefault: false },
+  { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', dir: 'ltr', status: 'active', isDefault: false },
+  { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', dir: 'ltr', status: 'active', isDefault: false }
 ];
 
 export default function AdminLanguagePage() {
-  const langContext = useTranslation();
-  const t = langContext?.t || ((key: string, fallback?: string) => fallback || key);
-  const version = langContext?.version;
+  const { t, locale: currentGlobalLocale, setLocale: setGlobalLocale } = useTranslation();
 
-  const [currentUser, setCurrentUser] = useState<any | null>(null);
-  const [languages, setLanguages] = useState<SupportedLanguage[]>([]);
-  const [search, setSearch] = useState('');
-  const [feedbackMsg, setFeedbackMsg] = useState('');
-  const [feedbackType, setFeedbackType] = useState<'success' | 'error'>('success');
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  // Navigation tab state
+  const [activeTab, setActiveTab] = useState<'languages' | 'words'>('languages');
 
-  // Modal State
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editActiveTab, setEditActiveTab] = useState<'settings' | 'words'>('settings');
-  const [editingCode, setEditingCode] = useState<string | null>(null);
+  // Core Data States
+  const [languages, setLanguages] = useState<SupportedLanguage[]>(DEFAULT_LOCALES);
+  const [defaultLang, setDefaultLang] = useState<string>('en');
+  const [dictionaries, setDictionaries] = useState<Record<string, Record<string, string>>>({});
+  const [initialDictionaries, setInitialDictionaries] = useState<Record<string, Record<string, string>>>({});
 
-  // Form Fields
-  const [langCode, setLangCode] = useState('');
-  const [langName, setLangName] = useState('');
-  const [langNativeName, setLangNativeName] = useState('');
-  const [langFlag, setLangFlag] = useState('🇺🇸');
-  const [langDirection, setLangDirection] = useState<'ltr' | 'rtl'>('ltr');
-  const [langStatus, setLangStatus] = useState<'active' | 'inactive'>('active');
-  const [langIsDefault, setLangIsDefault] = useState(false);
-  const [modalError, setModalError] = useState('');
+  // System Words Tab States
+  const [activeDictLang, setActiveDictLang] = useState<string>('en');
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  // UI Interaction States
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  // Flag Picker Dropdown State
-  const [showFlagPicker, setShowFlagPicker] = useState(false);
-  const [flagCountrySearch, setFlagCountrySearch] = useState('');
+  // Language Modal States
+  const [langModalOpen, setLangModalOpen] = useState(false);
+  const [editingLangCode, setEditingLangCode] = useState<string | null>(null);
+  const [langForm, setLangForm] = useState<SupportedLanguage>({
+    code: '',
+    name: '',
+    native: '',
+    flag: '🌐',
+    dir: 'ltr',
+    status: 'active',
+    isDefault: false
+  });
 
-  // Editable System Words State
-  const [wordsMap, setWordsMap] = useState<Record<string, string>>({});
-  const [wordSearch, setWordSearch] = useState('');
+  // Word Modal States
+  const [wordModalOpen, setWordModalOpen] = useState(false);
   const [newWordKey, setNewWordKey] = useState('');
-  const [newWordVal, setNewWordVal] = useState('');
+  const [newWordValue, setNewWordValue] = useState('');
 
-  // Dynamic Theme Synchronization
-  const applyGlobalTheme = useCallback(() => {
+  const isSavingRef = useRef(false);
+
+  // Compute dirty unsaved state for dictionaries
+  const isDirty = useMemo(() => {
+    return JSON.stringify(dictionaries) !== JSON.stringify(initialDictionaries);
+  }, [dictionaries, initialDictionaries]);
+
+  // Load language settings & system dictionaries from server API
+  const loadData = useCallback(async () => {
+    if (isSavingRef.current) return;
     try {
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
-    } catch (_) {}
-  }, []);
-
-  useEffect(() => {
-    applyGlobalTheme();
-    window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_updated', applyGlobalTheme);
-    window.addEventListener('storage', applyGlobalTheme);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
-      window.removeEventListener('storage', applyGlobalTheme);
-    };
-  }, [applyGlobalTheme]);
-
-  // Load languages exclusively from Server Storage (Zero LocalStorage)
-  const loadLanguages = useCallback(async () => {
-    setIsLoading(true);
-    purgeLegacyBrowserAdminStorage();
-    try {
-      const serverData = await fetchServerAdminSettings();
-      if (serverData && Array.isArray(serverData.supportedLanguages) && serverData.supportedLanguages.length > 0) {
-        const withFlags = serverData.supportedLanguages.map((item: any) => ({
-          ...item,
-          flag: item.flag || getLanguageFlag(item.code)
-        }));
-        setLanguages(withFlags);
-      } else {
-        setLanguages(DEFAULT_LANGUAGES);
+      setLoading(true);
+      const res = await fetch(`/api/admin/languages?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.supportedLanguages) && data.supportedLanguages.length > 0) {
+          setLanguages(data.supportedLanguages);
+          const def = data.supportedLanguages.find((l: any) => l.isDefault)?.code || data.defaultLanguage || 'en';
+          setDefaultLang(def);
+        }
+        if (data.translations && typeof data.translations === 'object') {
+          setDictionaries(data.translations);
+          setInitialDictionaries(JSON.parse(JSON.stringify(data.translations)));
+        }
       }
-    } catch (e) {
-      console.error('[AdminLanguagePage] Failed to fetch server languages:', e);
-      setLanguages(DEFAULT_LANGUAGES);
+    } catch (err) {
+      console.warn('Notice loading /admin/language data:', err);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    document.title = `${t('langPageTitle', 'Language Management')} - ${t('adminConsole', 'Admin Console')}`;
-    initAuthStorage();
-    const user = getCurrentUser();
-    setCurrentUser(user);
-    loadLanguages();
+    document.title = `${t('langPageTitle', 'Language & Localization')} - Zecratary`;
+    loadData();
 
-    const handleSync = () => loadLanguages();
-    window.addEventListener('zecratary_languages_updated', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    const handleExternalUpdates = () => {
+      loadData();
+    };
+
+    window.addEventListener('zecratary_languages_updated', handleExternalUpdates);
+    window.addEventListener('zecratary_dictionary_updated', handleExternalUpdates);
+    window.addEventListener('zecratary_locale_changed', handleExternalUpdates);
 
     return () => {
-      window.removeEventListener('zecratary_languages_updated', handleSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+      window.removeEventListener('zecratary_languages_updated', handleExternalUpdates);
+      window.removeEventListener('zecratary_dictionary_updated', handleExternalUpdates);
+      window.removeEventListener('zecratary_locale_changed', handleExternalUpdates);
     };
-  }, [t, version, loadLanguages]);
+  }, [loadData, t]);
 
-  const saveLanguagesList = async (updated: SupportedLanguage[]) => {
-    setLanguages(updated);
-    await persistServerAdminSettings({ supportedLanguages: updated });
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('zecratary_languages_updated', { detail: updated }));
-      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
+  // Synchronize activeDictLang if languages array updates
+  useEffect(() => {
+    if (languages.length > 0 && !languages.some(l => l.code === activeDictLang)) {
+      setActiveDictLang(languages[0].code);
     }
+  }, [languages, activeDictLang]);
+
+  // Trigger reactive cross-component broadcast
+  const broadcastUpdates = () => {
+    window.dispatchEvent(new Event('zecratary_languages_updated'));
+    window.dispatchEvent(new Event('zecratary_dictionary_updated'));
+    window.dispatchEvent(new Event('zecratary_locale_changed'));
+    window.dispatchEvent(new Event('storage'));
   };
 
-  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
-    setFeedbackMsg(msg);
-    setFeedbackType(type);
-    setTimeout(() => setFeedbackMsg(''), 3000);
-  };
-
-  const handleOpenAddModal = () => {
-    setLangCode('');
-    setLangName('');
-    setLangNativeName('');
-    setLangFlag('🇺🇸');
-    setLangDirection('ltr');
-    setLangStatus('active');
-    setLangIsDefault(false);
-    setModalError('');
-    setShowFlagPicker(false);
-    setFlagCountrySearch('');
-    setShowAddModal(true);
-  };
-
-  const handleAddLanguageSubmit = async (e?: React.FormEvent) => {
-    if (e && e.preventDefault) e.preventDefault();
-    setModalError('');
-
-    const cleanCode = langCode.trim().toLowerCase();
-    const cleanName = langName.trim();
-    const cleanNative = langNativeName.trim() || cleanName;
-
-    if (!cleanCode || !cleanName) {
-      setModalError(t('codeAndNameRequired', 'Language code and name are required.'));
-      return;
-    }
-
-    if (languages.some((l) => l.code.toLowerCase() === cleanCode)) {
-      setModalError(`"${cleanCode}" ${t('languageAlreadyExists', 'already exists.')}`);
-      return;
-    }
-
-    let updated = [...languages];
-    if (langIsDefault) {
-      updated = updated.map((l) => ({ ...l, isDefault: false }));
-    }
-
-    const newLang: SupportedLanguage = {
-      code: cleanCode,
-      name: cleanName,
-      nativeName: cleanNative,
-      flag: langFlag || getLanguageFlag(cleanCode),
-      direction: langDirection,
-      isDefault: langIsDefault,
-      status: langStatus,
-      lastUpdated: new Date().toISOString()
-    };
-
-    const initialWords: Record<string, string> = {};
-    Object.keys(en).forEach((k) => {
-      initialWords[k] = (en as any)[k];
-    });
-
+  // Save Languages List and Settings to PostgreSQL and Server Store
+  const persistLanguages = async (updatedLangs: SupportedLanguage[], defCode: string) => {
+    isSavingRef.current = true;
     try {
-      await fetch('/api/admin/languages', {
+      const res = await fetch('/api/admin/languages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          code: cleanCode,
-          name: cleanName,
-          dictionary: initialWords
+          supportedLanguages: updatedLangs,
+          defaultLanguage: defCode,
+          translations: dictionaries
         })
       });
-    } catch (err) {
-      console.warn('API file sync notice:', err);
-    }
 
-    await saveLanguagesList([...updated, newLang]);
-    try {
-      saveCustomDictionary(cleanCode, initialWords);
-    } catch (_) {}
+      if (!res.ok) throw new Error('Failed to persist language settings');
 
-    setShowAddModal(false);
-    showToast(`"${cleanName}" (${cleanCode}.ts) ${t('languageAddedSuccess', 'added successfully!')}`);
-  };
+      setLanguages(updatedLangs);
+      setDefaultLang(defCode);
+      broadcastUpdates();
 
-  const handleOpenEditModal = (lang: SupportedLanguage) => {
-    setEditingCode(lang.code);
-    setLangCode(lang.code);
-    setLangName(lang.name);
-    setLangNativeName(lang.nativeName);
-    setLangFlag(lang.flag || getLanguageFlag(lang.code));
-    setLangDirection(lang.direction);
-    setLangStatus(lang.status);
-    setLangIsDefault(lang.isDefault);
-    setModalError('');
-    setEditActiveTab('settings');
-    setWordSearch('');
-    setShowFlagPicker(false);
-    setFlagCountrySearch('');
-
-    const merged = getMergedDictionary(lang.code);
-    const fullDictionary: Record<string, string> = {};
-    Object.keys(en).forEach((k) => {
-      fullDictionary[k] = merged[k] || (DEFAULT_DICTIONARIES as any)[lang.code]?.[k] || (en as any)[k] || '';
-    });
-    Object.keys(merged).forEach((k) => {
-      if (fullDictionary[k] === undefined) {
-        fullDictionary[k] = merged[k];
-      }
-    });
-
-    setWordsMap(fullDictionary);
-    setShowEditModal(true);
-  };
-
-  const handleWordChange = (key: string, value: string) => {
-    setWordsMap((prev) => ({
-      ...prev,
-      [key]: value
-    }));
-  };
-
-  const handleAddNewWordKey = (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanKey = newWordKey.trim();
-    if (!cleanKey) return;
-    setWordsMap((prev) => ({
-      ...prev,
-      [cleanKey]: newWordVal.trim()
-    }));
-    setNewWordKey('');
-    setNewWordVal('');
-  };
-
-  const handleResetWordsToDefault = () => {
-    if (!editingCode) return;
-    if (confirm(t('confirmResetWords', 'Reset all words for this language back to system defaults?'))) {
-      const base = (DEFAULT_DICTIONARIES as any)[editingCode] || en;
-      setWordsMap({ ...base });
+      setToast({
+        type: 'success',
+        message: t('langSavedToast', 'Languages and settings updated successfully!')
+      });
+    } catch (err: any) {
+      setToast({
+        type: 'error',
+        message: err.message || t('wordsSaveError', 'Failed to save system words. Please try again.')
+      });
+    } finally {
+      setTimeout(() => { isSavingRef.current = false; }, 300);
     }
   };
 
-  const handleEditLanguageSubmit = async (e?: React.FormEvent) => {
-    if (e && e.preventDefault) e.preventDefault();
-    if (!editingCode) return;
-    setModalError('');
-
-    const cleanName = langName.trim();
-    const cleanNative = langNativeName.trim() || cleanName;
-
-    if (!cleanName) {
-      setModalError(t('nameRequired', 'Language display name is required.'));
-      return;
-    }
-
-    let updated = languages.map((l) => {
-      if (l.code === editingCode) {
-        return {
-          ...l,
-          name: cleanName,
-          nativeName: cleanNative,
-          flag: langFlag || getLanguageFlag(l.code),
-          direction: langDirection,
-          status: l.isDefault ? 'active' : langStatus,
-          isDefault: langIsDefault,
-          lastUpdated: new Date().toISOString()
-        };
-      }
-      return langIsDefault ? { ...l, isDefault: false } : l;
-    });
-
-    await saveLanguagesList(updated);
-    try {
-      saveCustomDictionary(editingCode, wordsMap);
-    } catch (_) {}
+  // Save Dictionaries to PostgreSQL and Server Store
+  const handleSaveDictionaries = async () => {
+    isSavingRef.current = true;
+    setSaving(true);
+    setToast(null);
 
     try {
-      await fetch('/api/admin/languages', {
+      const res = await fetch('/api/admin/languages', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          code: editingCode,
-          name: cleanName,
-          dictionary: wordsMap
+          supportedLanguages: languages,
+          defaultLanguage: defaultLang,
+          translations: dictionaries
         })
       });
-    } catch (_) {}
 
-    setShowEditModal(false);
-    showToast(`"${cleanName}" & ${editingCode}.ts updated successfully!`);
-  };
+      if (!res.ok) throw new Error(t('wordsSaveError', 'Failed to save system words. Please try again.'));
 
-  const handleDeleteLanguage = async (lang: SupportedLanguage) => {
-    if (lang.isDefault) {
-      showToast(t('cannotDeleteDefaultError', 'Default language cannot be deleted.'), 'error');
-      return;
-    }
-    if (lang.code === 'en') {
-      showToast(t('cannotDeleteEnglishError', 'Baseline English language cannot be deleted.'), 'error');
-      return;
-    }
-    if (!confirm(`${t('confirmDelete', 'Are you sure you want to delete')} "${lang.name}" (${lang.code}) and remove ${lang.code}.ts library?`)) return;
+      setInitialDictionaries(JSON.parse(JSON.stringify(dictionaries)));
+      broadcastUpdates();
 
-    try {
-      await fetch('/api/admin/languages', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: lang.code })
+      setToast({
+        type: 'success',
+        message: t('wordsSavedToast', 'System words saved & broadcasted successfully!')
       });
-    } catch (err) {
-      console.warn('API deletion sync notice:', err);
+    } catch (err: any) {
+      setToast({
+        type: 'error',
+        message: err.message || t('wordsSaveError', 'Failed to save system words. Please try again.')
+      });
+    } finally {
+      setSaving(false);
+      setTimeout(() => { isSavingRef.current = false; }, 300);
     }
-
-    const updated = languages.filter((l) => l.code !== lang.code);
-    await saveLanguagesList(updated);
-    showToast(`"${lang.name}" (${lang.code}.ts) ${t('languageRemoved', 'removed successfully.')}`);
   };
 
-  const handleSetDefault = async (code: string) => {
-    const updated = languages.map((l) => ({
+  // Discard dictionary edits
+  const handleDiscardDictionaries = () => {
+    setDictionaries(JSON.parse(JSON.stringify(initialDictionaries)));
+    setToast(null);
+  };
+
+  // Toggle Language Status (Active / Inactive)
+  const handleToggleStatus = (code: string) => {
+    if (code === defaultLang) {
+      setToast({
+        type: 'error',
+        message: t('cannotDeleteDefault', 'Cannot delete or deactivate the default language.')
+      });
+      return;
+    }
+    const updated = languages.map(l => {
+      if (l.code === code) {
+        const nextStatus: 'active' | 'inactive' = l.status === 'active' ? 'inactive' : 'active';
+        return { ...l, status: nextStatus };
+      }
+      return l;
+    });
+    persistLanguages(updated, defaultLang);
+  };
+
+  // Set Language as Default
+  const handleSetDefault = (code: string) => {
+    const updated = languages.map(l => ({
       ...l,
       isDefault: l.code === code,
-      status: (l.code === code ? 'active' : l.status) as 'active' | 'inactive'
+      status: l.code === code ? 'active' : l.status
     }));
-    await saveLanguagesList(updated);
-    showToast(`${t('setAsDefaultSuccess', 'Default language set to')} ${code.toUpperCase()}`);
+    persistLanguages(updated, code);
   };
 
-  const filtered = languages.filter(
-    (l) =>
-      !search.trim() ||
-      l.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-      l.nativeName.toLowerCase().includes(search.toLowerCase().trim()) ||
-      l.code.toLowerCase().includes(search.toLowerCase().trim())
-  );
+  // Delete Language
+  const handleDeleteLanguage = (code: string) => {
+    if (code === defaultLang) {
+      setToast({
+        type: 'error',
+        message: t('cannotDeleteDefault', 'Cannot delete or deactivate the default language.')
+      });
+      return;
+    }
+    if (!window.confirm(t('deleteLangConfirm', 'Are you sure you want to delete this language?'))) return;
 
-  const wordKeysList = useMemo(() => {
-    const query = wordSearch.toLowerCase().trim();
-    return Object.keys(wordsMap).filter((k) => {
-      if (!query) return true;
-      const enVal = (en as any)[k] || '';
-      const curVal = wordsMap[k] || '';
-      return (
-        k.toLowerCase().includes(query) ||
-        enVal.toLowerCase().includes(query) ||
-        curVal.toLowerCase().includes(query)
-      );
+    const updated = languages.filter(l => l.code !== code);
+    persistLanguages(updated, defaultLang);
+  };
+
+  // Open Language Modal for Add or Edit
+  const openLangModal = (lang?: SupportedLanguage) => {
+    if (lang) {
+      setEditingLangCode(lang.code);
+      setLangForm({ ...lang });
+    } else {
+      setEditingLangCode(null);
+      setLangForm({
+        code: '',
+        name: '',
+        native: '',
+        flag: '🌐',
+        dir: 'ltr',
+        status: 'active',
+        isDefault: false
+      });
+    }
+    setLangModalOpen(true);
+  };
+
+  // Submit Language Form (Add or Edit)
+  const handleSaveLangForm = () => {
+    const cleanCode = langForm.code.trim().toLowerCase();
+    const cleanName = langForm.name.trim();
+    const cleanNative = langForm.native.trim() || cleanName;
+    const cleanFlag = langForm.flag.trim() || '🌐';
+
+    if (!cleanCode || !cleanName) return;
+
+    let updated: SupportedLanguage[];
+    if (editingLangCode) {
+      updated = languages.map(l => l.code === editingLangCode ? {
+        ...l,
+        name: cleanName,
+        native: cleanNative,
+        flag: cleanFlag,
+        dir: langForm.dir,
+        status: langForm.status
+      } : l);
+    } else {
+      if (languages.some(l => l.code === cleanCode)) {
+        alert('Language code already exists!');
+        return;
+      }
+      const newLang: SupportedLanguage = {
+        code: cleanCode,
+        name: cleanName,
+        native: cleanNative,
+        flag: cleanFlag,
+        dir: langForm.dir,
+        status: langForm.status,
+        isDefault: false
+      };
+      updated = [...languages, newLang];
+
+      // Initialize empty dictionary if missing
+      if (!dictionaries[cleanCode]) {
+        setDictionaries(prev => ({ ...prev, [cleanCode]: {} }));
+      }
+    }
+
+    setLangModalOpen(false);
+    persistLanguages(updated, defaultLang);
+  };
+
+  // Add System Phrase Modal Submit
+  const handleAddWordSubmit = () => {
+    const key = newWordKey.trim();
+    const val = newWordValue.trim();
+    if (!key) return;
+
+    setDictionaries(prev => {
+      const copy = { ...prev };
+      // Inject to current dictionary and ensure fallback across others
+      languages.forEach(l => {
+        copy[l.code] = {
+          ...(copy[l.code] || {}),
+          [key]: l.code === activeDictLang ? val : (copy[l.code]?.[key] || val)
+        };
+      });
+      return copy;
     });
-  }, [wordsMap, wordSearch]);
 
-  const filteredCountries = useMemo(() => {
-    const q = flagCountrySearch.toLowerCase().trim();
-    if (!q) return COMMON_COUNTRIES;
-    return COMMON_COUNTRIES.filter(
-      (c) =>
-        c.name.toLowerCase().includes(q) ||
-        c.code.toLowerCase().includes(q) ||
-        c.flag.includes(q)
+    setWordModalOpen(false);
+    setNewWordKey('');
+    setNewWordValue('');
+  };
+
+  // Delete System Phrase
+  const handleDeleteWord = (keyToDelete: string) => {
+    if (!window.confirm(t('deleteWordConfirm', 'Are you sure you want to delete this phrase?'))) return;
+
+    setDictionaries(prev => {
+      const copy = { ...prev };
+      Object.keys(copy).forEach(lCode => {
+        if (copy[lCode]) {
+          const dictCopy = { ...copy[lCode] };
+          delete dictCopy[keyToDelete];
+          copy[lCode] = dictCopy;
+        }
+      });
+      return copy;
+    });
+  };
+
+  // Filtered System Words for Active Dictionary
+  const currentDict = dictionaries[activeDictLang] || {};
+  const currentWordsList = useMemo(() => {
+    const list = Object.entries(currentDict).map(([k, v]) => ({ key: k, value: String(v) }));
+    if (!searchTerm.trim()) return list;
+    const lower = searchTerm.toLowerCase();
+    return list.filter(item => 
+      item.key.toLowerCase().includes(lower) || 
+      item.value.toLowerCase().includes(lower)
     );
-  }, [flagCountrySearch]);
+  }, [currentDict, searchTerm]);
+
+  const activeLocalesCount = languages.filter(l => l.status === 'active').length;
+  const totalWordsCount = Object.keys(currentDict).length;
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
-      {/* ACCESS WARNING */}
-      {currentUser && currentUser.role !== 'admin' && (
-        <div 
-          className="p-4 rounded-2xl border flex items-center justify-between text-xs shadow-xs"
-          style={{
-            backgroundColor: 'var(--color-inner-dark)',
-            borderColor: 'rgba(217, 119, 6, 0.4)',
-            color: '#fde68a'
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="h-5 w-5 text-amber-500 shrink-0" />
-            <span>
-              Signed in as <strong>{currentUser.email}</strong>. {t('adminPrivilegeWarning', 'Administrative privileges are required to modify languages.')}
-            </span>
-          </div>
-          <Link 
-            href="/login"
-            className="px-3.5 py-1.5 text-white font-bold rounded-xl shrink-0 ml-3 shadow-sm"
-            style={{ backgroundColor: 'var(--color-primary)' }}
-          >
-            {t('switchToAdmin', 'Switch to Admin')}
-          </Link>
-        </div>
-      )}
-
-      {/* FEEDBACK TOAST */}
-      {feedbackMsg && (
-        <div 
-          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-sm animate-in fade-in"
-          style={{
-            backgroundColor: 'var(--color-inner-dark)',
-            borderColor: feedbackType === 'success' ? 'var(--color-emerald)' : '#ef4444',
-            color: feedbackType === 'success' ? 'var(--color-emerald)' : '#ef4444'
-          }}
-        >
-          {feedbackType === 'success' ? (
-            <CheckCircle className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} />
-          ) : (
-            <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
-          )}
-          <span>{feedbackMsg}</span>
-        </div>
-      )}
-
-      {/* HEADER */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      {/* Top Header & System Badges */}
+      <div 
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4"
+        style={{ borderColor: 'var(--color-border)' }}
+      >
         <div>
-          <h1 
-            className="text-3xl font-black tracking-tight flex items-center gap-2.5"
-            style={{ color: 'var(--color-primary)' }}
-          >
-            <Languages className="h-8 w-8" style={{ color: 'var(--color-primary)' }} /> {t('langPageTitle', 'Language Management')}
+          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+            <Languages className="h-6 w-6" /> {t('langPageTitle', 'Language & Localization')}
           </h1>
-          <p 
-            className="text-sm font-semibold"
-            style={{ color: 'var(--color-emerald)' }}
-          >
-            {t('langPageSubtitle', 'Configure active system locales and in-app dictionaries')} ({languages.length} {t('installedSuffix', 'installed')})
+          <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('langPageSubtitle', 'Manage supported languages, default locale, and system translation dictionaries.')}
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={loadLanguages}
-            disabled={isLoading}
-            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
+        {/* Telemetry Status Badges & Controls */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div 
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)', 
+              color: 'var(--color-text)' 
             }}
-            title="Reload from server store"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
-            <span>{t('refreshBtn', 'Reload')}</span>
-          </button>
+            <Database className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
+            <span>PostgreSQL Synchronized</span>
+          </div>
+
+          <div 
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)', 
+              color: 'var(--color-text)' 
+            }}
+          >
+            <ShieldCheck className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+            <span>{activeLocalesCount} {t('activeLanguagesBadge', 'Active Locales')}</span>
+          </div>
 
           <button
-            onClick={handleOpenAddModal}
-            disabled={currentUser?.role !== 'admin'}
-            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer disabled:opacity-50"
-            style={{ backgroundColor: 'var(--color-primary)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-          >
-            <Plus className="h-4 w-4" /> {t('addLanguage', 'Add Language')}
-          </button>
-          <Link
-            href="/admin"
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs"
-            style={{
-              backgroundColor: 'var(--color-card)',
+            type="button"
+            onClick={() => loadData()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer shadow-sm"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
               borderColor: 'var(--color-border)',
               color: 'var(--color-text)'
             }}
           >
-            <Shield className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('adminConsole', 'Admin Console')}
-          </Link>
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
         </div>
       </div>
 
-      {/* SEARCH BAR */}
-      <div className="relative">
-        <Search className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
-        <input
-          type="text"
-          placeholder={t('searchLanguagePlaceholder', 'Search language by name, code or native script...')}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full border rounded-2xl pl-11 pr-4 py-3 text-sm outline-none transition shadow-xs"
-          style={{
-            backgroundColor: 'var(--color-inner-dark)',
-            borderColor: 'var(--color-border)',
-            color: 'var(--color-text)'
-          }}
-          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-        />
-      </div>
-
-      {/* LANGUAGES TABLE */}
+      {/* Main Accessible Form-Free Region Container (Constraint 9) */}
       <div 
-        className="border rounded-3xl overflow-hidden shadow-sm transition-colors duration-200"
+        role="region"
+        data-lpignore="true"
+        className="rounded-3xl p-6 space-y-6 shadow-xl border transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
           borderColor: 'var(--color-border)'
         }}
       >
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead 
-              className="border-b uppercase font-bold text-[10px] tracking-wider transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text-secondary)'
-              }}
-            >
-              <tr>
-                <th className="px-5 py-4">{t('tableLangAndCode', 'Language & Identifier')}</th>
-                <th className="px-5 py-4">{t('tableNativeName', 'Native Script & Flag')}</th>
-                <th className="px-5 py-4">{t('tableDirection', 'Direction')}</th>
-                <th className="px-5 py-4">{t('tableDefault', 'Default')}</th>
-                <th className="px-5 py-4">{t('tableStatus', 'Status')}</th>
-                <th className="px-5 py-4 text-right">{t('tableActions', 'Actions')}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
-              {filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="text-center py-12" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('noLanguagesFound', 'No languages found matching')} "{search}"
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((item) => (
-                  <tr 
-                    key={item.code} 
-                    className="transition"
-                    style={{ borderColor: 'var(--color-border)' }}
-                  >
-                    <td className="px-5 py-4 font-bold flex items-center gap-3" style={{ color: 'var(--color-text)' }}>
-                      <div 
-                        className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0 uppercase shadow-xs"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-primary)'
-                        }}
-                      >
-                        {item.code}
-                      </div>
-                      <div>
-                        <div className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>{item.name}</div>
-                        <div className="font-mono text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{item.code}.ts</div>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4 font-medium" style={{ color: 'var(--color-text)' }}>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xl leading-none select-none drop-shadow-sm" title={`${item.name} flag`}>
-                          {item.flag || getLanguageFlag(item.code)}
-                        </span>
-                        <span className="font-semibold" style={{ color: 'var(--color-text)' }}>{item.nativeName}</span>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4">
-                      <span 
-                        className="border text-[10px] font-bold px-2 py-0.5 rounded uppercase shadow-xs"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text-secondary)'
-                        }}
-                      >
-                        {item.direction}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4">
-                      {item.isDefault ? (
-                        <span 
-                          className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border inline-flex items-center gap-1 shadow-xs"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-emerald)',
-                            color: 'var(--color-emerald)'
-                          }}
-                        >
-                          <Star className="h-3 w-3 fill-current" /> {t('defaultBadge', 'Default')}
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => handleSetDefault(item.code)}
-                          disabled={currentUser?.role !== 'admin'}
-                          className="text-[10px] border px-2 py-1 rounded-lg transition cursor-pointer shadow-xs"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text-secondary)'
-                          }}
-                        >
-                          {t('setDefault', 'Set Default')}
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-5 py-4">
-                      <span 
-                        className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border shadow-xs"
-                        style={item.status === 'active' ? {
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-emerald)',
-                          color: 'var(--color-emerald)'
-                        } : {
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text-secondary)'
-                        }}
-                      >
-                        {item.status === 'active' ? t('active', 'Active') : t('inactive', 'Inactive')}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditModal(item)}
-                          disabled={currentUser?.role !== 'admin'}
-                          className="p-2 rounded-xl border transition shadow-xs cursor-pointer disabled:opacity-40"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text)'
-                          }}
-                          title="Edit Language & Words"
-                        >
-                          <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteLanguage(item)}
-                          disabled={currentUser?.role !== 'admin' || item.isDefault || item.code === 'en'}
-                          className="p-2 rounded-xl border transition shadow-xs cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed hover:text-red-500"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text-secondary)'
-                          }}
-                          title={item.isDefault ? t('cannotDeleteDefault', 'Cannot delete default language') : t('deleteLanguageTooltip', 'Delete Language')}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* ADD LANGUAGE MODAL */}
-      {showAddModal && (
+        {/* Navigation Tabs Bar */}
         <div 
-          onClick={() => setShowAddModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+          className="flex p-1.5 rounded-2xl border transition-colors duration-200"
+          style={{
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: 'var(--color-border)'
+          }}
         >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <button 
-              onClick={() => setShowAddModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            <div className="space-y-1 pr-6">
-              <h2 
-                className="text-xl font-black flex items-center gap-2"
-                style={{ color: 'var(--color-primary)' }}
-              >
-                <Languages className="h-5 w-5" /> {t('addNewLanguageTitle', 'Add New Language')}
-              </h2>
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('addNewLanguageSub', 'Register a new locale code and initialize system translations.')}
-              </p>
-            </div>
-
-            {modalError && (
-              <div 
-                className="p-3 rounded-xl font-semibold flex items-center gap-2 border shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'rgba(239, 68, 68, 0.4)',
-                  color: '#ef4444'
+          {[
+            { id: 'languages', label: t('tabSupportedLanguages', 'Supported Languages'), icon: Globe, count: languages.length },
+            { id: 'words', label: t('tabSystemWords', 'System Words & Translations'), icon: Languages, count: totalWordsCount }
+          ].map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={`tab-${tab.id}`}
+                type="button"
+                onClick={() => {
+                  setActiveTab(tab.id as any);
+                  setToast(null);
+                }}
+                className="flex-1 py-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
+                style={isActive ? {
+                  backgroundColor: 'var(--color-card)',
+                  color: 'var(--color-primary)',
+                  borderColor: 'var(--color-primary)',
+                  borderWidth: '1px',
+                  boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                } : {
+                  color: 'var(--color-text-secondary)'
                 }}
               >
-                <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
-                <span>{modalError}</span>
+                <tab.icon className="h-4 w-4" />
+                <span>{tab.label}</span>
+                <span 
+                  className="px-2 py-0.5 rounded-full text-[10px] font-mono border"
+                  style={{ 
+                    backgroundColor: isActive ? 'var(--color-inner-dark)' : 'transparent',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  {tab.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* TAB 1: SUPPORTED LANGUAGES */}
+        {activeTab === 'languages' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>
+                  {t('tabSupportedLanguages', 'Supported Languages')}
+                </h3>
+                <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                  Installed system locales and writing directions.
+                </p>
               </div>
-            )}
 
-            <div className="space-y-4 pt-1">
-              <div className="flex gap-3 items-start">
-                <div className="relative">
-                  <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Flag</label>
-                  <button
-                    type="button"
-                    onClick={() => setShowFlagPicker(!showFlagPicker)}
-                    className="w-14 h-[42px] border rounded-xl flex items-center justify-center text-2xl transition cursor-pointer shadow-sm hover:border-[var(--color-primary)]"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: showFlagPicker ? 'var(--color-primary)' : 'var(--color-border)'
-                    }}
-                    title="Select Country Flag"
-                  >
-                    {langFlag || '🌐'}
-                  </button>
+              <button
+                type="button"
+                onClick={() => openLangModal()}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white transition hover:opacity-90 shadow cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                <Plus className="h-4 w-4" />
+                <span>{t('addLanguageBtn', 'Add Language')}</span>
+              </button>
+            </div>
 
-                  {showFlagPicker && (
-                    <div 
-                      className="absolute top-full left-0 mt-1.5 w-72 p-3 border rounded-2xl space-y-2 shadow-2xl z-30 transition-colors duration-200"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)'
-                      }}
-                    >
-                      <div className="relative">
-                        <Search className="h-3.5 w-3.5 absolute left-2.5 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
-                        <input
-                          type="text"
-                          placeholder="Search country or code..."
-                          value={flagCountrySearch}
-                          onChange={(e) => setFlagCountrySearch(e.target.value)}
-                          className="w-full pl-8 pr-3 py-1.5 border rounded-xl text-xs outline-none transition"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text)'
-                          }}
-                        />
-                      </div>
-                      <div className="max-h-44 overflow-y-auto grid grid-cols-2 gap-1.5 pr-1">
-                        {filteredCountries.map((c) => (
-                          <button
-                            key={`${c.name}-${c.flag}`}
-                            type="button"
-                            onClick={() => {
-                              setLangFlag(c.flag);
-                              if (!langCode) setLangCode(c.code);
-                              setShowFlagPicker(false);
-                              setFlagCountrySearch('');
-                            }}
-                            className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition text-xs cursor-pointer"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              color: 'var(--color-text)'
-                            }}
-                          >
-                            <span className="text-lg leading-none">{c.flag}</span>
-                            <span className="truncate">{c.name}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+            {/* Supported Languages Table */}
+            <div 
+              className="rounded-2xl border overflow-hidden shadow-sm transition-colors duration-200"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b" style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-card)' }}>
+                      <th className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>{t('colLanguage', 'Language')}</th>
+                      <th className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>{t('colCode', 'Code')}</th>
+                      <th className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>{t('colNative', 'Native Name')}</th>
+                      <th className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>{t('colDirection', 'Direction')}</th>
+                      <th className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>{t('colStatus', 'Status')}</th>
+                      <th className="py-3 px-4 font-bold text-right" style={{ color: 'var(--color-text)' }}>{t('colActions', 'Actions')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
+                    {languages.map((lang) => {
+                      const isDef = lang.isDefault || lang.code === defaultLang;
+                      return (
+                        <tr 
+                          key={`lang-row-${lang.code}`} 
+                          className="transition hover:opacity-90"
+                          style={{ backgroundColor: 'transparent' }}
+                        >
+                          <td className="py-3 px-4 font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                            <span className="text-xl">{lang.flag || '🌐'}</span>
+                            <span>{lang.name}</span>
+                            {isDef && (
+                              <span 
+                                className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-primary)',
+                                  color: 'var(--color-primary)'
+                                }}
+                              >
+                                {t('defaultBadge', 'Default')}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 font-mono font-bold uppercase" style={{ color: 'var(--color-text-secondary)' }}>
+                            {lang.code}
+                          </td>
+                          <td className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>
+                            {lang.native || lang.name}
+                          </td>
+                          <td className="py-3 px-4 font-mono text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                            {lang.dir?.toUpperCase() || 'LTR'}
+                          </td>
+                          <td className="py-3 px-4">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleStatus(lang.code)}
+                              disabled={isDef}
+                              className={`px-2.5 py-1 rounded-full text-[10px] font-bold border transition cursor-pointer ${
+                                isDef ? 'opacity-60 cursor-not-allowed' : 'hover:opacity-80'
+                              }`}
+                              style={{
+                                backgroundColor: lang.status === 'active' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                borderColor: lang.status === 'active' ? 'var(--color-emerald)' : 'rgba(239, 68, 68, 0.4)',
+                                color: lang.status === 'active' ? 'var(--color-emerald)' : '#ef4444'
+                              }}
+                            >
+                              {lang.status === 'active' ? t('statusActive', 'Active') : t('statusInactive', 'Inactive')}
+                            </button>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {!isDef && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetDefault(lang.code)}
+                                  className="px-2.5 py-1 rounded-lg border text-[11px] font-bold transition hover:opacity-80 cursor-pointer"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text)'
+                                  }}
+                                >
+                                  {t('setDefaultBtn', 'Set Default')}
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => openLangModal(lang)}
+                                className="p-1.5 rounded-lg border transition hover:opacity-80 cursor-pointer"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-text)'
+                                }}
+                                title={t('editLanguageBtn', 'Edit')}
+                              >
+                                <Edit2 className="h-3.5 w-3.5" />
+                              </button>
+                              {!isDef && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteLanguage(lang.code)}
+                                  className="p-1.5 rounded-lg border transition hover:opacity-80 text-red-400 cursor-pointer"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'rgba(239, 68, 68, 0.3)'
+                                  }}
+                                  title={t('deleteLanguageBtn', 'Delete')}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: SYSTEM WORDS & TRANSLATIONS */}
+        {activeTab === 'words' && (
+          <div className="space-y-4">
+            {/* Action Bar: Language Selector, Search & Add Word */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                  {t('selectLanguageLabel', 'Select Language to Edit:')}
+                </label>
+                <div className="flex items-center gap-1.5">
+                  {languages.map((l) => {
+                    const isSelected = activeDictLang === l.code;
+                    return (
+                      <button
+                        key={`dict-selector-${l.code}`}
+                        type="button"
+                        onClick={() => setActiveDictLang(l.code)}
+                        className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                        style={{
+                          backgroundColor: isSelected ? 'var(--color-primary)' : 'var(--color-inner-dark)',
+                          borderColor: isSelected ? 'var(--color-primary)' : 'var(--color-border)',
+                          color: isSelected ? '#ffffff' : 'var(--color-text)'
+                        }}
+                      >
+                        <span>{l.flag}</span>
+                        <span>{l.name}</span>
+                        <span className="font-mono text-[10px] uppercase opacity-75">({l.code})</span>
+                      </button>
+                    );
+                  })}
                 </div>
+              </div>
 
-                <div className="flex-1">
-                  <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('langCodeLabel', 'Language Code (ISO)')}
-                  </label>
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1 md:w-64">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5" style={{ color: 'var(--color-text-secondary)' }} />
                   <input
                     type="text"
-                    required
-                    placeholder={t('langCodePlaceholder', 'e.g. de, it, ja')}
-                    maxLength={5}
-                    value={langCode}
-                    onChange={(e) => setLangCode(e.target.value)}
-                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs uppercase font-mono outline-none transition"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder={t('searchWordsPlaceholder', 'Search translation keys or phrases...')}
+                    className="w-full pl-9 pr-3 py-1.5 rounded-xl border text-xs outline-none transition"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -900,37 +690,239 @@ export default function AdminLanguagePage() {
                     }}
                   />
                 </div>
-              </div>
 
-              <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('displayNameLabel', 'Display Name')}
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder={t('displayNamePlaceholder', 'e.g. German')}
-                  value={langName}
-                  onChange={(e) => setLangName(e.target.value)}
-                  className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
+                <button
+                  type="button"
+                  onClick={() => setWordModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition hover:opacity-90 cursor-pointer shadow-sm"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
                     color: 'var(--color-text)'
                   }}
-                />
+                >
+                  <Plus className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+                  <span>{t('addWordBtn', 'Add Phrase')}</span>
+                </button>
               </div>
+            </div>
 
+            {/* Unsaved Changes Banner */}
+            {isDirty && (
+              <div 
+                className="p-3 rounded-xl border flex items-center justify-between gap-3 text-xs animate-in fade-in"
+                style={{ 
+                  backgroundColor: 'rgba(245, 158, 11, 0.1)', 
+                  borderColor: 'rgba(245, 158, 11, 0.3)',
+                  color: '#f59e0b'
+                }}
+              >
+                <div className="flex items-center gap-2 font-bold">
+                  <AlertCircle className="h-4 w-4" />
+                  <span>{t('unsavedNotice', 'You have unsaved dictionary modifications.')}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDiscardDictionaries}
+                    className="px-3 py-1 rounded-lg border text-xs font-bold transition hover:opacity-80 cursor-pointer"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'rgba(245, 158, 11, 0.3)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    {t('discardChangesBtn', 'Discard')}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveDictionaries}
+                    disabled={saving}
+                    className="px-3 py-1 rounded-lg text-xs font-bold text-white transition hover:opacity-90 cursor-pointer shadow"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    {saving ? t('savingChanges', 'Saving...') : t('saveChangesBtn', 'Save Changes')}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* System Words Table */}
+            <div 
+              className="rounded-2xl border overflow-hidden shadow-sm transition-colors duration-200"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="max-h-[550px] overflow-y-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="sticky top-0 z-10 shadow-sm" style={{ backgroundColor: 'var(--color-card)' }}>
+                    <tr className="border-b" style={{ borderColor: 'var(--color-border)' }}>
+                      <th className="py-3 px-4 font-bold w-1/3" style={{ color: 'var(--color-text)' }}>{t('colKey', 'Translation Key')}</th>
+                      <th className="py-3 px-4 font-bold" style={{ color: 'var(--color-text)' }}>{t('colValue', 'Translated Text')}</th>
+                      <th className="py-3 px-4 font-bold text-right w-16" style={{ color: 'var(--color-text)' }}>{t('colActions', 'Actions')}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
+                    {currentWordsList.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="py-8 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                          {t('noWordsFound', 'No matching system phrases found.')}
+                        </td>
+                      </tr>
+                    ) : (
+                      currentWordsList.map((item) => (
+                        <tr 
+                          key={`word-row-${activeDictLang}-${item.key}`} 
+                          className="transition hover:opacity-95"
+                          style={{ backgroundColor: 'transparent' }}
+                        >
+                          <td className="py-2.5 px-4 font-mono font-bold break-all select-all" style={{ color: 'var(--color-primary)' }}>
+                            {item.key}
+                          </td>
+                          <td className="py-2.5 px-4">
+                            <input
+                              type="text"
+                              autoComplete="off"
+                              data-lpignore="true"
+                              data-form-type="other"
+                              spellCheck="false"
+                              value={item.value}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setDictionaries(prev => ({
+                                  ...prev,
+                                  [activeDictLang]: {
+                                    ...(prev[activeDictLang] || {}),
+                                    [item.key]: val
+                                  }
+                                }));
+                              }}
+                              className="w-full border rounded-xl px-3 py-1.5 text-xs outline-none font-sans transition"
+                              style={{
+                                backgroundColor: 'var(--color-card)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text)'
+                              }}
+                              onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                              onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                            />
+                          </td>
+                          <td className="py-2.5 px-4 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteWord(item.key)}
+                              className="p-1.5 rounded-lg border transition hover:opacity-80 text-red-400 cursor-pointer"
+                              style={{
+                                backgroundColor: 'var(--color-card)',
+                                borderColor: 'rgba(239, 68, 68, 0.3)'
+                              }}
+                              title={t('deleteLanguageBtn', 'Delete')}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Status Notification Toast Banner */}
+        {toast && (
+          <div
+            className="p-4 rounded-2xl border text-xs font-semibold flex items-center gap-2 animate-in fade-in"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: toast.type === 'success' ? 'var(--color-emerald)' : 'rgba(239, 68, 68, 0.4)',
+              color: toast.type === 'success' ? 'var(--color-emerald)' : '#ef4444'
+            }}
+          >
+            {toast.type === 'success' ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} />
+            ) : (
+              <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
+            )}
+            <span>{toast.message}</span>
+          </div>
+        )}
+
+        {/* Bottom Persistent Action Bar */}
+        <div 
+          className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t" 
+          style={{ borderColor: 'var(--color-border)' }}
+        >
+          <div className="text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('totalWordsBadge', 'Total Phrases')}: <span className="font-mono font-bold" style={{ color: 'var(--color-text)' }}>{totalWordsCount}</span>
+          </div>
+
+          <div className="flex items-center gap-3 w-full sm:w-auto">
+            {isDirty && (
+              <button
+                type="button"
+                onClick={handleDiscardDictionaries}
+                className="flex-1 sm:flex-none text-xs font-bold px-4 py-2.5 rounded-xl border transition hover:opacity-80 cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                {t('discardChangesBtn', 'Discard')}
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handleSaveDictionaries}
+              disabled={saving || !isDirty}
+              className={`flex-1 sm:flex-none px-6 py-2.5 rounded-xl text-xs font-bold text-white shadow-lg transition flex items-center justify-center gap-2 cursor-pointer ${
+                saving || !isDirty ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90'
+              }`}
+              style={{ backgroundColor: 'var(--color-primary)' }}
+            >
+              <Check className={`h-4 w-4 ${saving ? 'animate-spin' : ''}`} />
+              <span>{saving ? t('savingChanges', 'Saving...') : t('saveChangesBtn', 'Save Changes')}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* MODAL 1: ADD / EDIT SUPPORTED LANGUAGE */}
+      {langModalOpen && (
+        <div 
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+        >
+          <div 
+            role="region"
+            data-lpignore="true"
+            className="w-full max-w-md p-6 rounded-3xl border shadow-2xl space-y-4 animate-in zoom-in-95"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <h3 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+              <Globe className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+              {editingLangCode ? t('modalEditLangTitle', 'Edit Supported Language') : t('modalAddLangTitle', 'Add Supported Language')}
+            </h3>
+
+            <div className="space-y-3">
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('nativeNameLabel', 'Native Name')}
+                <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {t('langNameLabel', 'Language Name (English)')}
                 </label>
                 <input
                   type="text"
-                  placeholder={t('nativeNamePlaceholder', 'e.g. Deutsch')}
-                  value={langNativeName}
-                  onChange={(e) => setLangNativeName(e.target.value)}
-                  className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  placeholder="e.g. Japanese"
+                  value={langForm.name}
+                  onChange={(e) => setLangForm({ ...langForm, name: e.target.value })}
+                  className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-bold"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
@@ -941,473 +933,206 @@ export default function AdminLanguagePage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('layoutDirectionLabel', 'Layout Direction')}
+                  <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                    {t('langCodeLabel', 'Language Code')}
                   </label>
-                  <select
-                    value={langDirection}
-                    onChange={(e) => setLangDirection(e.target.value as any)}
-                    className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer transition"
+                  <input
+                    type="text"
+                    disabled={!!editingLangCode}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
+                    placeholder="ja"
+                    maxLength={5}
+                    value={langForm.code}
+                    onChange={(e) => setLangForm({ ...langForm, code: e.target.value })}
+                    className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-mono font-bold uppercase disabled:opacity-50"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-text)'
                     }}
-                  >
-                    <option value="ltr" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('directionLtr', 'Left-to-Right (LTR)')}</option>
-                    <option value="rtl" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('directionRtl', 'Right-to-Left (RTL)')}</option>
-                  </select>
+                  />
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('statusLabel', 'Status')}
+                  <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                    {t('langFlagLabel', 'Flag Emoji')}
                   </label>
-                  <select
-                    value={langStatus}
-                    onChange={(e) => setLangStatus(e.target.value as any)}
-                    className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer transition"
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
+                    placeholder="🇯🇵"
+                    maxLength={4}
+                    value={langForm.flag}
+                    onChange={(e) => setLangForm({ ...langForm, flag: e.target.value })}
+                    className="w-full border rounded-xl px-3 py-2 text-xs text-center outline-none text-base font-bold"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-text)'
                     }}
-                  >
-                    <option value="active" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('active', 'Active')}</option>
-                    <option value="inactive" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('inactive', 'Inactive')}</option>
-                  </select>
+                  />
                 </div>
               </div>
 
-              <div className="pt-2">
-                <label className="flex items-center gap-2 cursor-pointer font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                  <input
-                    type="checkbox"
-                    checked={langIsDefault}
-                    onChange={(e) => setLangIsDefault(e.target.checked)}
-                    className="rounded accent-[#E05638]"
-                  />
-                  <span>{t('setAsDefaultLabel', 'Set as default application language')}</span>
+              <div>
+                <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {t('langNativeLabel', 'Native Display Name')}
                 </label>
-              </div>
-
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  placeholder="日本語"
+                  value={langForm.native}
+                  onChange={(e) => setLangForm({ ...langForm, native: e.target.value })}
+                  className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-bold"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
-                    color: 'var(--color-text-secondary)'
+                    color: 'var(--color-text)'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {t('langDirectionLabel', 'Text Direction')}
+                </label>
+                <select
+                  value={langForm.dir}
+                  onChange={(e) => setLangForm({ ...langForm, dir: e.target.value as 'ltr' | 'rtl' })}
+                  className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-bold cursor-pointer"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
                 >
-                  {t('cancel', 'Cancel')}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleAddLanguageSubmit}
-                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                >
-                  <Plus className="h-4 w-4" /> {t('addLanguage', 'Add Language')}
-                </button>
+                  <option value="ltr">{t('dirLtr', 'Left-to-Right (LTR)')}</option>
+                  <option value="rtl">{t('dirRtl', 'Right-to-Left (RTL)')}</option>
+                </select>
               </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setLangModalOpen(false)}
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                {t('cancelBtn', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveLangForm}
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white shadow transition hover:opacity-90 cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {t('confirmBtn', 'Save Language')}
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* EDIT LANGUAGE MODAL */}
-      {showEditModal && (
+      {/* MODAL 2: ADD SYSTEM PHRASE */}
+      {wordModalOpen && (
         <div 
-          onClick={() => setShowEditModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 cursor-pointer"
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
         >
           <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-3xl w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default flex flex-col max-h-[90vh] transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
+            role="region"
+            data-lpignore="true"
+            className="w-full max-w-md p-6 rounded-3xl border shadow-2xl space-y-4 animate-in zoom-in-95"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
-            <button 
-              onClick={() => setShowEditModal(false)}
-              className="absolute top-4 right-4 p-1.5 rounded-xl transition cursor-pointer shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <X className="h-4 w-4" />
-            </button>
+            <h3 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+              <Languages className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+              {t('modalAddWordTitle', 'Add System Phrase')}
+            </h3>
 
-            <div className="space-y-1 pr-6">
-              <h2 
-                className="text-xl font-black flex items-center gap-2"
-                style={{ color: 'var(--color-primary)' }}
-              >
-                <Edit3 className="h-5 w-5" /> {t('editLanguageTitle', 'Edit Language')} ({editingCode?.toUpperCase()})
-              </h2>
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('editLanguageSub', 'Customize locale configuration and system dictionary phrases.')}
-              </p>
-            </div>
-
-            {/* TAB NAVIGATION */}
-            <div className="flex border-b gap-4 shrink-0 transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
-              <button
-                type="button"
-                onClick={() => setEditActiveTab('settings')}
-                className={`flex items-center gap-2 pb-2.5 text-xs font-bold border-b-2 transition cursor-pointer ${
-                  editActiveTab === 'settings'
-                    ? 'border-[var(--color-primary)]'
-                    : 'border-transparent'
-                }`}
-                style={{
-                  color: editActiveTab === 'settings' ? 'var(--color-primary)' : 'var(--color-text-secondary)'
-                }}
-              >
-                <Sliders className="h-3.5 w-3.5" /> Language Configuration
-              </button>
-              <button
-                type="button"
-                onClick={() => setEditActiveTab('words')}
-                className={`flex items-center gap-2 pb-2.5 text-xs font-bold border-b-2 transition cursor-pointer ${
-                  editActiveTab === 'words'
-                    ? 'border-[var(--color-primary)]'
-                    : 'border-transparent'
-                }`}
-                style={{
-                  color: editActiveTab === 'words' ? 'var(--color-primary)' : 'var(--color-text-secondary)'
-                }}
-              >
-                <Type className="h-3.5 w-3.5" /> System Words & Translations ({Object.keys(wordsMap).length})
-              </button>
-            </div>
-
-            {modalError && (
-              <div 
-                className="p-3 rounded-xl font-semibold flex items-center gap-2 border shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'rgba(239, 68, 68, 0.4)',
-                  color: '#ef4444'
-                }}
-              >
-                <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
-                <span>{modalError}</span>
-              </div>
-            )}
-
-            {/* TAB 1: SETTINGS */}
-            {editActiveTab === 'settings' && (
-              <div className="space-y-4 pt-1 overflow-y-auto pr-1">
-                <div className="flex gap-3 items-start">
-                  <div className="relative">
-                    <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>Flag</label>
-                    <button
-                      type="button"
-                      onClick={() => setShowFlagPicker(!showFlagPicker)}
-                      className="w-14 h-[42px] border rounded-xl flex items-center justify-center text-2xl transition cursor-pointer shadow-sm hover:border-[var(--color-primary)]"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: showFlagPicker ? 'var(--color-primary)' : 'var(--color-border)'
-                      }}
-                      title="Change Country Flag"
-                    >
-                      {langFlag || '🌐'}
-                    </button>
-
-                    {showFlagPicker && (
-                      <div 
-                        className="absolute top-full left-0 mt-1.5 w-72 p-3 border rounded-2xl space-y-2 shadow-2xl z-30 transition-colors duration-200"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)'
-                        }}
-                      >
-                        <div className="relative">
-                          <Search className="h-3.5 w-3.5 absolute left-2.5 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
-                          <input
-                            type="text"
-                            placeholder="Search country or code..."
-                            value={flagCountrySearch}
-                            onChange={(e) => setFlagCountrySearch(e.target.value)}
-                            className="w-full pl-8 pr-3 py-1.5 border rounded-xl text-xs outline-none transition"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text)'
-                            }}
-                          />
-                        </div>
-                        <div className="max-h-44 overflow-y-auto grid grid-cols-2 gap-1.5 pr-1">
-                          {filteredCountries.map((c) => (
-                            <button
-                              key={`${c.name}-${c.flag}`}
-                              type="button"
-                              onClick={() => {
-                                setLangFlag(c.flag);
-                                setShowFlagPicker(false);
-                                setFlagCountrySearch('');
-                              }}
-                              className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition text-xs cursor-pointer"
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark)',
-                                color: 'var(--color-text)'
-                              }}
-                            >
-                              <span className="text-lg leading-none">{c.flag}</span>
-                              <span className="truncate">{c.name}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex-1">
-                    <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('displayNameLabel', 'Display Name')}
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={langName}
-                      onChange={(e) => setLangName(e.target.value)}
-                      className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('nativeNameLabel', 'Native Name')}
-                  </label>
-                  <input
-                    type="text"
-                    value={langNativeName}
-                    onChange={(e) => setLangNativeName(e.target.value)}
-                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('layoutDirectionLabel', 'Layout Direction')}
-                    </label>
-                    <select
-                      value={langDirection}
-                      onChange={(e) => setLangDirection(e.target.value as any)}
-                      className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      <option value="ltr" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('directionLtr', 'Left-to-Right (LTR)')}</option>
-                      <option value="rtl" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('directionRtl', 'Right-to-Left (RTL)')}</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('statusLabel', 'Status')}
-                    </label>
-                    <select
-                      value={langStatus}
-                      onChange={(e) => setLangStatus(e.target.value as any)}
-                      className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      <option value="active" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('active', 'Active')}</option>
-                      <option value="inactive" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('inactive', 'Inactive')}</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="pt-2">
-                  <label className="flex items-center gap-2 cursor-pointer font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                    <input
-                      type="checkbox"
-                      checked={langIsDefault}
-                      onChange={(e) => setLangIsDefault(e.target.checked)}
-                      className="rounded accent-[#E05638]"
-                    />
-                    <span>{t('setAsDefaultLabel', 'Set as default application language')}</span>
-                  </label>
-                </div>
-              </div>
-            )}
-
-            {/* TAB 2: SYSTEM WORDS */}
-            {editActiveTab === 'words' && (
-              <div className="space-y-3 pt-1 flex-1 flex flex-col min-h-0">
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
-                  <div className="relative flex-1">
-                    <Search className="h-3.5 w-3.5 absolute left-3 top-2.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
-                    <input
-                      type="text"
-                      placeholder="Filter words by translation key or English text..."
-                      value={wordSearch}
-                      onChange={(e) => setWordSearch(e.target.value)}
-                      className="w-full border rounded-xl pl-9 pr-3 py-2 text-xs outline-none transition"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleResetWordsToDefault}
-                    className="px-3 py-2 border rounded-xl text-[11px] font-bold flex items-center gap-1.5 transition shrink-0 cursor-pointer shadow-xs"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text-secondary)'
-                    }}
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" /> Reset to Defaults
-                  </button>
-                </div>
-
-                <div 
-                  className="p-3 border rounded-2xl flex flex-col sm:flex-row gap-2 items-center shrink-0 transition-colors duration-200"
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {t('keyNameLabel', 'Translation Key (camelCase)')}
+                </label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  placeholder="e.g. checkoutSubmitButton"
+                  value={newWordKey}
+                  onChange={(e) => setNewWordKey(e.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
+                  className="w-full border rounded-xl px-3 py-2 text-xs outline-none font-mono font-bold"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)'
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                >
-                  <input
-                    type="text"
-                    placeholder="New Key (e.g. welcomeBanner)"
-                    value={newWordKey}
-                    onChange={(e) => setNewWordKey(e.target.value)}
-                    className="flex-1 border rounded-lg px-2.5 py-1.5 text-xs outline-none font-mono transition"
-                    style={{
-                      backgroundColor: 'var(--color-card)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  />
-                  <input
-                    type="text"
-                    placeholder={`Translation in ${langName}`}
-                    value={newWordVal}
-                    onChange={(e) => setNewWordVal(e.target.value)}
-                    className="flex-1 border rounded-lg px-2.5 py-1.5 text-xs outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-card)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddNewWordKey}
-                    className="px-3 py-1.5 text-white font-bold rounded-lg text-xs flex items-center gap-1 shrink-0 cursor-pointer shadow-xs"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                  >
-                    <Plus className="h-3.5 w-3.5" /> Add Phrase
-                  </button>
-                </div>
+                />
+              </div>
 
-                <div 
-                  className="flex-1 overflow-y-auto border rounded-2xl divide-y space-y-0.5 p-2 transition-colors duration-200"
+              <div>
+                <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+                  {t('keyValueLabel', 'Translated Text')} ({activeDictLang.toUpperCase()})
+                </label>
+                <textarea
+                  rows={3}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  placeholder="Enter translated text here..."
+                  value={newWordValue}
+                  onChange={(e) => setNewWordValue(e.target.value)}
+                  className="w-full border rounded-xl p-3 text-xs outline-none font-sans"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)'
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
                   }}
-                >
-                  {wordKeysList.length === 0 ? (
-                    <div className="text-center py-8" style={{ color: 'var(--color-text-secondary)' }}>
-                      No system phrases matching "{wordSearch}"
-                    </div>
-                  ) : (
-                    wordKeysList.map((key) => {
-                      const englishRef = (en as any)[key] || key;
-                      const currentValue = wordsMap[key] ?? '';
-
-                      return (
-                        <div 
-                          key={key} 
-                          className="p-2.5 rounded-xl transition flex flex-col sm:flex-row items-start sm:items-center gap-3"
-                          style={{ borderColor: 'var(--color-border)' }}
-                        >
-                          <div className="sm:w-1/3 shrink-0">
-                            <div className="font-mono text-[11px] font-bold truncate" style={{ color: 'var(--color-text)' }} title={key}>
-                              {key}
-                            </div>
-                            <div className="text-[10px] truncate" style={{ color: 'var(--color-text-secondary)' }} title={englishRef}>
-                              EN: {englishRef}
-                            </div>
-                          </div>
-
-                          <div className="w-full sm:flex-1">
-                            <input
-                              type="text"
-                              value={currentValue}
-                              placeholder={`Translate "${englishRef}"...`}
-                              onChange={(e) => handleWordChange(key, e.target.value)}
-                              className="w-full border rounded-xl px-3 py-2 text-xs outline-none transition"
-                              style={{
-                                backgroundColor: 'var(--color-card)',
-                                borderColor: 'var(--color-border)',
-                                color: 'var(--color-text)'
-                              }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
+                />
               </div>
-            )}
+            </div>
 
-            {/* MODAL FOOTER */}
-            <div className="flex justify-end gap-2.5 pt-3 border-t shrink-0 transition-colors duration-200" style={{ borderColor: 'var(--color-border)' }}>
+            <div className="flex items-center justify-end gap-2 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               <button
                 type="button"
-                onClick={() => setShowEditModal(false)}
-                className="px-4 py-2.5 border font-bold rounded-xl text-xs transition cursor-pointer shadow-xs"
+                onClick={() => setWordModalOpen(false)}
+                className="px-4 py-2 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
-                  color: 'var(--color-text-secondary)'
+                  color: 'var(--color-text)'
                 }}
               >
-                {t('cancel', 'Cancel')}
+                {t('cancelBtn', 'Cancel')}
               </button>
               <button
                 type="button"
-                onClick={handleEditLanguageSubmit}
-                className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md transition flex items-center gap-1.5 text-xs cursor-pointer"
+                onClick={handleAddWordSubmit}
+                disabled={!newWordKey.trim()}
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white shadow transition hover:opacity-90 cursor-pointer disabled:opacity-50"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                <Check className="h-4 w-4" /> {t('saveChanges', 'Save Changes')}
+                {t('addWordBtn', 'Add Phrase')}
               </button>
             </div>
           </div>
