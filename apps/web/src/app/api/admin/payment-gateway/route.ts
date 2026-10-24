@@ -122,7 +122,7 @@ async function persistAdminSettingsData(settings: any, currency: string) {
   } catch (err) {
     try {
       await query(
-        `UPDATE admin_settings SET payment_settings = $1, currency = $2, updated_at = NOW() WHERE id = 1`,
+        `UPDATE admin_settings SET payment_settings = $1, currency = $2, updated_at = NOW() WHERE id = '1'`,
         [jsonStr, cur]
       );
     } catch (_) {}
@@ -145,7 +145,7 @@ async function persistAdminSettingsData(settings: any, currency: string) {
       [cur, JSON.stringify(allowedGateways)]
     ).catch(async () => {
       await query(
-        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW() WHERE id = 1`,
+        `UPDATE wallet_settings SET currency = $1, allowed_gateways = $2::jsonb, updated_at = NOW() WHERE id = '1'`,
         [cur, JSON.stringify(allowedGateways)]
       ).catch(() => {});
     });
@@ -189,7 +189,7 @@ export async function GET() {
 
     let settings: any = null;
     try {
-      const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+      const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = '1' LIMIT 1`);
       const sRow: any = parseDbRow(sRes);
       if (sRow) {
         let ps = sRow.payment_settings;
@@ -238,7 +238,7 @@ export async function POST(req: Request) {
 
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const sRes: any = await query(`SELECT payment_settings, currency FROM admin_settings WHERE id = '1' LIMIT 1`);
         const row: any = parseDbRow(sRes);
         if (row?.payment_settings) {
           currentSettings = typeof row.payment_settings === 'string'
@@ -289,7 +289,7 @@ export async function POST(req: Request) {
       const nextMode = normalizeBool(body.testMode);
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = '1' LIMIT 1`);
         const row: any = parseDbRow(sRes);
         if (row?.payment_settings) {
           currentSettings = typeof row.payment_settings === 'string' 
@@ -319,7 +319,7 @@ export async function POST(req: Request) {
     if (body.action === 'sync_env') {
       let currentSettings: any = {};
       try {
-        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = 1 LIMIT 1`);
+        const sRes: any = await query(`SELECT payment_settings FROM admin_settings WHERE id = '1' LIMIT 1`);
         const row: any = parseDbRow(sRes);
         if (row?.payment_settings) {
           currentSettings = typeof row.payment_settings === 'string' ? JSON.parse(row.payment_settings) : row.payment_settings;

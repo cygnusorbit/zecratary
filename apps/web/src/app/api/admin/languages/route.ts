@@ -6,122 +6,69 @@ import path from 'path';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-const DEFAULT_SYSTEM_LANGUAGES = [
-  { id: 'lang_en', code: 'en', name: 'English', native: 'English', flag: '🇺🇸', direction: 'ltr', status: 'active', is_default: true, file: 'en.ts' },
-  { id: 'lang_es', code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', direction: 'ltr', status: 'active', is_default: false, file: 'es.ts' },
-  { id: 'lang_fr', code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', direction: 'ltr', status: 'active', is_default: false, file: 'fr.ts' },
-  { id: 'lang_th', code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', direction: 'ltr', status: 'active', is_default: false, file: 'th.ts' }
-];
-
-function getLocalFileLanguages(): any[] | null {
-  for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
-    try {
-      const p = path.join(process.cwd(), rel);
-      if (fs.existsSync(p)) {
-        const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
-        const langs = raw.supportedLanguages || raw.supported_languages;
-        if (Array.isArray(langs) && langs.length > 0) return langs;
-      }
-    } catch (_) {}
+function readServerJsonTranslations(): Record<string, any> {
+  const paths = [
+    path.join(process.cwd(), 'apps/web/data/admin_settings.json'),
+    path.join(process.cwd(), 'data/admin_settings.json')
+  ];
+  for (const p of paths) {
+    if (fs.existsSync(p)) {
+      try {
+        const raw = fs.readFileSync(p, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed?.translations) return parsed.translations;
+      } catch (_) {}
+    }
   }
-  return null;
+  return {};
 }
 
 export async function GET() {
   try {
-    let languages = null;
-    let translations = {};
+    let languages: any[] = [];
+    let translations: Record<string, any> = readServerJsonTranslations();
 
     try {
       const res: any = await query(`
-        SELECT * FROM admin_settings 
-        WHERE id = 'primary_settings' OR id = '1' 
-        ORDER BY updated_at DESC LIMIT 1;
+        SELECT supported_languages, translations FROM admin_settings 
+        WHERE id::text = 'primary_settings' OR id::text = 'current' OR id::text = '1'
+        LIMIT 1;
       `);
       const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
       if (row) {
         if (row.supported_languages) {
-          const parsed = typeof row.supported_languages === 'string'
-            ? JSON.parse(row.supported_languages)
+          const parsedLangs = typeof row.supported_languages === 'string' 
+            ? JSON.parse(row.supported_languages) 
             : row.supported_languages;
-          if (Array.isArray(parsed) && parsed.length > 0) languages = parsed;
-        } else if (row.settings) {
-          const s = typeof row.settings === 'string' ? JSON.parse(row.settings) : row.settings;
-          const l = s?.supportedLanguages || s?.supported_languages;
-          if (Array.isArray(l) && l.length > 0) languages = l;
+          if (Array.isArray(parsedLangs) && parsedLangs.length > 0) languages = parsedLangs;
         }
-
         if (row.translations) {
-          translations = typeof row.translations === 'string' ? JSON.parse(row.translations) : row.translations;
+          const dbTrans = typeof row.translations === 'string' 
+            ? JSON.parse(row.translations) 
+            : row.translations;
+          translations = { ...translations, ...dbTrans };
         }
       }
     } catch (_) {}
 
-    if (!languages) {
-      languages = getLocalFileLanguages() || DEFAULT_SYSTEM_LANGUAGES;
+    if (languages.length === 0) {
+      languages = [
+        { id: 'lang_en', code: 'en', name: 'English', flag: '🇺🇸', status: 'active', is_default: true },
+        { id: 'lang_th', code: 'th', name: 'ภาษาไทย (Thai)', flag: '🇹🇭', status: 'active', is_default: false },
+        { id: 'lang_es', code: 'es', name: 'Español', flag: '🇪🇸', status: 'active', is_default: false },
+        { id: 'lang_fr', code: 'fr', name: 'Français', flag: '🇫🇷', status: 'active', is_default: false },
+      ];
     }
 
-    return NextResponse.json(
-      { success: true, languages, translations },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-    );
+    return NextResponse.json({
+      success: true,
+      languages,
+      translations,
+      dictionaries: translations
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
   } catch (err: any) {
-    return NextResponse.json({ success: true, languages: DEFAULT_SYSTEM_LANGUAGES, translations: {} });
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const languages = Array.isArray(body) ? body : (body.languages || body.supportedLanguages);
-    const translations = body.translations;
-
-    if (Array.isArray(languages)) {
-      for (const rel of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
-        try {
-          const p = path.join(process.cwd(), rel);
-          osEnsureDir(path.dirname(p));
-          let existing: any = {};
-          if (fs.existsSync(p)) {
-            try { existing = JSON.parse(fs.readFileSync(p, 'utf8')); } catch (_) {}
-          }
-          existing.supportedLanguages = languages;
-          existing.supported_languages = languages;
-          fs.writeFileSync(p, JSON.stringify(existing, null, 2), 'utf8');
-        } catch (_) {}
-      }
-
-      try {
-        await query(`
-          INSERT INTO admin_settings (id, supported_languages, updated_at)
-          VALUES ('primary_settings', $1::jsonb, NOW())
-          ON CONFLICT (id) DO UPDATE SET
-            supported_languages = EXCLUDED.supported_languages,
-            updated_at = NOW();
-        `, [JSON.stringify(languages)]);
-      } catch (_) {}
-    }
-
-    if (translations && typeof translations === 'object') {
-      try {
-        await query(`
-          INSERT INTO admin_settings (id, translations, updated_at)
-          VALUES ('primary_settings', $1::jsonb, NOW())
-          ON CONFLICT (id) DO UPDATE SET
-            translations = EXCLUDED.translations,
-            updated_at = NOW();
-        `, [JSON.stringify(translations)]);
-      } catch (_) {}
-    }
-
-    return NextResponse.json({ success: true, message: 'Languages synchronized successfully' });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
-
-function osEnsureDir(dirPath: string) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
+    return NextResponse.json({ success: false, error: err.message, languages: [], translations: {} }, { status: 500 });
   }
 }
