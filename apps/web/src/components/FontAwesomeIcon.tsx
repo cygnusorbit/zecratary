@@ -17,7 +17,7 @@ interface FontAwesomeIconProps extends React.SVGProps<SVGSVGElement> {
   color?: string;
 }
 
-// Official Font Awesome Free SVG Vector Definitions with Exact Unicode Hex Keys
+// Official Font Awesome 6 Free SVG Vector Definitions
 const FA_ICONS: Record<string, { viewBox: string; path: React.ReactNode; unicode: string }> = {
   // Apple Icon (Unicode: f179)
   f179: {
@@ -41,7 +41,7 @@ const FA_ICONS: Record<string, { viewBox: string; path: React.ReactNode; unicode
     )
   },
 
-  // Facebook Icon (Unicode: f09a)
+  // Facebook Icon (Unicode: f09a - fa-facebook-f)
   f09a: {
     unicode: 'f09a',
     viewBox: '0 0 320 512',
@@ -63,7 +63,7 @@ const FA_ICONS: Record<string, { viewBox: string; path: React.ReactNode; unicode
     )
   },
 
-  // Google Icon (Unicode: f1a0)
+  // Google Icon (Unicode: f1a0 - fa-google)
   f1a0: {
     unicode: 'f1a0',
     viewBox: '0 0 488 512',

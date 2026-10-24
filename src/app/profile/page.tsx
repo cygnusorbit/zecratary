@@ -19,14 +19,15 @@ type SocialProvider = 'google' | 'facebook' | 'apple';
 interface SocialAccountStatus {
   id: SocialProvider;
   name: string;
-  icon: string;
-  color: string;
+  unicode: string; // f1a0, f09a, f179
+  brandColor: string;
 }
 
+// Exactly mapped to requested Font Awesome unicodes
 const SOCIAL_PROVIDERS: SocialAccountStatus[] = [
-  { id: 'google', name: 'Google', icon: '🌐', color: '#ea4335' },
-  { id: 'facebook', name: 'Facebook', icon: '📘', color: '#1877f2' },
-  { id: 'apple', name: 'Apple', icon: '🍎', color: '#ffffff' }
+  { id: 'google', name: 'Google', unicode: 'f1a0', brandColor: '#EA4335' },
+  { id: 'facebook', name: 'Facebook', unicode: 'f09a', brandColor: '#1877F2' },
+  { id: 'apple', name: 'Apple', unicode: 'f179', brandColor: 'var(--color-text)' }
 ];
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
@@ -140,8 +141,8 @@ function ProfileContent() {
   const [socialConfig, setSocialConfig] = useState({ google: true, facebook: true, apple: true });
 
   // Modals State
-  const [unlinkModalProvider, setUnlinkModalProvider] = useState<SocialProvider | null>(null);
-  const [linkModalProvider, setLinkModalProvider] = useState<SocialProvider | null>(null);
+  const [unlinkModalProvider, setUnlinkModalProvider] = useState<SocialAccountStatus | null>(null);
+  const [linkModalProvider, setLinkModalProvider] = useState<SocialAccountStatus | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
 
   // Tab 2 & 3 Ledger State
@@ -151,7 +152,6 @@ function ProfileContent() {
   const [tabLimit, setTabLimit] = useState<number>(10);
   const [tabTotalPages, setTabTotalPages] = useState<number>(1);
   const [tabTotalCount, setTabTotalCount] = useState<number>(0);
-  const [tabLoading, setTabLoading] = useState<boolean>(false);
 
   // Re-entrancy guards
   const isFetchingRef = useRef<boolean>(false);
@@ -294,7 +294,6 @@ function ProfileContent() {
   // 2. Fetch Ledger Records on Tab 2 (Tokens) or Tab 3 (Wallet)
   const fetchLedgerData = useCallback(async (targetPage = 1, currentTab = activeTab, query = tabSearch, filter = tabTypeFilter) => {
     if (currentTab === 'overview' || !currentUser) return;
-    setTabLoading(true);
 
     const targetUserId = currentUser.id || 'usr_admin_1';
     const targetEmail = currentUser.email || 'admin@zecratary.com';
@@ -337,9 +336,7 @@ function ProfileContent() {
           }
         }
       }
-    } catch (_) {} finally {
-      setTabLoading(false);
-    }
+    } catch (_) {}
   }, [currentUser, activeTab, tabSearch, tabTypeFilter, tabLimit]);
 
   useEffect(() => {
@@ -363,7 +360,7 @@ function ProfileContent() {
       showToast(t('passwordMismatchError', 'New passwords do not match.'), 'error');
       return;
     }
-    if (!currentUser) return;
+    if (!currentUser || submitting) return;
     setSubmitting(true);
 
     try {
@@ -408,17 +405,17 @@ function ProfileContent() {
   };
 
   // Social Account Linking Flow
-  const handleInitiateLink = (provider: SocialProvider) => {
-    if (!socialConfig[provider]) {
-      showToast(`${provider.toUpperCase()} login is disabled by the administrator.`, 'error');
+  const handleInitiateLink = (providerObj: SocialAccountStatus) => {
+    if (!socialConfig[providerObj.id]) {
+      showToast(`${providerObj.name} login is disabled by the administrator.`, 'error');
       return;
     }
-    setLinkModalProvider(provider);
+    setLinkModalProvider(providerObj);
   };
 
   const handleConfirmVerifyLink = () => {
     if (!linkModalProvider) return;
-    const provider = linkModalProvider;
+    const provider = linkModalProvider.id;
     setLinkModalProvider(null);
 
     // Direct to OAuth Provider Link Handshake
@@ -427,22 +424,22 @@ function ProfileContent() {
   };
 
   // Social Account Unlinking Flow
-  const handleInitiateUnlink = (provider: SocialProvider) => {
-    const isPrimary = activeLoginProvider === provider;
+  const handleInitiateUnlink = (providerObj: SocialAccountStatus) => {
+    const isPrimary = activeLoginProvider === providerObj.id;
     if (isPrimary && (!currentUser?.password || currentUser?.password === '')) {
       showToast(
         (t('unlinkActiveProviderError', 'Cannot unlink {provider}: This is your active social login method. Please set a password first before disconnecting.'))
-          .replace('{provider}', provider.toUpperCase()),
+          .replace('{provider}', providerObj.name),
         'error'
       );
       return;
     }
-    setUnlinkModalProvider(provider);
+    setUnlinkModalProvider(providerObj);
   };
 
   const handleConfirmUnlink = async () => {
     if (!unlinkModalProvider || !currentUser) return;
-    const provider = unlinkModalProvider;
+    const provider = unlinkModalProvider.id;
     setUnlinkModalProvider(null);
 
     const updatedProviders = linkedProviders.filter(p => p !== provider);
@@ -469,7 +466,7 @@ function ProfileContent() {
         localStorage.setItem('zecratary_user', JSON.stringify(updatedUser));
         window.dispatchEvent(new Event('zecratary_users_updated'));
       }
-      showToast(`Disconnected ${provider.toUpperCase()} account successfully.`, 'success');
+      showToast(`Disconnected ${unlinkModalProvider.name} account successfully.`, 'success');
     } catch (_) {
       showToast('Error updating account providers.', 'error');
     }
@@ -739,7 +736,7 @@ function ProfileContent() {
             </div>
           </div>
 
-          {/* Section 2: Connected Social Accounts */}
+          {/* Section 2: Connected Social Accounts (WITH EXACT FONT AWESOME ICONS: f179, f09a, f1a0) */}
           <div 
             className="p-6 rounded-3xl border shadow-sm space-y-4"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -767,7 +764,29 @@ function ProfileContent() {
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
-                        <span className="text-xl">{prov.icon}</span>
+                        {/* Font Awesome Icon Box */}
+                        <div 
+                          className="w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)'
+                          }}
+                        >
+                          <FontAwesomeIcon
+                            unicode={prov.unicode}
+                            name={prov.id}
+                            size={18}
+                            className="shrink-0"
+                            style={{
+                              color: prov.id === 'google' 
+                                ? '#EA4335' 
+                                : prov.id === 'facebook' 
+                                ? '#1877F2' 
+                                : 'var(--color-text)'
+                            }}
+                          />
+                        </div>
+
                         <div>
                           <span className="font-bold text-xs block" style={{ color: 'var(--color-text)' }}>{prov.name}</span>
                           {!isEnabledByAdmin && (
@@ -795,7 +814,7 @@ function ProfileContent() {
                       {isLinked ? (
                         <button
                           type="button"
-                          onClick={() => handleInitiateUnlink(prov.id)}
+                          onClick={() => handleInitiateUnlink(prov)}
                           className="w-full py-2 rounded-xl border text-[11px] font-bold text-red-400 hover:bg-red-500/10 transition cursor-pointer"
                           style={{ borderColor: 'rgba(239, 68, 68, 0.4)' }}
                         >
@@ -804,7 +823,7 @@ function ProfileContent() {
                       ) : (
                         <button
                           type="button"
-                          onClick={() => handleInitiateLink(prov.id)}
+                          onClick={() => handleInitiateLink(prov)}
                           disabled={!isEnabledByAdmin}
                           className="w-full py-2 rounded-xl text-[11px] font-bold transition shadow cursor-pointer text-white hover:opacity-90 disabled:opacity-40"
                           style={{ backgroundColor: 'var(--color-primary)' }}
@@ -932,7 +951,7 @@ function ProfileContent() {
         </div>
       )}
 
-      {/* MODAL 1: VERIFY & CONNECT SOCIAL ACCOUNT */}
+      {/* MODAL 1: VERIFY & CONNECT SOCIAL ACCOUNT (With Font Awesome Logo) */}
       {linkModalProvider && (
         <div 
           onClick={() => setLinkModalProvider(null)}
@@ -946,18 +965,53 @@ function ProfileContent() {
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
-                {t('verifyConnectModalTitle', 'Verify & Connect Account')}
-              </h3>
+              <div className="flex items-center gap-2.5">
+                <FontAwesomeIcon
+                  unicode={linkModalProvider.unicode}
+                  name={linkModalProvider.id}
+                  size={18}
+                  style={{
+                    color: linkModalProvider.id === 'google' 
+                      ? '#EA4335' 
+                      : linkModalProvider.id === 'facebook' 
+                      ? '#1877F2' 
+                      : 'var(--color-text)'
+                  }}
+                />
+                <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+                  {t('verifyConnectModalTitle', 'Verify & Connect Account')}
+                </h3>
+              </div>
               <button type="button" onClick={() => setLinkModalProvider(null)} className="p-1 rounded-lg">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
             <div className="space-y-3">
+              <div className="flex items-center gap-3 p-3 rounded-2xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <div className="w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 shadow-xs" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+                  <FontAwesomeIcon
+                    unicode={linkModalProvider.unicode}
+                    name={linkModalProvider.id}
+                    size={22}
+                    style={{
+                      color: linkModalProvider.id === 'google' 
+                        ? '#EA4335' 
+                        : linkModalProvider.id === 'facebook' 
+                        ? '#1877F2' 
+                        : 'var(--color-text)'
+                    }}
+                  />
+                </div>
+                <div>
+                  <span className="font-bold text-xs block">{linkModalProvider.name} Single Sign-On</span>
+                  <span className="text-[11px] opacity-70 block font-mono">Font Awesome: {linkModalProvider.unicode}</span>
+                </div>
+              </div>
+
               <p className="text-xs opacity-80 leading-relaxed">
                 {(t('verifyConnectDesc', 'You will be redirected to authenticate with {provider} to prove account ownership.'))
-                  .replace('{provider}', linkModalProvider.toUpperCase())}
+                  .replace('{provider}', linkModalProvider.name)}
               </p>
 
               <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
@@ -972,10 +1026,11 @@ function ProfileContent() {
                 <button
                   type="button"
                   onClick={handleConfirmVerifyLink}
-                  className="px-5 py-2 text-white font-bold rounded-xl shadow cursor-pointer hover:opacity-90"
+                  className="px-5 py-2 text-white font-bold rounded-xl shadow cursor-pointer hover:opacity-90 flex items-center gap-1.5"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
-                  {t('verifyAndConnectBtn', 'Verify & Connect')}
+                  <span>{t('verifyAndConnectBtn', 'Verify & Connect')}</span>
+                  <ArrowUpRight className="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>
@@ -983,7 +1038,7 @@ function ProfileContent() {
         </div>
       )}
 
-      {/* MODAL 2: CONFIRM UNLINK SOCIAL ACCOUNT */}
+      {/* MODAL 2: CONFIRM UNLINK SOCIAL ACCOUNT (With Font Awesome Logo) */}
       {unlinkModalProvider && (
         <div 
           onClick={() => setUnlinkModalProvider(null)}
@@ -997,18 +1052,53 @@ function ProfileContent() {
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="font-extrabold text-sm text-red-500">
-                {t('confirmUnlinkModalTitle', 'Disconnect Social Account')}
-              </h3>
+              <div className="flex items-center gap-2.5">
+                <FontAwesomeIcon
+                  unicode={unlinkModalProvider.unicode}
+                  name={unlinkModalProvider.id}
+                  size={18}
+                  style={{
+                    color: unlinkModalProvider.id === 'google' 
+                      ? '#EA4335' 
+                      : unlinkModalProvider.id === 'facebook' 
+                      ? '#1877F2' 
+                      : 'var(--color-text)'
+                  }}
+                />
+                <h3 className="font-extrabold text-sm text-red-500">
+                  {t('confirmUnlinkModalTitle', 'Disconnect Social Account')}
+                </h3>
+              </div>
               <button type="button" onClick={() => setUnlinkModalProvider(null)} className="p-1 rounded-lg">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
             <div className="space-y-3">
+              <div className="flex items-center gap-3 p-3 rounded-2xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                <div className="w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 shadow-xs" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+                  <FontAwesomeIcon
+                    unicode={unlinkModalProvider.unicode}
+                    name={unlinkModalProvider.id}
+                    size={22}
+                    style={{
+                      color: unlinkModalProvider.id === 'google' 
+                        ? '#EA4335' 
+                        : unlinkModalProvider.id === 'facebook' 
+                        ? '#1877F2' 
+                        : 'var(--color-text)'
+                    }}
+                  />
+                </div>
+                <div>
+                  <span className="font-bold text-xs block">{unlinkModalProvider.name} Single Sign-On</span>
+                  <span className="text-[11px] opacity-70 block font-mono">Font Awesome: {unlinkModalProvider.unicode}</span>
+                </div>
+              </div>
+
               <p className="text-xs opacity-80 leading-relaxed">
                 {(t('confirmUnlinkDesc', 'Are you sure you want to disconnect {provider} from your account?'))
-                  .replace('{provider}', unlinkModalProvider.toUpperCase())}
+                  .replace('{provider}', unlinkModalProvider.name)}
               </p>
 
               <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
