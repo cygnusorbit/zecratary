@@ -296,6 +296,43 @@ export default function Sidebar() {
     }
   }, [pathname]);
 
+  
+  useEffect(() => {
+    let channel: BroadcastChannel | null = null;
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        channel = new BroadcastChannel('zecratary_balance_channel');
+        channel.onmessage = (event) => {
+          if (event.data) {
+            if (event.data.wallet_balance !== undefined) setWalletBalance(Number(event.data.wallet_balance) || 0);
+            if (event.data.token_balance !== undefined) setTokenBalance(Number(event.data.token_balance) || 0);
+          }
+        };
+      }
+    } catch (_) {}
+
+    const handleExternalBalance = (e: any) => {
+      if (e?.detail) {
+        if (e.detail.wallet_balance !== undefined) setWalletBalance(Number(e.detail.wallet_balance) || 0);
+        if (e.detail.token_balance !== undefined) setTokenBalance(Number(e.detail.token_balance) || 0);
+      }
+      fetchWalletData();
+      fetchUserTokenAndNotifications();
+    };
+
+    window.addEventListener('zecratary_wallet_updated', handleExternalBalance);
+    window.addEventListener('zecratary_tokens_updated', handleExternalBalance);
+    window.addEventListener('zecratary_token_updated', handleExternalBalance);
+    window.addEventListener('focus', () => { fetchWalletData(); fetchUserTokenAndNotifications(); });
+
+    return () => {
+      if (channel) channel.close();
+      window.removeEventListener('zecratary_wallet_updated', handleExternalBalance);
+      window.removeEventListener('zecratary_tokens_updated', handleExternalBalance);
+      window.removeEventListener('zecratary_token_updated', handleExternalBalance);
+    };
+  }, [fetchWalletData, fetchUserTokenAndNotifications]);
+
   useEffect(() => {
     setMounted(true);
     syncUserState();
