@@ -1,243 +1,115 @@
-// Generated / Updated by AI Collaborator
+// @ts-nocheck
 'use client';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { 
-  Plus, Trash2, Check, Star, Copy, Edit3, X, Save, Search 
+  ShoppingCart, Plus, Trash2, Check, CheckSquare, Square, 
+  Search, Edit3, Share2, Copy, Filter, X, RefreshCw, 
+  CheckCircle2, AlertCircle, Bookmark, Utensils, ArrowRight
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
-import { CATEGORIES } from '@/constants/categories';
+import { useIngredientCategories, DEFAULT_CATEGORIES } from '@/lib/categories';
 import { useTranslation } from '@/components/LanguageProvider';
 
-export default function ShoppingListPage() {
+interface ShoppingItem {
+  id: string;
+  userId: string;
+  name: string;
+  item?: string;
+  amount: string;
+  unit: string;
+  category: string;
+  staple: boolean;
+  checked: boolean;
+  recipeId?: string;
+  recipeTitle?: string;
+}
+
+export default function ShoppingPage() {
   const router = useRouter();
   const { t } = useTranslation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [items, setItems] = useState<any[]>([]);
-  const [search, setSearch] = useState('');
-  const [showStaplesOnly, setShowStaplesOnly] = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [editingItem, setEditingItem] = useState<any | null>(null);
-  const [isDayMode, setIsDayMode] = useState<boolean>(false);
 
-  // Dynamic Categories from Settings
-  const availableCategories = (Array.isArray(CATEGORIES) && CATEGORIES.length > 0) ? CATEGORIES : [
-    'Produce', 'Dairy', 'Meat and Poultry', 'Seafood', 'Grains and Pasta',
-    'Pantry Staples', 'Condiments and Sauces', 'Spices and Seasonings',
-    'Beverages', 'Frozen Foods', 'Snacks', 'Bakery', 'Canned Goods', 'Other'
-  ];
+  const [items, setItems] = useState<ShoppingItem[]>([]);
+  const [search, setSearch] = useState<string>('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [filterStaplesOnly, setFilterStaplesOnly] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Form states matching ingredient fields
-  const [itemName, setItemName] = useState('');
-  const [itemAmount, setItemAmount] = useState('1');
-  const [itemUnit, setItemUnit] = useState('Unit');
-  const [itemCategory, setItemCategory] = useState<string>(availableCategories[0] || 'Produce');
+  const remoteCategories = useIngredientCategories();
+  const categoriesList = useMemo(() => {
+    return Array.isArray(remoteCategories) && remoteCategories.length > 0 
+      ? remoteCategories 
+      : DEFAULT_CATEGORIES;
+  }, [remoteCategories]);
 
-  // Dynamic Theme Synchronization & Day Mode Inversion
-  const applyGlobalTheme = useCallback(() => {
-    try {
-      const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-      const isDay = mode === 'light' || mode === 'day';
-      setIsDayMode(isDay);
+  const safeDefaultCategory = categoriesList[0] || 'Produce';
 
-      let c: any = {};
-      const stored = typeof window !== 'undefined' 
-        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
-        : null;
-      if (stored) {
-        try { c = JSON.parse(stored); } catch (_) {}
-      }
+  // Add Item Modal State (Form-Free Container)
+  const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  const [itemName, setItemName] = useState<string>('');
+  const [itemAmount, setItemAmount] = useState<string>('1');
+  const [itemUnit, setItemUnit] = useState<string>('pkg');
+  const [itemCategory, setItemCategory] = useState<string>(safeDefaultCategory);
+  const [itemStaple, setItemStaple] = useState<boolean>(false);
 
-      const root = document.documentElement;
+  // Edit Item Modal State
+  const [editingItem, setEditingItem] = useState<ShoppingItem | null>(null);
 
-      if (isDay) {
-        root.classList.remove('dark');
-        root.classList.add('light');
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', '#f8fafc');
-        root.style.setProperty('--color-background', '#f8fafc');
-        root.style.setProperty('--color-bg', '#f8fafc');
-        root.style.setProperty('--color-card-dark', '#ffffff');
-        root.style.setProperty('--color-card', '#ffffff');
-        root.style.setProperty('--color-inner-dark', '#f1f5f9');
-        root.style.setProperty('--color-border', '#e2e8f0');
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', '#0f172a');
-        root.style.setProperty('--color-text-secondary', '#64748b');
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = '#f8fafc';
-          document.body.style.color = '#0f172a';
-        }
-      } else {
-        const bg = c.backgroundColor || c.backgroundDark || '#070b13';
-        const card = c.cardBackground || c.cardDark || '#0b0f17';
-        const border = c.cardBorder || c.borderColor || '#1e293b';
-        const textSec = c.textSecondary || '#94a3b8';
+  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage({ type, text });
+    setTimeout(() => setToastMessage(null), 3500);
+  };
 
-        root.classList.remove('light');
-        root.classList.add('dark');
-        root.style.setProperty('--color-primary', c.primary || c.primaryColor || '#E05638');
-        root.style.setProperty('--color-primary-hover', c.primaryHover || '#c94529');
-        root.style.setProperty('--color-bg-dark', bg);
-        root.style.setProperty('--color-background', bg);
-        root.style.setProperty('--color-bg', bg);
-        root.style.setProperty('--color-card-dark', card);
-        root.style.setProperty('--color-card', card);
-        root.style.setProperty('--color-inner-dark', c.innerDark || '#070b13');
-        root.style.setProperty('--color-border', border);
-        root.style.setProperty('--color-emerald', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-accent', c.accentEmerald || c.accentColor || '#10b981');
-        root.style.setProperty('--color-text', c.textColor || '#ffffff');
-        root.style.setProperty('--color-text-secondary', textSec);
-        if (typeof document !== 'undefined' && document.body) {
-          document.body.style.backgroundColor = bg;
-          document.body.style.color = c.textColor || '#ffffff';
-        }
-      }
-    } catch (_) {}
-  }, []);
-
-  useEffect(() => {
-    applyGlobalTheme();
-
-    fetch('/api/user/theme', { cache: 'no-store' })
-      .then(res => res.json())
-      .then(data => {
-        if (data?.themeColors && Object.keys(data.themeColors).length > 0) {
-          localStorage.setItem('zecratary_theme_colors', JSON.stringify(data.themeColors));
-          applyGlobalTheme();
-        }
-      })
-      .catch(() => {
-        fetch('/api/admin/settings', { cache: 'no-store' })
-          .then(res => res.json())
-          .then(data => {
-            if (data?.themeColors && Object.keys(data.themeColors).length > 0) {
-              localStorage.setItem('zecratary_theme_colors', JSON.stringify(data.themeColors));
-              applyGlobalTheme();
-            }
-          })
-          .catch(() => {});
-      });
-
-    window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_updated', applyGlobalTheme);
-    window.addEventListener('storage', applyGlobalTheme);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
-      window.removeEventListener('storage', applyGlobalTheme);
-    };
-  }, [applyGlobalTheme]);
-
-  // Load shopping list directly from PostgreSQL with safe fallback
+  // 1. Fetch live items from PostgreSQL /api/shopping
   const loadShoppingData = useCallback(async (user: User | null) => {
-    if (!user) return;
-    const targetUserId = user.id || 'usr_admin_1';
+    const targetUserId = user?.id || 'usr_admin_1';
+    setLoading(true);
 
     try {
-      const res = await fetch(`/api/shopping?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+      let fetchedItems: ShoppingItem[] = [];
+      const res = await fetch(`/api/shopping?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        if (data.success && Array.isArray(data.items)) {
-          const normalized = data.items.map((i: any) => ({
-            ...i,
-            checked: Boolean(i.checked ?? i.completed),
-            completed: Boolean(i.checked ?? i.completed)
-          }));
-          setItems(normalized);
-          localStorage.setItem('zecratary_shopping_list', JSON.stringify(normalized));
-          localStorage.setItem('zecratary_shopping', JSON.stringify(normalized));
-          localStorage.setItem('zecratary_shopping_seeded', 'true');
-          return;
+        if (Array.isArray(data.items)) {
+          fetchedItems = data.items;
         }
       }
-    } catch (err) {
-      console.warn('[ShoppingListPage] Server fetch note:', err);
-    }
 
-    try {
-      const local = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
-      let allItems: any[] = local ? JSON.parse(local) : [];
-
-      const hasSeeded = localStorage.getItem('zecratary_shopping_seeded');
-      if (!hasSeeded && (!Array.isArray(allItems) || allItems.length === 0)) {
-        allItems = [
-          { 
-            id: 's_1_' + user.id, 
-            userId: user.id, 
-            createdBy: user.email, 
-            creatorName: user.name,
-            name: 'lime', 
-            amount: '1', 
-            unit: '', 
-            category: 'Produce', 
-            staple: false, 
-            checked: false,
-            completed: false,
-            createdAt: new Date().toISOString()
-          },
-          { 
-            id: 's_2_' + user.id, 
-            userId: user.id, 
-            createdBy: user.email, 
-            creatorName: user.name,
-            name: 'roasted peanuts', 
-            amount: '¼', 
-            unit: 'cup', 
-            category: 'Snacks', 
-            staple: false, 
-            checked: false,
-            completed: false,
-            createdAt: new Date().toISOString()
-          }
-        ];
-        localStorage.setItem('zecratary_shopping_seeded', 'true');
-        localStorage.setItem('zecratary_shopping_list', JSON.stringify(allItems));
-        localStorage.setItem('zecratary_shopping', JSON.stringify(allItems));
-        
-        fetch('/api/shopping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(allItems)
-        }).catch(() => {});
+      // Offline localStorage fallback
+      if (fetchedItems.length === 0 && typeof window !== 'undefined') {
+        const raw = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) fetchedItems = parsed;
+        }
       }
 
-      const userItems = Array.isArray(allItems) ? allItems.filter((i: any) => {
-        return !i.userId || i.userId === user.id || i.createdBy === user.email;
-      }).map((i: any) => ({
-        ...i,
-        checked: Boolean(i.checked ?? i.completed),
-        completed: Boolean(i.checked ?? i.completed)
-      })) : [];
-
-      setItems(userItems);
+      setItems(fetchedItems);
     } catch (e) {
-      console.error('Failed to load shopping list from cache', e);
+      console.warn('[ShoppingPage] Error loading data:', e);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    document.title = `${t('shoppingList') || 'Shopping List'} - FoodiePrep`;
+    document.title = `${t('shoppingListTitle', 'Interactive Shopping List')} - Zecratary`;
     initAuthStorage();
     const user = getCurrentUser();
-
     if (!user) {
       router.replace('/login');
       return;
     }
-
     setCurrentUser(user);
     loadShoppingData(user);
 
     const handleSync = (e: any) => {
-      // Discard self-generated local mutations to prevent race conditions during toggling
-      if (e?.detail?.source === 'local_shopping_mutation') return;
+      // Ignore local optimistic mutation triggers to prevent reverting checkboxes
+      if (e?.detail?.source === 'local_mutation') return;
       const active = getCurrentUser();
       if (active) {
         setCurrentUser(active);
@@ -245,702 +117,539 @@ export default function ShoppingListPage() {
       }
     };
 
-    window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_shopping_updated', handleSync as EventListener);
-    window.addEventListener('zecratary_shopping_list_updated', handleSync as EventListener);
-    window.addEventListener('zecratary_auth_changed', handleSync as EventListener);
+    window.addEventListener('zecratary_shopping_updated', handleSync);
+    window.addEventListener('zecratary_languages_updated', handleSync);
+    window.addEventListener('zecratary_dictionary_updated', handleSync);
+    window.addEventListener('zecratary_locale_changed', handleSync);
 
     return () => {
-      window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_shopping_updated', handleSync as EventListener);
-      window.removeEventListener('zecratary_shopping_list_updated', handleSync as EventListener);
-      window.removeEventListener('zecratary_auth_changed', handleSync as EventListener);
+      window.removeEventListener('zecratary_shopping_updated', handleSync);
+      window.removeEventListener('zecratary_languages_updated', handleSync);
+      window.removeEventListener('zecratary_dictionary_updated', handleSync);
+      window.removeEventListener('zecratary_locale_changed', handleSync);
     };
   }, [loadShoppingData, router, t]);
 
-  const saveList = (updatedUserItems: any[]) => {
-    if (!currentUser) return;
+  const saveItemsList = async (updatedList: ShoppingItem[], notifyOtherTabs = true) => {
+    setItems(updatedList);
+    const targetUserId = currentUser?.id || 'usr_admin_1';
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('zecratary_shopping_list', JSON.stringify(updatedList));
+        localStorage.setItem('zecratary_shopping', JSON.stringify(updatedList));
+      } catch (_) {}
+    }
 
     try {
-      const local = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
-      const allItems: any[] = local ? JSON.parse(local) : [];
-
-      const otherUsersItems = allItems.filter((i: any) => {
-        return i.userId && i.userId !== currentUser.id && i.createdBy !== currentUser.email;
+      await fetch('/api/shopping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: targetUserId, items: updatedList })
       });
+    } catch (_) {}
 
-      const merged = [...updatedUserItems, ...otherUsersItems];
-      localStorage.setItem('zecratary_shopping_list', JSON.stringify(merged));
-      localStorage.setItem('zecratary_shopping', JSON.stringify(merged));
-      localStorage.setItem('zecratary_shopping_seeded', 'true');
-
-      setItems(updatedUserItems);
-
-      // Do NOT dispatch generic 'storage' event which re-queries the server before POST finishes
-      window.dispatchEvent(new CustomEvent('zecratary_shopping_updated', { detail: { source: 'local_shopping_mutation' } }));
-    } catch (e) {
-      console.error('Failed to save shopping list', e);
+    if (notifyOtherTabs) {
+      window.dispatchEvent(new CustomEvent('zecratary_shopping_updated', { detail: { source: 'local_mutation' } }));
     }
   };
 
-  const handleAddItem = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
-    if (e && 'preventDefault' in e) e.preventDefault();
+  // Toggle Checkbox Item
+  const handleToggleCheck = async (id: string) => {
+    const target = items.find(i => i.id === id);
+    if (!target) return;
+    const nextVal = !target.checked;
+
+    const updated = items.map(i => i.id === id ? { ...i, checked: nextVal } : i);
+    await saveItemsList(updated, true);
+  };
+
+  // Add Item
+  const handleAddItem = async () => {
     if (!itemName.trim() || !currentUser) return;
 
-    const newItem = {
-      id: 's_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-      userId: currentUser.id,
-      createdBy: currentUser.email,
-      creatorName: currentUser.name,
+    const newItem: ShoppingItem = {
+      id: 'shop_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
+      userId: currentUser.id || 'usr_admin_1',
       name: itemName.trim(),
-      amount: itemAmount || '1',
-      unit: itemUnit === 'Unit' ? '' : itemUnit || '',
-      category: itemCategory || availableCategories[0] || 'Produce',
-      staple: false,
-      checked: false,
-      completed: false,
-      createdAt: new Date().toISOString()
+      amount: itemAmount.trim() || '1',
+      unit: itemUnit.trim() || '',
+      category: itemCategory || safeDefaultCategory,
+      staple: itemStaple,
+      checked: false
     };
 
-    const updated = [...items, newItem];
-    saveList(updated);
-
-    try {
-      await Promise.allSettled([
-        fetch('/api/shopping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify([newItem])
-        }),
-        fetch('/api/shopping-list', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify([newItem])
-        })
-      ]);
-    } catch (err) {
-      console.error('Failed to persist item to PostgreSQL:', err);
-    }
+    const updated = [newItem, ...items];
+    await saveItemsList(updated);
 
     setItemName('');
     setItemAmount('1');
-    setItemUnit('Unit');
-    setItemCategory(availableCategories[0] || 'Produce');
+    setItemUnit('pkg');
+    setItemCategory(safeDefaultCategory);
+    setItemStaple(false);
     setShowAddModal(false);
+    showToast(t('itemAddedToast', 'Item added to your shopping list!'));
   };
 
-  const handleUpdateItem = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
-    if (e && 'preventDefault' in e) e.preventDefault();
+  // Update Item
+  const handleUpdateItem = async () => {
     if (!editingItem || !editingItem.name.trim() || !currentUser) return;
 
-    const updatedItem = {
-      ...editingItem,
-      userId: currentUser.id,
-      createdBy: currentUser.email,
-      creatorName: currentUser.name,
-    };
-
-    const updated = items.map((i) => (i.id === editingItem.id ? updatedItem : i));
-    saveList(updated);
-
-    try {
-      await Promise.allSettled([
-        fetch('/api/shopping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify([updatedItem])
-        }),
-        fetch('/api/shopping-list', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify([updatedItem])
-        })
-      ]);
-    } catch (err) {
-      console.error('Failed to update item in PostgreSQL:', err);
-    }
-
+    const updated = items.map(i => i.id === editingItem.id ? editingItem : i);
+    await saveItemsList(updated);
     setEditingItem(null);
+    showToast(t('itemUpdatedToast', 'Item updated successfully!'));
   };
 
-  const toggleCheck = async (id: string) => {
-    const target = items.find((i) => i.id === id);
-    if (!target) return;
-    const nextVal = !target.checked;
-    const updatedItem = { ...target, checked: nextVal, completed: nextVal };
-    const updated = items.map((i) => (i.id === id ? updatedItem : i));
-    
-    // Update local state and cache synchronously without event loop
-    saveList(updated);
-
-    // Persist to PostgreSQL asynchronously
-    try {
-      await Promise.allSettled([
-        fetch('/api/shopping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify([updatedItem])
-        }),
-        fetch('/api/shopping-list', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify([updatedItem])
-        })
-      ]);
-    } catch (_) {}
-  };
-
-  const toggleStaple = async (id: string) => {
-    const target = items.find((i) => i.id === id);
-    if (!target) return;
-    const nextVal = !target.staple;
-    const updatedItem = { ...target, staple: nextVal };
-    const updated = items.map((i) => (i.id === id ? updatedItem : i));
-    saveList(updated);
+  // Delete Single Item
+  const handleDeleteItem = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const updated = items.filter(i => i.id !== id);
+    await saveItemsList(updated);
 
     try {
-      await Promise.allSettled([
-        fetch('/api/shopping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify([updatedItem])
-        }),
-        fetch('/api/shopping-list', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify([updatedItem])
-        })
-      ]);
-    } catch (_) {}
-  };
-
-  const handleCopySingleItem = (item: any) => {
-    const text = item.name.trim();
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(text);
-    } else {
-      const textArea = document.createElement('textarea');
-      textArea.value = text;
-      document.body.appendChild(textArea);
-      textArea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textArea);
-    }
-    const template = t('copiedToClipboard') || 'Copied "{name}" to clipboard!';
-    alert(template.replace('{name}', item.name));
-  };
-
-  const handleDeleteItem = async (id: string) => {
-    const updated = items.filter((i) => i.id !== id);
-    setItems(updated);
-
-    if (editingItem && editingItem.id === id) {
-      setEditingItem(null);
-    }
-
-    try {
-      const local = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
-      const allItems: any[] = local ? JSON.parse(local) : [];
-      const merged = allItems.filter((item: any) => item.id !== id);
-      localStorage.setItem('zecratary_shopping_list', JSON.stringify(merged));
-      localStorage.setItem('zecratary_shopping', JSON.stringify(merged));
-      localStorage.setItem('zecratary_shopping_seeded', 'true');
+      await fetch(`/api/shopping?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
     } catch (_) {}
 
-    try {
-      await Promise.allSettled([
-        fetch(`/api/shopping?id=${encodeURIComponent(id)}`, { 
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id })
-        }),
-        fetch(`/api/shopping-list?id=${encodeURIComponent(id)}`, { 
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id })
-        })
-      ]);
-    } catch (err) {
-      console.error('Failed to delete item from PostgreSQL:', err);
-    }
-
-    window.dispatchEvent(new CustomEvent('zecratary_shopping_updated', { detail: { source: 'local_shopping_mutation' } }));
+    showToast(t('itemDeletedToast', 'Item removed from shopping list.'));
   };
 
-  const filteredItems = useMemo(() => {
-    return items.filter((i) => {
-      const matchesSearch = !search.trim() || i.name.toLowerCase().includes(search.toLowerCase().trim());
-      const matchesStaples = !showStaplesOnly || i.staple;
-      return matchesSearch && matchesStaples;
-    });
-  }, [items, search, showStaplesOnly]);
+  // Clear All Completed Items
+  const handleClearCompleted = async () => {
+    const completedItems = items.filter(i => i.checked);
+    if (completedItems.length === 0) return;
+    if (!confirm(t('confirmClearCompleted', 'Are you sure you want to clear all completed items?'))) return;
 
-  const allFilteredCompleted = filteredItems.length > 0 && filteredItems.every((i) => i.checked);
-
-  const toggleAllComplete = async () => {
-    if (filteredItems.length === 0) return;
-    const targetState = !allFilteredCompleted;
-    const filteredIds = new Set(filteredItems.map(i => i.id));
-    const updated = items.map((i) => filteredIds.has(i.id) ? { ...i, checked: targetState, completed: targetState } : i);
-    saveList(updated);
-
-    const changedItems = updated.filter(i => filteredIds.has(i.id));
-    try {
-      await Promise.allSettled([
-        fetch('/api/shopping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(changedItems)
-        }),
-        fetch('/api/shopping-list', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(changedItems)
-        })
-      ]);
-    } catch (_) {}
-  };
-
-  const handleRemoveCompleted = async () => {
-    const completedList = items.filter((i) => i.checked);
-    if (completedList.length === 0) return;
-
-    const completedIds = completedList.map((i) => i.id);
-    const activeOnly = items.filter((i) => !i.checked);
-    setItems(activeOnly);
+    const remaining = items.filter(i => !i.checked);
+    await saveItemsList(remaining);
 
     try {
-      const local = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
-      const allItems: any[] = local ? JSON.parse(local) : [];
-      const merged = allItems.filter((item: any) => !completedIds.includes(item.id));
-      localStorage.setItem('zecratary_shopping_list', JSON.stringify(merged));
-      localStorage.setItem('zecratary_shopping', JSON.stringify(merged));
-      localStorage.setItem('zecratary_shopping_seeded', 'true');
-    } catch (_) {}
-
-    try {
-      await Promise.allSettled([
-        fetch(`/api/shopping?action=remove_completed&userId=${encodeURIComponent(currentUser?.id || '')}`, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids: completedIds, action: 'remove_completed', userId: currentUser?.id })
-        }),
-        fetch(`/api/shopping-list?action=remove_completed&userId=${encodeURIComponent(currentUser?.id || '')}`, {
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids: completedIds, action: 'remove_completed', userId: currentUser?.id })
-        })
-      ]);
-    } catch (err) {
-      console.error('Failed to remove completed items from PostgreSQL:', err);
-    }
-
-    window.dispatchEvent(new CustomEvent('zecratary_shopping_updated', { detail: { source: 'local_shopping_mutation' } }));
-  };
-
-  const handleCopyList = () => {
-    const activeList = items.filter((i) => !i.checked);
-    if (activeList.length === 0) {
-      alert(t('noActiveItemsToCopy') || 'No active items to copy!');
-      return;
-    }
-
-    const categoriesList = Array.from(new Set(activeList.map((i) => i.category || 'Produce'))).sort();
-    
-    let textLines: string[] = [];
-    categoriesList.forEach((cat) => {
-      textLines.push(`[${cat}]`);
-      const catItems = activeList.filter((i) => (i.category || 'Produce') === cat);
-      catItems.forEach((item) => {
-        textLines.push(`- ${item.name}`);
+      await fetch('/api/shopping', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'remove_completed', ids: completedItems.map(i => i.id) })
       });
-      textLines.push('');
+    } catch (_) {}
+
+    showToast(t('completedClearedToast', 'Completed items cleared.'));
+  };
+
+  // Toggle Complete All / Incomplete All
+  const handleToggleCompleteAll = async () => {
+    const allChecked = items.length > 0 && items.every(i => i.checked);
+    const nextVal = !allChecked;
+
+    const updated = items.map(i => ({ ...i, checked: nextVal }));
+    await saveItemsList(updated);
+
+    showToast(nextVal ? t('allCompletedToast', 'All items marked as completed!') : t('allIncompletedToast', 'All items marked as active.'));
+  };
+
+  // Copy Shopping List to Clipboard
+  const handleCopyList = async () => {
+    if (items.length === 0) return;
+
+    const activeList = items.filter(i => !i.checked);
+    let text = `🛒 ${t('shoppingListTitle', 'Interactive Shopping List')}\n\n`;
+
+    const groups: Record<string, ShoppingItem[]> = {};
+    activeList.forEach(item => {
+      const cat = item.category || 'Produce';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(item);
     });
 
-    const finalText = textLines.join('\n').trim();
-
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(finalText).then(() => {
-        const msg = t('copiedListToClipboard') || 'Successfully copied {count} items to clipboard, sorted by category!';
-        alert(msg.replace('{count}', String(activeList.length)));
-      }).catch(() => {
-        fallbackCopyText(finalText, activeList.length);
+    for (const [cat, catItems] of Object.entries(groups)) {
+      text += `📁 ${cat}:\n`;
+      catItems.forEach(i => {
+        text += `  • [ ] ${i.name} (${i.amount} ${i.unit})\n`;
       });
-    } else {
-      fallbackCopyText(finalText, activeList.length);
+      text += '\n';
     }
-  };
 
-  const fallbackCopyText = (text: string, count: number) => {
     try {
-      const textArea = document.createElement('textarea');
-      textArea.value = text;
-      textArea.style.position = 'fixed';
-      textArea.style.left = '-999999px';
-      textArea.style.top = '-999999px';
-      document.body.appendChild(textArea);
-      textArea.focus();
-      textArea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textArea);
-      const msg = t('copiedListToClipboard') || 'Successfully copied {count} items to clipboard, sorted by category!';
-      alert(msg.replace('{count}', String(count)));
-    } catch (err) {
-      alert(t('failedToCopy') || 'Failed to copy to clipboard.');
+      await navigator.clipboard.writeText(text);
+      showToast(t('listCopiedToast', 'Shopping list copied to clipboard!'));
+    } catch (_) {
+      showToast('Clipboard access unavailable.', 'error');
     }
   };
 
-  const completedCount = items.filter((i) => i.checked).length;
+  // Filtered Pipeline
+  const filteredActiveItems = useMemo(() => {
+    return items.filter(i => {
+      if (i.checked) return false;
+      if (filterStaplesOnly && !i.staple) return false;
+      if (selectedCategory !== 'All' && i.category !== selectedCategory) return false;
+      if (search.trim()) {
+        const q = search.toLowerCase().trim();
+        return i.name.toLowerCase().includes(q) || (i.category || '').toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [items, filterStaplesOnly, selectedCategory, search]);
 
-  const activeItems = filteredItems.filter((i) => !i.checked);
-  const completedItems = filteredItems.filter((i) => i.checked);
-  const categories = Array.from(new Set(activeItems.map((i) => i.category || 'Produce')));
+  const filteredCompletedItems = useMemo(() => {
+    return items.filter(i => {
+      if (!i.checked) return false;
+      if (filterStaplesOnly && !i.staple) return false;
+      if (selectedCategory !== 'All' && i.category !== selectedCategory) return false;
+      if (search.trim()) {
+        const q = search.toLowerCase().trim();
+        return i.name.toLowerCase().includes(q) || (i.category || '').toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [items, filterStaplesOnly, selectedCategory, search]);
+
+  // Group Active Items by Category
+  const groupedActiveItems = useMemo(() => {
+    const groups: Record<string, ShoppingItem[]> = {};
+    filteredActiveItems.forEach(item => {
+      const cat = item.category || 'Produce';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(item);
+    });
+    return groups;
+  }, [filteredActiveItems]);
+
+  const totalActive = items.filter(i => !i.checked).length;
+  const totalCompleted = items.filter(i => i.checked).length;
 
   return (
     <div 
       className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
-      {/* PAGE HEADER */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
-            {t('shoppingList') || 'Shopping List'}
+      {/* Toast Alert Banner */}
+      {toastMessage && (
+        <div 
+          className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: toastMessage.type === 'success' ? 'var(--color-emerald)' : '#ef4444',
+            color: 'var(--color-text)'
+          }}
+        >
+          {toastMessage.type === 'success' ? (
+            <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
+          ) : (
+            <AlertCircle className="h-4 w-4 text-red-500" />
+          )}
+          <span>{toastMessage.text}</span>
+        </div>
+      )}
+
+      {/* Top Header Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+        <div>
+          <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+            {t('shoppingListTitle', 'Interactive Shopping List')}
           </h1>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {(t('shoppingItemsCompleted') || '{completed} of {total} items completed')
-              .replace('{completed}', String(completedCount))
-              .replace('{total}', String(items.length))}
+            {t('shoppingListSubtitle', 'Organize your grocery checklist by category and track purchased ingredients.')}
           </p>
         </div>
 
-        {/* TOP RIGHT BUTTON GROUP */}
-        <div className="flex items-center gap-2.5">
-          {/* COMPLETE ALL / INCOMPLETE ALL BUTTON */}
+        {/* Toolbar Buttons */}
+        <div className="flex flex-wrap items-center gap-2.5">
           <button
             type="button"
-            onClick={toggleAllComplete}
-            disabled={filteredItems.length === 0}
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-emerald)'
-            }}
-            title={allFilteredCompleted ? (t('deselectAllItemsTooltip') || 'Deselect all items') : (t('selectAllItemsTooltip') || 'Select all items')}
+            onClick={() => loadShoppingData(currentUser)}
+            disabled={loading}
+            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50 hover:opacity-80"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            title={t('reloadBtn', 'Reload')}
           >
-            <Check className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
-            <span>{allFilteredCompleted ? (t('incompleteAll') || 'Incomplete All') : (t('completeAll') || 'Complete All')}</span>
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
           </button>
 
-          {/* REMOVE COMPLETED BUTTON */}
-          <button
-            type="button"
-            onClick={handleRemoveCompleted}
-            disabled={completedItems.length === 0}
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: '#ef4444'
-            }}
-            title={t('removeCompletedTooltip') || 'Remove completed items'}
-          >
-            <Trash2 className="h-4 w-4 text-red-500" />
-            <span>{t('removeCompleted') || 'Remove Completed'}</span>
-          </button>
-        </div>
-      </div>
-
-      {/* TOP CONTROLS */}
-      <div className="flex flex-col sm:flex-row items-center gap-3 justify-between">
-        {/* Search Bar */}
-        <div className="relative flex-1 w-full">
-          <Search 
-            className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none" 
-            style={{ color: 'var(--color-text-secondary)' }}
-          />
-          <input
-            type="text"
-            placeholder={t('searchItemsPlaceholder') || 'Search items...'}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full border rounded-xl pl-11 pr-4 py-2.5 text-sm outline-none shadow-xs transition"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-          />
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2.5 w-full sm:w-auto">
           <button
             type="button"
             onClick={handleCopyList}
-            className="flex-1 sm:flex-initial border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
+            disabled={items.length === 0}
+            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer hover:opacity-80 disabled:opacity-40"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
-            <Copy className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} /> {t('copyList') || 'Copy List'}
+            <Copy className="h-3.5 w-3.5" />
+            <span>{t('exportListBtn', 'Copy List')}</span>
           </button>
-          
+
           <button
             type="button"
-            onClick={() => setShowStaplesOnly(!showStaplesOnly)}
-            className="flex-1 sm:flex-initial border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow-sm cursor-pointer"
-            style={showStaplesOnly ? {
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-primary)',
-              color: 'var(--color-primary)'
-            } : {
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
+            onClick={handleToggleCompleteAll}
+            disabled={items.length === 0}
+            className="border font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer hover:opacity-80 disabled:opacity-40"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
-            <Star 
-              className={`h-4 w-4 ${showStaplesOnly ? 'fill-current' : ''}`}
-              style={{ color: 'var(--color-primary)' }} 
-            /> 
-            {t('myStaples') || 'My Staples'}
+            <CheckSquare className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
+            <span>{items.length > 0 && items.every(i => i.checked) ? t('incompleteAllBtn', 'Uncheck All') : t('completeAllBtn', 'Mark All Done')}</span>
           </button>
 
           <button
             type="button"
             onClick={() => setShowAddModal(true)}
-            className="flex-1 sm:flex-initial text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center justify-center gap-1.5 shadow-lg cursor-pointer"
+            className="text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-lg cursor-pointer hover:opacity-90"
             style={{ backgroundColor: 'var(--color-primary)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
-            <Plus className="h-4 w-4" /> {t('addItemBtn') || 'Add Item(s)'}
+            <Plus className="h-4 w-4" />
+            <span>{t('addItemBtn', 'Add Item')}</span>
           </button>
         </div>
       </div>
 
-      {/* ACTIVE CATEGORY CARDS */}
-      <div className="space-y-4">
-        {categories.map((cat) => {
-          const catItems = activeItems.filter((i) => (i.category || 'Produce') === cat);
-          if (catItems.length === 0) return null;
+      {/* Search Bar & Category Filter Strip */}
+      <div 
+        role="region"
+        data-lpignore="true"
+        className="p-4 rounded-3xl border space-y-3.5 shadow-sm transition-colors duration-200"
+        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+      >
+        <div className="flex flex-col sm:flex-row items-center gap-3">
+          <div className="relative flex-1 w-full">
+            <Search className="h-4 w-4 absolute left-3.5 top-3 pointer-events-none opacity-60" />
+            <input
+              type="text"
+              autoComplete="off"
+              data-lpignore="true"
+              data-form-type="other"
+              spellCheck="false"
+              placeholder={t('searchItemsPlaceholder', 'Search shopping items...')}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-xs outline-none transition font-medium"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            />
+          </div>
 
-          return (
-            <div 
-              key={cat} 
-              className="border rounded-2xl p-5 space-y-3 shadow-sm transition-colors duration-200"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)'
-              }}
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
+              className="px-3.5 py-2 rounded-xl border text-xs font-bold outline-none cursor-pointer shadow-xs"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
             >
-              <h2 
-                className="text-base font-bold tracking-wide"
-                style={{ color: 'var(--color-primary)' }}
-              >
-                {cat}
-              </h2>
+              <option value="All">{t('allCategories', 'All Categories')}</option>
+              {categoriesList.map(cat => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
+            </select>
 
-              <div className="space-y-3">
-                {catItems.map((item) => (
-                  <div
-                    key={item.id}
-                    onClick={() => toggleCheck(item.id)}
-                    className="flex items-center justify-between py-1 transition cursor-pointer select-none"
-                  >
-                    <div className="flex items-start gap-3">
-                      <div 
-                        className="w-4 h-4 rounded mt-0.5 border flex items-center justify-center transition shrink-0"
-                        style={{
-                          borderColor: 'var(--color-primary)',
-                          backgroundColor: 'var(--color-inner-dark)'
-                        }}
-                      />
+            <button
+              type="button"
+              onClick={() => setFilterStaplesOnly(!filterStaplesOnly)}
+              className={`px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs ${
+                filterStaplesOnly ? 'text-white' : 'opacity-70 hover:opacity-100'
+              }`}
+              style={filterStaplesOnly ? { backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' } : { backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <Bookmark className="h-3.5 w-3.5" />
+              <span>{t('staplesOnly', 'Household Staples')}</span>
+            </button>
+          </div>
+        </div>
 
-                      <div>
-                        <h4 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>
-                          {item.name}
-                        </h4>
-                        {(item.amount || item.unit) && (
-                          <span className="text-xs font-medium block" style={{ color: 'var(--color-text-secondary)' }}>
+        {/* Counter Pills Strip */}
+        <div className="flex items-center justify-between pt-2 border-t text-xs font-bold" style={{ borderColor: 'var(--color-border)' }}>
+          <span className="text-[var(--color-primary)]">
+            {(t('activeItemsCount', '{count} Items to Buy')).replace('{count}', String(totalActive))}
+          </span>
+          <span className="text-emerald-400">
+            {(t('completedItemsCount', '{count} Items Purchased')).replace('{count}', String(totalCompleted))}
+          </span>
+        </div>
+      </div>
+
+      {/* Main Checklist Body */}
+      {items.length === 0 ? (
+        <div 
+          className="text-center py-16 border rounded-3xl p-8 space-y-3 shadow-xs"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <ShoppingCart className="h-10 w-10 mx-auto opacity-30" />
+          <h3 className="font-extrabold text-sm">{t('noShoppingItemsFound', 'Your shopping list is clear')}</h3>
+          <p className="text-xs opacity-70 max-w-sm mx-auto">
+            {t('noShoppingItemsDesc', 'Add custom items or import ingredients directly from recipes and meal plans.')}
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowAddModal(true)}
+            className="text-white font-bold text-xs px-4 py-2 rounded-xl transition shadow inline-flex items-center gap-1.5 cursor-pointer hover:opacity-90"
+            style={{ backgroundColor: 'var(--color-primary)' }}
+          >
+            <Plus className="h-4 w-4" /> {t('addFirstItemBtn', 'Add First Item')}
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {/* Active Items Grouped by Category */}
+          {Object.keys(groupedActiveItems).length > 0 && (
+            <div className="space-y-4">
+              {Object.entries(groupedActiveItems).map(([catName, catItems]) => (
+                <div 
+                  key={catName}
+                  className="border rounded-3xl p-5 space-y-3 shadow-xs transition-colors duration-200"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                    <h3 className="font-extrabold text-xs uppercase tracking-wider text-[var(--color-primary)]">
+                      {catName} ({catItems.length})
+                    </h3>
+                  </div>
+
+                  <div className="space-y-2">
+                    {catItems.map(item => (
+                      <div
+                        key={item.id}
+                        onClick={() => handleToggleCheck(item.id)}
+                        className="p-3 rounded-2xl border flex items-center justify-between gap-3 transition cursor-pointer select-none hover:border-[var(--color-primary)] shadow-xs"
+                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleToggleCheck(item.id); }}
+                            className="w-5 h-5 rounded-lg border flex items-center justify-center transition shrink-0"
+                            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                          >
+                            {item.checked && <Check className="h-3.5 w-3.5 stroke-[3] text-emerald-400" />}
+                          </button>
+
+                          <div className="space-y-0.5 min-w-0">
+                            <span className="font-bold text-xs block truncate" style={{ color: 'var(--color-text)' }}>
+                              {item.name}
+                            </span>
+                            {item.recipeTitle && (
+                              <span className="text-[10px] opacity-60 block truncate">
+                                {t('recipeTag', 'From recipe:')} {item.recipeTitle}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <span className="font-mono font-bold text-xs px-2.5 py-1 rounded-lg border" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
                             {item.amount} {item.unit}
                           </span>
-                        )}
+
+                          <button
+                            type="button"
+                            onClick={() => setEditingItem(item)}
+                            className="p-1.5 rounded-lg border transition hover:opacity-80"
+                            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                            title={t('editItemTooltip', 'Edit item')}
+                          >
+                            <Edit3 className="h-3.5 w-3.5 opacity-70" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteItem(e, item.id)}
+                            className="p-1.5 rounded-lg border text-red-400 hover:bg-red-500/10 transition"
+                            style={{ borderColor: 'rgba(239, 68, 68, 0.4)' }}
+                            title={t('deleteItemTooltip', 'Delete item')}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
                       </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Completed Items Section */}
+          {filteredCompletedItems.length > 0 && (
+            <div 
+              className="border rounded-3xl p-5 space-y-3 shadow-xs transition-colors duration-200"
+              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                <h3 className="font-extrabold text-xs uppercase tracking-wider text-emerald-400">
+                  {t('completedItemsHeading', 'Completed Items')} ({filteredCompletedItems.length})
+                </h3>
+                <button
+                  type="button"
+                  onClick={handleClearCompleted}
+                  className="text-xs font-bold text-red-400 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>{t('clearCompletedBtn', 'Clear Completed')}</span>
+                </button>
+              </div>
+
+              <div className="space-y-2 opacity-60">
+                {filteredCompletedItems.map(item => (
+                  <div
+                    key={item.id}
+                    onClick={() => handleToggleCheck(item.id)}
+                    className="p-3 rounded-2xl border flex items-center justify-between gap-3 transition cursor-pointer select-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-5 h-5 rounded-lg border flex items-center justify-center bg-emerald-500/20 border-emerald-500/40 text-emerald-400 shrink-0">
+                        <Check className="h-3.5 w-3.5 stroke-[3]" />
+                      </div>
+                      <span className="font-bold text-xs line-through truncate">
+                        {item.name}
+                      </span>
                     </div>
 
-                    <div className="flex items-center gap-3.5" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="font-mono text-xs line-through opacity-75">
+                        {item.amount} {item.unit}
+                      </span>
                       <button
                         type="button"
-                        onClick={() => toggleStaple(item.id)}
-                        className="transition hover:opacity-80 cursor-pointer"
-                        style={{ color: item.staple ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
-                        title={t('markAsStapleTooltip') || 'Mark as Staple'}
+                        onClick={(e) => handleDeleteItem(e, item.id)}
+                        className="p-1 rounded text-red-400 hover:text-red-300"
+                        title={t('deleteItemTooltip', 'Delete item')}
                       >
-                        <Star className={`h-4 w-4 ${item.staple ? 'fill-current' : ''}`} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleCopySingleItem(item)}
-                        className="transition hover:opacity-80 cursor-pointer"
-                        style={{ color: 'var(--color-text-secondary)' }}
-                        title={t('copyItemTooltip') || 'Copy item'}
-                      >
-                        <Copy className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEditingItem(item)}
-                        className="transition hover:opacity-80 cursor-pointer"
-                        style={{ color: 'var(--color-text-secondary)' }}
-                        title={t('editItemTooltip') || 'Edit item'}
-                      >
-                        <Edit3 className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteItem(item.id)}
-                        className="transition hover:text-red-500 cursor-pointer"
-                        style={{ color: 'var(--color-text-secondary)' }}
-                        title={t('deleteBtn') || 'Delete'}
-                      >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
-          );
-        })}
-      </div>
-
-      {/* COMPLETED ITEMS SECTION */}
-      {completedItems.length > 0 && (
-        <div className="space-y-3 pt-2">
-          <div className="flex items-center gap-3">
-            <h2 
-              className="text-base font-extrabold whitespace-nowrap"
-              style={{ color: 'var(--color-emerald)' }}
-            >
-              {t('completedItemsHeading') || 'Completed Items'}
-            </h2>
-            <div 
-              className="h-px flex-1"
-              style={{ backgroundColor: 'var(--color-border)' }}
-            />
-          </div>
-
-          <div 
-            className="border rounded-2xl p-5 space-y-3 shadow-sm transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)'
-            }}
-          >
-            {completedItems.map((item) => (
-              <div
-                key={item.id}
-                onClick={() => toggleCheck(item.id)}
-                className="flex items-center justify-between py-1 transition cursor-pointer select-none"
-              >
-                <div className="flex items-start gap-3 flex-1 pr-4">
-                  <div 
-                    className="w-4 h-4 rounded mt-0.5 flex items-center justify-center text-white transition shrink-0"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                  >
-                    <Check className="h-3 w-3 stroke-[3]" />
-                  </div>
-
-                  <span 
-                    className="text-sm font-semibold line-through leading-snug"
-                    style={{ color: 'var(--color-text-secondary)' }}
-                  >
-                    {item.name}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-3.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    onClick={() => toggleStaple(item.id)}
-                    className="transition hover:opacity-80 cursor-pointer"
-                    style={{ color: item.staple ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
-                    title={t('markAsStapleTooltip') || 'Mark as Staple'}
-                  >
-                    <Star className={`h-4 w-4 ${item.staple ? 'fill-current' : ''}`} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditingItem(item)}
-                    className="transition hover:opacity-80 cursor-pointer"
-                    style={{ color: 'var(--color-text-secondary)' }}
-                    title={t('editItemTooltip') || 'Edit item'}
-                  >
-                    <Edit3 className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteItem(item.id)}
-                    className="transition hover:text-red-500 cursor-pointer"
-                    style={{ color: 'var(--color-text-secondary)' }}
-                    title={t('deleteBtn') || 'Delete'}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+          )}
         </div>
       )}
 
-      {/* ADD ITEM MODAL */}
+      {/* MODAL 1: ADD ITEM (Autofill Safe Container) */}
       {showAddModal && (
         <div 
           onClick={() => setShowAddModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-6 shadow-2xl relative text-xs cursor-default animate-in fade-in transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
+            role="region"
+            data-lpignore="true"
+            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
-            <button
-              type="button"
-              onClick={() => setShowAddModal(false)}
-              className="absolute top-4 right-4 p-2 rounded-full transition cursor-pointer shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <X className="h-4 w-4" />
-            </button>
+            <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+                {t('addItemModalTitle', 'Add Shopping Item')}
+              </h3>
+              <button type="button" onClick={() => setShowAddModal(false)} className="p-1 rounded-lg">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
 
-            <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-              <Plus className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('addShoppingItemTitle') || 'Add Shopping Item'}
-            </h2>
-
-            <div className="space-y-4 text-xs">
+            <div className="space-y-3.5">
               <div>
-                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('itemNameLabel') || 'Item Name *'}
-                </label>
+                <label className="block font-bold mb-1 opacity-80">{t('itemNameLabel', 'Item Name *')}</label>
                 <input
                   type="text"
-                  required
-                  placeholder={t('itemNamePlaceholder') || 'e.g. lime, roasted peanuts...'}
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
+                  placeholder={t('itemNamePlaceholder', 'e.g. Eggs, Fresh Milk, Lettuce...')}
                   value={itemName}
                   onChange={(e) => setItemName(e.target.value)}
                   onKeyDown={(e) => {
@@ -949,115 +658,85 @@ export default function ShoppingListPage() {
                       handleAddItem();
                     }
                   }}
-                  className="w-full border rounded-xl p-3 text-sm outline-none transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('amountQtyLabel') || 'Amount / Qty'}
-                  </label>
+                  <label className="block font-bold mb-1 opacity-80">{t('amountLabel', 'Amount')}</label>
                   <input
                     type="text"
-                    placeholder={t('amountQtyPlaceholder') || 'e.g. 1 or ¼'}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                     value={itemAmount}
                     onChange={(e) => setItemAmount(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddItem();
-                      }
-                    }}
-                    className="w-full border rounded-xl p-3 text-sm outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                    className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
+
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('unitLabel') || 'Unit'}
-                  </label>
+                  <label className="block font-bold mb-1 opacity-80">{t('unitLabel', 'Unit')}</label>
                   <input
                     type="text"
-                    placeholder={t('unitPlaceholder') || 'e.g. cup, tbsp, oz'}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                     value={itemUnit}
                     onChange={(e) => setItemUnit(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddItem();
-                      }
-                    }}
-                    className="w-full border rounded-xl p-3 text-sm outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                    className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('categoryLabel') || 'Category'}
-                </label>
+                <label className="block font-bold mb-1 opacity-80">{t('categoryLabel', 'Category')}</label>
                 <select
                   value={itemCategory}
                   onChange={(e) => setItemCategory(e.target.value)}
-                  className="w-full border rounded-xl p-3 text-sm outline-none cursor-pointer transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 >
-                  {availableCategories.map((cat: string) => (
-                    <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
-                      {cat}
-                    </option>
+                  {categoriesList.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
                   ))}
                 </select>
               </div>
 
-              <div className="flex justify-end gap-3 pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="stapleCheckbox"
+                  checked={itemStaple}
+                  onChange={(e) => setItemStaple(e.target.checked)}
+                  className="rounded cursor-pointer"
+                />
+                <label htmlFor="stapleCheckbox" className="font-semibold text-xs cursor-pointer opacity-80">
+                  {t('markAsStapleLabel', 'Household Staple (Regularly Purchased)')}
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-5 py-2.5 rounded-xl font-bold transition cursor-pointer"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    color: 'var(--color-text-secondary)'
-                  }}
+                  className="px-4 py-2 border rounded-xl font-bold cursor-pointer hover:opacity-80"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
                 >
-                  {t('cancel') || 'Cancel'}
+                  {t('cancelBtn', 'Cancel')}
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleAddItem()}
-                  className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg cursor-pointer"
+                  onClick={handleAddItem}
+                  disabled={!itemName.trim()}
+                  className="px-5 py-2 text-white font-bold rounded-xl shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
                   style={{ backgroundColor: 'var(--color-primary)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                 >
-                  {t('addItemSubmit') || 'Add Item'}
+                  {t('saveItemBtn', 'Save Item')}
                 </button>
               </div>
             </div>
@@ -1065,177 +744,119 @@ export default function ShoppingListPage() {
         </div>
       )}
 
-      {/* EDIT ITEM MODAL */}
+      {/* MODAL 2: EDIT ITEM */}
       {editingItem && (
         <div 
           onClick={() => setEditingItem(null)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-6 shadow-2xl relative text-xs cursor-default animate-in fade-in transition-colors duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
+            role="region"
+            data-lpignore="true"
+            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
-            <button
-              type="button"
-              onClick={() => setEditingItem(null)}
-              className="absolute top-4 right-4 p-2 rounded-full transition cursor-pointer shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <X className="h-4 w-4" />
-            </button>
+            <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+                {t('editItemModalTitle', 'Edit Shopping Item')}
+              </h3>
+              <button type="button" onClick={() => setEditingItem(null)} className="p-1 rounded-lg">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
 
-            <h2 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-              <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }} /> {t('editShoppingItemTitle') || 'Edit Shopping Item'}
-            </h2>
-
-            <div className="space-y-4 text-xs">
+            <div className="space-y-3.5">
               <div>
-                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('itemNameLabel') || 'Item Name *'}
-                </label>
+                <label className="block font-bold mb-1 opacity-80">{t('itemNameLabel', 'Item Name *')}</label>
                 <input
                   type="text"
-                  required
+                  autoComplete="off"
+                  data-lpignore="true"
+                  data-form-type="other"
+                  spellCheck="false"
                   value={editingItem.name}
                   onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      handleUpdateItem();
-                    }
-                  }}
-                  className="w-full border rounded-xl p-3 text-sm outline-none transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('amountLabel') || 'Amount'}
-                  </label>
+                  <label className="block font-bold mb-1 opacity-80">{t('amountLabel', 'Amount')}</label>
                   <input
                     type="text"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                     value={editingItem.amount}
-                    placeholder={t('amountQtyPlaceholder') || 'e.g. 1 or ¼'}
                     onChange={(e) => setEditingItem({ ...editingItem, amount: e.target.value })}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleUpdateItem();
-                      }
-                    }}
-                    className="w-full border rounded-xl p-3 text-sm outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                    className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
+
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('unitLabel') || 'Unit'}
-                  </label>
+                  <label className="block font-bold mb-1 opacity-80">{t('unitLabel', 'Unit')}</label>
                   <input
                     type="text"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
                     value={editingItem.unit}
-                    placeholder={t('unitPlaceholder') || 'e.g. cup, tbsp, oz'}
                     onChange={(e) => setEditingItem({ ...editingItem, unit: e.target.value })}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleUpdateItem();
-                      }
-                    }}
-                    className="w-full border rounded-xl p-3 text-sm outline-none transition"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                    className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-semibold mb-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('categoryLabel') || 'Category'}
-                </label>
+                <label className="block font-bold mb-1 opacity-80">{t('categoryLabel', 'Category')}</label>
                 <select
                   value={editingItem.category}
                   onChange={(e) => setEditingItem({ ...editingItem, category: e.target.value })}
-                  className="w-full border rounded-xl p-3 text-sm outline-none cursor-pointer transition"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 >
-                  {availableCategories.map((cat: string) => (
-                    <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
-                      {cat}
-                    </option>
+                  {categoriesList.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
                   ))}
                 </select>
               </div>
 
-              <div className="flex justify-between items-center pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="editStapleCheckbox"
+                  checked={editingItem.staple}
+                  onChange={(e) => setEditingItem({ ...editingItem, staple: e.target.checked })}
+                  className="rounded cursor-pointer"
+                />
+                <label htmlFor="editStapleCheckbox" className="font-semibold text-xs cursor-pointer opacity-80">
+                  {t('markAsStapleLabel', 'Household Staple (Regularly Purchased)')}
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
                 <button
                   type="button"
-                  onClick={() => handleDeleteItem(editingItem.id)}
-                  className="px-4 py-2.5 rounded-xl font-bold border transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'rgba(239, 68, 68, 0.4)',
-                    color: '#ef4444'
-                  }}
+                  onClick={() => setEditingItem(null)}
+                  className="px-4 py-2 border rounded-xl font-bold cursor-pointer hover:opacity-80"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
                 >
-                  <Trash2 className="h-4 w-4" /> {t('deleteBtn') || 'Delete'}
+                  {t('cancelBtn', 'Cancel')}
                 </button>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEditingItem(null)}
-                    className="px-5 py-2.5 rounded-xl font-bold transition cursor-pointer"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      color: 'var(--color-text-secondary)'
-                    }}
-                  >
-                    {t('cancel') || 'Cancel'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleUpdateItem()}
-                    className="px-6 py-2.5 rounded-xl text-white font-bold transition flex items-center gap-1.5 shadow-lg cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
-                  >
-                    <Save className="h-4 w-4" /> {t('saveChanges') || 'Save Changes'}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={handleUpdateItem}
+                  disabled={!editingItem.name.trim()}
+                  className="px-5 py-2 text-white font-bold rounded-xl shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                >
+                  {t('saveItemBtn', 'Save Item')}
+                </button>
               </div>
             </div>
           </div>

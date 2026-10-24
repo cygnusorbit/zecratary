@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 async function ensureTable() {
   try {
@@ -20,6 +21,7 @@ async function ensureTable() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
+      CREATE INDEX IF NOT EXISTS idx_shopping_items_user ON shopping_items(user_id);
     `);
   } catch (_) {}
 }
@@ -28,24 +30,24 @@ export async function GET(req: NextRequest) {
   try {
     await ensureTable();
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId');
+    const userId = searchParams.get('userId')?.trim();
 
-    let sql = 'SELECT * FROM shopping_items WHERE 1=1';
+    let sql = 'SELECT * FROM shopping_items';
     const params: any[] = [];
 
     if (userId) {
       params.push(userId);
-      sql += ` AND (user_id = $${params.length} OR user_id = 'usr_admin_1' OR user_id IS NULL)`;
+      sql += ' WHERE user_id = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL';
     }
 
     sql += ' ORDER BY created_at ASC';
 
-    const rows = await query(sql, params);
+    const rows: any = await query(sql, params);
+    const raw = Array.isArray(rows) ? rows : (rows?.rows || []);
 
-    const formatted = rows.map((r: any) => ({
+    const formatted = raw.map((r: any) => ({
       id: r.id,
       userId: r.user_id || 'usr_admin_1',
-      user_id: r.user_id || 'usr_admin_1',
       name: r.name || '',
       item: r.name || '',
       amount: r.amount || '1',
@@ -53,11 +55,9 @@ export async function GET(req: NextRequest) {
       category: r.category || 'Produce',
       staple: Boolean(r.staple),
       checked: Boolean(r.checked),
-      completed: Boolean(r.checked),
       recipeId: r.recipe_id || null,
       recipeTitle: r.recipe_title || null,
-      createdAt: r.created_at || new Date().toISOString(),
-      updatedAt: r.updated_at || new Date().toISOString()
+      createdAt: r.created_at || new Date().toISOString()
     }));
 
     return NextResponse.json(
@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
       { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
     );
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: err.message, items: [] }, { status: 500 });
   }
 }
 
@@ -73,12 +73,12 @@ export async function POST(req: NextRequest) {
   try {
     await ensureTable();
     const body = await req.json();
+    const targetUserId = body.userId || body.user_id || 'usr_admin_1';
     const items = Array.isArray(body) ? body : (body.items || [body.item || body]);
 
     for (const item of items) {
-      if (!item || !item.name) continue;
-      const id = String(item.id || 's_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)).slice(0, 64);
-      const targetUserId = item.userId || item.user_id || body.userId || body.user_id || 'usr_admin_1';
+      if (!item || (!item.name && !item.item)) continue;
+      const id = String(item.id || ('s_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6))).slice(0, 64);
       const name = String(item.name || item.item || '').trim().slice(0, 255);
       const amount = String(item.amount || item.quantity || '1').slice(0, 64);
       const unit = String(item.unit || '').slice(0, 64);
@@ -93,7 +93,6 @@ export async function POST(req: NextRequest) {
           id, user_id, name, amount, unit, category, staple, checked, recipe_id, recipe_title, updated_at
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
         ON CONFLICT (id) DO UPDATE SET
-          user_id = COALESCE(EXCLUDED.user_id, shopping_items.user_id),
           name = EXCLUDED.name,
           amount = EXCLUDED.amount,
           unit = EXCLUDED.unit,
@@ -106,9 +105,8 @@ export async function POST(req: NextRequest) {
       `, [id, targetUserId, name, amount, unit, category, staple, checked, recipeId, recipeTitle]);
     }
 
-    return NextResponse.json({ success: true, message: 'Shopping item(s) saved to PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Shopping items saved in PostgreSQL.' });
   } catch (err: any) {
-    console.error('[POST /api/shopping] Error:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -134,34 +132,28 @@ export async function DELETE(req: NextRequest) {
 
     if (action === 'remove_completed') {
       if (bodyIds.length > 0) {
-        await query('DELETE FROM shopping_items WHERE id = ANY($1::text[])', [bodyIds]);
-        await query('DELETE FROM shopping_list WHERE id = ANY($1::text[])', [bodyIds]).catch(() => {});
+        await query('DELETE FROM shopping_items WHERE id = ANY($1::varchar[])', [bodyIds]);
       } else {
         const sql = userId
-          ? "DELETE FROM shopping_items WHERE checked = TRUE AND (user_id = $1 OR user_id = 'usr_admin_1' OR user_id IS NULL)"
-          : "DELETE FROM shopping_items WHERE checked = TRUE";
+          ? 'DELETE FROM shopping_items WHERE checked = TRUE AND (user_id = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL)'
+          : 'DELETE FROM shopping_items WHERE checked = TRUE';
         const params = userId ? [userId] : [];
         await query(sql, params);
-        await query(sql.replace('shopping_items', 'shopping_list'), params).catch(() => {});
       }
       return NextResponse.json({ success: true, message: 'Completed items removed from PostgreSQL.' });
     }
 
     if (bodyIds.length > 0) {
-      await query('DELETE FROM shopping_items WHERE id = ANY($1::text[])', [bodyIds]);
-      await query('DELETE FROM shopping_list WHERE id = ANY($1::text[])', [bodyIds]).catch(() => {});
-      return NextResponse.json({ success: true, message: 'Shopping items removed from PostgreSQL.' });
+      await query('DELETE FROM shopping_items WHERE id = ANY($1::varchar[])', [bodyIds]);
+      return NextResponse.json({ success: true, message: 'Items removed from PostgreSQL.' });
     }
 
     if (!id) {
       return NextResponse.json({ success: false, error: 'Item ID is required' }, { status: 400 });
     }
 
-    const cleanId = id.trim();
-    await query('DELETE FROM shopping_items WHERE id = $1', [cleanId]);
-    await query('DELETE FROM shopping_list WHERE id = $1', [cleanId]).catch(() => {});
-
-    return NextResponse.json({ success: true, message: 'Shopping item removed from PostgreSQL.' });
+    await query('DELETE FROM shopping_items WHERE id = $1', [id.trim()]);
+    return NextResponse.json({ success: true, message: 'Item removed from PostgreSQL.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
