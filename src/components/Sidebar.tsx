@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
@@ -9,11 +9,11 @@ import {
   ShieldCheck, CreditCard, Tag, Utensils, Settings, LogOut, 
   Menu, X, Wallet, Languages, Cpu, Moon, Sun, Key, Coins, 
   Bell, BellRing, User as UserIcon, Plus, ChevronDown, ChevronRight, 
-  Layers, Check, Database, HardDrive, Receipt, Globe
+  Layers, Check, Database, Receipt, Globe, HardDrive 
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON } from '@/lib/siteConfig';
-import { useTranslation } from '@/components/LanguageProvider';
+import { useTranslation, SupportedLanguage } from '@/components/LanguageProvider';
 
 interface InAppNotification {
   id: string;
@@ -35,7 +35,7 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   JPY: '¥'
 };
 
-const LANGUAGE_FLAG_MAP: Record<string, string> = {
+const DEFAULT_FALLBACK_FLAG_MAP: Record<string, string> = {
   en: '🇺🇸',
   es: '🇪🇸',
   fr: '🇫🇷',
@@ -55,9 +55,63 @@ const LANGUAGE_FLAG_MAP: Record<string, string> = {
   tr: '🇹🇷'
 };
 
-const getLanguageFlag = (code: string): string => {
-  if (!code) return '🌐';
-  return LANGUAGE_FLAG_MAP[code.toLowerCase().trim()] || '🌐';
+const DEFAULT_FALLBACK_LANGUAGES: SupportedLanguage[] = [
+  { id: 'lang_en', code: 'en', name: 'English', flag: '🇺🇸', status: 'active', is_default: true },
+  { id: 'lang_es', code: 'es', name: 'Español', flag: '🇪🇸', status: 'active', is_default: false },
+  { id: 'lang_fr', code: 'fr', name: 'Français', flag: '🇫🇷', status: 'active', is_default: false },
+  { id: 'lang_th', code: 'th', name: 'ภาษาไทย (Thai)', flag: '🇹🇭', status: 'active', is_default: false },
+  { id: 'lang_de', code: 'de', name: 'Deutsch', flag: '🇩🇪', status: 'active', is_default: false },
+  { id: 'lang_it', code: 'it', name: 'Italiano', flag: '🇮🇹', status: 'active', is_default: false },
+  { id: 'lang_ja', code: 'ja', name: '日本語', flag: '🇯🇵', status: 'active', is_default: false },
+  { id: 'lang_zh', code: 'zh', name: '中文 (Chinese)', flag: '🇨🇳', status: 'active', is_default: false },
+  { id: 'lang_ko', code: 'ko', name: '한국어 (Korean)', flag: '🇰🇷', status: 'active', is_default: false },
+  { id: 'lang_pt', code: 'pt', name: 'Português', flag: '🇵🇹', status: 'active', is_default: false },
+  { id: 'lang_ru', code: 'ru', name: 'Русский', flag: '🇷🇺', status: 'active', is_default: false },
+  { id: 'lang_ar', code: 'ar', name: 'العربية (Arabic)', flag: '🇸🇦', direction: 'rtl', status: 'active', is_default: false },
+];
+
+const getLanguageFlag = (code?: string): string => {
+  if (!code || typeof code !== 'string') return '🌐';
+  return DEFAULT_FALLBACK_FLAG_MAP[code.toLowerCase().trim()] || '🌐';
+};
+
+// Safe Normalizer for any raw language payload (prevents undefined.toLowerCase() crash)
+const normalizeLanguageItem = (item: any): SupportedLanguage => {
+  if (!item) {
+    return { id: 'lang_en', code: 'en', name: 'English', flag: '🇺🇸', status: 'active', is_default: true };
+  }
+  if (typeof item === 'string') {
+    const code = item.toLowerCase().trim();
+    return {
+      id: `lang_${code}`,
+      code,
+      name: code.toUpperCase(),
+      flag: getLanguageFlag(code),
+      status: 'active',
+      is_default: code === 'en'
+    };
+  }
+  const rawCode = item.code || item.locale || item.lang || item.id || 'en';
+  const code = typeof rawCode === 'string' ? rawCode.toLowerCase().trim() : 'en';
+  const name = item.name || item.label || code.toUpperCase();
+  const flag = item.flag || getLanguageFlag(code);
+  const status = typeof item.status === 'string' ? item.status.toLowerCase().trim() : 'active';
+  return {
+    id: item.id || `lang_${code}`,
+    code,
+    name,
+    flag,
+    direction: item.direction || (code === 'ar' || code === 'he' ? 'rtl' : 'ltr'),
+    status: status || 'active',
+    is_default: Boolean(item.is_default || item.isDefault)
+  };
+};
+
+// Safe code comparison helper (never throws TypeError on undefined)
+const isCodeMatch = (item: any, target: string): boolean => {
+  if (!item || !target) return false;
+  const itemCode = typeof item === 'string' ? item : (item.code || item.locale || item.lang || '');
+  return typeof itemCode === 'string' && itemCode.toLowerCase().trim() === target.toLowerCase().trim();
 };
 
 const isImageIcon = (icon?: unknown): icon is string =>
@@ -69,11 +123,13 @@ const isImageIcon = (icon?: unknown): icon is string =>
   );
 
 export default function Sidebar() {
-  // 1. ALL REACT HOOKS UNCONDITIONALLY AT THE TOP LEVEL (REACT 19 COMPLIANT)
   const pathname = usePathname() || '';
   const langContext = useTranslation();
   const t = langContext?.t || ((k: string, fb?: string) => fb || k);
-  const currentLanguage = (langContext as any)?.currentLanguage || (langContext as any)?.locale || (langContext as any)?.language || 'en';
+  
+  // Safe resolution of current active language
+  const rawLang = (langContext as any)?.currentLanguage || (langContext as any)?.locale || (langContext as any)?.language || 'en';
+  const currentLanguage = typeof rawLang === 'string' && rawLang.trim() ? rawLang.trim().toLowerCase() : 'en';
   const changeLanguage = (langContext as any)?.changeLanguage || (langContext as any)?.setLocale || (langContext as any)?.setLanguage || (() => {});
 
   const [mounted, setMounted] = useState<boolean>(false);
@@ -83,6 +139,9 @@ export default function Sidebar() {
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
+
+  // Dynamic Languages List (Synced from /admin/language and /api/admin/languages)
+  const [availableLanguages, setAvailableLanguages] = useState<SupportedLanguage[]>(DEFAULT_FALLBACK_LANGUAGES);
 
   // Accordion Sections State
   const [openSections, setOpenSections] = useState<{
@@ -154,6 +213,25 @@ export default function Sidebar() {
     return () => window.removeEventListener('resize', updateLayoutMetrics);
   }, [isAuthRoute, isHomePage, isCollapsed]);
 
+  // Dynamic Languages Fetcher (Direct API & LanguageProvider Sync)
+  const syncLanguages = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/languages?t=' + Date.now(), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data.languages) ? data.languages : [];
+        if (list.length > 0) {
+          setAvailableLanguages(list.map(normalizeLanguageItem));
+          return;
+        }
+      }
+    } catch (_) {}
+
+    if (Array.isArray((langContext as any)?.availableLanguages) && (langContext as any).availableLanguages.length > 0) {
+      setAvailableLanguages((langContext as any).availableLanguages.map(normalizeLanguageItem));
+    }
+  }, [langContext]);
+
   const syncUserState = useCallback(() => {
     try {
       const u = getCurrentUser();
@@ -210,14 +288,23 @@ export default function Sidebar() {
   useEffect(() => {
     setMounted(true);
     syncUserState();
+    syncLanguages();
 
     const handleSync = () => syncUserState();
+    const handleLangSync = () => syncLanguages();
+
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('zecratary_site_settings_changed', handleSync);
     window.addEventListener('zecratary_theme_mode_changed', handleSync);
     window.addEventListener('zecratary_wallet_updated', handleSync);
     window.addEventListener('zecratary_tokens_updated', handleSync);
+
+    // Dynamic Language Synchronization Events
+    window.addEventListener('zecratary_languages_updated', handleLangSync);
+    window.addEventListener('zecratary_locale_changed', handleLangSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleLangSync);
+    window.addEventListener('focus', handleLangSync);
 
     return () => {
       window.removeEventListener('storage', handleSync);
@@ -226,8 +313,13 @@ export default function Sidebar() {
       window.removeEventListener('zecratary_theme_mode_changed', handleSync);
       window.removeEventListener('zecratary_wallet_updated', handleSync);
       window.removeEventListener('zecratary_tokens_updated', handleSync);
+
+      window.removeEventListener('zecratary_languages_updated', handleLangSync);
+      window.removeEventListener('zecratary_locale_changed', handleLangSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleLangSync);
+      window.removeEventListener('focus', handleLangSync);
     };
-  }, [syncUserState]);
+  }, [syncUserState, syncLanguages]);
 
   // Click outside listener for dropdowns
   useEffect(() => {
@@ -289,6 +381,34 @@ export default function Sidebar() {
     }
   };
 
+  // Filter Active Languages Safely & Dynamically
+  const activeLanguages = useMemo(() => {
+    const rawList = Array.isArray(availableLanguages) && availableLanguages.length > 0 
+      ? availableLanguages 
+      : DEFAULT_FALLBACK_LANGUAGES;
+    return rawList
+      .map(normalizeLanguageItem)
+      .filter(l => l.status === 'active' || l.status === '');
+  }, [availableLanguages]);
+
+  // Safe Resolution of Active Language Object (Eliminates undefined.toLowerCase() error)
+  const currentLangObj = useMemo(() => {
+    const safeLang = typeof currentLanguage === 'string' && currentLanguage ? currentLanguage.toLowerCase().trim() : 'en';
+    const found = activeLanguages.find(l => isCodeMatch(l, safeLang)) || 
+                  (Array.isArray(availableLanguages) ? availableLanguages.map(normalizeLanguageItem).find(l => isCodeMatch(l, safeLang)) : null);
+    
+    if (found) {
+      return found;
+    }
+    return { 
+      id: `lang_${safeLang}`,
+      code: safeLang, 
+      name: safeLang.toUpperCase(), 
+      flag: getLanguageFlag(safeLang),
+      status: 'active'
+    };
+  }, [activeLanguages, availableLanguages, currentLanguage]);
+
   if (!mounted || isAuthRoute || isHomePage) {
     return null;
   }
@@ -299,18 +419,16 @@ export default function Sidebar() {
     currentUser?.email?.includes('admin')
   );
 
-  // ACCURATE ROUTE MATCHER: Eliminates dual-highlighting between /admin and /admin/*
+  // Exact path matching for /admin to prevent dual highlighting
   const isRouteActive = (route: string): boolean => {
     if (!pathname) return false;
     const cleanPath = pathname === '/' ? '/' : pathname.replace(/\/+$/, '');
     const cleanRoute = route === '/' ? '/' : route.replace(/\/+$/, '');
 
-    // Root and Admin Overview require exact match so child modules don't activate them
     if (cleanRoute === '/' || cleanRoute === '/admin') {
       return cleanPath === cleanRoute;
     }
 
-    // Sibling routes require exact match or explicit sub-path boundary ('/route/...')
     return cleanPath === cleanRoute || cleanPath.startsWith(`${cleanRoute}/`);
   };
 
@@ -499,7 +617,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* LANGUAGE PICKER */}
+          {/* DYNAMIC TOP BAR LANGUAGE PICKER (FULLY TYPE-SAFE & NULL-TOLERANT) */}
           <div className="relative">
             <button
               type="button"
@@ -517,36 +635,63 @@ export default function Sidebar() {
               }}
               title={t('selectLanguage', 'Select Language')}
             >
-              <span className="text-sm">{getLanguageFlag(currentLanguage || 'en')}</span>
-              <span className="uppercase text-[11px] font-extrabold">{currentLanguage || 'EN'}</span>
+              <span className="text-sm">{currentLangObj.flag || getLanguageFlag(currentLanguage)}</span>
+              <span className="uppercase text-[11px] font-extrabold">{currentLangObj.code}</span>
+              <ChevronDown className="h-3 w-3 opacity-60" />
             </button>
 
             {langDropdownOpen && (
               <div
-                className="absolute right-0 mt-2 w-44 border rounded-2xl p-2 shadow-xl z-50 space-y-1 text-xs"
+                className="absolute right-0 mt-2 w-56 border rounded-2xl p-2 shadow-xl z-50 space-y-1 text-xs"
                 style={{
                   backgroundColor: 'var(--color-card)',
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text)'
                 }}
               >
-                {Object.keys(LANGUAGE_FLAG_MAP).map((code) => (
-                  <button
-                    key={code}
-                    type="button"
-                    onClick={() => {
-                      if (typeof changeLanguage === 'function') changeLanguage(code);
-                      setLangDropdownOpen(false);
-                    }}
-                    className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg hover:bg-slate-800/40 text-xs font-semibold cursor-pointer transition"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span>{LANGUAGE_FLAG_MAP[code]}</span>
-                      <span className="uppercase">{code}</span>
-                    </span>
-                    {currentLanguage === code && <Check className="h-3.5 w-3.5 text-emerald-400" />}
-                  </button>
-                ))}
+                <div className="px-2 py-1 text-[10px] font-black uppercase tracking-wider text-muted-foreground opacity-70 border-b mb-1 flex items-center justify-between" style={{ borderColor: 'var(--color-border)' }}>
+                  <span>{t('availableLanguages', 'Languages')}</span>
+                  <span className="text-[9px] font-bold text-[var(--color-primary)]">{activeLanguages.length} active</span>
+                </div>
+                <div className="max-h-64 overflow-y-auto space-y-0.5 pr-1">
+                  {activeLanguages.map((rawLang, idx) => {
+                    const lang = normalizeLanguageItem(rawLang);
+                    const isSelected = isCodeMatch(lang.code, currentLanguage);
+                    return (
+                      <button
+                        key={lang.code || `lang_key_${idx}`}
+                        type="button"
+                        onClick={() => {
+                          if (typeof changeLanguage === 'function' && lang.code) changeLanguage(lang.code);
+                          setLangDropdownOpen(false);
+                        }}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold cursor-pointer transition hover:bg-slate-800/40"
+                        style={isSelected ? { backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-primary)' } : {}}
+                      >
+                        <span className="flex items-center gap-2.5 truncate">
+                          <span className="text-base shrink-0">{lang.flag || getLanguageFlag(lang.code)}</span>
+                          <span className="font-bold truncate">{lang.name || (lang.code || '').toUpperCase()}</span>
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                          <span className="text-[10px] font-extrabold uppercase opacity-60">{lang.code}</span>
+                          {isSelected && <Check className="h-3.5 w-3.5 text-emerald-400" />}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                {isAdmin && (
+                  <div className="pt-1.5 border-t mt-1" style={{ borderColor: 'var(--color-border)' }}>
+                    <Link
+                      href="/admin/language"
+                      onClick={() => setLangDropdownOpen(false)}
+                      className="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-[var(--color-primary)] hover:bg-slate-800/20 transition"
+                    >
+                      <span>{t('manageLanguages', 'Configure Languages')}</span>
+                      <Languages className="h-3.5 w-3.5" />
+                    </Link>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -979,14 +1124,17 @@ export default function Sidebar() {
                 <Link href="/admin/frontend" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/frontend')} style={navStyle('/admin/frontend')}>
                   <Globe className="h-4 w-4" /> <span>{t('pageBuilder', 'Page Builder')}</span>
                 </Link>
+                <Link href="/admin/language" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/language')} style={navStyle('/admin/language')}>
+                  <Languages className="h-4 w-4" /> <span>{t('languageSettings', 'Languages')}</span>
+                </Link>
+                <Link href="/admin/storage" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/storage')} style={navStyle('/admin/storage')}>
+                  <HardDrive className="h-4 w-4" /> <span>{t('storage', 'Storage Settings')}</span>
+                </Link>
                 <Link href="/admin/users" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/users')} style={navStyle('/admin/users')}>
                   <UserPlus className="h-4 w-4" /> <span>{t('users', 'User Accounts')}</span>
                 </Link>
                 <Link href="/admin/payment" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/payment')} style={navStyle('/admin/payment')}>
                   <ShieldCheck className="h-4 w-4" /> <span>{t('payments', 'Payment Gateway')}</span>
-                </Link>
-                <Link href="/admin/storage" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/storage')} style={navStyle('/admin/storage')}>
-                  <HardDrive className="h-4 w-4" /> <span>{t('storage', 'Storage Settings')}</span>
                 </Link>
               </div>
             )}

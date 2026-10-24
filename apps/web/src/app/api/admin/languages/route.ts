@@ -1,99 +1,95 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/db';
+import fs from 'fs';
+import path from 'path';
+
 export const dynamic = 'force-dynamic';
-import { NextResponse } from 'next/server';
-import { Pool } from 'pg';
+export const revalidate = 0;
 
-let pool: Pool | null = null;
+const DEFAULT_LANGUAGES = [
+  { id: 'lang_en', code: 'en', name: 'English', flag: '🇺🇸', direction: 'ltr', status: 'active', is_default: true },
+  { id: 'lang_es', code: 'es', name: 'Español', flag: '🇪🇸', direction: 'ltr', status: 'active', is_default: false },
+  { id: 'lang_fr', code: 'fr', name: 'Français', flag: '🇫🇷', direction: 'ltr', status: 'active', is_default: false },
+  { id: 'lang_th', code: 'th', name: 'ภาษาไทย (Thai)', flag: '🇹🇭', direction: 'ltr', status: 'active', is_default: false },
+  { id: 'lang_de', code: 'de', name: 'Deutsch', flag: '🇩🇪', direction: 'ltr', status: 'active', is_default: false },
+  { id: 'lang_it', code: 'it', name: 'Italiano', flag: '🇮🇹', direction: 'ltr', status: 'active', is_default: false },
+  { id: 'lang_ja', code: 'ja', name: '日本語', flag: '🇯🇵', direction: 'ltr', status: 'active', is_default: false },
+  { id: 'lang_zh', code: 'zh', name: '中文 (Chinese)', flag: '🇨🇳', direction: 'ltr', status: 'active', is_default: false },
+  { id: 'lang_ko', code: 'ko', name: '한국어 (Korean)', flag: '🇰🇷', direction: 'ltr', status: 'active', is_default: false },
+  { id: 'lang_pt', code: 'pt', name: 'Português', flag: '🇵🇹', direction: 'ltr', status: 'active', is_default: false },
+  { id: 'lang_ru', code: 'ru', name: 'Русский', flag: '🇷🇺', direction: 'ltr', status: 'active', is_default: false },
+  { id: 'lang_ar', code: 'ar', name: 'العربية (Arabic)', flag: '🇸🇦', direction: 'rtl', status: 'active', is_default: false }
+];
 
-function getDbPool() {
-  if (!pool) {
-    const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-    if (connectionString) {
-      pool = new Pool({ connectionString });
+export async function GET() {
+  try {
+    const res: any = await query(`
+      SELECT supported_languages, translations FROM admin_settings 
+      WHERE id = 'primary_settings' OR id = '1' 
+      ORDER BY updated_at DESC LIMIT 1;
+    `);
+    const row = Array.isArray(res) ? res[0] : res?.rows?.[0];
+
+    let languages = DEFAULT_LANGUAGES;
+    let translations = {};
+
+    if (row) {
+      if (row.supported_languages) {
+        const parsed = typeof row.supported_languages === 'string'
+          ? JSON.parse(row.supported_languages)
+          : row.supported_languages;
+        if (Array.isArray(parsed) && parsed.length > 0) languages = parsed;
+      }
+      if (row.translations) {
+        translations = typeof row.translations === 'string'
+          ? JSON.parse(row.translations)
+          : row.translations;
+      }
     }
-  }
-  return pool;
-}
 
-async function initTranslationsTable(client: any) {
-  await client.query(`
-    CREATE TABLE IF NOT EXISTS app_translations (
-      lang_code VARCHAR(10) PRIMARY KEY,
-      lang_name VARCHAR(100) NOT NULL,
-      dictionary JSONB NOT NULL DEFAULT '{}',
-      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    return NextResponse.json(
+      { success: true, languages, translations },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
     );
-  `);
-}
-
-export async function GET(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const code = searchParams.get('code');
-    const db = getDbPool();
-
-    if (db) {
-      const client = await db.connect();
-      try {
-        await initTranslationsTable(client);
-        if (code) {
-          const res = await client.query('SELECT dictionary FROM app_translations WHERE lang_code = $1', [code.toLowerCase().trim()]);
-          const dictionary = res.rows[0]?.dictionary || {};
-          return NextResponse.json({ success: true, code, dictionary });
-        } else {
-          const res = await client.query('SELECT lang_code, lang_name, dictionary FROM app_translations');
-          const records: Record<string, any> = {};
-          res.rows.forEach((r: any) => { records[r.lang_code] = r.dictionary; });
-          return NextResponse.json({ success: true, translations: records });
-        }
-      } finally {
-        client.release();
-      }
-    }
-
-    return NextResponse.json({ success: true, translations: {}, fallback: true });
-  } catch (error: any) {
-    console.error('[API /api/admin/languages GET error]:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  } catch (err: any) {
+    return NextResponse.json({ success: true, languages: DEFAULT_LANGUAGES, translations: {} });
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await request.json();
-    const { code, name, dictionary } = body;
+    const body = await req.json();
+    const languages = Array.isArray(body) ? body : (body.languages || body.supportedLanguages);
+    const translations = body.translations;
 
-    if (!code) {
-      return NextResponse.json({ success: false, error: 'Language code is required' }, { status: 400 });
+    const updates: string[] = [];
+    const params: any[] = [];
+    let pIdx = 1;
+
+    if (Array.isArray(languages)) {
+      updates.push(`supported_languages = $${pIdx}::jsonb`);
+      params.push(JSON.stringify(languages));
+      pIdx++;
     }
 
-    const cleanCode = code.toLowerCase().trim();
-    const cleanName = (name || cleanCode).trim();
-    const dictObj = dictionary || {};
-
-    const db = getDbPool();
-    if (db) {
-      const client = await db.connect();
-      try {
-        await initTranslationsTable(client);
-        await client.query(`
-          INSERT INTO app_translations (lang_code, lang_name, dictionary, updated_at)
-          VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-          ON CONFLICT (lang_code) 
-          DO UPDATE SET 
-            lang_name = EXCLUDED.lang_name,
-            dictionary = EXCLUDED.dictionary,
-            updated_at = CURRENT_TIMESTAMP;
-        `, [cleanCode, cleanName, JSON.stringify(dictObj)]);
-        
-        return NextResponse.json({ success: true, message: `Translations for ${cleanCode} stored in PostgreSQL` });
-      } finally {
-        client.release();
-      }
+    if (translations && typeof translations === 'object') {
+      updates.push(`translations = $${pIdx}::jsonb`);
+      params.push(JSON.stringify(translations));
+      pIdx++;
     }
 
-    return NextResponse.json({ success: true, message: 'Processed without PostgreSQL connection' });
-  } catch (error: any) {
-    console.error('[API /api/admin/languages POST error]:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    if (updates.length > 0) {
+      await query(`
+        INSERT INTO admin_settings (id, updated_at)
+        VALUES ('primary_settings', NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          ${updates.join(', ')},
+          updated_at = NOW();
+      `, params);
+    }
+
+    return NextResponse.json({ success: true, message: 'Languages & translations updated successfully' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
