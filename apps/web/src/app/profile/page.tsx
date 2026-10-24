@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, logoutUser, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+import FontAwesomeIcon from '@/components/FontAwesomeIcon';
 
 type SocialProvider = 'google' | 'facebook' | 'apple';
 
