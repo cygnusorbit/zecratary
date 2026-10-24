@@ -1,7 +1,7 @@
 // @ts-nocheck
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { 
@@ -52,6 +52,10 @@ function WalletContent() {
   const [user, setUser] = useState<User | null>(null);
   const [balance, setBalance] = useState<number>(0);
 
+  // Concurrency and Loop Prevention Guards
+  const isFetchingRef = useRef<boolean>(false);
+  const syncTimeoutRef = useRef<any>(null);
+
   // Settings
   const [settings, setSettings] = useState<WalletSettings>({
     is_enabled: true,
@@ -86,8 +90,8 @@ function WalletContent() {
     setTimeout(() => setToastMessage(null), 3800);
   };
 
-  // Synchronize balance with localStorage and header counters
-  const syncLocalBalance = useCallback((newBal: number) => {
+  // Pure Local State & Storage Synchronization (NO RECURSIVE EVENT DISPATCHES)
+  const syncLocalBalancePure = useCallback((newBal: number) => {
     setBalance(newBal);
     if (typeof window !== 'undefined') {
       try {
@@ -101,22 +105,17 @@ function WalletContent() {
           }
         }
       } catch (_) {}
-      window.dispatchEvent(new Event('zecratary_wallet_updated'));
-      window.dispatchEvent(new Event('storage'));
-
-      try {
-        const bc = new BroadcastChannel('zecratary_balance_channel');
-        bc.postMessage({ type: 'WALLET_UPDATED', wallet: newBal });
-        bc.close();
-      } catch (_) {}
     }
   }, []);
 
-  // Fetch Wallet Data, Settings & Audit Ledger
-  const fetchWalletData = useCallback(async (activeUser: User | null, targetPage = 1, search = '', filter = 'all') => {
+  // Fetch Wallet Data (Idempotent GET without self-triggering event broadcasts)
+  const fetchWalletData = useCallback(async (activeUser: User | null, targetPage = page, search = searchQuery, filter = typeFilter) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+    setLoading(true);
+
     const userEmail = activeUser?.email || 'admin@zecratary.com';
     const userId = activeUser?.id || 'usr_admin_1';
-    setLoading(true);
 
     try {
       const qParams = new URLSearchParams({
@@ -125,8 +124,7 @@ function WalletContent() {
         page: String(targetPage),
         limit: '10',
         search: search,
-        type: filter,
-        t: String(Date.now())
+        type: filter
       });
 
       const res = await fetch(`/api/wallet?${qParams.toString()}`, { cache: 'no-store' });
@@ -136,7 +134,7 @@ function WalletContent() {
           const wBal = typeof data.wallet_balance === 'number' 
             ? data.wallet_balance 
             : (typeof data.balance === 'number' ? data.balance : Number(data.user?.wallet_balance || 0));
-          syncLocalBalance(wBal);
+          syncLocalBalancePure(wBal);
 
           if (data.settings) {
             setSettings({
@@ -161,13 +159,25 @@ function WalletContent() {
         }
       }
     } catch (err) {
-      console.warn('[WalletPage] Fetch error:', err);
+      console.warn('[WalletPage] Read notice:', err);
     } finally {
       setLoading(false);
+      isFetchingRef.current = false;
     }
-  }, [syncLocalBalance]);
+  }, [syncLocalBalancePure, page, searchQuery, typeFilter]);
 
-  // Handle URL Pre-fill Amount from /token shortfall & Stripe Redirection Reconcile
+  // Stable ref for fetchWalletData to decouple primary lifecycle effect
+  const fetchRef = useRef(fetchWalletData);
+  useEffect(() => {
+    fetchRef.current = fetchWalletData;
+  });
+
+  // Isolated Document Title Effect (Doesn't trigger data re-fetching)
+  useEffect(() => {
+    document.title = `${t('storeWalletTitle', 'Store Wallet')} - Zecratary`;
+  }, [t]);
+
+  // Initial Mount Effect (Executes Strictly Once)
   useEffect(() => {
     initAuthStorage();
     const u = getCurrentUser();
@@ -177,7 +187,7 @@ function WalletContent() {
     }
     setUser(u);
 
-    // Read URL parameters
+    // Read initial URL parameters safely
     const paramAmount = searchParams?.get('amount');
     if (paramAmount) {
       const parsedAmount = parseFloat(paramAmount);
@@ -191,32 +201,45 @@ function WalletContent() {
     const isSuccess = searchParams?.get('success') === 'true';
     if (sessionId || isSuccess) {
       showToast(t('paymentReconciledToast', 'Payment verified! Your wallet has been credited.'), 'success');
+      // Clean query parameters from URL to avoid re-verification on reload
+      try {
+        window.history.replaceState({}, '', '/wallet');
+      } catch (_) {}
     }
 
-    fetchWalletData(u, page, searchQuery, typeFilter);
+    // Execute initial load
+    fetchRef.current(u);
 
-    const handleSync = () => {
-      const active = getCurrentUser();
-      if (active) {
-        setUser(active);
-        fetchWalletData(active, page, searchQuery, typeFilter);
-      }
+    // Debounced listener for external window events (300ms throttle)
+    const handleDebouncedSync = () => {
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+      syncTimeoutRef.current = setTimeout(() => {
+        const active = getCurrentUser();
+        if (active) {
+          setUser(active);
+          fetchRef.current(active);
+        }
+      }, 300);
     };
 
-    window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_wallet_updated', handleSync);
-    window.addEventListener('zecratary_languages_updated', handleSync);
-    window.addEventListener('zecratary_dictionary_updated', handleSync);
-    window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('zecratary_languages_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_dictionary_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_locale_changed', handleDebouncedSync);
 
     return () => {
-      window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_wallet_updated', handleSync);
-      window.removeEventListener('zecratary_languages_updated', handleSync);
-      window.removeEventListener('zecratary_dictionary_updated', handleSync);
-      window.removeEventListener('zecratary_locale_changed', handleSync);
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+      window.removeEventListener('zecratary_languages_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_dictionary_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_locale_changed', handleDebouncedSync);
     };
-  }, [fetchWalletData, page, searchQuery, typeFilter, searchParams, router, t]);
+  }, []); // Strictly mount-only: []
+
+  // Re-fetch only on explicit page, search, or type filter changes
+  useEffect(() => {
+    if (user) {
+      fetchRef.current(user, page, searchQuery, typeFilter);
+    }
+  }, [page, searchQuery, typeFilter]);
 
   // Compute Active Deposit Amount and Bonus
   const finalDepositAmount = useMemo(() => {
@@ -238,6 +261,7 @@ function WalletContent() {
     return (finalDepositAmount * activeBonusPercent) / 100;
   }, [finalDepositAmount, activeBonusPercent]);
 
+  // Execute User-Initiated Deposit Mutation (Broadcasts events ONLY on write)
   const handleDeposit = async () => {
     if (finalDepositAmount < settings.min_topup) {
       showToast((t('minTopupWarning', 'Minimum deposit is {min}')).replace('{min}', `${activeCurrencySymbol}${settings.min_topup}`), 'error');
@@ -247,7 +271,7 @@ function WalletContent() {
       showToast((t('maxTopupWarning', 'Maximum deposit is {max}')).replace('{max}', `${activeCurrencySymbol}${settings.max_topup}`), 'error');
       return;
     }
-    if (!user) return;
+    if (!user || submitting) return;
     setSubmitting(true);
 
     try {
@@ -270,7 +294,6 @@ function WalletContent() {
         throw new Error(data.error || 'Failed to deposit funds');
       }
 
-      // If gateway provides checkout URL (e.g. Stripe Hosted Checkout)
       if (data.checkoutUrl) {
         showToast(t('checkoutRedirectNotice', 'Redirecting to secure payment checkout...'));
         window.location.href = data.checkoutUrl;
@@ -280,7 +303,19 @@ function WalletContent() {
       const newBal = typeof data.wallet_balance === 'number' 
         ? data.wallet_balance 
         : (balance + finalDepositAmount + bonusAmount);
-      syncLocalBalance(newBal);
+      
+      syncLocalBalancePure(newBal);
+
+      // Explicitly broadcast balance changes ONLY upon write actions
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_wallet_updated'));
+        window.dispatchEvent(new Event('storage'));
+        try {
+          const bc = new BroadcastChannel('zecratary_balance_channel');
+          bc.postMessage({ type: 'WALLET_UPDATED', wallet: newBal });
+          bc.close();
+        } catch (_) {}
+      }
 
       showToast(
         (t('depositSuccessToast', 'Successfully deposited {amount} into your wallet!'))
@@ -290,7 +325,7 @@ function WalletContent() {
 
       setCustomAmount('');
       setSelectedAmount(settings.preset_amounts[0] || 50);
-      fetchWalletData(user, page, searchQuery, typeFilter);
+      fetchRef.current(user, page, searchQuery, typeFilter);
     } catch (err: any) {
       showToast(err.message || 'Deposit failed.', 'error');
     } finally {
@@ -336,7 +371,7 @@ function WalletContent() {
         <div className="flex items-center gap-2.5">
           <button
             type="button"
-            onClick={() => fetchWalletData(user, page, searchQuery, typeFilter)}
+            onClick={() => fetchRef.current(user, page, searchQuery, typeFilter)}
             disabled={loading}
             className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50 hover:opacity-80"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
@@ -461,7 +496,7 @@ function WalletContent() {
             </div>
           </div>
 
-          {/* Payment Gateway Options with Explicit Check Icon */}
+          {/* Payment Gateway Options with Check Icon */}
           <div className="space-y-2">
             <label className="block text-xs font-bold opacity-80">{t('paymentGateway', 'Payment Gateway')}</label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
@@ -675,7 +710,6 @@ function WalletContent() {
   );
 }
 
-// Wrap in Suspense boundary for Next.js App Router useSearchParams compliance
 export default function WalletPage() {
   return (
     <Suspense fallback={
