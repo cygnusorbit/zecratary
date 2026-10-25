@@ -47,32 +47,17 @@
     "Combine - Add drained pasta and stir well until fully coated, the sauce will thicken slightly and cling to the macaroni. Add more pasta water if the sauce gets too thick.",
     "Serve immediately while hot and creamy. I like to grind extra black pepper on top just before eating. Enjoy!"
   ],
-  "nutrition": {
-    "@type": "NutritionInformation",
-    "calories": "811 kcal",
-    "carbohydrateContent": "92 g",
-    "proteinContent": "36 g",
-    "fatContent": "33 g",
-    "saturatedFatContent": "18 g",
-    "transFatContent": "1 g",
-    "cholesterolContent": "96 mg",
-    "sodiumContent": "1071 mg",
-    "fiberContent": "4 g",
-    "sugarContent": "10 g",
-    "unsaturatedFatContent": "11 g",
-    "servingSize": "1 serving"
-  },
+  "nutrition": {},
   "tags": [
-    "Breakfast",
-    "URL"
+    "Breakfast"
   ],
   "image": "/uploads/recipes/scraped_1790686697546_t4s9s.webp",
   "imageUrl": "/uploads/recipes/scraped_1790686697546_t4s9s.webp",
   "sourceUrl": "https://www.recipetineats.com/coquillettes-au-jambon-french-macaroni-and-cheese-with-ham/",
   "isFavorite": false,
   "isCooked": false,
-  "rating": 0,
+  "rating": 5,
   "bookId": null,
   "createdAt": "2026-10-03T09:19:34.315Z",
-  "updatedAt": "2026-10-25T17:11:30.979Z"
+  "updatedAt": "2026-10-25T18:53:23.025Z"
 }

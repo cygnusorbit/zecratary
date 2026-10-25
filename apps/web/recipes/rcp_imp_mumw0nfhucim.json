@@ -53,16 +53,15 @@
   ],
   "nutrition": {},
   "tags": [
-    "Main Dish",
-    "URL"
+    "Main Dish"
   ],
   "image": "/uploads/recipes/scraped_1790699114286_umr0aw.webp",
   "imageUrl": "/uploads/recipes/scraped_1790699114286_umr0aw.webp",
   "sourceUrl": "https://www.recipetineats.com/oven-baked-chicken-schnitzel/",
   "isFavorite": false,
   "isCooked": false,
-  "rating": 0,
+  "rating": 5,
   "bookId": null,
   "createdAt": "2026-10-03T09:19:34.309Z",
-  "updatedAt": "2026-10-25T17:11:30.996Z"
+  "updatedAt": "2026-10-25T18:53:23.033Z"
 }

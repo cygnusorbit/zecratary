@@ -52,16 +52,15 @@
   ],
   "nutrition": {},
   "tags": [
-    "Breakfast",
-    "URL"
+    "Breakfast"
   ],
   "image": "/uploads/recipes/scraped_1791025786196_r15tnb.webp",
   "imageUrl": "/uploads/recipes/scraped_1791025786196_r15tnb.webp",
   "sourceUrl": "https://www.recipetineats.com/lemon-coconut-slice-cake/",
   "isFavorite": false,
   "isCooked": false,
-  "rating": 0,
-  "bookId": null,
+  "rating": 5,
+  "bookId": "book_mus64ag3_5bps",
   "createdAt": "2026-10-03T11:09:46.445Z",
-  "updatedAt": "2026-10-25T17:11:30.951Z"
+  "updatedAt": "2026-10-25T18:53:22.991Z"
 }

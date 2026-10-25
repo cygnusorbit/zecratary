@@ -16,7 +16,7 @@
   "visibility": "private",
   "title": "Spinach French Onion Cob Dip",
   "description": "",
-  "prepMinutes": 20,
+  "prepMinutes": 15,
   "cookMinutes": 25,
   "servings": 12,
   "recipeType": "Main Dish",
@@ -25,66 +25,66 @@
   "ingredients": [
     {
       "id": "ing_1789791432501_0",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "unit",
       "item": "packet (40g/1.4oz)   French onion soup mix powder, ( full salt (not low salt))",
       "name": "packet (40g/1.4oz)   French onion soup mix powder, ( full salt (not low salt))",
-      "category": "Produce"
+      "unit": "unit",
+      "amount": "1",
+      "category": "Produce",
+      "quantity": "1"
     },
     {
       "id": "ing_1789791432502_1",
-      "amount": "250",
-      "quantity": "250",
-      "unit": "g",
       "item": "/8 oz  cream cheese (, full fat)",
       "name": "/8 oz  cream cheese (, full fat)",
-      "category": "Dairy"
+      "unit": "g",
+      "amount": "250",
+      "category": "Dairy",
+      "quantity": "250"
     },
     {
       "id": "ing_1789791432502_2",
-      "amount": "300",
-      "quantity": "300",
-      "unit": "g",
       "item": "/ 10oz   sour cream (, full fat (or 250g/8oz tub + top up with yogurt or extra mayo))",
       "name": "/ 10oz   sour cream (, full fat (or 250g/8oz tub + top up with yogurt or extra mayo))",
-      "category": "Dairy"
+      "unit": "g",
+      "amount": "300",
+      "category": "Dairy",
+      "quantity": "300"
     },
     {
       "id": "ing_1789791432502_3",
-      "amount": "1/2",
-      "quantity": "1/2",
-      "unit": "cup",
       "item": "mayonnaise",
       "name": "mayonnaise",
-      "category": "Condiments and Sauces"
+      "unit": "cup",
+      "amount": "1/2",
+      "category": "Condiments and Sauces",
+      "quantity": "1/2"
     },
     {
       "id": "ing_1789791432502_4",
-      "amount": "250",
-      "quantity": "250",
-      "unit": "g",
       "item": "/8 oz  frozen chopped spinach (, thawed (I microwave), excess water squeezed out with hands (Note 1))",
       "name": "/8 oz  frozen chopped spinach (, thawed (I microwave), excess water squeezed out with hands (Note 1))",
-      "category": "Produce"
+      "unit": "g",
+      "amount": "250",
+      "category": "Produce",
+      "quantity": "250"
     },
     {
       "id": "ing_1789791432502_5",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "unit",
       "item": "cob loaf ((crusty round bread), preferably sourdough, or other shape loaf, about 25cm/10oz wide (Note 2))",
       "name": "cob loaf ((crusty round bread), preferably sourdough, or other shape loaf, about 25cm/10oz wide (Note 2))",
-      "category": "Grains and Pasta"
+      "unit": "unit",
+      "amount": "1",
+      "category": "Grains and Pasta",
+      "quantity": "1"
     },
     {
       "id": "ing_1789791432502_6",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "unit",
       "item": "Artichokes, chopped water chestnuts, green onion, bacon, garlic, shredded cheese, jalapeño (for zing!)",
       "name": "Artichokes, chopped water chestnuts, green onion, bacon, garlic, shredded cheese, jalapeño (for zing!)",
-      "category": "Produce"
+      "unit": "unit",
+      "amount": "1",
+      "category": "Produce",
+      "quantity": "1"
     }
   ],
   "instructions": [
@@ -105,8 +105,8 @@
   "sourceUrl": "https://www.recipetineats.com/spinach-french-onion-cob-dip/",
   "isFavorite": false,
   "isCooked": false,
-  "rating": 0,
+  "rating": 5,
   "bookId": null,
-  "createdAt": "2026-09-19T04:17:12.507Z",
-  "updatedAt": "2026-10-25T17:11:30.969Z"
+  "createdAt": "2026-10-03T09:19:34.319Z",
+  "updatedAt": "2026-10-25T18:53:23.015Z"
 }

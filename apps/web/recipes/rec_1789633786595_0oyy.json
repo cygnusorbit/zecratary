@@ -16,7 +16,7 @@
   "visibility": "private",
   "title": "Chinese Orange Chicken",
   "description": "",
-  "prepMinutes": 20,
+  "prepMinutes": 15,
   "cookMinutes": 25,
   "servings": 4,
   "recipeType": "Main Dish",
@@ -25,183 +25,183 @@
   "ingredients": [
     {
       "id": "ing_1789633786588_0",
-      "amount": "600",
-      "quantity": "600",
-      "unit": "g",
       "item": "/1.2 lb  boneless skinless chicken thighs or breast (, cut into 2.5cm / 1\" pieces)",
       "name": "/1.2 lb  boneless skinless chicken thighs or breast (, cut into 2.5cm / 1\" pieces)",
-      "category": "Meat and Seafood"
+      "unit": "g",
+      "amount": "600",
+      "category": "Meat and Seafood",
+      "quantity": "600"
     },
     {
       "id": "ing_1789633786589_1",
-      "amount": "2",
-      "quantity": "2",
-      "unit": "tbsp",
       "item": "light soy sauce (, or all-purpose soy (not dark soy - Note 1))",
       "name": "light soy sauce (, or all-purpose soy (not dark soy - Note 1))",
-      "category": "Condiments and Sauces"
+      "unit": "tbsp",
+      "amount": "2",
+      "category": "Condiments and Sauces",
+      "quantity": "2"
     },
     {
       "id": "ing_1789633786589_2",
-      "amount": "1/2",
-      "quantity": "1/2",
-      "unit": "tsp",
       "item": "finely grated ginger (, optional)",
       "name": "finely grated ginger (, optional)",
-      "category": "Produce"
+      "unit": "tsp",
+      "amount": "1/2",
+      "category": "Produce",
+      "quantity": "1/2"
     },
     {
       "id": "ing_1789633786589_3",
-      "amount": "1/8",
-      "quantity": "1/8",
-      "unit": "tsp",
       "item": "white pepper ((substitute black pepper))",
       "name": "white pepper ((substitute black pepper))",
-      "category": "Produce"
+      "unit": "tsp",
+      "amount": "1/8",
+      "category": "Produce",
+      "quantity": "1/8"
     },
     {
       "id": "ing_1789633786590_4",
-      "amount": "2",
-      "quantity": "2",
-      "unit": "tbsp",
       "item": "cornflour / cornstarch (- for mixing)",
       "name": "cornflour / cornstarch (- for mixing)",
-      "category": "Grains and Pasta"
+      "unit": "tbsp",
+      "amount": "2",
+      "category": "Grains and Pasta",
+      "quantity": "2"
     },
     {
       "id": "ing_1789633786590_5",
-      "amount": "3/4",
-      "quantity": "3/4",
-      "unit": "cup",
       "item": "cornflour / cornstarch (- for crispy coating)",
       "name": "cornflour / cornstarch (- for crispy coating)",
-      "category": "Grains and Pasta"
+      "unit": "cup",
+      "amount": "3/4",
+      "category": "Grains and Pasta",
+      "quantity": "3/4"
     },
     {
       "id": "ing_1789633786590_6",
-      "amount": "3/4",
-      "quantity": "3/4",
-      "unit": "unit",
       "item": "- 1 cup vegetable oil (, or other plain oil (1/2 cm / 0.2\" depth))",
       "name": "- 1 cup vegetable oil (, or other plain oil (1/2 cm / 0.2\" depth))",
-      "category": "Condiments and Sauces"
+      "unit": "unit",
+      "amount": "3/4",
+      "category": "Condiments and Sauces",
+      "quantity": "3/4"
     },
     {
       "id": "ing_1789633786590_7",
-      "amount": "2",
-      "quantity": "2",
-      "unit": "tsp",
       "item": "orange zest (, from 1 orange)",
       "name": "orange zest (, from 1 orange)",
-      "category": "Produce"
+      "unit": "tsp",
+      "amount": "2",
+      "category": "Produce",
+      "quantity": "2"
     },
     {
       "id": "ing_1789633786590_8",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "cup",
       "item": "orange juice (, either squeeze oranges or use fresh bottled OJ (or use the orange then top up with bottle))",
       "name": "orange juice (, either squeeze oranges or use fresh bottled OJ (or use the orange then top up with bottle))",
-      "category": "Beverages"
+      "unit": "cup",
+      "amount": "1",
+      "category": "Beverages",
+      "quantity": "1"
     },
     {
       "id": "ing_1789633786590_9",
-      "amount": "1 1/2",
-      "quantity": "1 1/2",
-      "unit": "tbsp",
       "item": "cornflour / cornstarch",
       "name": "cornflour / cornstarch",
-      "category": "Grains and Pasta"
+      "unit": "tbsp",
+      "amount": "1 1/2",
+      "category": "Grains and Pasta",
+      "quantity": "1 1/2"
     },
     {
       "id": "ing_1789633786590_10",
-      "amount": "2",
-      "quantity": "2",
-      "unit": "tbsp",
       "item": "Chinese cooking wine (/Shaoxing wine (Note 2))",
       "name": "Chinese cooking wine (/Shaoxing wine (Note 2))",
-      "category": "Beverages"
+      "unit": "tbsp",
+      "amount": "2",
+      "category": "Beverages",
+      "quantity": "2"
     },
     {
       "id": "ing_1789633786590_11",
-      "amount": "2",
-      "quantity": "2",
-      "unit": "tbsp",
       "item": "rice vinegar ((substitute white vinegar))",
       "name": "rice vinegar ((substitute white vinegar))",
-      "category": "Grains and Pasta"
+      "unit": "tbsp",
+      "amount": "2",
+      "category": "Grains and Pasta",
+      "quantity": "2"
     },
     {
       "id": "ing_1789633786590_12",
-      "amount": "1/3",
-      "quantity": "1/3",
-      "unit": "cup",
       "item": "+ 2 tbsp  white sugar",
       "name": "+ 2 tbsp  white sugar",
-      "category": "Pantry Staples"
+      "unit": "cup",
+      "amount": "1/3",
+      "category": "Pantry Staples",
+      "quantity": "1/3"
     },
     {
       "id": "ing_1789633786590_13",
-      "amount": "2",
-      "quantity": "2",
-      "unit": "tbsp",
       "item": "light soy sauce ( or all-purpose soy sauce (not dark soy - Note 1))",
       "name": "light soy sauce ( or all-purpose soy sauce (not dark soy - Note 1))",
-      "category": "Condiments and Sauces"
+      "unit": "tbsp",
+      "amount": "2",
+      "category": "Condiments and Sauces",
+      "quantity": "2"
     },
     {
       "id": "ing_1789633786590_14",
-      "amount": "1/4",
-      "quantity": "1/4",
-      "unit": "tsp",
       "item": "cooking salt / kosher salt ((halve for table salt, double for flakes))",
       "name": "cooking salt / kosher salt ((halve for table salt, double for flakes))",
-      "category": "Pantry Staples"
+      "unit": "tsp",
+      "amount": "1/4",
+      "category": "Pantry Staples",
+      "quantity": "1/4"
     },
     {
       "id": "ing_1789633786590_15",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "tsp",
       "item": "ginger (, finely grated)",
       "name": "ginger (, finely grated)",
-      "category": "Produce"
+      "unit": "tsp",
+      "amount": "1",
+      "category": "Produce",
+      "quantity": "1"
     },
     {
       "id": "ing_1789633786590_16",
-      "amount": "2",
-      "quantity": "2",
-      "unit": "unit",
       "item": "garlic cloves (, finely minced with a knife)",
       "name": "garlic cloves (, finely minced with a knife)",
-      "category": "Produce"
+      "unit": "unit",
+      "amount": "2",
+      "category": "Produce",
+      "quantity": "2"
     },
     {
       "id": "ing_1789633786590_17",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "unit",
       "item": "White rice (, or other plain rice of choice)",
       "name": "White rice (, or other plain rice of choice)",
-      "category": "Grains and Pasta"
+      "unit": "unit",
+      "amount": "1",
+      "category": "Grains and Pasta",
+      "quantity": "1"
     },
     {
       "id": "ing_1789633786590_18",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "unit",
       "item": "green onion (, finely sliced - optional garnish)",
       "name": "green onion (, finely sliced - optional garnish)",
-      "category": "Produce"
+      "unit": "unit",
+      "amount": "1",
+      "category": "Produce",
+      "quantity": "1"
     },
     {
       "id": "ing_1789633786590_19",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "unit",
       "item": "White sesame seeds - optional garnish",
       "name": "White sesame seeds - optional garnish",
-      "category": "Pantry Staples"
+      "unit": "unit",
+      "amount": "1",
+      "category": "Pantry Staples",
+      "quantity": "1"
     }
   ],
   "instructions": [
@@ -224,8 +224,8 @@
   "sourceUrl": "https://www.recipetineats.com/orange-chicken/",
   "isFavorite": false,
   "isCooked": false,
-  "rating": 0,
+  "rating": 5,
   "bookId": null,
-  "createdAt": "2026-09-17T08:29:46.595Z",
-  "updatedAt": "2026-10-25T17:11:30.967Z"
+  "createdAt": "2026-10-03T09:19:34.320Z",
+  "updatedAt": "2026-10-25T18:53:23.010Z"
 }

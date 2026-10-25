@@ -37,18 +37,15 @@
   ],
   "nutrition": {},
   "tags": [
-    "Main Dish",
-    "Italian",
-    "Gourmet",
-    "Vegetarian"
+    "Main Dish"
   ],
   "image": "https://images.unsplash.com/photo-1633964913295-ceb43826e7c9?auto=format&fit=crop&w=800&q=80",
   "imageUrl": "https://images.unsplash.com/photo-1633964913295-ceb43826e7c9?auto=format&fit=crop&w=800&q=80",
   "sourceUrl": "https://recipetineats.com",
   "isFavorite": true,
   "isCooked": false,
-  "rating": 0,
+  "rating": 5,
   "bookId": null,
-  "createdAt": "2026-10-23T19:41:19.669Z",
-  "updatedAt": "2026-10-25T17:11:30.949Z"
+  "createdAt": "2026-10-25T18:53:22.953Z",
+  "updatedAt": "2026-10-25T18:53:22.953Z"
 }

@@ -16,7 +16,7 @@
   "visibility": "private",
   "title": "Fresh Basil Vinaigrette",
   "description": "",
-  "prepMinutes": 20,
+  "prepMinutes": 15,
   "cookMinutes": 25,
   "servings": 1,
   "recipeType": "Main Dish",
@@ -25,75 +25,75 @@
   "ingredients": [
     {
       "id": "ing_1789615656370_0",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "unit",
       "item": "tightly packed cup basil leaves ((press down firmly in a cup measure))",
       "name": "tightly packed cup basil leaves ((press down firmly in a cup measure))",
-      "category": "Produce"
+      "unit": "unit",
+      "amount": "1",
+      "category": "Produce",
+      "quantity": "1"
     },
     {
       "id": "ing_1789615656371_1",
-      "amount": "1/4",
-      "quantity": "1/4",
-      "unit": "tsp",
       "item": "finely grated garlic ((just a bit else it's too harsh!))",
       "name": "finely grated garlic ((just a bit else it's too harsh!))",
-      "category": "Produce"
+      "unit": "tsp",
+      "amount": "1/4",
+      "category": "Produce",
+      "quantity": "1/4"
     },
     {
       "id": "ing_1789615656371_2",
-      "amount": "1/2",
-      "quantity": "1/2",
-      "unit": "tsp",
       "item": "Dijon mustard",
       "name": "Dijon mustard",
-      "category": "Condiments and Sauces"
+      "unit": "tsp",
+      "amount": "1/2",
+      "category": "Condiments and Sauces",
+      "quantity": "1/2"
     },
     {
       "id": "ing_1789615656371_3",
-      "amount": "1/2",
-      "quantity": "1/2",
-      "unit": "tsp",
       "item": "cooking salt / kosher salt (, halve for table salt, +50% for flakes)",
       "name": "cooking salt / kosher salt (, halve for table salt, +50% for flakes)",
-      "category": "Pantry Staples"
+      "unit": "tsp",
+      "amount": "1/2",
+      "category": "Pantry Staples",
+      "quantity": "1/2"
     },
     {
       "id": "ing_1789615656371_4",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "pinch",
       "item": "ground white pepper  (or black pepper)",
       "name": "ground white pepper  (or black pepper)",
-      "category": "Produce"
+      "unit": "pinch",
+      "amount": "1",
+      "category": "Produce",
+      "quantity": "1"
     },
     {
       "id": "ing_1789615656371_5",
-      "amount": "2",
-      "quantity": "2",
-      "unit": "tsp",
       "item": "apple cider vinegar ((Note 1))",
       "name": "apple cider vinegar ((Note 1))",
-      "category": "Produce"
+      "unit": "tsp",
+      "amount": "2",
+      "category": "Produce",
+      "quantity": "2"
     },
     {
       "id": "ing_1789615656371_6",
-      "amount": "1/3",
-      "quantity": "1/3",
-      "unit": "cup",
       "item": "extra virgin olive oil",
       "name": "extra virgin olive oil",
-      "category": "Condiments and Sauces"
+      "unit": "cup",
+      "amount": "1/3",
+      "category": "Condiments and Sauces",
+      "quantity": "1/3"
     },
     {
       "id": "ing_1789615656371_7",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "unit",
       "item": "ice cube (~1 tbsp in size) (, or 1 tbsp ice cold water (Note 2))",
       "name": "ice cube (~1 tbsp in size) (, or 1 tbsp ice cold water (Note 2))",
-      "category": "Beverages"
+      "unit": "unit",
+      "amount": "1",
+      "category": "Beverages",
+      "quantity": "1"
     }
   ],
   "instructions": [
@@ -114,8 +114,8 @@
   "sourceUrl": "https://www.recipetineats.com/fresh-basil-vinaigrette/",
   "isFavorite": false,
   "isCooked": false,
-  "rating": 0,
+  "rating": 5,
   "bookId": null,
-  "createdAt": "2026-09-17T03:27:36.375Z",
-  "updatedAt": "2026-10-25T17:11:30.961Z"
+  "createdAt": "2026-10-03T09:19:34.325Z",
+  "updatedAt": "2026-10-25T18:53:23.001Z"
 }

@@ -16,7 +16,7 @@
   "visibility": "private",
   "title": "Monster Cookies",
   "description": "",
-  "prepMinutes": 20,
+  "prepMinutes": 15,
   "cookMinutes": 25,
   "servings": 18,
   "recipeType": "Main Dish",
@@ -25,120 +25,120 @@
   "ingredients": [
     {
       "id": "ing_1789808113003_0",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "cup",
       "item": "plain flour / all-purpose flour ((Note 1 for gluten-free))",
       "name": "plain flour / all-purpose flour ((Note 1 for gluten-free))",
-      "category": "Grains and Pasta"
+      "unit": "cup",
+      "amount": "1",
+      "category": "Grains and Pasta",
+      "quantity": "1"
     },
     {
       "id": "ing_1789808113003_1",
-      "amount": "1 1/2",
-      "quantity": "1 1/2",
-      "unit": "cups",
       "item": "rolled oats ((not steel-cut, quick cook or porridge oats))",
       "name": "rolled oats ((not steel-cut, quick cook or porridge oats))",
-      "category": "Grains and Pasta"
+      "unit": "cups",
+      "amount": "1 1/2",
+      "category": "Grains and Pasta",
+      "quantity": "1 1/2"
     },
     {
       "id": "ing_1789808113004_2",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "tsp",
       "item": "baking soda ((bi-carbonate soda), sifted if lumpy (Note 2))",
       "name": "baking soda ((bi-carbonate soda), sifted if lumpy (Note 2))",
-      "category": "Beverages"
+      "unit": "tsp",
+      "amount": "1",
+      "category": "Beverages",
+      "quantity": "1"
     },
     {
       "id": "ing_1789808113004_3",
-      "amount": "1/4",
-      "quantity": "1/4",
-      "unit": "tsp",
       "item": "cooking salt / kosher salt ((halve for table salt, +50% for flakes))",
       "name": "cooking salt / kosher salt ((halve for table salt, +50% for flakes))",
-      "category": "Pantry Staples"
+      "unit": "tsp",
+      "amount": "1/4",
+      "category": "Pantry Staples",
+      "quantity": "1/4"
     },
     {
       "id": "ing_1789808113004_4",
-      "amount": "125",
-      "quantity": "125",
-      "unit": "g",
       "item": "/ 8 tbsp   unsalted butter (, cut into chunks (for even melting))",
       "name": "/ 8 tbsp   unsalted butter (, cut into chunks (for even melting))",
-      "category": "Dairy"
+      "unit": "g",
+      "amount": "125",
+      "category": "Dairy",
+      "quantity": "125"
     },
     {
       "id": "ing_1789808113004_5",
-      "amount": "3/4",
-      "quantity": "3/4",
-      "unit": "cup",
       "item": "creamy peanut butter ((not the runny natural, no added salt or sugar kind, also see FAQ for peanut allergy alternatives))",
       "name": "creamy peanut butter ((not the runny natural, no added salt or sugar kind, also see FAQ for peanut allergy alternatives))",
-      "category": "Dairy"
+      "unit": "cup",
+      "amount": "3/4",
+      "category": "Dairy",
+      "quantity": "3/4"
     },
     {
       "id": "ing_1789808113004_6",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "large",
       "item": "egg ((~50-55g/2oz in shell), fridge cold is fine)",
       "name": "egg ((~50-55g/2oz in shell), fridge cold is fine)",
-      "category": "Meat and Seafood"
+      "unit": "large",
+      "amount": "1",
+      "category": "Meat and Seafood",
+      "quantity": "1"
     },
     {
       "id": "ing_1789808113004_7",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "tsp",
       "item": "vanilla extract",
       "name": "vanilla extract",
-      "category": "Pantry Staples"
+      "unit": "tsp",
+      "amount": "1",
+      "category": "Pantry Staples",
+      "quantity": "1"
     },
     {
       "id": "ing_1789808113004_8",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "cup",
       "item": "(tightly packed) brown sugar",
       "name": "(tightly packed) brown sugar",
-      "category": "Pantry Staples"
+      "unit": "cup",
+      "amount": "1",
+      "category": "Pantry Staples",
+      "quantity": "1"
     },
     {
       "id": "ing_1789808113004_9",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "cup",
       "item": "(200g)  M&Ms (, plain chocolate ones, not peanut or crispy rice)",
       "name": "(200g)  M&Ms (, plain chocolate ones, not peanut or crispy rice)",
-      "category": "Grains and Pasta"
+      "unit": "cup",
+      "amount": "1",
+      "category": "Grains and Pasta",
+      "quantity": "1"
     },
     {
       "id": "ing_1789808113004_10",
-      "amount": "1/2",
-      "quantity": "1/2",
-      "unit": "cup",
       "item": "(90g)  dark chocolate chips / semi-sweet chips",
       "name": "(90g)  dark chocolate chips / semi-sweet chips",
-      "category": "Produce"
+      "unit": "cup",
+      "amount": "1/2",
+      "category": "Produce",
+      "quantity": "1/2"
     },
     {
       "id": "ing_1789808113004_11",
-      "amount": "3",
-      "quantity": "3",
-      "unit": "tbsp",
       "item": "(35g)  M&Ms",
       "name": "(35g)  M&Ms",
-      "category": "Produce"
+      "unit": "tbsp",
+      "amount": "3",
+      "category": "Produce",
+      "quantity": "3"
     },
     {
       "id": "ing_1789808113004_12",
-      "amount": "2",
-      "quantity": "2",
-      "unit": "tbsp",
       "item": "(20g)  dark chocolate chips / semi-sweet chips",
       "name": "(20g)  dark chocolate chips / semi-sweet chips",
-      "category": "Produce"
+      "unit": "tbsp",
+      "amount": "2",
+      "category": "Produce",
+      "quantity": "2"
     }
   ],
   "instructions": [
@@ -163,8 +163,8 @@
   "sourceUrl": "https://www.recipetineats.com/monster-cookies-recipe/",
   "isFavorite": false,
   "isCooked": false,
-  "rating": 0,
+  "rating": 5,
   "bookId": null,
-  "createdAt": "2026-09-19T08:55:13.010Z",
-  "updatedAt": "2026-10-25T17:11:30.971Z"
+  "createdAt": "2026-10-03T09:19:34.318Z",
+  "updatedAt": "2026-10-25T18:53:23.017Z"
 }

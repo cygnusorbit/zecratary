@@ -16,7 +16,7 @@
   "visibility": "private",
   "title": "Raspberry Tartlets",
   "description": "",
-  "prepMinutes": 20,
+  "prepMinutes": 15,
   "cookMinutes": 25,
   "servings": 6,
   "recipeType": "Main Dish",
@@ -25,75 +25,75 @@
   "ingredients": [
     {
       "id": "ing_1789615957168_0",
-      "amount": "6",
-      "quantity": "6",
-      "unit": "unit",
       "item": "sweet tartlet shells (, 12cm / 4.7\" wide (Note 1))",
       "name": "sweet tartlet shells (, 12cm / 4.7\" wide (Note 1))",
-      "category": "Produce"
+      "unit": "unit",
+      "amount": "6",
+      "category": "Produce",
+      "quantity": "6"
     },
     {
       "id": "ing_1789615957168_1",
-      "amount": "250",
-      "quantity": "250",
-      "unit": "g",
       "item": "(8 oz)  fresh raspberries ((Note 2))",
       "name": "(8 oz)  fresh raspberries ((Note 2))",
-      "category": "Produce"
+      "unit": "g",
+      "amount": "250",
+      "category": "Produce",
+      "quantity": "250"
     },
     {
       "id": "ing_1789615957169_2",
-      "amount": "150",
-      "quantity": "150",
-      "unit": "g",
       "item": "/ 10 tbsp  unsalted butter (, softened, cut into 1cm / 0.4\" cubes)",
       "name": "/ 10 tbsp  unsalted butter (, softened, cut into 1cm / 0.4\" cubes)",
-      "category": "Dairy"
+      "unit": "g",
+      "amount": "150",
+      "category": "Dairy",
+      "quantity": "150"
     },
     {
       "id": "ing_1789615957169_3",
-      "amount": "3/4",
-      "quantity": "3/4",
-      "unit": "cup",
       "item": "caster sugar / superfine sugar ((or regular / granulated sugar))",
       "name": "caster sugar / superfine sugar ((or regular / granulated sugar))",
-      "category": "Pantry Staples"
+      "unit": "cup",
+      "amount": "3/4",
+      "category": "Pantry Staples",
+      "quantity": "3/4"
     },
     {
       "id": "ing_1789615957169_4",
-      "amount": "3",
-      "quantity": "3",
-      "unit": "large",
       "item": "eggs (, (~50 - 55g/2oz shell-on weight), at room temperature)",
       "name": "eggs (, (~50 - 55g/2oz shell-on weight), at room temperature)",
-      "category": "Meat and Seafood"
+      "unit": "large",
+      "amount": "3",
+      "category": "Meat and Seafood",
+      "quantity": "3"
     },
     {
       "id": "ing_1789615957169_5",
-      "amount": "1 2/3",
-      "quantity": "1 2/3",
-      "unit": "cup",
       "item": "almond meal / ground almonds (, not almond flour)",
       "name": "almond meal / ground almonds (, not almond flour)",
-      "category": "Grains and Pasta"
+      "unit": "cup",
+      "amount": "1 2/3",
+      "category": "Grains and Pasta",
+      "quantity": "1 2/3"
     },
     {
       "id": "ing_1789615957169_6",
-      "amount": "2",
-      "quantity": "2",
-      "unit": "tbsp",
       "item": "apricot jam (, mixed with 1 tsp water and warmed in microwave (for glazing) - strain if needed to remove lumps)",
       "name": "apricot jam (, mixed with 1 tsp water and warmed in microwave (for glazing) - strain if needed to remove lumps)",
-      "category": "Beverages"
+      "unit": "tbsp",
+      "amount": "2",
+      "category": "Beverages",
+      "quantity": "2"
     },
     {
       "id": "ing_1789615957169_7",
-      "amount": "2 1/2",
-      "quantity": "2 1/2",
-      "unit": "tbsp",
       "item": "pistachios ((unsalted, roasted), finely chopped (for sprinkling))",
       "name": "pistachios ((unsalted, roasted), finely chopped (for sprinkling))",
-      "category": "Pantry Staples"
+      "unit": "tbsp",
+      "amount": "2 1/2",
+      "category": "Pantry Staples",
+      "quantity": "2 1/2"
     }
   ],
   "instructions": [
@@ -117,8 +117,8 @@
   "sourceUrl": "https://www.recipetineats.com/raspberry-tartlets-recipe/",
   "isFavorite": false,
   "isCooked": false,
-  "rating": 0,
+  "rating": 5,
   "bookId": null,
-  "createdAt": "2026-09-17T03:32:37.172Z",
-  "updatedAt": "2026-10-25T17:11:30.964Z"
+  "createdAt": "2026-10-03T09:19:34.322Z",
+  "updatedAt": "2026-10-25T18:53:23.009Z"
 }

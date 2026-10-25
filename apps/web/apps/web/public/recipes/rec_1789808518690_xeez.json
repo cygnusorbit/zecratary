@@ -16,7 +16,7 @@
   "visibility": "private",
   "title": "Slow-roast Easter stuffed lamb",
   "description": "",
-  "prepMinutes": 20,
+  "prepMinutes": 15,
   "cookMinutes": 25,
   "servings": 5,
   "recipeType": "Main Dish",
@@ -25,246 +25,246 @@
   "ingredients": [
     {
       "id": "ing_1789808518679_0",
-      "amount": "35 - 1.5",
-      "quantity": "35 - 1.5",
-      "unit": "kg",
       "item": "/ 2.7 - 3 lb  deboned lamb shoulder ((Note 1))",
       "name": "/ 2.7 - 3 lb  deboned lamb shoulder ((Note 1))",
-      "category": "Meat and Seafood"
+      "unit": "kg",
+      "amount": "35 - 1.5",
+      "category": "Meat and Seafood",
+      "quantity": "35 - 1.5"
     },
     {
       "id": "ing_1789808518681_1",
-      "amount": "1 1/2",
-      "quantity": "1 1/2",
-      "unit": "tsp",
       "item": "cooking salt / kosher salt (, divided)",
       "name": "cooking salt / kosher salt (, divided)",
-      "category": "Pantry Staples"
+      "unit": "tsp",
+      "amount": "1 1/2",
+      "category": "Pantry Staples",
+      "quantity": "1 1/2"
     },
     {
       "id": "ing_1789808518681_2",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "tsp",
       "item": "black pepper (, divided)",
       "name": "black pepper (, divided)",
-      "category": "Produce"
+      "unit": "tsp",
+      "amount": "1",
+      "category": "Produce",
+      "quantity": "1"
     },
     {
       "id": "ing_1789808518682_3",
-      "amount": "2",
-      "quantity": "2",
-      "unit": "tsp",
       "item": "extra virgin olive oil",
       "name": "extra virgin olive oil",
-      "category": "Condiments and Sauces"
+      "unit": "tsp",
+      "amount": "2",
+      "category": "Condiments and Sauces",
+      "quantity": "2"
     },
     {
       "id": "ing_1789808518682_4",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "tbsp",
       "item": "/ 20g  unsalted butter",
       "name": "/ 20g  unsalted butter",
-      "category": "Dairy"
+      "unit": "tbsp",
+      "amount": "1",
+      "category": "Dairy",
+      "quantity": "1"
     },
     {
       "id": "ing_1789808518682_5",
-      "amount": "2",
-      "quantity": "2",
-      "unit": "unit",
       "item": "eschalots (, finely diced (US: shallots, sub 1 small onion) (Note 2))",
       "name": "eschalots (, finely diced (US: shallots, sub 1 small onion) (Note 2))",
-      "category": "Produce"
+      "unit": "unit",
+      "amount": "2",
+      "category": "Produce",
+      "quantity": "2"
     },
     {
       "id": "ing_1789808518682_6",
-      "amount": "3",
-      "quantity": "3",
-      "unit": "unit",
       "item": "garlic cloves (, finely minced)",
       "name": "garlic cloves (, finely minced)",
-      "category": "Produce"
+      "unit": "unit",
+      "amount": "3",
+      "category": "Produce",
+      "quantity": "3"
     },
     {
       "id": "ing_1789808518682_7",
-      "amount": "300",
-      "quantity": "300",
-      "unit": "g",
       "item": "/ 10 oz  mushrooms (, button/white (Note 3))",
       "name": "/ 10 oz  mushrooms (, button/white (Note 3))",
-      "category": "Produce"
+      "unit": "g",
+      "amount": "300",
+      "category": "Produce",
+      "quantity": "300"
     },
     {
       "id": "ing_1789808518682_8",
-      "amount": "2",
-      "quantity": "2",
-      "unit": "unit",
       "item": "tightly packed cups baby spinach (, roughly chopped 100g)",
       "name": "tightly packed cups baby spinach (, roughly chopped 100g)",
-      "category": "Produce"
+      "unit": "unit",
+      "amount": "2",
+      "category": "Produce",
+      "quantity": "2"
     },
     {
       "id": "ing_1789808518682_9",
-      "amount": "3",
-      "quantity": "3",
-      "unit": "tbsp",
       "item": "skinless hazelnuts ((Note 4))",
       "name": "skinless hazelnuts ((Note 4))",
-      "category": "Produce"
+      "unit": "tbsp",
+      "amount": "3",
+      "category": "Produce",
+      "quantity": "3"
     },
     {
       "id": "ing_1789808518682_10",
-      "amount": "3",
-      "quantity": "3",
-      "unit": "tbsp",
       "item": "pistachios (, roughly chopped (Note 4))",
       "name": "pistachios (, roughly chopped (Note 4))",
-      "category": "Produce"
+      "unit": "tbsp",
+      "amount": "3",
+      "category": "Produce",
+      "quantity": "3"
     },
     {
       "id": "ing_1789808518682_11",
-      "amount": "1 1/2",
-      "quantity": "1 1/2",
-      "unit": "tbsp",
       "item": "parsley (, finely chopped (ok to omit))",
       "name": "parsley (, finely chopped (ok to omit))",
-      "category": "Produce"
+      "unit": "tbsp",
+      "amount": "1 1/2",
+      "category": "Produce",
+      "quantity": "1 1/2"
     },
     {
       "id": "ing_1789808518682_12",
-      "amount": "1 1/2",
-      "quantity": "1 1/2",
-      "unit": "tsp",
       "item": "rosemary (, fresh, finely chopped (sub fresh thyme, or 1 tsp dried))",
       "name": "rosemary (, fresh, finely chopped (sub fresh thyme, or 1 tsp dried))",
-      "category": "Produce"
+      "unit": "tsp",
+      "amount": "1 1/2",
+      "category": "Produce",
+      "quantity": "1 1/2"
     },
     {
       "id": "ing_1789808518682_13",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "tbsp",
       "item": "lemon zest ((divine touch, don't skip this!))",
       "name": "lemon zest ((divine touch, don't skip this!))",
-      "category": "Produce"
+      "unit": "tbsp",
+      "amount": "1",
+      "category": "Produce",
+      "quantity": "1"
     },
     {
       "id": "ing_1789808518682_14",
-      "amount": "1/2",
-      "quantity": "1/2",
-      "unit": "tsp",
       "item": "cooking salt / kosher salt",
       "name": "cooking salt / kosher salt",
-      "category": "Pantry Staples"
+      "unit": "tsp",
+      "amount": "1/2",
+      "category": "Pantry Staples",
+      "quantity": "1/2"
     },
     {
       "id": "ing_1789808518682_15",
-      "amount": "1/4",
-      "quantity": "1/4",
-      "unit": "tsp",
       "item": "black pepper",
       "name": "black pepper",
-      "category": "Produce"
+      "unit": "tsp",
+      "amount": "1/4",
+      "category": "Produce",
+      "quantity": "1/4"
     },
     {
       "id": "ing_1789808518682_16",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "kg",
       "item": "/ 2 lb  baby potatoes (, cut in half (4 if large) (Note 5))",
       "name": "/ 2 lb  baby potatoes (, cut in half (4 if large) (Note 5))",
-      "category": "Produce"
+      "unit": "kg",
+      "amount": "1",
+      "category": "Produce",
+      "quantity": "1"
     },
     {
       "id": "ing_1789808518682_17",
-      "amount": "1/2",
-      "quantity": "1/2",
-      "unit": "tsp",
       "item": "cooking salt / kosher salt",
       "name": "cooking salt / kosher salt",
-      "category": "Pantry Staples"
+      "unit": "tsp",
+      "amount": "1/2",
+      "category": "Pantry Staples",
+      "quantity": "1/2"
     },
     {
       "id": "ing_1789808518682_18",
-      "amount": "1/4",
-      "quantity": "1/4",
-      "unit": "tsp",
       "item": "black pepper",
       "name": "black pepper",
-      "category": "Produce"
+      "unit": "tsp",
+      "amount": "1/4",
+      "category": "Produce",
+      "quantity": "1/4"
     },
     {
       "id": "ing_1789808518682_19",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "tbsp",
       "item": "extra virgin olive oil",
       "name": "extra virgin olive oil",
-      "category": "Condiments and Sauces"
+      "unit": "tbsp",
+      "amount": "1",
+      "category": "Condiments and Sauces",
+      "quantity": "1"
     },
     {
       "id": "ing_1789808518682_20",
-      "amount": "2",
-      "quantity": "2",
-      "unit": "tbsp",
       "item": "flour (plain / all-purpose)",
       "name": "flour (plain / all-purpose)",
-      "category": "Grains and Pasta"
+      "unit": "tbsp",
+      "amount": "2",
+      "category": "Grains and Pasta",
+      "quantity": "2"
     },
     {
       "id": "ing_1789808518683_21",
-      "amount": "1 1/4",
-      "quantity": "1 1/4",
-      "unit": "cups",
       "item": "beef stock/broth (, low sodium)",
       "name": "beef stock/broth (, low sodium)",
-      "category": "Meat and Seafood"
+      "unit": "cups",
+      "amount": "1 1/4",
+      "category": "Meat and Seafood",
+      "quantity": "1 1/4"
     },
     {
       "id": "ing_1789808518683_22",
-      "amount": "1/4",
-      "quantity": "1/4",
-      "unit": "tsp",
       "item": "dark soy sauce ((optional, for deeper colour) (Note 6))",
       "name": "dark soy sauce ((optional, for deeper colour) (Note 6))",
-      "category": "Condiments and Sauces"
+      "unit": "tsp",
+      "amount": "1/4",
+      "category": "Condiments and Sauces",
+      "quantity": "1/4"
     },
     {
       "id": "ing_1789808518683_23",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "unit",
       "item": "Salt and pepper (, if needed (I don't add any more))",
       "name": "Salt and pepper (, if needed (I don't add any more))",
-      "category": "Produce"
+      "unit": "unit",
+      "amount": "1",
+      "category": "Produce",
+      "quantity": "1"
     },
     {
       "id": "ing_1789808518683_24",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "tbsp",
       "item": "pistachios (, roughly chopped (optional garnish))",
       "name": "pistachios (, roughly chopped (optional garnish))",
-      "category": "Produce"
+      "unit": "tbsp",
+      "amount": "1",
+      "category": "Produce",
+      "quantity": "1"
     },
     {
       "id": "ing_1789808518683_25",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "unit",
       "item": "Rosemary sprigs (, optional garnish)",
       "name": "Rosemary sprigs (, optional garnish)",
-      "category": "Produce"
+      "unit": "unit",
+      "amount": "1",
+      "category": "Produce",
+      "quantity": "1"
     },
     {
       "id": "ing_1789808518683_26",
-      "amount": "1",
-      "quantity": "1",
-      "unit": "unit",
       "item": "Sautéed green beans ((pictured - vegetable side, splash of colour))",
       "name": "Sautéed green beans ((pictured - vegetable side, splash of colour))",
-      "category": "Produce"
+      "unit": "unit",
+      "amount": "1",
+      "category": "Produce",
+      "quantity": "1"
     }
   ],
   "instructions": [
@@ -298,8 +298,8 @@
   "sourceUrl": "https://www.recipetineats.com/slow-roast-easter-stuffed-lamb/",
   "isFavorite": false,
   "isCooked": false,
-  "rating": 0,
+  "rating": 5,
   "bookId": null,
-  "createdAt": "2026-09-19T09:01:58.690Z",
-  "updatedAt": "2026-10-25T17:11:30.974Z"
+  "createdAt": "2026-10-03T09:19:34.317Z",
+  "updatedAt": "2026-10-25T18:53:23.020Z"
 }

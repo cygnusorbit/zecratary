@@ -37,18 +37,15 @@
   ],
   "nutrition": {},
   "tags": [
-    "Main Dish",
-    "Mediterranean",
-    "Healthy",
-    "Gluten-Free"
+    "Main Dish"
   ],
   "image": "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=800&q=80",
   "imageUrl": "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=800&q=80",
   "sourceUrl": "https://bbcgoodfood.com",
   "isFavorite": false,
   "isCooked": false,
-  "rating": 0,
+  "rating": 5,
   "bookId": "book_healthy_prep",
-  "createdAt": "2026-10-23T19:41:20.181Z",
-  "updatedAt": "2026-10-25T17:11:30.947Z"
+  "createdAt": "2026-10-25T17:11:30.944Z",
+  "updatedAt": "2026-10-25T18:53:22.963Z"
 }

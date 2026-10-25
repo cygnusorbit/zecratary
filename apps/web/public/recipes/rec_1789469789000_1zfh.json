@@ -169,8 +169,8 @@
   "sourceUrl": "https://www.recipetineats.com/beef-rice-noodles/",
   "isFavorite": false,
   "isCooked": false,
-  "rating": 0,
-  "bookId": null,
-  "createdAt": "2026-10-23T19:41:20.917Z",
-  "updatedAt": "2026-10-25T17:11:30.930Z"
+  "rating": 5,
+  "bookId": "book_1789053656064_zyyz",
+  "createdAt": "2026-10-03T09:19:34.327Z",
+  "updatedAt": "2026-10-25T18:53:22.998Z"
 }

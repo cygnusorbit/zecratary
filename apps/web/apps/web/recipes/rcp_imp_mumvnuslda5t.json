@@ -41,16 +41,15 @@
   ],
   "nutrition": {},
   "tags": [
-    "Main Dish",
-    "URL"
+    "Main Dish"
   ],
   "image": "/uploads/recipes/scraped_1790698517365_snxeor.webp",
   "imageUrl": "/uploads/recipes/scraped_1790698517365_snxeor.webp",
   "sourceUrl": "https://www.recipetineats.com/ranch-dressing/",
   "isFavorite": false,
   "isCooked": false,
-  "rating": 0,
+  "rating": 5,
   "bookId": null,
   "createdAt": "2026-10-03T09:19:34.311Z",
-  "updatedAt": "2026-10-25T17:11:30.995Z"
+  "updatedAt": "2026-10-25T18:53:23.032Z"
 }

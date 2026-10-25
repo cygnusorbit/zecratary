@@ -19,17 +19,16 @@
   "prepMinutes": 15,
   "cookMinutes": 30,
   "servings": 2,
-  "calories": 450,
   "recipeType": "Breakfast",
   "mealType": "Breakfast",
   "cuisine": "",
   "ingredients": [
     {
       "id": "ing_1792916500305_0",
-      "amount": "10",
-      "unit": "g",
-      "name": "Palm sugar, chopped",
       "item": "Palm sugar, chopped",
+      "name": "Palm sugar, chopped",
+      "unit": "g",
+      "amount": "10",
       "category": "Pantry Staples"
     }
   ],
@@ -39,8 +38,7 @@
   ],
   "nutrition": {},
   "tags": [
-    "Breakfast",
-    "Manual"
+    "Breakfast"
   ],
   "image": "/uploads/recipes/upload-1792916482953-z4phmg.png",
   "imageUrl": "/uploads/recipes/upload-1792916482953-z4phmg.png",
@@ -49,6 +47,6 @@
   "isCooked": false,
   "rating": 5,
   "bookId": "book_mvnffcie_yf49",
-  "createdAt": "2026-10-25T08:21:40.306Z",
-  "updatedAt": "2026-10-25T17:11:30.902Z"
+  "createdAt": "2026-10-25T18:53:04.514Z",
+  "updatedAt": "2026-10-25T18:53:22.955Z"
 }

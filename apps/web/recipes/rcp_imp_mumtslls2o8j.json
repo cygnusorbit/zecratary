@@ -40,16 +40,15 @@
   ],
   "nutrition": {},
   "tags": [
-    "Main Dish",
-    "URL"
+    "Main Dish"
   ],
   "image": "/uploads/recipes/scraped_1790695379425_6fgjed.webp",
   "imageUrl": "/uploads/recipes/scraped_1790695379425_6fgjed.webp",
   "sourceUrl": "https://www.recipetineats.com/nagis-everyday-kale-side-salad/",
   "isFavorite": false,
   "isCooked": false,
-  "rating": 0,
+  "rating": 5,
   "bookId": null,
   "createdAt": "2026-10-03T09:19:34.313Z",
-  "updatedAt": "2026-10-25T17:11:30.989Z"
+  "updatedAt": "2026-10-25T18:53:23.030Z"
 }

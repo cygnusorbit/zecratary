@@ -41,16 +41,15 @@
   ],
   "nutrition": {},
   "tags": [
-    "Main Dish",
-    "URL"
+    "Main Dish"
   ],
   "image": "/uploads/recipes/scraped_1790756139759_owe1d1.webp",
   "imageUrl": "/uploads/recipes/scraped_1790756139759_owe1d1.webp",
   "sourceUrl": "https://www.recipetineats.com/french-glazed-carrots-carottes-vichy-recipe/",
   "isFavorite": false,
   "isCooked": false,
-  "rating": 0,
+  "rating": 5,
   "bookId": null,
   "createdAt": "2026-10-03T09:19:34.303Z",
-  "updatedAt": "2026-10-25T17:11:31.000Z"
+  "updatedAt": "2026-10-25T18:53:23.037Z"
 }

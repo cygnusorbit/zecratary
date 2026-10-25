@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.33",
+  "version": "8.1.35",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.33",
+  "version": "8.1.35",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -1816,68 +1816,226 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
 ## File: `apps/web/src/app/saved/page.tsx`
 ```typescript
 'use client';
-// @ts-nocheck
-
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { 
-  Search, SlidersHorizontal, Heart, Clock, Utensils, X, UploadCloud, 
-  BookmarkPlus, CalendarPlus, ShoppingCart, Timer, Edit3, Share2, 
-  Star, Check, Book, ChevronDown, Trash2, Save, Plus, ImagePlus, 
-  Users, Calendar, GripVertical, CheckSquare, CheckCircle2, Type, 
-  ExternalLink, Carrot, Hourglass, ChevronLeft, ChevronRight, 
-  LayoutGrid, Grid3X3, Rows3, Flame, AlertCircle, BookOpen
+import {
+  Search, SlidersHorizontal, Heart, Clock, Utensils,
+  X, UploadCloud, BookmarkPlus, CalendarPlus, ShoppingCart,
+  Timer, Edit3, Share2, Star, Check, Book, ChevronDown,
+  Trash2, Save, Plus, ImagePlus, Users, Calendar,
+  GripVertical, CheckSquare, CheckCircle2, Type, ExternalLink,
+  Carrot, Hourglass, ChevronLeft, ChevronRight, LayoutGrid,
+  Grid3X3, Rows3, Play, Pause, Bell
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { syncUserSavedRecipes, persistSavedRecipe, deleteSavedRecipe } from '@/lib/recipeSync';
 import { getStoredCategories } from '@/lib/categories';
 import { useTranslation } from '@/components/LanguageProvider';
 
+const RECIPE_TYPES = [
+  'All Types',
+  'Appetiser',
+  'Main Dish',
+  'Side Dish',
+  'Dessert',
+  'Snack',
+  'Breakfast',
+  'Lunch'
+];
+
 type GridMode = '3x3' | '4x4' | '5x5';
 
 const GRID_CONFIG: Record<GridMode, { colsClass: string; perPage: number; label: string; imgHeight: string; titleSize: string }> = {
-  '3x3': { colsClass: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3', perPage: 9, label: '3×3', imgHeight: 'h-44', titleSize: 'text-base' },
-  '4x4': { colsClass: 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4', perPage: 16, label: '4×4', imgHeight: 'h-36', titleSize: 'text-sm' },
-  '5x5': { colsClass: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5', perPage: 25, label: '5×5', imgHeight: 'h-28', titleSize: 'text-xs' }
+  '3x3': {
+    colsClass: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3',
+    perPage: 9,
+    label: '3×3',
+    imgHeight: 'h-44',
+    titleSize: 'text-base'
+  },
+  '4x4': {
+    colsClass: 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4',
+    perPage: 16,
+    label: '4×4',
+    imgHeight: 'h-36',
+    titleSize: 'text-sm'
+  },
+  '5x5': {
+    colsClass: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5',
+    perPage: 25,
+    label: '5×5',
+    imgHeight: 'h-28',
+    titleSize: 'text-xs'
+  }
 };
+
+const DEFAULT_RECIPE_IMAGE = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80';
 
 const isRecipeInBook = (rec: any, bookId: string): boolean => {
   if (!rec || !bookId) return false;
   return rec.bookId === bookId || rec.book_id === bookId;
 };
 
-// Robust arithmetic fraction and ingredient quantity scaler
-function scaleAmountString(amountStr: string, factor: number): string {
-  if (!amountStr || factor === 1) return amountStr;
-  const trimmed = amountStr.trim();
-  
-  // Handle mixed fractions like "1 1/2"
-  const mixedMatch = trimmed.match(/^(\d+)\s+(\d+)\/(\d+)$/);
-  if (mixedMatch) {
-    const whole = parseFloat(mixedMatch[1]);
-    const num = parseFloat(mixedMatch[2]);
-    const den = parseFloat(mixedMatch[3]);
-    const val = (whole + num / den) * factor;
-    return (Math.round(val * 100) / 100).toString();
+// Culinary Fraction & Number Scaling Helpers
+const formatScaledNumber = (val: number): string => {
+  if (isNaN(val) || val <= 0) return '';
+  const intPart = Math.floor(val);
+  const fracPart = val - intPart;
+
+  if (Math.abs(val - Math.round(val)) < 0.02) {
+    return String(Math.round(val));
   }
 
-  // Handle simple fractions like "1/2", "3/4"
-  const fracMatch = trimmed.match(/^(\d+)\/(\d+)$/);
-  if (fracMatch) {
-    const num = parseFloat(fracMatch[1]);
-    const den = parseFloat(fracMatch[2]);
-    const val = (num / den) * factor;
-    return (Math.round(val * 100) / 100).toString();
+  const fractions: [number, string][] = [
+    [0.25, '1/4'],
+    [0.333, '1/3'],
+    [0.5, '1/2'],
+    [0.667, '2/3'],
+    [0.75, '3/4']
+  ];
+
+  for (const [fVal, fStr] of fractions) {
+    if (Math.abs(fracPart - fVal) < 0.04) {
+      return intPart > 0 ? `${intPart} ${fStr}` : fStr;
+    }
   }
 
-  const numVal = parseFloat(trimmed);
-  if (!isNaN(numVal)) {
-    const scaled = numVal * factor;
-    return (Math.round(scaled * 100) / 100).toString();
+  return Number(val.toFixed(2)).toString();
+};
+
+const parseAmountToNumber = (rawAmt: any): number | null => {
+  if (rawAmt === null || rawAmt === undefined) return null;
+  const str = String(rawAmt).trim();
+  if (!str) return null;
+
+  if (str.includes('/')) {
+    const parts = str.split(/\s+/);
+    if (parts.length === 2) {
+      const [num, den] = parts[1].split('/').map(Number);
+      if (!isNaN(num) && !isNaN(den) && den !== 0) {
+        return (Number(parts[0]) || 0) + (num / den);
+      }
+    } else if (parts.length === 1) {
+      const [num, den] = parts[0].split('/').map(Number);
+      if (!isNaN(num) && !isNaN(den) && den !== 0) {
+        return num / den;
+      }
+    }
   }
-  return amountStr;
-}
+
+  const numMatch = str.match(/^(\d+(?:\.\d+)?)/);
+  if (numMatch) {
+    const parsed = Number(numMatch[1]);
+    if (!isNaN(parsed)) return parsed;
+  }
+
+  const directNum = Number(str);
+  if (!isNaN(directNum)) return directNum;
+
+  return null;
+};
+
+const calculateScaledAmount = (rawAmt: any, baseServings: number, currentServings: number): string => {
+  if (!rawAmt && rawAmt !== 0) return '';
+  const safeBase = Math.max(1, Number(baseServings) || 4);
+  const safeCurrent = Math.max(1, Number(currentServings) || safeBase);
+  const scaleRatio = safeCurrent / safeBase;
+
+  const str = String(rawAmt).trim();
+  if (!str) return '';
+
+  const rangeMatch = str.match(/^((?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?)\s*(-|to)\s*((?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?)$/i);
+  if (rangeMatch) {
+    const num1 = parseAmountToNumber(rangeMatch[1]);
+    const num2 = parseAmountToNumber(rangeMatch[3]);
+    const sep = rangeMatch[2];
+    if (num1 !== null && num2 !== null) {
+      const s1 = formatScaledNumber(num1 * scaleRatio);
+      const s2 = formatScaledNumber(num2 * scaleRatio);
+      return `${s1} ${sep} ${s2}`;
+    }
+  }
+
+  const num = parseAmountToNumber(str);
+  if (num !== null) {
+    return formatScaledNumber(num * scaleRatio);
+  }
+
+  return str;
+};
+
+const parseIngredientString = (rawStr: string, defaultCat: string) => {
+  const trimmed = String(rawStr || '').trim();
+  if (!trimmed) return { amount: '', unit: '', item: '', category: defaultCat };
+
+  const regex = /^((?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?(?:\s*(?:-|to)\s*(?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?)?)\s*([a-zA-Z]+)?\s*(?:of\s+)?(.*)$/i;
+  const match = trimmed.match(regex);
+
+  if (match) {
+    const amount = match[1].trim();
+    const possibleUnit = (match[2] || '').trim().toLowerCase();
+    const rest = (match[3] || '').trim();
+
+    const knownUnits = [
+      'cup', 'cups', 'tbsp', 'tbs', 'tablespoon', 'tablespoons', 'tsp', 'teaspoon', 'teaspoons',
+      'oz', 'ounce', 'ounces', 'lb', 'lbs', 'pound', 'pounds', 'g', 'gram', 'grams', 'kg',
+      'ml', 'l', 'liter', 'liters', 'clove', 'cloves', 'can', 'cans', 'slice', 'slices',
+      'pinch', 'pinches', 'bunch', 'bunches', 'stalk', 'stalks', 'piece', 'pieces', 'dash',
+      'pkg', 'package', 'packages', 'handful', 'handfuls', 'sprig', 'sprigs'
+    ];
+
+    if (knownUnits.includes(possibleUnit)) {
+      return { amount, unit: possibleUnit, item: rest || trimmed, category: defaultCat };
+    } else if (possibleUnit) {
+      return { amount, unit: '', item: `${possibleUnit} ${rest}`.trim(), category: defaultCat };
+    }
+    return { amount, unit: '', item: rest || trimmed, category: defaultCat };
+  }
+
+  return { amount: '', unit: '', item: trimmed, category: defaultCat };
+};
+
+const getNormalizedIngredient = (ing: any, defaultCat: string) => {
+  if (!ing) return { amount: '', unit: '', name: '', category: defaultCat };
+
+  if (typeof ing === 'string') {
+    const parsed = parseIngredientString(ing, defaultCat);
+    return {
+      amount: parsed.amount,
+      unit: parsed.unit,
+      name: parsed.item,
+      category: parsed.category
+    };
+  }
+
+  if (typeof ing === 'object') {
+    const rawItem = String(ing.item || ing.name || '').trim();
+    const rawAmt = String(ing.amount || ing.quantity || '').trim();
+    const rawUnit = String(ing.unit || '').trim();
+
+    if (!rawAmt && rawItem) {
+      const parsed = parseIngredientString(rawItem, ing.category || defaultCat);
+      if (parsed.amount) {
+        return {
+          amount: parsed.amount,
+          unit: rawUnit || parsed.unit,
+          name: parsed.item,
+          category: ing.category || defaultCat
+        };
+      }
+    }
+
+    return {
+      amount: rawAmt,
+      unit: rawUnit,
+      name: rawItem,
+      category: ing.category || defaultCat
+    };
+  }
+
+  return { amount: '', unit: '', name: String(ing), category: defaultCat };
+};
 
 export default function SavedRecipesPage() {
   const router = useRouter();
@@ -1887,16 +2045,18 @@ export default function SavedRecipesPage() {
   const [books, setBooks] = useState<any[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedRecipe, setSelectedRecipe] = useState<any | null>(null);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const isSavingRef = useRef<boolean>(false);
 
-  // Search & Filter State
+  // Search & Filters
   const [search, setSearch] = useState('');
   const [showFilters, setShowFilters] = useState(true);
   const [filterFavorites, setFilterFavorites] = useState(false);
   const [filterCooked, setFilterCooked] = useState(false);
+  
+  // Ingredients Filter State
   const [ingredientQuery, setIngredientQuery] = useState('');
   const [selectedIngredientsList, setSelectedIngredientsList] = useState<string[]>([]);
+
+  // Dropdown Filters
   const [selectedType, setSelectedType] = useState('All Types');
   const [selectedRating, setSelectedRating] = useState('All Ratings');
   const [selectedPrepTime, setSelectedPrepTime] = useState('All Prep Times');
@@ -1905,329 +2065,1042 @@ export default function SavedRecipesPage() {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
 
-  // Multi-Density Grid & Pagination State
-  const [gridMode, setGridMode] = useState<GridMode>('3x3');
-  const [currentPage, setCurrentPage] = useState<number>(1);
-
   // Add to Plan / Calendar Modal State
   const [showAddToPlanModal, setShowAddToPlanModal] = useState(false);
   const [planDate, setPlanDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [planMealType, setPlanMealType] = useState('Dinner');
-  const [planTime, setPlanTime] = useState('19:00');
+  const [planTime, setPlanTime] = useState('');
   const [planNotes, setPlanNotes] = useState('');
 
-  // Servings Scaling State in Detail Modal
-  const [modalServings, setModalServings] = useState<number>(4);
+  // Edit Mode & Form State
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTab, setEditTab] = useState<'info' | 'ingredients' | 'steps'>('info');
+  const [editForm, setEditForm] = useState<any>({
+    title: '',
+    description: '',
+    recipeType: 'Main Dish',
+    sourceUrl: '',
+    servings: 4,
+    prepTimeMinutes: 30,
+    cookTimeMinutes: 10,
+    imageUrl: '',
+    ingredients: [],
+    instructions: []
+  });
 
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
-  };
+  const [isReorderingIngredients, setIsReorderingIngredients] = useState(false);
+  const [isReorderingSteps, setIsReorderingSteps] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  const loadData = useCallback(async (user: User | null) => {
+  // Servings Scaling & View States
+  const [currentServings, setCurrentServings] = useState<number>(4);
+  const [fontSizeScale, setFontSizeScale] = useState(80);
+  const [completedSteps, setCompletedSteps] = useState<number[]>([]);
+  const [noteText, setNoteText] = useState('');
+  const [isNoteOpen, setIsNoteOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  // Grid Density & Pagination States
+  const [gridMode, setGridMode] = useState<GridMode>('3x3');
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Shopping List Modal State
+  const [isShoppingModalOpen, setIsShoppingModalOpen] = useState(false);
+  const [shoppingModalIngredients, setShoppingModalIngredients] = useState<any[]>([]);
+
+  // Kitchen Timer States
+  const [isTimerModalOpen, setIsTimerModalOpen] = useState(false);
+  const [timerInputMinutes, setTimerInputMinutes] = useState(15);
+  const [activeTimer, setActiveTimer] = useState<{
+    recipeId: string;
+    recipeTitle: string;
+    totalSeconds: number;
+    remainingSeconds: number;
+    isRunning: boolean;
+    endTime: number;
+  } | null>(null);
+
+  const audioCtxRef = useRef<any>(null);
+  const isSyncingRef = useRef<boolean>(false);
+
+  const defaultBooks = [
+    { id: 'book_1', title: 'Family Favorites & Weeknight Dinners', description: 'Quick and easy meals.' },
+    { id: 'book_2', title: 'Authentic Asian Cuisine', description: 'Traditional recipes & stir-fries.' },
+    { id: 'book_3', title: 'Baking & Desserts', description: 'Sweet treats & pastries.' }
+  ];
+
+  useEffect(() => {
     try {
-      const targetUserId = user?.id || 'usr_admin_1';
-      
-      // 1. Fetch from PostgreSQL /api/saved-recipes & /api/recipes/saved
-      let remoteRecipes: any[] = [];
-      try {
-        const res = await fetch(`/api/saved-recipes?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          remoteRecipes = Array.isArray(data) ? data : (data?.recipes || data?.saved_recipes || []);
-        }
-      } catch (_) {}
-
-      if (remoteRecipes.length === 0) {
-        try {
-          const res2 = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
-          if (res2.ok) {
-            const data2 = await res2.json();
-            remoteRecipes = Array.isArray(data2) ? data2 : (data2?.recipes || data2?.saved_recipes || []);
-          }
-        } catch (_) {}
+      const savedMode = localStorage.getItem('zecratary_saved_grid_mode') as GridMode;
+      if (savedMode && (savedMode === '3x3' || savedMode === '4x4' || savedMode === '5x5')) {
+        setGridMode(savedMode);
       }
+    } catch (_) {}
+  }, []);
 
-      // Fallback to localStorage
-      if (remoteRecipes.length === 0 && typeof window !== 'undefined') {
-        const raw = localStorage.getItem('zecratary_saved_recipes') || localStorage.getItem('saved_recipes');
-        if (raw) remoteRecipes = JSON.parse(raw);
-      }
+  const playTimerEndSound = useCallback(() => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = audioCtxRef.current || new AudioCtx();
+      audioCtxRef.current = ctx;
 
-      const normalized = remoteRecipes.map(r => ({
-        ...r,
-        id: r.id || ('saved_' + Math.random().toString(36).substring(2, 8)),
-        title: r.title || r.name || 'Untitled Recipe',
-        name: r.title || r.name || 'Untitled Recipe',
-        isFavorite: Boolean(r.isFavorite ?? r.is_favorite),
-        is_favorite: Boolean(r.isFavorite ?? r.is_favorite),
-        isCooked: Boolean(r.isCooked ?? r.is_cooked),
-        is_cooked: Boolean(r.isCooked ?? r.is_cooked),
-        servings: Number(r.servings) || 4,
-        prepTimeMinutes: Number(r.prepTimeMinutes || r.prep_time_minutes || 15),
-        cookTimeMinutes: Number(r.cookTimeMinutes || r.cook_time_minutes || 25),
-        recipeType: r.recipeType || r.category || 'Main Dish',
-        category: r.category || r.recipeType || 'Main Dish',
-        ingredients: Array.isArray(r.ingredients) ? r.ingredients : [],
-        instructions: Array.isArray(r.instructions) ? r.instructions : (Array.isArray(r.directions) ? r.directions : []),
-        imageUrl: r.imageUrl || r.image || r.image_url || '/uploads/recipes/default.jpg'
-      }));
-
-      setRecipes(normalized);
-
-      // Fetch Cookbooks
-      try {
-        const bRes = await fetch(`/api/books?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
-        if (bRes.ok) {
-          const bData = await bRes.json();
-          const bList = Array.isArray(bData) ? bData : (bData?.books || []);
-          setBooks(bList);
-        }
-      } catch (_) {}
-
-    } catch (err) {
-      console.warn('Error loading saved recipes:', err);
+      const notes = [587.33, 880, 1174.66, 1760];
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.16);
+        gain.gain.setValueAtTime(0, ctx.currentTime + idx * 0.16);
+        gain.gain.linearRampToValueAtTime(0.28, ctx.currentTime + idx * 0.16 + 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + idx * 0.16 + 0.45);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime + idx * 0.16);
+        osc.stop(ctx.currentTime + idx * 0.16 + 0.5);
+      });
+    } catch (e) {
+      console.warn('Could not trigger Web Audio chime:', e);
     }
   }, []);
 
   useEffect(() => {
-    document.title = `${t('savedRecipesTitle', 'Saved Recipe Collections')} - Zecratary`;
-    initAuthStorage();
-    const user = getCurrentUser();
-    setCurrentUser(user);
-    loadData(user);
+    try {
+      const savedTimerRaw = localStorage.getItem('zecratary_active_timer');
+      if (savedTimerRaw) {
+        const parsed = JSON.parse(savedTimerRaw);
+        if (parsed && typeof parsed.endTime === 'number') {
+          const now = Date.now();
+          const rem = Math.max(0, Math.ceil((parsed.endTime - now) / 1000));
+          if (rem > 0) {
+            setActiveTimer({
+              ...parsed,
+              remainingSeconds: rem,
+              isRunning: parsed.isRunning ?? true
+            });
+          }
+        }
+      }
+    } catch (_) {}
+  }, []);
 
-    if (typeof window !== 'undefined') {
-      const storedGrid = localStorage.getItem('zecratary_saved_grid_mode') as GridMode;
-      if (storedGrid && GRID_CONFIG[storedGrid]) setGridMode(storedGrid);
+  useEffect(() => {
+    if (!activeTimer || !activeTimer.isRunning) return;
+
+    if (activeTimer.remainingSeconds <= 0) {
+      playTimerEndSound();
+      return;
     }
 
-    const handleSync = () => {
-      const u = getCurrentUser();
-      loadData(u);
-    };
+    const interval = setInterval(() => {
+      setActiveTimer((prev) => {
+        if (!prev || !prev.isRunning) return prev;
+        const now = Date.now();
+        const calculatedRemaining = Math.max(0, Math.ceil((prev.endTime - now) / 1000));
 
-    window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
-    window.addEventListener('zecratary_recipes_updated', handleSync);
-    window.addEventListener('zecratary_languages_updated', handleSync);
-    window.addEventListener('zecratary_dictionary_updated', handleSync);
-    window.addEventListener('zecratary_locale_changed', handleSync);
+        if (calculatedRemaining <= 0) {
+          clearInterval(interval);
+          playTimerEndSound();
+          try {
+            localStorage.removeItem('zecratary_active_timer');
+          } catch (_) {}
+          return {
+            ...prev,
+            remainingSeconds: 0,
+            isRunning: false
+          };
+        }
+
+        const updated = {
+          ...prev,
+          remainingSeconds: calculatedRemaining
+        };
+
+        try {
+          localStorage.setItem('zecratary_active_timer', JSON.stringify(updated));
+        } catch (_) {}
+
+        return updated;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeTimer?.isRunning, activeTimer?.endTime, playTimerEndSound]);
+
+  const applyGlobalTheme = useCallback(() => {
+    try {
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
+    } catch (_) {}
+  }, []);
+
+  const getCleanRecipeType = (rec: any): string => {
+    const raw = rec.recipeType || rec.category || rec.recipe_type || (Array.isArray(rec.tags) ? rec.tags[0] : 'Main Dish');
+    if (raw === 'Appetizer' || raw === 'Appetiser') return 'Appetiser';
+    if (RECIPE_TYPES.includes(raw)) return raw;
+    return 'Main Dish';
+  };
+
+  const getSafeHostname = (urlStr: string) => {
+    if (!urlStr || typeof urlStr !== 'string') return 'source website';
+    try {
+      const normalized = urlStr.startsWith('http://') || urlStr.startsWith('https://') 
+        ? urlStr 
+        : `https://${urlStr}`;
+      return new URL(normalized).hostname.replace('www.', '');
+    } catch {
+      return urlStr.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0] || 'source website';
+    }
+  };
+
+  const getSafeHref = (urlStr: string) => {
+    if (!urlStr) return '#';
+    if (urlStr.startsWith('http://') || urlStr.startsWith('https://')) return urlStr;
+    return `https://${urlStr}`;
+  };
+
+  const normalizeRecipeFields = useCallback((r: any, targetUserId: string, userName: string) => {
+    const cleanType = getCleanRecipeType(r);
+    const resolvedImg = r.imageUrl || r.image || r.image_url || DEFAULT_RECIPE_IMAGE;
+
+    let ingredients = r.ingredients;
+    if (typeof ingredients === 'string') {
+      try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = []; }
+    }
+    if (!Array.isArray(ingredients)) ingredients = [];
+
+    let instructions = r.instructions || r.directions || r.steps;
+    if (typeof instructions === 'string') {
+      try { instructions = JSON.parse(instructions); } catch (_) { instructions = [instructions]; }
+    }
+    if (!Array.isArray(instructions)) instructions = [];
+
+    const prepMins = Number(r.prepTimeMinutes || r.prep_time || r.prepTime) || 15;
+    const cookMins = Number(r.cookTimeMinutes || r.cook_time || r.cookTime) || 25;
+
+    return {
+      ...r,
+      id: r.id || 'rcp_' + Math.random().toString(36).substring(2, 9),
+      userId: r.user_id || r.userId || targetUserId,
+      user_id: r.user_id || r.userId || targetUserId,
+      createdBy: r.created_by || r.createdBy || targetUserId,
+      created_by: r.created_by || r.createdBy || targetUserId,
+      creatorName: r.creator_name || r.creatorName || userName,
+      creator_name: r.creator_name || r.creatorName || userName,
+      title: r.title || r.name || 'Untitled Recipe',
+      name: r.title || r.name || 'Untitled Recipe',
+      description: r.description || '',
+      recipeType: cleanType,
+      category: cleanType,
+      recipe_type: cleanType,
+      imageUrl: resolvedImg,
+      image: resolvedImg,
+      image_url: resolvedImg,
+      servings: Number(r.servings || r.servingsCount) || 4,
+      prepTimeMinutes: prepMins,
+      cookTimeMinutes: cookMins,
+      prepTime: String(prepMins),
+      cookTime: String(cookMins),
+      prep_time: String(prepMins),
+      cook_time: String(cookMins),
+      ingredients,
+      directions: instructions,
+      instructions,
+      steps: instructions,
+      bookId: r.book_id || r.bookId || null,
+      book_id: r.book_id || r.bookId || null,
+      isFavorite: Boolean(r.is_favorite || r.isFavorite),
+      is_favorite: Boolean(r.is_favorite || r.isFavorite),
+      isCooked: Boolean(r.is_cooked || r.isCooked),
+      is_cooked: Boolean(r.is_cooked || r.isCooked),
+      rating: Number(r.rating) || 0,
+      note: r.note || '',
+      sourceUrl: r.source_url || r.sourceUrl || '',
+      source_url: r.source_url || r.sourceUrl || '',
+      tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
+    };
+  }, []);
+
+  const loadData = useCallback(async (user: User | null, showSpinner = true) => {
+    if (!user) return;
+    setCategories(getStoredCategories());
+    const targetUserId = (user.id || user.email || 'usr_admin_1').trim();
+    const userName = user.name || 'You';
+
+    try {
+      if (showSpinner) setLoading(true);
+
+      const candidateLists: any[][] = [];
+
+      // 1. Direct API call to PostgreSQL /api/recipes/saved
+      try {
+        const res = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.recipes)) {
+            candidateLists.push(data.recipes);
+          } else if (Array.isArray(data)) {
+            candidateLists.push(data);
+          }
+        }
+      } catch (_) {}
+
+      // 2. Fallback check to syncUserSavedRecipes helper
+      try {
+        const syncRes = await syncUserSavedRecipes(targetUserId);
+        if (Array.isArray(syncRes)) {
+          candidateLists.push(syncRes);
+        } else if (syncRes && Array.isArray((syncRes as any).recipes)) {
+          candidateLists.push((syncRes as any).recipes);
+        }
+      } catch (_) {}
+
+      // 3. Fallback check to general /api/recipes
+      try {
+        const genRes = await fetch(`/api/recipes?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+        if (genRes.ok) {
+          const gData = await genRes.json();
+          if (Array.isArray(gData.recipes)) candidateLists.push(gData.recipes);
+          else if (Array.isArray(gData)) candidateLists.push(gData);
+        }
+      } catch (_) {}
+
+      // 4. Fallback check to local storage stores
+      const localKeys = [
+        'zecratary_saved_recipes',
+        'saved_recipes',
+        'zecratary_recipes',
+        'zecratary_user_recipes',
+        'zecratary_imported_recipes'
+      ];
+      for (const k of localKeys) {
+        try {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              candidateLists.push(parsed);
+            }
+          }
+        } catch (_) {}
+      }
+
+      // Merge and deduplicate by recipe id or normalized title
+      const recipeMap = new Map<string, any>();
+      for (const list of candidateLists) {
+        for (const item of list) {
+          if (!item) continue;
+          const rUser = String(item.user_id || item.userId || '').trim();
+          const rCreator = String(item.created_by || item.createdBy || '').trim();
+
+          const belongsToUser = !rUser ||
+            rUser === targetUserId ||
+            rUser === 'usr_admin_1' ||
+            rUser === 'undefined' ||
+            item.is_public ||
+            item.isPublic ||
+            (user.email && (rUser === user.email || rCreator === user.email));
+
+          if (belongsToUser) {
+            const normalized = normalizeRecipeFields(item, targetUserId, userName);
+            const key = normalized.id || normalized.title.toLowerCase();
+            if (!recipeMap.has(key)) {
+              recipeMap.set(key, normalized);
+            } else {
+              // Merge non-empty fields
+              const existing = recipeMap.get(key);
+              recipeMap.set(key, { ...existing, ...normalized, isFavorite: existing.isFavorite || normalized.isFavorite });
+            }
+          }
+        }
+      }
+
+      const mergedRecipes = Array.from(recipeMap.values());
+      setRecipes(mergedRecipes);
+
+      // Books loading
+      let parsedBooks = defaultBooks;
+      try {
+        const bRes = await fetch(`/api/books?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+        if (bRes.ok) {
+          const bData = await bRes.json();
+          if (Array.isArray(bData.books) && bData.books.length > 0) parsedBooks = bData.books;
+        }
+      } catch (_) {}
+
+      const localBooks = localStorage.getItem('zecratary_recipe_books') || localStorage.getItem('zecratary_cookbooks');
+      if (localBooks) {
+        try {
+          const parsed = JSON.parse(localBooks);
+          if (Array.isArray(parsed) && parsed.length > 0) parsedBooks = parsed;
+        } catch (_) {}
+      }
+
+      const userBooks = parsedBooks.filter((b: any) => {
+        if (!b.userId && !b.createdBy) return true;
+        if (b.userId) return b.userId === targetUserId;
+        return b.createdBy === user.email || b.createdBy === targetUserId;
+      });
+
+      setBooks(userBooks.map((b: any) => ({
+        ...b,
+        recipeCount: mergedRecipes.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
+      })));
+    } catch (e) {
+      console.error('[SavedRecipesPage] Load error:', e);
+    } finally {
+      if (showSpinner) setLoading(false);
+    }
+  }, [normalizeRecipeFields]);
+
+  useEffect(() => {
+    applyGlobalTheme();
+    window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
+    window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
+    window.addEventListener('zecratary_theme_updated', applyGlobalTheme);
+    window.addEventListener('storage', applyGlobalTheme);
 
     return () => {
-      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
+      window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
+      window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
+      window.removeEventListener('storage', applyGlobalTheme);
+    };
+  }, [applyGlobalTheme]);
+
+  useEffect(() => {
+    document.title = `${t('savedRecipesTitle') || 'Saved Recipes'} - FoodiePrep`;
+    initAuthStorage();
+    const user = getCurrentUser();
+    if (!user) {
+      router.replace('/login');
+      return;
+    }
+    setCurrentUser(user);
+    loadData(user, true);
+
+    const handleSync = () => {
+      if (isSyncingRef.current) return;
+      const activeUser = getCurrentUser();
+      if (activeUser) {
+        setCurrentUser(activeUser);
+        loadData(activeUser, false);
+      }
+    };
+
+    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
+    window.addEventListener('zecratary_recipes_updated', handleSync);
+    window.addEventListener('zecratary_recipe_books_updated', handleSync);
+    window.addEventListener('zecratary_categories_changed', handleSync);
+    window.addEventListener('zecratary_auth_changed', handleSync);
+    window.addEventListener('storage', handleSync);
+
+    return () => {
       window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
       window.removeEventListener('zecratary_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_languages_updated', handleSync);
-      window.removeEventListener('zecratary_dictionary_updated', handleSync);
-      window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('zecratary_recipe_books_updated', handleSync);
+      window.removeEventListener('zecratary_categories_changed', handleSync);
+      window.removeEventListener('zecratary_auth_changed', handleSync);
+      window.removeEventListener('storage', handleSync);
     };
-  }, [loadData, t]);
+  }, [loadData, router, t]);
 
-  const handleGridModeChange = (mode: GridMode) => {
-    setGridMode(mode);
-    setCurrentPage(1);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('zecratary_saved_grid_mode', mode);
-    }
-  };
+  const saveAllRecipes = (updatedUserList: any[]) => {
+    if (!currentUser) return;
+    const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
 
-  const saveAllRecipes = async (updatedUserList: any[]) => {
-    const targetUserId = currentUser?.id || 'usr_admin_1';
-    setRecipes(updatedUserList);
+    const updatedWithId = updatedUserList.map(r => normalizeRecipeFields(r, targetUserId, currentUser.name || 'You'));
 
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('zecratary_saved_recipes', JSON.stringify(updatedUserList));
-      } catch (_) {}
-    }
+    setRecipes(updatedWithId);
 
+    // Save to localStorage immediately
     try {
-      await persistSavedRecipe(targetUserId, updatedUserList);
+      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(updatedWithId));
+      localStorage.setItem('saved_recipes', JSON.stringify(updatedWithId));
     } catch (_) {}
+
+    isSyncingRef.current = true;
+
+    // Persist via PostgreSQL POST API
+    Promise.allSettled([
+      fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedWithId)
+      }),
+      persistSavedRecipe(targetUserId, updatedWithId, {
+        createdBy: currentUser.email || targetUserId,
+        creatorName: currentUser.name || 'You'
+      })
+    ]).then(() => {
+      setTimeout(() => {
+        isSyncingRef.current = false;
+      }, 400);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_recipes_updated'));
+      }
+    }).catch((err) => {
+      isSyncingRef.current = false;
+      console.error('[SavedRecipesPage] Error saving recipes via POST:', err);
+    });
+
+    const updatedBooks = books.map((b: any) => ({
+      ...b,
+      recipeCount: updatedWithId.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
+    }));
+    setBooks(updatedBooks);
   };
 
-  // Toggle Favorite
-  const toggleFavorite = async (e: React.MouseEvent, id: string) => {
+  const toggleFavorite = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    const current = recipes.find(r => r.id === id);
-    if (!current) return;
-    const nextVal = !current.isFavorite;
+    const target = recipes.find(r => r.id === id);
+    if (!target) return;
+    const newFav = !target.isFavorite;
 
-    const updatedRecipe = { ...current, isFavorite: nextVal, is_favorite: nextVal };
-    const updated = recipes.map(r => r.id === id ? updatedRecipe : r);
+    const updated = recipes.map(r => r.id === id ? { ...r, isFavorite: newFav, is_favorite: newFav } : r);
     setRecipes(updated);
 
     if (selectedRecipe?.id === id) {
-      setSelectedRecipe(updatedRecipe);
+      setSelectedRecipe((prev: any) => prev ? { ...prev, isFavorite: newFav, is_favorite: newFav } : null);
     }
 
-    await saveAllRecipes(updated);
-    showToast(t('favoriteUpdatedToast', 'Favorite status updated.'));
+    saveAllRecipes(updated);
 
-    try {
-      await fetch('/api/saved-recipes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedRecipe)
-      });
-    } catch (_) {}
+    // Direct atomic PATCH
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, isFavorite: newFav, is_favorite: newFav })
+    }).catch(() => {});
   };
 
-  // Toggle Cooked
-  const toggleCooked = async (e: React.MouseEvent, id: string) => {
+  const toggleCooked = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    const current = recipes.find(r => r.id === id);
-    if (!current) return;
-    const nextVal = !current.isCooked;
+    const target = recipes.find(r => r.id === id);
+    if (!target) return;
+    const newCooked = !target.isCooked;
 
-    const updatedRecipe = { ...current, isCooked: nextVal, is_cooked: nextVal };
-    const updated = recipes.map(r => r.id === id ? updatedRecipe : r);
+    const updated = recipes.map(r => r.id === id ? { ...r, isCooked: newCooked, is_cooked: newCooked } : r);
     setRecipes(updated);
 
     if (selectedRecipe?.id === id) {
-      setSelectedRecipe(updatedRecipe);
+      setSelectedRecipe((prev: any) => prev ? { ...prev, isCooked: newCooked, is_cooked: newCooked } : null);
     }
 
-    await saveAllRecipes(updated);
-    showToast(t('cookedUpdatedToast', 'Cooked status updated.'));
+    saveAllRecipes(updated);
 
-    try {
-      await fetch('/api/saved-recipes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedRecipe)
-      });
-    } catch (_) {}
+    // Direct atomic PATCH
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, isCooked: newCooked, is_cooked: newCooked })
+    }).catch(() => {});
   };
 
-  // Delete Recipe
-  const handleDeleteRecipe = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    if (!confirm(t('confirmDeleteRecipe', 'Are you sure you want to delete this recipe?'))) return;
-
-    const updated = recipes.filter(r => r.id !== id);
-    setRecipes(updated);
-    if (selectedRecipe?.id === id) setSelectedRecipe(null);
-
-    await saveAllRecipes(updated);
-    try {
-      await fetch(`/api/saved-recipes?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-    } catch (_) {}
-
-    showToast(t('recipeDeletedToast', 'Recipe removed from your library.'));
-    window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
-  };
-
-  // Cookbook Assignment
-  const handleAssignToBook = async (bookId: string) => {
+  const handleAssignToBook = (bookId: string) => {
     if (!selectedRecipe) return;
     const isRemoving = isRecipeInBook(selectedRecipe, bookId);
     const targetBookId = isRemoving ? null : bookId;
-
+    
     const updatedRecipe = {
       ...selectedRecipe,
       bookId: targetBookId,
       book_id: targetBookId
     };
-
     setSelectedRecipe(updatedRecipe);
-    const updated = recipes.map(r => r.id === selectedRecipe.id ? updatedRecipe : r);
-    setRecipes(updated);
-    await saveAllRecipes(updated);
-    showToast(t('cookbookAssignedToast', 'Cookbook assignment updated.'));
 
-    try {
-      await fetch('/api/saved-recipes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updatedRecipe)
-      });
-    } catch (_) {}
+    const updatedRecipes = recipes.map(r => r.id === selectedRecipe.id ? updatedRecipe : r);
+    setRecipes(updatedRecipes);
+    saveAllRecipes(updatedRecipes);
+
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: selectedRecipe.id, bookId: targetBookId, book_id: targetBookId })
+    }).catch(() => {});
   };
 
-  // Add to Meal Planner / Calendar
-  const handleSaveToCalendar = async () => {
-    if (!selectedRecipe) return;
-    const targetUserId = currentUser?.id || 'usr_admin_1';
+  const openAddToPlanModal = () => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    setPlanDate(todayStr);
+    setPlanMealType('Dinner');
+    setPlanTime('19:00');
+    setPlanNotes('');
+    setShowAddToPlanModal(true);
+  };
 
-    const mealItem = {
-      id: 'plan_' + Date.now(),
+  const handleSaveToCalendar = async () => {
+    if (!selectedRecipe || !currentUser) return;
+
+    const recName = selectedRecipe.title || selectedRecipe.name || 'Untitled Recipe';
+    const recImage = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || DEFAULT_RECIPE_IMAGE;
+    const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
+
+    const newPlanItem = {
+      id: 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
       userId: targetUserId,
-      recipeId: selectedRecipe.id,
-      title: selectedRecipe.title,
-      mealType: planMealType,
+      user_id: targetUserId,
+      createdBy: currentUser.email || targetUserId,
+      creatorName: currentUser.name || 'User',
       date: planDate,
-      time: planTime,
-      notes: planNotes,
-      servings: modalServings,
-      prepMinutes: selectedRecipe.prepTimeMinutes || 15,
-      cookMinutes: selectedRecipe.cookTimeMinutes || 25
+      recipeId: selectedRecipe.id,
+      recipe_id: selectedRecipe.id,
+      recipeName: recName,
+      title: recName,
+      image: recImage,
+      imageUrl: recImage,
+      image_url: recImage,
+      mealType: planMealType,
+      time: planTime || '',
+      notes: planNotes || '',
+      servings: currentServings || selectedRecipe.servings || 4,
+      prepTimeMinutes: selectedRecipe.prepTimeMinutes || 15,
+      cookTimeMinutes: selectedRecipe.cookTimeMinutes || 25,
+      recipe: selectedRecipe,
+      isLeftover: false,
+      createdAt: new Date().toISOString()
     };
 
     try {
-      await fetch('/api/planner', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(mealItem)
-      });
+      const planKeys = ['zecratary_meal_plan', 'zecratary_meal_plans'];
+      for (const k of planKeys) {
+        const raw = localStorage.getItem(k);
+        const currentPlan = raw ? JSON.parse(raw) : [];
+        const updated = Array.isArray(currentPlan) ? [...currentPlan, newPlanItem] : [newPlanItem];
+        localStorage.setItem(k, JSON.stringify(updated));
+      }
     } catch (_) {}
 
+    try {
+      await Promise.allSettled([
+        fetch('/api/planner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newPlanItem)
+        }),
+        fetch('/api/meal-plans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newPlanItem)
+        })
+      ]);
+    } catch (_) {}
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_planner_updated'));
+      window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
+      window.dispatchEvent(new Event('zecratary_meal_plans_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }
+
     setShowAddToPlanModal(false);
-    showToast(t('mealScheduledToast', 'Recipe scheduled in your meal planner!'));
-    window.dispatchEvent(new Event('zecratary_planner_updated'));
+    const alertMsg = (t('scheduledMealAlert') || 'Successfully scheduled "{title}" in your meal plan!')
+      .replace('{title}', recName);
+    alert(alertMsg);
   };
 
-  // Add to Shopping List
-  const handleAddToShoppingList = async () => {
+  const updateSelectedRecipeState = (key: string, val: any) => {
     if (!selectedRecipe) return;
-    const targetUserId = currentUser?.id || 'usr_admin_1';
-    const ings = (selectedRecipe.ingredients || []).map((ing: any) => ({
-      id: 'shop_' + Math.random().toString(36).substring(2, 7),
+    const updatedRec = { ...selectedRecipe, [key]: val };
+    if (key === 'isFavorite') updatedRec.is_favorite = val;
+    if (key === 'isCooked') updatedRec.is_cooked = val;
+    if (key === 'bookId') updatedRec.book_id = val;
+
+    setSelectedRecipe(updatedRec);
+    const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
+    saveAllRecipes(updatedList);
+
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: selectedRecipe.id, [key]: val })
+    }).catch(() => {});
+  };
+
+  const handleDeleteRecipe = async (id: string) => {
+    if (!confirm(t('confirmDeleteRecipe') || 'Are you sure you want to delete this recipe?')) return;
+    
+    try {
+      await Promise.allSettled([
+        fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        }),
+        fetch(`/api/recipes?id=${encodeURIComponent(id)}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        })
+      ]);
+
+      if (typeof deleteSavedRecipe === 'function') {
+        await deleteSavedRecipe(currentUser?.id || currentUser?.email || 'usr_admin_1', id).catch(() => {});
+      }
+
+      const updated = recipes.filter(r => r.id !== id);
+      setRecipes(updated);
+      setSelectedRecipe(null);
+      setIsEditing(false);
+
+      const updatedBooks = books.map((b: any) => ({
+        ...b,
+        recipeCount: updated.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
+      }));
+      setBooks(updatedBooks);
+
+      try {
+        const localKeys = ['zecratary_saved_recipes', 'zecratary_recipes', 'zecratary_user_recipes', 'saved_recipes', 'zecratary_imported_recipes'];
+        for (const k of localKeys) {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) {
+              const cleaned = arr.filter((x: any) => x.id !== id);
+              localStorage.setItem(k, JSON.stringify(cleaned));
+            }
+          }
+        }
+      } catch (_) {}
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_recipes_updated'));
+        window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+      }
+    } catch (err) {
+      console.error('[SavedRecipesPage] Error deleting recipe:', err);
+      alert(t('errorDeletingRecipe') || 'Failed to delete recipe. Please try again.');
+    }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setEditForm((prev: any) => ({ ...prev, imageUrl: reader.result as string }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleDragStart = (index: number) => {
+    setDraggedIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number, type: 'ingredients' | 'steps') => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === index) return;
+
+    if (type === 'ingredients') {
+      const list = [...editForm.ingredients];
+      const item = list[draggedIndex];
+      list.splice(draggedIndex, 1);
+      list.splice(index, 0, item);
+      setEditForm({ ...editForm, ingredients: list });
+      setDraggedIndex(index);
+    } else {
+      const list = [...editForm.instructions];
+      const item = list[draggedIndex];
+      list.splice(draggedIndex, 1);
+      list.splice(index, 0, item);
+      setEditForm({ ...editForm, instructions: list });
+      setDraggedIndex(index);
+    }
+  };
+
+  const handleDrop = () => {
+    setDraggedIndex(null);
+  };
+
+  const handleOpenEdit = () => {
+    if (!selectedRecipe) return;
+    const defaultCat = categories[0] || 'Produce';
+    const cleanType = getCleanRecipeType(selectedRecipe);
+
+    let rawIngredients = selectedRecipe.ingredients;
+    if (typeof rawIngredients === 'string') {
+      try { rawIngredients = JSON.parse(rawIngredients); } catch (_) { rawIngredients = [rawIngredients]; }
+    }
+    if (!Array.isArray(rawIngredients)) rawIngredients = [];
+
+    let rawSteps = selectedRecipe.instructions || selectedRecipe.directions || selectedRecipe.steps;
+    if (typeof rawSteps === 'string') {
+      try { rawSteps = JSON.parse(rawSteps); } catch (_) { rawSteps = [rawSteps]; }
+    }
+    if (!Array.isArray(rawSteps) || rawSteps.length === 0) {
+      rawSteps = [''];
+    }
+
+    const currentImg = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || '';
+
+    setEditForm({
+      title: selectedRecipe.title || selectedRecipe.name || '',
+      description: selectedRecipe.description || '',
+      recipeType: cleanType,
+      sourceUrl: selectedRecipe.sourceUrl || selectedRecipe.source_url || '',
+      servings: selectedRecipe.servings || 4,
+      prepTimeMinutes: selectedRecipe.prepTimeMinutes || 30,
+      cookTimeMinutes: selectedRecipe.cookTimeMinutes || 10,
+      imageUrl: currentImg,
+      ingredients: rawIngredients.length > 0
+        ? rawIngredients.map((ing: any) => {
+            const norm = getNormalizedIngredient(ing, defaultCat);
+            return {
+              amount: norm.amount,
+              unit: norm.unit,
+              item: norm.name,
+              category: norm.category
+            };
+          })
+        : [{ amount: '', unit: '', item: '', category: defaultCat }],
+      instructions: [...rawSteps]
+    });
+    setEditTab('info');
+    setIsReorderingIngredients(false);
+    setIsReorderingSteps(false);
+    setIsEditing(true);
+  };
+
+  const handleSaveEdit = () => {
+    if (!editForm.title.trim()) {
+      alert(t('enterRecipeTitleAlert') || 'Please enter a recipe title.');
+      setEditTab('info');
+      return;
+    }
+
+    const cleanType = getCleanRecipeType(editForm);
+    const targetUserId = currentUser?.id || currentUser?.email || 'usr_admin_1';
+    const resolvedImg = editForm.imageUrl || editForm.image || editForm.image_url || selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || '';
+    const newServings = Math.max(1, Number(editForm.servings) || 4);
+
+    const updatedRec = {
+      ...selectedRecipe,
+      ...editForm,
+      servings: newServings,
+      imageUrl: resolvedImg,
+      image: resolvedImg,
+      image_url: resolvedImg,
       userId: targetUserId,
-      item: typeof ing === 'string' ? ing : ing.name || ing.item,
-      amount: typeof ing === 'object' ? scaleAmountString(ing.amount || '1', modalServings / (selectedRecipe.servings || 4)) : '1',
-      unit: typeof ing === 'object' ? ing.unit || '' : '',
-      category: typeof ing === 'object' ? ing.category || 'Pantry Staples' : 'Pantry Staples',
-      checked: false
+      user_id: targetUserId,
+      createdBy: selectedRecipe.createdBy || currentUser?.email || targetUserId,
+      created_by: selectedRecipe.created_by || currentUser?.email || targetUserId,
+      creatorName: selectedRecipe.creatorName || currentUser?.name || 'You',
+      creator_name: selectedRecipe.creator_name || currentUser?.name || 'You',
+      recipeType: cleanType,
+      category: cleanType,
+      recipe_type: cleanType,
+      tags: [cleanType],
+      instructions: editForm.instructions,
+      directions: editForm.instructions,
+      steps: editForm.instructions
+    };
+
+    setSelectedRecipe(updatedRec);
+    setCurrentServings(newServings);
+    const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
+    saveAllRecipes(updatedList);
+    setIsEditing(false);
+  };
+
+  const handleOpenShoppingModal = () => {
+    if (!selectedRecipe) return;
+    const defaultCat = categories[0] || 'Produce';
+    const base = Math.max(1, Number(selectedRecipe.servings) || 4);
+    const totalServings = currentServings || base;
+
+    let rawIngredients = selectedRecipe.ingredients;
+    if (typeof rawIngredients === 'string') {
+      try { rawIngredients = JSON.parse(rawIngredients); } catch (_) { rawIngredients = [rawIngredients]; }
+    }
+    if (!Array.isArray(rawIngredients)) rawIngredients = [];
+
+    const items = rawIngredients.map((ing: any, idx: number) => {
+      const norm = getNormalizedIngredient(ing, defaultCat);
+      const scaledAmt = calculateScaledAmount(norm.amount, base, totalServings);
+
+      return {
+        id: 'shop_item_' + idx + '_' + Math.random().toString(36).substring(2, 6),
+        selected: true,
+        amount: scaledAmt !== '' ? scaledAmt : (norm.amount || '1'),
+        unit: norm.unit || '',
+        name: norm.name || 'Ingredient',
+        category: norm.category || defaultCat
+      };
+    });
+
+    setShoppingModalIngredients(items);
+    setIsShoppingModalOpen(true);
+  };
+
+  const handleConfirmAddToShoppingList = async () => {
+    const selectedItems = shoppingModalIngredients.filter(i => i.selected);
+    if (selectedItems.length === 0) {
+      alert(t('noIngredientsSelectedAlert') || 'No ingredients selected.');
+      return;
+    }
+
+    const recTitle = selectedRecipe?.title || selectedRecipe?.name || 'Recipe';
+    const recId = selectedRecipe?.id;
+    const targetUserId = currentUser?.id || currentUser?.email || 'usr_admin_1';
+
+    const formatted = selectedItems.map(i => ({
+      id: 'shop_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy: currentUser?.email || targetUserId,
+      creatorName: currentUser?.name || 'User',
+      name: i.name,
+      item: i.name,
+      amount: String(i.amount || '1'),
+      quantity: String(i.amount || '1'),
+      unit: i.unit || 'unit',
+      category: i.category || (categories[0] || 'Produce'),
+      checked: false,
+      completed: false,
+      recipeId: recId,
+      recipeTitle: recTitle,
+      createdAt: new Date().toISOString()
     }));
 
     try {
-      await fetch('/api/shopping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: ings })
-      });
+      const keys = ['zecratary_shopping_list', 'zecratary_shopping'];
+      for (const k of keys) {
+        const raw = localStorage.getItem(k);
+        const currentList = raw ? JSON.parse(raw) : [];
+        const updated = Array.isArray(currentList) ? [...formatted, ...currentList] : formatted;
+        localStorage.setItem(k, JSON.stringify(updated));
+      }
     } catch (_) {}
 
-    showToast(t('addedToShoppingListToast', 'Ingredients added to your shopping list!'));
-    window.dispatchEvent(new Event('zecratary_shopping_updated'));
+    try {
+      await Promise.allSettled([
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formatted)
+        }),
+        fetch('/api/shopping-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formatted)
+        })
+      ]);
+    } catch (_) {}
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_shopping_updated'));
+      window.dispatchEvent(new Event('zecratary_shopping_list_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }
+
+    setIsShoppingModalOpen(false);
+    const alertMsg = (t('addedItemsShoppingAlert') || 'Added {count} items to your Shopping List!')
+      .replace('{count}', String(selectedItems.length));
+    alert(alertMsg);
   };
 
-  // Filtered Recipes Pipeline
-  const filteredRecipes = useMemo(() => {
+  const handleOpenTimerModal = () => {
+    const defaultMins = Math.min(60, Math.max(1, selectedRecipe?.cookTimeMinutes || 15));
+    setTimerInputMinutes(defaultMins);
+    setIsTimerModalOpen(true);
+  };
+
+  const handleStartTimer = () => {
+    const safeMinutes = Math.min(60, Math.max(1, Number(timerInputMinutes) || 15));
+    const totalSecs = safeMinutes * 60;
+    const targetEndTime = Date.now() + totalSecs * 1000;
+    const recTitle = selectedRecipe?.title || selectedRecipe?.name || 'Kitchen Timer';
+
+    const newTimerState = {
+      recipeId: selectedRecipe?.id || 'manual_timer',
+      recipeTitle: recTitle,
+      totalSeconds: totalSecs,
+      remainingSeconds: totalSecs,
+      isRunning: true,
+      endTime: targetEndTime
+    };
+
+    setActiveTimer(newTimerState);
+    setIsTimerModalOpen(false);
+
+    try {
+      localStorage.setItem('zecratary_active_timer', JSON.stringify(newTimerState));
+      fetch('/api/timer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser?.id || currentUser?.email || 'usr_admin_1',
+          recipeId: selectedRecipe?.id,
+          durationMinutes: safeMinutes,
+          startedAt: new Date().toISOString()
+        })
+      }).catch(() => {});
+    } catch (_) {}
+  };
+
+  const handleTogglePauseTimer = () => {
+    if (!activeTimer) return;
+    if (activeTimer.remainingSeconds <= 0) return;
+
+    const nextRunning = !activeTimer.isRunning;
+    const updated = {
+      ...activeTimer,
+      isRunning: nextRunning,
+      endTime: nextRunning ? Date.now() + activeTimer.remainingSeconds * 1000 : activeTimer.endTime
+    };
+    setActiveTimer(updated);
+    try {
+      localStorage.setItem('zecratary_active_timer', JSON.stringify(updated));
+    } catch (_) {}
+  };
+
+  const handleResetOrDismissTimer = () => {
+    setActiveTimer(null);
+    try {
+      localStorage.removeItem('zecratary_active_timer');
+    } catch (_) {}
+  };
+
+  const handleAddIngredientFilter = () => {
+    const clean = ingredientQuery.trim();
+    if (!clean) return;
+    if (!selectedIngredientsList.includes(clean.toLowerCase())) {
+      setSelectedIngredientsList([...selectedIngredientsList, clean.toLowerCase()]);
+    }
+    setIngredientQuery('');
+  };
+
+  const handleRemoveIngredientFilter = (ing: string) => {
+    setSelectedIngredientsList(selectedIngredientsList.filter(i => i !== ing));
+  };
+
+  const filtered = useMemo(() => {
     return recipes.filter(r => {
+      const q = search.toLowerCase().trim();
+      const title = (r.title || r.name || '').toLowerCase();
+      if (q && !title.includes(q)) return false;
+
       if (filterFavorites && !r.isFavorite) return false;
       if (filterCooked && !r.isCooked) return false;
 
-      if (search.trim()) {
-        const q = search.toLowerCase();
-        const matchesTitle = (r.title || '').toLowerCase().includes(q);
-        const matchesDesc = (r.description || '').toLowerCase().includes(q);
-        const matchesIng = (r.ingredients || []).some((ing: any) => 
-          (typeof ing === 'string' ? ing : ing.name || ing.item || '').toLowerCase().includes(q)
-        );
-        if (!matchesTitle && !matchesDesc && !matchesIng) return false;
+      if (selectedType !== 'All Types') {
+        const type = getCleanRecipeType(r);
+        if (type !== selectedType) return false;
       }
 
       if (selectedIngredientsList.length > 0) {
-        const rIngs = (r.ingredients || []).map((i: any) => (typeof i === 'string' ? i : i.name || i.item || '').toLowerCase());
-        const matchesAll = selectedIngredientsList.every(sel => rIngs.some((ri: any) => ri.includes(sel.toLowerCase())));
-        if (!matchesAll) return false;
-      }
-
-      if (selectedType !== 'All Types' && r.recipeType !== selectedType && r.category !== selectedType) {
-        return false;
+        let rIng = r.ingredients;
+        if (typeof rIng === 'string') {
+          try { rIng = JSON.parse(rIng); } catch (_) { rIng = []; }
+        }
+        const recipeIngNames = Array.isArray(rIng) 
+          ? rIng.map((ing: any) => (typeof ing === 'string' ? ing : ing.item || ing.name || '').toLowerCase())
+          : [];
+        
+        const hasAll = selectedIngredientsList.every(targetIng => 
+          recipeIngNames.some(item => item.includes(targetIng))
+        );
+        if (!hasAll) return false;
       }
 
       if (selectedRating !== 'All Ratings') {
@@ -2236,376 +3109,766 @@ export default function SavedRecipesPage() {
       }
 
       if (selectedPrepTime !== 'All Prep Times') {
-        const pt = r.prepTimeMinutes || 0;
-        if (selectedPrepTime === 'Under 15 mins' && pt > 15) return false;
-        if (selectedPrepTime === 'Under 30 mins' && pt > 30) return false;
-        if (selectedPrepTime === 'Under 60 mins' && pt > 60) return false;
-        if (selectedPrepTime === '60+ mins' && pt < 60) return false;
+        const prep = r.prepTimeMinutes || 0;
+        if (selectedPrepTime === 'Under 15m' && prep > 15) return false;
+        if (selectedPrepTime === '15-30m' && (prep < 15 || prep > 30)) return false;
+        if (selectedPrepTime === 'Over 30m' && prep < 30) return false;
       }
 
       if (selectedCookTime !== 'All Cook Times') {
-        const ct = r.cookTimeMinutes || 0;
-        if (selectedCookTime === 'Under 15 mins' && ct > 15) return false;
-        if (selectedCookTime === 'Under 30 mins' && ct > 30) return false;
-        if (selectedCookTime === 'Under 60 mins' && ct > 60) return false;
-        if (selectedCookTime === '60+ mins' && ct < 60) return false;
+        const cook = r.cookTimeMinutes || 0;
+        if (selectedCookTime === 'Under 15m' && cook > 15) return false;
+        if (selectedCookTime === '15-30m' && (cook < 15 || cook > 30)) return false;
+        if (selectedCookTime === 'Over 30m' && cook < 30) return false;
       }
 
       return true;
     });
-  }, [recipes, filterFavorites, filterCooked, search, selectedIngredientsList, selectedType, selectedRating, selectedPrepTime, selectedCookTime]);
+  }, [recipes, search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime]);
 
-  // Pagination Math
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime, gridMode]);
+
   const itemsPerPage = GRID_CONFIG[gridMode].perPage;
-  const totalPages = Math.max(1, Math.ceil(filteredRecipes.length / itemsPerPage));
+  const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
   const safeCurrentPage = Math.min(currentPage, totalPages);
   const startIndex = (safeCurrentPage - 1) * itemsPerPage;
-  const paginatedRecipes = filteredRecipes.slice(startIndex, startIndex + itemsPerPage);
+  const paginatedRecipes = filtered.slice(startIndex, startIndex + itemsPerPage);
 
-  const handleOpenDetailModal = (recipe: any) => {
-    setSelectedRecipe(recipe);
-    setModalServings(Number(recipe.servings) || 4);
-  };
+  const assignedBook = books.find(b => b.id === (selectedRecipe?.bookId || selectedRecipe?.book_id));
+  const baseServings = Math.max(1, Number(selectedRecipe?.servings) || 4);
+  const recipeCategoryBadge = selectedRecipe ? getCleanRecipeType(selectedRecipe) : 'Main Dish';
+
+  const scaleFactor = useMemo(() => {
+    return currentServings / baseServings;
+  }, [currentServings, baseServings]);
+
+  const percentChange = useMemo(() => {
+    return Math.round(((currentServings - baseServings) / baseServings) * 100);
+  }, [currentServings, baseServings]);
+
+  const formattedCountdown = useMemo(() => {
+    if (!activeTimer) return '00:00';
+    const mins = Math.floor(activeTimer.remainingSeconds / 60);
+    const secs = activeTimer.remainingSeconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }, [activeTimer?.remainingSeconds]);
 
   return (
     <div 
-      className="max-w-7xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
+      className="max-w-6xl mx-auto space-y-6 pb-16 px-4 font-sans transition-colors duration-200" 
       style={{ color: 'var(--color-text)' }}
+      onClick={() => setOpenDropdown(null)}
     >
-      {/* Toast Alert Banner */}
-      {toastMessage && (
-        <div 
-          className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-emerald)',
-            color: 'var(--color-text)'
-          }}
-        >
-          <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
-          <span>{toastMessage}</span>
-        </div>
-      )}
-
-      {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+      {/* Top Header */}
+      <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
         <div>
-          <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
-            {t('savedRecipesTitle', 'Saved Recipe Collections')}
+          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
+            {t('savedRecipesTitle') || 'Saved Recipes'}
           </h1>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('savedRecipesSubtitle', 'Browse, filter, and organize your favorite culinary creations and meal plans.')}
+            {(t('savedRecipesSubtitle') || 'Your collection of favorite recipes ({count})').replace('{count}', String(recipes.length))}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          {/* Grid Mode Switcher (3x3, 4x4, 5x5) */}
+        <div className="flex items-center gap-3">
+          {/* 3x3, 4x4, 5x5 Grid Switcher */}
           <div 
-            className="flex items-center border rounded-xl p-1 shadow-xs"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            className="flex items-center p-1 rounded-xl border shadow-xs"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
           >
-            {(['3x3', '4x4', '5x5'] as GridMode[]).map(mode => (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => handleGridModeChange(mode)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
-                  gridMode === mode ? 'text-white shadow-xs' : 'opacity-60 hover:opacity-100'
-                }`}
-                style={gridMode === mode ? { backgroundColor: 'var(--color-primary)' } : {}}
-                title={`Switch to ${mode} grid`}
-              >
-                {mode === '3x3' ? <Grid3X3 className="h-3.5 w-3.5" /> : mode === '4x4' ? <LayoutGrid className="h-3.5 w-3.5" /> : <Rows3 className="h-3.5 w-3.5" />}
-                <span>{GRID_CONFIG[mode].label}</span>
-              </button>
-            ))}
+            {(['3x3', '4x4', '5x5'] as GridMode[]).map((mode) => {
+              const isActive = gridMode === mode;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => {
+                    setGridMode(mode);
+                    try { localStorage.setItem('zecratary_saved_grid_mode', mode); } catch (_) {}
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                  style={isActive ? {
+                    backgroundColor: 'var(--color-primary)',
+                    color: '#ffffff',
+                    boxShadow: '0 2px 8px rgba(224, 86, 56, 0.3)'
+                  } : {
+                    color: 'var(--color-text-secondary)',
+                    backgroundColor: 'transparent'
+                  }}
+                  title={`Show ${GRID_CONFIG[mode].label} layout (${GRID_CONFIG[mode].perPage} per page)`}
+                >
+                  {mode === '3x3' && <Grid3X3 className="h-3.5 w-3.5" />}
+                  {mode === '4x4' && <LayoutGrid className="h-3.5 w-3.5" />}
+                  {mode === '5x5' && <Rows3 className="h-3.5 w-3.5" />}
+                  <span>{GRID_CONFIG[mode].label}</span>
+                </button>
+              );
+            })}
           </div>
 
-          <Link
-            href="/books"
-            className="px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-80"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <BookOpen className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-            <span>{t('manageCookbooks', 'Manage Cookbooks')}</span>
-          </Link>
-
-          <Link
+          <Link 
+            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg"
             href="/manual"
-            className="px-4 py-2 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 transition shadow-md hover:opacity-90 cursor-pointer"
             style={{ backgroundColor: 'var(--color-primary)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
-            <Plus className="h-3.5 w-3.5" />
-            <span>{t('newRecipeBtn', 'Create Recipe')}</span>
+            <UploadCloud className="h-4 w-4"/> {t('createRecipe') || 'Create Recipe'}
           </Link>
         </div>
       </div>
 
-      {/* Search & Active Filters Bar */}
-      <div 
-        role="region"
-        data-lpignore="true"
-        className="p-4 rounded-3xl border space-y-3.5 shadow-sm transition-colors duration-200"
-        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-      >
-        <div className="flex flex-col sm:flex-row items-center gap-3">
-          <div className="relative flex-1 w-full">
-            <Search className="h-4 w-4 absolute left-3.5 top-3 pointer-events-none opacity-60" />
+      {/* Filter Row */}
+      <div className="space-y-3">
+        <div className="flex gap-3">
+          <div className="relative flex-1">
+            <Search className="h-4 w-4 absolute left-3.5 top-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
             <input
               type="text"
               autoComplete="off"
               data-lpignore="true"
-              data-form-type="other"
-              spellCheck="false"
-              placeholder={t('searchRecipesPlaceholder', 'Search saved recipes by title, ingredients, tags, or notes...')}
+              placeholder={t('searchByNamePlaceholder') || 'Search by name or ingredient...'}
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border text-xs outline-none font-medium"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+              onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+              onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
             />
           </div>
-
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <button
-              type="button"
-              onClick={() => { setFilterFavorites(!filterFavorites); setCurrentPage(1); }}
-              className={`px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs ${
-                filterFavorites ? 'text-white' : 'opacity-70 hover:opacity-100'
-              }`}
-              style={filterFavorites ? { backgroundColor: '#ef4444', borderColor: '#ef4444' } : { backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-            >
-              <Heart className={`h-3.5 w-3.5 ${filterFavorites ? 'fill-current' : ''}`} />
-              <span>{t('filterFavorites', 'Favorites')}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => { setFilterCooked(!filterCooked); setCurrentPage(1); }}
-              className={`px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs ${
-                filterCooked ? 'text-white' : 'opacity-70 hover:opacity-100'
-              }`}
-              style={filterCooked ? { backgroundColor: 'var(--color-emerald)', borderColor: 'var(--color-emerald)' } : { backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-            >
-              <Check className="h-3.5 w-3.5" />
-              <span>{t('filterCooked', 'Cooked')}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setShowFilters(!showFilters)}
-              className="p-2.5 rounded-xl border text-xs font-bold transition cursor-pointer shadow-xs hover:opacity-80"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              title="Toggle Detailed Filters"
-            >
-              <SlidersHorizontal className="h-4 w-4" />
-            </button>
-          </div>
+          <button 
+            type="button"
+            onClick={() => setShowFilters(!showFilters)}
+            className="border font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition cursor-pointer"
+            style={showFilters ? {
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-emerald)',
+              color: 'var(--color-emerald)'
+            } : {
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-secondary)'
+            }}
+          >
+            <SlidersHorizontal className="h-4 w-4" style={{ color: 'var(--color-emerald)' }}/> {t('filter') || 'Filter'}
+          </button>
         </div>
 
-        {/* Extended Filter Dropdowns */}
+        {/* Filter Pills */}
         {showFilters && (
-          <div className="pt-2 border-t grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs" style={{ borderColor: 'var(--color-border)' }}>
-            <select
-              value={selectedType}
-              onChange={(e) => { setSelectedType(e.target.value); setCurrentPage(1); }}
-              className="border rounded-xl p-2 outline-none cursor-pointer font-bold"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          <div className="flex flex-wrap items-center gap-2 pt-1 animate-in fade-in text-xs font-semibold select-none">
+            <button
+              type="button"
+              onClick={() => setFilterFavorites(!filterFavorites)}
+              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              style={filterFavorites ? {
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-primary)',
+                color: 'var(--color-primary)'
+              } : {
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
             >
-              <option value="All Types">{t('allTypes', 'All Types')}</option>
-              {['Main Dish', 'Breakfast', 'Lunch', 'Dinner', 'Appetizer', 'Side Dish', 'Dessert', 'Snacks', 'Beverages'].map(tp => (
-                <option key={tp} value={tp}>{tp}</option>
-              ))}
-            </select>
+              <Heart className={`h-3.5 w-3.5 ${filterFavorites ? 'fill-current' : ''}`} style={{ color: filterFavorites ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}/>
+              <span>{t('favorites') || 'Favorites'}</span>
+            </button>
 
-            <select
-              value={selectedRating}
-              onChange={(e) => { setSelectedRating(e.target.value); setCurrentPage(1); }}
-              className="border rounded-xl p-2 outline-none cursor-pointer font-bold"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-            >
-              <option value="All Ratings">{t('allRatings', 'All Ratings')}</option>
-              <option value="5">★★★★★ (5 Stars)</option>
-              <option value="4">★★★★☆ (4+ Stars)</option>
-              <option value="3">★★★☆☆ (3+ Stars)</option>
-            </select>
+            {/* Ingredients Popover Filter */}
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => setOpenDropdown(openDropdown === 'ingredients' ? null : 'ingredients')}
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                style={selectedIngredientsList.length > 0 || openDropdown === 'ingredients' ? {
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
+                } : {
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <Carrot className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }}/>
+                <span>{t('ingredientsFilter') || 'Ingredients'} {selectedIngredientsList.length > 0 ? `(${selectedIngredientsList.length})` : ''}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
+              </button>
 
-            <select
-              value={selectedPrepTime}
-              onChange={(e) => { setSelectedPrepTime(e.target.value); setCurrentPage(1); }}
-              className="border rounded-xl p-2 outline-none cursor-pointer font-bold"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-            >
-              <option value="All Prep Times">{t('allPrepTimes', 'All Prep Times')}</option>
-              <option value="Under 15 mins">{t('under15Mins', 'Under 15 mins')}</option>
-              <option value="Under 30 mins">{t('under30Mins', 'Under 30 mins')}</option>
-              <option value="Under 60 mins">{t('under60Mins', 'Under 60 mins')}</option>
-              <option value="60+ mins">{t('over60Mins', '60+ mins')}</option>
-            </select>
+              {openDropdown === 'ingredients' && (
+                <div 
+                  className="absolute left-0 top-full mt-2 w-72 border rounded-2xl shadow-2xl p-3 z-50 space-y-2.5 animate-in fade-in"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-primary)'
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <div 
+                      className="flex-1 border-2 rounded-xl overflow-hidden"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)'
+                      }}
+                    >
+                      <input
+                        type="text"
+                        autoFocus
+                        autoComplete="off"
+                        placeholder={t('searchIngredientsPlaceholder') || 'Search ingredients'}
+                        value={ingredientQuery}
+                        onChange={(e) => setIngredientQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddIngredientFilter();
+                          }
+                        }}
+                        className="w-full bg-transparent px-3 py-2 text-xs outline-none"
+                        style={{ color: 'var(--color-text)' }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddIngredientFilter}
+                      className="text-white p-2 rounded-xl transition flex items-center justify-center font-bold text-sm shadow-md cursor-pointer shrink-0"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                    >
+                      <Plus className="h-4 w-4 stroke-[3]"/>
+                    </button>
+                  </div>
 
-            <select
-              value={selectedCookTime}
-              onChange={(e) => { setSelectedCookTime(e.target.value); setCurrentPage(1); }}
-              className="border rounded-xl p-2 outline-none cursor-pointer font-bold"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  {selectedIngredientsList.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
+                      {selectedIngredientsList.map((ing) => (
+                        <span
+                          key={ing}
+                          className="text-[11px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 border"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <span className="capitalize">{ing}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveIngredientFilter(ing)}
+                            className="text-slate-400 hover:text-red-500 cursor-pointer"
+                          >
+                            <X className="h-3 w-3"/>
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="text-[11px] leading-tight pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('recipesMustContainIngredients') || 'Recipes must contain all listed ingredients.'}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Recipe Type Dropdown */}
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => setOpenDropdown(openDropdown === 'recipeType' ? null : 'recipeType')}
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                style={selectedType !== 'All Types' ? {
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
+                } : {
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <Utensils className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/>
+                <span className="font-bold">{selectedType === 'All Types' ? (t('recipeTypeLabel') || 'Recipe Type') : selectedType}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
+              </button>
+
+              {openDropdown === 'recipeType' && (
+                <div 
+                  className="absolute left-0 top-full mt-2 w-48 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1 animate-in fade-in"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  {RECIPE_TYPES.map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => { setSelectedType(type); setOpenDropdown(null); }}
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
+                      style={selectedType === type ? {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-primary)',
+                        border: '1px solid var(--color-primary)'
+                      } : {
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      {type}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Cooked Pill */}
+            <button
+              type="button"
+              onClick={() => setFilterCooked(!filterCooked)}
+              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              style={filterCooked ? {
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-emerald)',
+                color: 'var(--color-emerald)'
+              } : {
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
             >
-              <option value="All Cook Times">{t('allCookTimes', 'All Cook Times')}</option>
-              <option value="Under 15 mins">{t('under15Mins', 'Under 15 mins')}</option>
-              <option value="Under 30 mins">{t('under30Mins', 'Under 30 mins')}</option>
-              <option value="Under 60 mins">{t('under60Mins', 'Under 60 mins')}</option>
-              <option value="60+ mins">{t('over60Mins', '60+ mins')}</option>
-            </select>
+              <CheckCircle2 className="h-3.5 w-3.5" style={{ color: filterCooked ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}/>
+              <span>{t('cooked') || 'Cooked'}</span>
+            </button>
+
+            {/* Rating Dropdown */}
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => setOpenDropdown(openDropdown === 'rating' ? null : 'rating')}
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                style={selectedRating !== 'All Ratings' ? {
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
+                } : {
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <Star className="h-3.5 w-3.5" style={{ color: selectedRating !== 'All Ratings' ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}/>
+                <span>{selectedRating === 'All Ratings' ? (t('rating') || 'Rating') : selectedRating}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
+              </button>
+
+              {openDropdown === 'rating' && (
+                <div 
+                  className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  {['All Ratings', '4+ Stars', '3+ Stars', '1+ Stars'].map((rat) => (
+                    <button
+                      key={rat}
+                      type="button"
+                      onClick={() => { setSelectedRating(rat); setOpenDropdown(null); }}
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
+                      style={selectedRating === rat ? {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-primary)',
+                        border: '1px solid var(--color-border)'
+                      } : {
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      {rat}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Prep Time Dropdown */}
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => setOpenDropdown(openDropdown === 'prepTime' ? null : 'prepTime')}
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                style={selectedPrepTime !== 'All Prep Times' ? {
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-emerald)',
+                  color: 'var(--color-emerald)'
+                } : {
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <Hourglass className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }}/>
+                <span className="font-bold">{selectedPrepTime === 'All Prep Times' ? (t('prepTime') || 'Prep Time') : selectedPrepTime}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
+              </button>
+
+              {openDropdown === 'prepTime' && (
+                <div 
+                  className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  {['All Prep Times', 'Under 15m', '15-30m', 'Over 30m'].map((time) => (
+                    <button
+                      key={time}
+                      type="button"
+                      onClick={() => { setSelectedPrepTime(time); setOpenDropdown(null); }}
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
+                      style={selectedPrepTime === time ? {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-emerald)',
+                        border: '1px solid var(--color-border)'
+                      } : {
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      {time}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Cook Time Dropdown */}
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => setOpenDropdown(openDropdown === 'cookTime' ? null : 'cookTime')}
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                style={selectedCookTime !== 'All Cook Times' ? {
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-emerald)',
+                  color: 'var(--color-emerald)'
+                } : {
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }}/>
+                <span className="font-bold">{selectedCookTime === 'All Cook Times' ? (t('cookTime') || 'Cook Time') : selectedCookTime}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
+              </button>
+
+              {openDropdown === 'cookTime' && (
+                <div 
+                  className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  {['All Cook Times', 'Under 15m', '15-30m', 'Over 30m'].map((time) => (
+                    <button
+                      key={time}
+                      type="button"
+                      onClick={() => { setSelectedCookTime(time); setOpenDropdown(null); }}
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
+                      style={selectedCookTime === time ? {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-emerald)',
+                        border: '1px solid var(--color-border)'
+                      } : {
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      {time}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
 
-      {/* Recipe Grid (Adaptive Density 3x3, 4x4, 5x5) */}
-      {paginatedRecipes.length === 0 ? (
+      {/* Grid */}
+      {loading ? (
+        <div className="text-xs py-12 text-center" style={{ color: 'var(--color-text-secondary)' }}>
+          {t('loadingRecipes') || 'Loading recipes...'}
+        </div>
+      ) : recipes.length === 0 ? (
         <div 
-          className="text-center py-16 border rounded-3xl p-8 space-y-3 shadow-xs"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          className="text-center py-16 px-4 border border-dashed rounded-3xl space-y-3"
+          style={{
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: 'var(--color-border)'
+          }}
         >
-          <Utensils className="h-10 w-10 mx-auto opacity-40" />
-          <h3 className="font-extrabold text-sm">{t('noRecipesFound', 'No recipes found matching your criteria.')}</h3>
-          <button
-            type="button"
-            onClick={() => {
-              setSearch('');
-              setFilterFavorites(false);
-              setFilterCooked(false);
-              setSelectedType('All Types');
-              setSelectedRating('All Ratings');
-              setSelectedPrepTime('All Prep Times');
-              setSelectedCookTime('All Cook Times');
-              setCurrentPage(1);
-            }}
-            className="text-xs font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
+          <div 
+            className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto shadow-sm"
+            style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' }}
           >
-            {t('clearAllFilters', 'Clear all filters')}
-          </button>
+            <Utensils className="h-6 w-6"/>
+          </div>
+          <h3 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>
+            {t('noSavedRecipesTitle') || 'No Recipes Yet'}
+          </h3>
+          <p className="text-xs max-w-sm mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('noSavedRecipesDesc') || 'Recipes imported or created by your account will appear exclusively here.'}
+          </p>
+          <div className="flex justify-center gap-3 pt-2">
+            <Link 
+              href="/import"
+              className="px-4 py-2 rounded-xl text-xs font-bold border transition shadow-sm"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              {t('importRecipe') || 'Import Recipe'}
+            </Link>
+            <Link 
+              href="/manual"
+              className="px-4 py-2 rounded-xl text-xs font-bold text-white transition shadow-sm"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+            >
+              {t('createRecipe') || 'Create Recipe'}
+            </Link>
+          </div>
         </div>
       ) : (
-        <div className={`grid gap-4 ${GRID_CONFIG[gridMode].colsClass}`}>
-          {paginatedRecipes.map((recipe) => (
-            <div
-              key={recipe.id}
-              onClick={() => handleOpenDetailModal(recipe)}
-              className="border rounded-3xl overflow-hidden shadow-xs hover:shadow-xl transition-all duration-200 cursor-pointer flex flex-col justify-between group"
-              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-            >
-              <div className="space-y-2.5">
-                {/* Thumbnail Header with Favorite & Cooked Action Buttons */}
-                <div className={`relative w-full ${GRID_CONFIG[gridMode].imgHeight} overflow-hidden`} style={{ backgroundColor: 'var(--color-inner-dark)' }}>
-                  <img
-                    src={recipe.imageUrl}
-                    alt={recipe.title}
-                    className="w-full h-full object-cover transition duration-300 group-hover:scale-105"
-                  />
-                  <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={(e) => toggleFavorite(e, recipe.id)}
-                      className="p-1.5 rounded-full backdrop-blur-md transition cursor-pointer shadow"
-                      style={{
-                        backgroundColor: 'rgba(0, 0, 0, 0.65)',
-                        color: recipe.isFavorite ? '#ef4444' : '#ffffff'
-                      }}
-                      title={recipe.isFavorite ? 'Favorited' : 'Add to favorites'}
-                    >
-                      <Heart className={`h-3.5 w-3.5 ${recipe.isFavorite ? 'fill-current' : ''}`} />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => toggleCooked(e, recipe.id)}
-                      className="p-1.5 rounded-full backdrop-blur-md transition cursor-pointer shadow"
-                      style={{
-                        backgroundColor: 'rgba(0, 0, 0, 0.65)',
-                        color: recipe.isCooked ? 'var(--color-emerald)' : '#ffffff'
-                      }}
-                      title={recipe.isCooked ? 'Cooked' : 'Mark as cooked'}
-                    >
-                      <Check className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+        <div className={`grid ${GRID_CONFIG[gridMode].colsClass} gap-4 sm:gap-5`}>
+          {paginatedRecipes.map((r) => {
+            const cardBook = books.find(b => b.id === (r.bookId || r.book_id));
+            const cardTypeBadge = getCleanRecipeType(r);
+            const cfg = GRID_CONFIG[gridMode];
+            const displayImg = r.imageUrl || r.image || r.image_url || DEFAULT_RECIPE_IMAGE;
 
-                  <div className="absolute bottom-2.5 left-2.5">
-                    <span 
-                      className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider text-white backdrop-blur-md border border-white/20"
-                      style={{ backgroundColor: 'rgba(0, 0, 0, 0.65)' }}
-                    >
-                      {recipe.recipeType || 'Main Dish'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Recipe Card Body */}
-                <div className="p-3.5 space-y-1.5">
-                  <h3 className={`font-black ${GRID_CONFIG[gridMode].titleSize} leading-snug line-clamp-1`} style={{ color: 'var(--color-text)' }}>
-                    {recipe.title}
-                  </h3>
-                  {recipe.description && (
-                    <p className="text-[11px] leading-relaxed opacity-75 line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>
-                      {recipe.description}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Card Footer Telemetry */}
-              <div 
-                className="p-3 border-t flex items-center justify-between text-[11px] font-semibold opacity-80"
-                style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)' }}
+            return (
+              <div
+                key={r.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  setSelectedRecipe(r);
+                  setCurrentServings(Math.max(1, Number(r.servings) || 4));
+                  setCompletedSteps([]);
+                  setNoteText(r.note || '');
+                  setIsBookDropdownOpen(false);
+                  setIsEditing(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedRecipe(r);
+                    setCurrentServings(Math.max(1, Number(r.servings) || 4));
+                    setCompletedSteps([]);
+                    setNoteText(r.note || '');
+                    setIsBookDropdownOpen(false);
+                    setIsEditing(false);
+                  }
+                }}
+                className="border rounded-2xl overflow-hidden transition cursor-pointer group shadow-sm hover:shadow-md relative flex flex-col justify-between"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)'
+                }}
               >
-                <span className="flex items-center gap-1">
-                  <Clock className="h-3 w-3 text-emerald-400" />
-                  {recipe.prepTimeMinutes + recipe.cookTimeMinutes}m
-                </span>
-                <span className="flex items-center gap-1">
-                  <Users className="h-3 w-3" />
-                  {recipe.servings}
-                </span>
-                <span className="flex items-center gap-1">
-                  <Flame className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
-                  {recipe.calories || 450} {t('recipeCardCalories', 'kcal')}
-                </span>
+                <div>
+                  <div className={`relative ${cfg.imgHeight} w-full overflow-hidden`} style={{ backgroundColor: 'var(--color-inner-dark)' }}>
+                    <img
+                      src={displayImg}
+                      alt={r.title || r.name}
+                      referrerPolicy="no-referrer"
+                      crossOrigin="anonymous"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (!target.dataset.failed) {
+                          target.dataset.failed = 'true';
+                          target.src = DEFAULT_RECIPE_IMAGE;
+                        }
+                      }}
+                      className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                    />
+                    
+                    {/* Card Action Buttons */}
+                    <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={(e) => toggleCooked(e, r.id)}
+                        className="p-1.5 rounded-full backdrop-blur-md transition shadow-md cursor-pointer border"
+                        style={r.isCooked ? {
+                          backgroundColor: 'var(--color-emerald)',
+                          borderColor: 'var(--color-emerald)',
+                          color: '#ffffff'
+                        } : {
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
+                        }}
+                        title={r.isCooked ? (t('cooked') || 'Cooked') : (t('markAsCooked') || 'Mark as Cooked')}
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5"/>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => toggleFavorite(e, r.id)}
+                        className="p-1.5 rounded-full backdrop-blur-md transition shadow-md cursor-pointer border"
+                        style={r.isFavorite ? {
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        } : {
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
+                        }}
+                        title={r.isFavorite ? (t('favorites') || 'Favorite') : (t('addToFavorites') || 'Add to Favorites')}
+                      >
+                        <Heart 
+                          className={`h-3.5 w-3.5 ${r.isFavorite ? 'fill-current' : ''}`}
+                          style={{ color: r.isFavorite ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
+                        />
+                      </button>
+                    </div>
+
+                    {cardBook && gridMode !== '5x5' && (
+                      <div className="absolute bottom-2.5 left-2.5 bg-black/75 backdrop-blur-md text-[10px] text-amber-300 font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border border-amber-400/30 max-w-[80%] truncate">
+                        <Book className="h-3 w-3 shrink-0"/> <span className="truncate">{cardBook.title}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="p-3.5 space-y-1.5">
+                    <h3 
+                      className={`font-bold ${cfg.titleSize} leading-snug line-clamp-2`}
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      {r.title || r.name}
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="px-3.5 pb-3 pt-0 flex items-center justify-between gap-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span 
+                      className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 shadow-xs"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                    >
+                      {cardTypeBadge}
+                    </span>
+
+                    <span 
+                      className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 border"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text-secondary)'
+                      }}
+                    >
+                      {r.creatorName ? `${t('by') || 'By'} ${r.creatorName}` : (t('ownedByYou') || 'Created by you')}
+                    </span>
+
+                    {(r.rating || 0) > 0 && gridMode !== '5x5' ? (
+                      <span className="flex items-center gap-0.5 text-amber-500 text-[11px] font-bold bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/20 shadow-xs">
+                        <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-500"/> {r.rating}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <span className="text-[11px] flex items-center gap-1 shrink-0 font-semibold" style={{ color: 'var(--color-text)' }}>
+                    <Clock className="h-3 w-3" style={{ color: 'var(--color-primary)' }}/> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {/* Production-Ready Pagination Controls */}
-      {totalPages > 1 && (
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t" style={{ borderColor: 'var(--color-border)' }}>
-          <div className="text-xs opacity-75 font-medium">
-            {(t('showingRecipesRange', 'Showing {start} - {end} of {total} recipes'))
+      {/* Pagination Controls */}
+      {filtered.length > 0 && (
+        <div 
+          className="pt-4 border-t flex flex-wrap items-center justify-between gap-3 text-xs"
+          style={{ borderColor: 'var(--color-border)' }}
+        >
+          <span style={{ color: 'var(--color-text-secondary)' }}>
+            {(t('showingRecipesRange') || 'Showing {start} - {end} of {total} recipes')
               .replace('{start}', String(startIndex + 1))
-              .replace('{end}', String(Math.min(startIndex + itemsPerPage, filteredRecipes.length)))
-              .replace('{total}', String(filteredRecipes.length))}
-          </div>
+              .replace('{end}', String(Math.min(startIndex + itemsPerPage, filtered.length)))
+              .replace('{total}', String(filtered.length))}
+          </span>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
-              onClick={() => setCurrentPage(Math.max(1, safeCurrentPage - 1))}
-              disabled={safeCurrentPage === 1}
-              className="p-2 rounded-xl border text-xs font-bold disabled:opacity-30 transition cursor-pointer shadow-xs"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              disabled={safeCurrentPage <= 1}
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              className="p-2 rounded-xl border disabled:opacity-30 transition cursor-pointer shadow-xs"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+              title="Previous Page"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
 
-            <span className="text-xs font-bold px-3 py-1.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-              {(t('pageIndicator', 'Page {page} of {total}'))
-                .replace('{page}', String(safeCurrentPage))
-                .replace('{total}', String(totalPages))}
-            </span>
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter(num => num === 1 || num === totalPages || Math.abs(num - safeCurrentPage) <= 1)
+              .map((num, i, arr) => {
+                const prev = arr[i - 1];
+                const showEllipsis = prev && num - prev > 1;
+
+                return (
+                  <div key={num} className="flex items-center gap-1">
+                    {showEllipsis && <span className="px-1 font-bold" style={{ color: 'var(--color-text-secondary)' }}>...</span>}
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage(num)}
+                      className="min-w-[32px] h-8 rounded-xl text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-xs"
+                      style={safeCurrentPage === num ? {
+                        backgroundColor: 'var(--color-primary)',
+                        borderColor: 'var(--color-primary)',
+                        color: '#ffffff',
+                        boxShadow: '0 2px 8px rgba(224, 86, 56, 0.3)'
+                      } : {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      {num}
+                    </button>
+                  </div>
+                );
+              })}
 
             <button
               type="button"
-              onClick={() => setCurrentPage(Math.min(totalPages, safeCurrentPage + 1))}
-              disabled={safeCurrentPage === totalPages}
-              className="p-2 rounded-xl border text-xs font-bold disabled:opacity-30 transition cursor-pointer shadow-xs"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              disabled={safeCurrentPage >= totalPages}
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              className="p-2 rounded-xl border disabled:opacity-30 transition cursor-pointer shadow-xs"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+              title="Next Page"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
@@ -2613,320 +3876,1786 @@ export default function SavedRecipesPage() {
         </div>
       )}
 
-      {/* RECIPE DETAILS MODAL (Autofill Safe & Dynamic Scaler) */}
+      {/* RECIPE DETAILS & EDIT MODAL */}
       {selectedRecipe && (
         <div 
-          onClick={() => setSelectedRecipe(null)}
+          onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
           className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative p-6 space-y-4 cursor-default animate-in fade-in"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            className="border rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative cursor-default transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
           >
-            {/* Modal Header */}
-            <div className="flex justify-between items-start gap-3 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <div>
-                <span className="text-[10px] font-black uppercase tracking-wider text-[var(--color-primary)]">
-                  {selectedRecipe.recipeType || 'Main Dish'}
-                </span>
-                <h2 className="text-xl font-black leading-tight" style={{ color: 'var(--color-text)' }}>
-                  {selectedRecipe.title}
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedRecipe(null)}
-                className="p-2 rounded-xl border transition cursor-pointer hover:opacity-80"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
+              className="absolute top-4 right-4 z-30 p-2 rounded-xl border transition cursor-pointer shadow-md"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <X className="h-5 w-5"/>
+            </button>
 
-            {/* Modal Content Scroll Area */}
-            <div className="overflow-y-auto flex-1 space-y-4 pr-1 text-xs custom-scrollbar">
-              {/* Image & Quick Action Header */}
-              <div className="relative h-48 w-full rounded-2xl overflow-hidden border" style={{ borderColor: 'var(--color-border)' }}>
-                <img src={selectedRecipe.imageUrl} alt={selectedRecipe.title} className="w-full h-full object-cover" />
-                <div className="absolute top-2.5 right-2.5 flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={(e) => toggleFavorite(e, selectedRecipe.id)}
-                    className="p-2 rounded-full backdrop-blur-md shadow"
-                    style={{ backgroundColor: 'rgba(0,0,0,0.7)', color: selectedRecipe.isFavorite ? '#ef4444' : '#ffffff' }}
-                  >
-                    <Heart className={`h-4 w-4 ${selectedRecipe.isFavorite ? 'fill-current' : ''}`} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={(e) => toggleCooked(e, selectedRecipe.id)}
-                    className="p-2 rounded-full backdrop-blur-md shadow"
-                    style={{ backgroundColor: 'rgba(0,0,0,0.7)', color: selectedRecipe.isCooked ? 'var(--color-emerald)' : '#ffffff' }}
-                  >
-                    <Check className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
+            <div className="overflow-y-auto flex-1">
+              {!isEditing ? (
+                <div className="space-y-5 pb-6">
+                  <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
+                    <img
+                      src={selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || DEFAULT_RECIPE_IMAGE}
+                      alt={selectedRecipe.title || selectedRecipe.name}
+                      referrerPolicy="no-referrer"
+                      crossOrigin="anonymous"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (!target.dataset.failed) {
+                          target.dataset.failed = 'true';
+                          target.src = DEFAULT_RECIPE_IMAGE;
+                        }
+                      }}
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
 
-              {/* Telemetry Info Bar & Servings Scaler */}
-              <div 
-                className="p-3 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              >
-                <div className="flex items-center gap-4 opacity-80">
-                  <span className="flex items-center gap-1">
-                    <Clock className="h-3.5 w-3.5 text-emerald-400" /> {t('recipeCardPrep', 'Prep')}: {selectedRecipe.prepTimeMinutes}m
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Flame className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('recipeCardCook', 'Cook')}: {selectedRecipe.cookTimeMinutes}m
-                  </span>
-                </div>
+                    <div className="relative z-10 space-y-3">
+                      <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
+                        {selectedRecipe.title || selectedRecipe.name}
+                      </h2>
 
-                {/* Arithmetic Scaler */}
-                <div className="flex items-center gap-2 font-bold">
-                  <span>{t('scaleServings', 'Scale Servings')}:</span>
-                  <div className="flex items-center gap-1.5">
+                      {/* Modal Badges */}
+                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }}/> 
+                          <span className="font-bold">{(t('cookTimePrefix') || 'Cook: {time} minutes').replace('{time}', String(selectedRecipe.cookTimeMinutes || 10))}</span>
+                        </span>
+
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
+                          <span className="font-bold">{(t('prepTimePrefix') || 'Prep: {time} minutes').replace('{time}', String(selectedRecipe.prepTimeMinutes || 30))}</span>
+                        </span>
+
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Utensils className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
+                          <span className="font-bold">{recipeCategoryBadge}</span>
+                        </span>
+
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Users className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
+                          <span className="font-bold">
+                            {selectedRecipe.creatorName ? `${t('creator') || 'Creator'}: ${selectedRecipe.creatorName}` : (t('ownedByYou') || 'Created by you')}
+                          </span>
+                        </span>
+                        
+                        <button
+                          type="button"
+                          onClick={(e) => toggleFavorite(e, selectedRecipe.id)}
+                          className="ml-auto w-8 h-8 rounded-full flex items-center justify-center shadow-md cursor-pointer transition border"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: selectedRecipe.isFavorite ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+                          }}
+                          title={selectedRecipe.isFavorite ? "Favorite" : "Mark as Favorite"}
+                        >
+                          <Heart className={`h-4 w-4 ${selectedRecipe.isFavorite ? 'fill-current' : ''}`} style={{ color: selectedRecipe.isFavorite ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}/>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 3 Core Action Buttons */}
+                  <div className="px-5 grid grid-cols-3 gap-2.5">
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setIsBookDropdownOpen(!isBookDropdownOpen)}
+                        className="w-full border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                        style={{
+                          backgroundColor: assignedBook ? 'var(--color-inner-dark)' : 'var(--color-card)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                      >
+                        <BookmarkPlus className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }}/>
+                        <span className="truncate">
+                          {assignedBook ? assignedBook.title : (t('addToCookbook') || t('addToBook') || 'Add to Cookbook')}
+                        </span>
+                        <ChevronDown className="h-3 w-3 shrink-0 opacity-70 ml-0.5"/>
+                      </button>
+
+                      {isBookDropdownOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setIsBookDropdownOpen(false)} />
+                          <div 
+                            className="absolute left-0 top-full mt-2 w-64 border rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in" 
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            <div className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
+                              <span>{t('selectCookbook') || 'Select Cookbook'}</span>
+                              <Link 
+                                className="hover:underline font-bold" 
+                                href="/books"
+                                style={{ color: 'var(--color-emerald)' }}
+                              >
+                                {t('manage') || 'Manage'}
+                              </Link>
+                            </div>
+
+                            <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
+                              {books.length === 0 ? (
+                                <div className="text-xs px-2.5 py-2" style={{ color: 'var(--color-text-secondary)' }}>{t('noCookbooksAvailable') || 'No cookbooks available'}</div>
+                              ) : (
+                                books.map((b) => {
+                                  const isAssigned = (selectedRecipe.bookId || selectedRecipe.book_id) === b.id;
+                                  return (
+                                    <button
+                                      key={b.id}
+                                      type="button"
+                                      onClick={() => {
+                                        handleAssignToBook(b.id);
+                                        setIsBookDropdownOpen(false);
+                                      }}
+                                      className="w-full text-left px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition cursor-pointer"
+                                      style={isAssigned ? {
+                                        backgroundColor: 'var(--color-inner-dark)',
+                                        color: 'var(--color-primary)',
+                                        border: '1px solid var(--color-primary)'
+                                      } : {
+                                        color: 'var(--color-text)'
+                                      }}
+                                    >
+                                      <span className="truncate flex-1 pr-2">{b.title}</span>
+                                      {isAssigned && <Check className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-primary)' }}/>}
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
                     <button
                       type="button"
-                      onClick={() => setModalServings(Math.max(1, modalServings - 1))}
-                      className="w-6 h-6 rounded-lg border flex items-center justify-center font-bold hover:bg-slate-800/30 cursor-pointer"
-                      style={{ borderColor: 'var(--color-border)' }}
+                      onClick={openAddToPlanModal}
+                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
                     >
-                      -
+                      <CalendarPlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('addToPlan') || 'Add to Plan'}
                     </button>
-                    <span className="px-2 font-mono text-sm">{modalServings}</span>
+
                     <button
                       type="button"
-                      onClick={() => setModalServings(modalServings + 1)}
-                      className="w-6 h-6 rounded-lg border flex items-center justify-center font-bold hover:bg-slate-800/30 cursor-pointer"
-                      style={{ borderColor: 'var(--color-border)' }}
+                      onClick={handleOpenShoppingModal}
+                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
                     >
-                      +
+                      <ShoppingCart className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('shoppingList') || 'Shopping List'}
                     </button>
                   </div>
-                </div>
-              </div>
 
-              {/* Ingredients List */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-extrabold uppercase tracking-wider text-[var(--color-primary)]">
-                    {t('ingredientsHeading', 'Ingredients')} ({(selectedRecipe.ingredients || []).length})
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={handleAddToShoppingList}
-                    className="text-[11px] font-bold flex items-center gap-1 text-emerald-400 hover:underline cursor-pointer"
-                  >
-                    <ShoppingCart className="h-3.5 w-3.5" /> {t('addToShoppingList', 'Add to Shopping List')}
-                  </button>
-                </div>
-                <ul className="space-y-1">
-                  {(selectedRecipe.ingredients || []).map((ing: any, i: number) => {
-                    const baseAmt = typeof ing === 'object' ? ing.amount || '' : '';
-                    const scaledAmt = scaleAmountString(baseAmt, modalServings / (Number(selectedRecipe.servings) || 4));
-                    const unit = typeof ing === 'object' ? ing.unit || '' : '';
-                    const name = typeof ing === 'object' ? ing.name || ing.item || '' : ing;
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
-                    return (
-                      <li 
-                        key={i} 
-                        className="p-2 rounded-xl border flex items-center justify-between text-xs"
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  {/* Servings Stepper with Live Percentage Telemetry */}
+                  <div className="px-5 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <span 
+                        className="text-xs font-bold flex items-center gap-1.5"
+                        style={{ color: 'var(--color-primary)' }}
                       >
-                        <span className="font-medium">• {name}</span>
-                        {(scaledAmt || unit) && (
-                          <span className="font-bold opacity-80 font-mono text-[11px]">
-                            {scaledAmt} {unit}
+                        <Users className="h-4 w-4"/> {t('servingsLabel') || 'Servings'}
+                      </span>
+                      <div 
+                        className="flex items-center border rounded-lg overflow-hidden shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setCurrentServings((prev) => Math.max(1, prev - 1))}
+                          className="px-2.5 py-1 font-bold cursor-pointer transition select-none hover:opacity-80"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                          title="Decrease servings by 1"
+                        >
+                          -
+                        </button>
+                        <span className="px-3 py-1 text-xs font-bold min-w-[36px] text-center tabular-nums" style={{ color: 'var(--color-text)' }}>
+                          {currentServings}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setCurrentServings((prev) => prev + 1)}
+                          className="px-2.5 py-1 font-bold cursor-pointer transition select-none hover:opacity-80"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                          title="Increase servings by 1"
+                        >
+                          +
+                        </button>
+                      </div>
+
+                      {/* Percentage Badge & Reset */}
+                      <div className="flex items-center gap-1.5">
+                        <span 
+                          className="text-[11px] font-bold px-2 py-0.5 rounded-full border transition-all shadow-xs tabular-nums"
+                          style={percentChange === 0 ? {
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text-secondary)'
+                          } : percentChange > 0 ? {
+                            backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                            borderColor: 'var(--color-emerald)',
+                            color: 'var(--color-emerald)'
+                          } : {
+                            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-primary)'
+                          }}
+                          title={`Scale factor: ${scaleFactor.toFixed(2)}x`}
+                        >
+                          {percentChange === 0 ? '100%' : `${percentChange > 0 ? '+' : ''}${percentChange}%`}
+                        </span>
+
+                        {percentChange !== 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setCurrentServings(baseServings)}
+                            className="text-[10px] font-bold underline cursor-pointer transition hover:opacity-90"
+                            style={{ color: 'var(--color-text-secondary)' }}
+                            title={t('resetServings') || 'Reset to original servings'}
+                          >
+                            {t('reset') || 'Reset'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleOpenTimerModal}
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90"
+                        style={{
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                      >
+                        <Timer className="h-3.5 w-3.5"/> {t('timerBtn') || 'Timer'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleOpenEdit}
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        style={{
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                      >
+                        <Edit3 className="h-3.5 w-3.5"/> {t('editBtn') || 'Edit'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(window.location.href);
+                          alert(t('recipeLinkCopiedAlert') || 'Recipe link copied!');
+                        }}
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        style={{
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                      >
+                        <Share2 className="h-3.5 w-3.5"/> {t('shareRecipeBtn') || 'Share Recipe'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <div className="px-5 text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                    {selectedRecipe.description}
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* Cooked Status / Star Rating / Note */}
+                  <div className="px-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={(e) => toggleCooked(e, selectedRecipe.id)}
+                        className="flex items-center gap-2.5 text-base font-extrabold group cursor-pointer select-none transition"
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        <span className="font-extrabold tracking-tight">
+                          {selectedRecipe.isCooked ? (t('cooked') || 'Cooked') : (t('markAsCooked') || 'Mark as Cooked')}
+                        </span>
+                        
+                        <span 
+                          className="w-5 h-5 rounded-full flex items-center justify-center transition shadow-sm border"
+                          style={selectedRecipe.isCooked ? {
+                            backgroundColor: 'var(--color-emerald)',
+                            borderColor: 'var(--color-emerald)',
+                            color: '#ffffff'
+                          } : {
+                            border: '1px solid var(--color-border)',
+                            backgroundColor: 'var(--color-inner-dark)',
+                            color: 'var(--color-text-secondary)'
+                          }}
+                        >
+                          {selectedRecipe.isCooked && <Check className="h-3.5 w-3.5 stroke-[3]"/>}
+                        </span>
+                      </button>
+
+                      <div className="flex items-center gap-1">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Star
+                            key={star}
+                            onClick={() => updateSelectedRecipeState('rating', star)}
+                            className="h-5 w-5 cursor-pointer transition"
+                            style={{
+                              color: (selectedRecipe.rating || 0) >= star ? 'var(--color-primary)' : 'var(--color-border)',
+                              fill: (selectedRecipe.rating || 0) >= star ? 'var(--color-primary)' : 'transparent'
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsNoteOpen(!isNoteOpen)}
+                        className="flex items-center gap-1.5 text-xs font-medium transition cursor-pointer"
+                        style={{ color: 'var(--color-text-secondary)' }}
+                      >
+                        <Edit3 className="h-3.5 w-3.5"/>
+                        <span className="italic">{t('addANote') || 'Add a note'}</span>
+                      </button>
+
+                      {isNoteOpen && (
+                        <div className="flex gap-2 animate-in fade-in">
+                          <input
+                            type="text"
+                            autoComplete="off"
+                            data-lpignore="true"
+                            placeholder={t('addNotesPlaceholder') || 'Add notes...'}
+                            value={noteText}
+                            onChange={(e) => setNoteText(e.target.value)}
+                            className="flex-1 border rounded-xl px-3 py-2 text-xs outline-none"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateSelectedRecipeState('note', noteText);
+                              setIsNoteOpen(false);
+                            }}
+                            className="text-white font-bold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer shadow-sm"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                          >
+                            {t('save') || 'Save'}
+                          </button>
+                        </div>
+                      )}
+                      {selectedRecipe.note && !isNoteOpen && (
+                        <p 
+                          className="text-xs italic"
+                          style={{ color: 'var(--color-emerald)' }}
+                        >
+                          Note: "{selectedRecipe.note}"
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* INGREDIENTS SECTION (SCALED BY PERCENTAGE) */}
+                  <div className="px-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>
+                          {t('ingredientsHeading') || 'Ingredients'}
+                        </h3>
+                        {percentChange !== 0 && (
+                          <span 
+                            className="text-[11px] font-bold px-2 py-0.5 rounded-full border shadow-xs"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-primary)',
+                              color: 'var(--color-primary)'
+                            }}
+                          >
+                            {scaleFactor.toFixed(2)}x
                           </span>
                         )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-
-              {/* Step-by-Step Directions */}
-              <div className="space-y-2">
-                <h4 className="font-extrabold uppercase tracking-wider text-[var(--color-primary)]">
-                  {t('directionsHeading', 'Preparation Steps')}
-                </h4>
-                <ol className="space-y-2">
-                  {(selectedRecipe.instructions || []).map((step: string, sIdx: number) => (
-                    <li key={sIdx} className="flex items-start gap-2.5 leading-relaxed text-xs">
-                      <span 
-                        className="w-5 h-5 rounded-full border flex items-center justify-center font-bold text-[10px] shrink-0 mt-0.5"
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
+                      </div>
+                      
+                      <div 
+                        className="flex items-center border rounded-lg overflow-hidden text-xs shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
+                        }}
                       >
-                        {sIdx + 1}
-                      </span>
-                      <span className="opacity-90">{step}</span>
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            </div>
+                        <div className="px-2.5 py-1 border-r flex items-center justify-center" style={{ borderColor: 'var(--color-border)' }}>
+                          <Type className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setFontSizeScale(Math.max(60, fontSizeScale - 10))}
+                          className="px-2.5 py-1 font-bold cursor-pointer"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        >
+                          -
+                        </button>
+                        <span className="px-2.5 py-1 font-bold min-w-[42px] text-center" style={{ color: 'var(--color-text)' }}>
+                          {fontSizeScale}%
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setFontSizeScale(Math.min(140, fontSizeScale + 10))}
+                          className="px-2.5 py-1 font-bold cursor-pointer"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
 
-            {/* Modal Footer with Actions & Bottom-Right Source Link (Constraint 2) */}
-            <div className="pt-3 border-t flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs" style={{ borderColor: 'var(--color-border)' }}>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAddToPlanModal(true)}
-                  className="px-3.5 py-2 rounded-xl text-white font-bold flex items-center gap-1.5 transition shadow cursor-pointer hover:opacity-90"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                >
-                  <CalendarPlus className="h-3.5 w-3.5" />
-                  <span>{t('addToMealPlan', 'Add to Meal Planner')}</span>
-                </button>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2.5" style={{ fontSize: `${fontSizeScale}%` }}>
+                      {Array.isArray(selectedRecipe.ingredients) && selectedRecipe.ingredients.map((ing: any, idx: number) => {
+                        const defaultCat = categories[0] || 'Produce';
+                        const norm = getNormalizedIngredient(ing, defaultCat);
+                        const scaledAmt = calculateScaledAmount(norm.amount, baseServings, currentServings);
 
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setIsBookDropdownOpen(!isBookDropdownOpen)}
-                    className="px-3.5 py-2 rounded-xl border font-bold flex items-center gap-1.5 transition cursor-pointer hover:opacity-80"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                  >
-                    <Book className="h-3.5 w-3.5" />
-                    <span>{t('addToCookbook', 'Add to Cookbook')}</span>
-                    <ChevronDown className="h-3 w-3 opacity-60" />
-                  </button>
-
-                  {isBookDropdownOpen && (
-                    <div 
-                      className="absolute left-0 mt-1.5 w-48 border rounded-2xl p-2 shadow-2xl z-30 space-y-1 text-xs"
-                      style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-                    >
-                      {books.map(b => {
-                        const inThisBook = isRecipeInBook(selectedRecipe, b.id);
                         return (
-                          <button
-                            key={b.id}
-                            type="button"
-                            onClick={() => { handleAssignToBook(b.id); setIsBookDropdownOpen(false); }}
-                            className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition hover:bg-slate-800/40 cursor-pointer"
-                          >
-                            <span className="truncate">{b.title}</span>
-                            {inThisBook && <Check className="h-3 w-3 text-emerald-400 shrink-0" />}
-                          </button>
+                          <div key={idx} className="flex items-start gap-2.5 leading-snug">
+                            <span 
+                              className="w-2 h-2 rounded-full inline-block shrink-0 mt-1.5"
+                              style={{ backgroundColor: 'var(--color-primary)' }}
+                            />
+                            <span style={{ color: 'var(--color-text)' }}>
+                              {(scaledAmt || norm.unit) ? (
+                                <>
+                                  <strong className="font-bold tracking-tight" style={{ color: 'var(--color-text)' }}>
+                                    {scaledAmt} {norm.unit && norm.unit.toLowerCase() !== 'unit' ? norm.unit : ''}{' '}
+                                  </strong>
+                                  <span>{norm.name}</span>
+                                </>
+                              ) : (
+                                <span>{norm.name}</span>
+                              )}
+                            </span>
+                          </div>
                         );
                       })}
                     </div>
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* INSTRUCTIONS SECTION */}
+                  <div className="px-5 space-y-4">
+                    <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>{t('instructionsHeading') || 'Instructions'}</h3>
+                    
+                    <div className="space-y-3.5" style={{ fontSize: `${fontSizeScale}%` }}>
+                      {Array.isArray(selectedRecipe.instructions) && selectedRecipe.instructions.map((step: string, idx: number) => {
+                        const isDone = completedSteps.includes(idx);
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => {
+                              if (completedSteps.includes(idx)) {
+                                setCompletedSteps(completedSteps.filter(i => i !== idx));
+                              } else {
+                                setCompletedSteps([...completedSteps, idx]);
+                              }
+                            }}
+                            className={`flex items-start gap-3 p-3 rounded-2xl border cursor-pointer transition select-none shadow-xs ${
+                              isDone ? 'opacity-50' : ''
+                            }`}
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            <div 
+                              className="w-4 h-4 rounded border flex items-center justify-center shrink-0 mt-0.5 transition"
+                              style={isDone ? {
+                                backgroundColor: 'var(--color-primary)',
+                                borderColor: 'var(--color-primary)',
+                                color: '#ffffff'
+                              } : {
+                                borderColor: 'var(--color-primary)',
+                                backgroundColor: 'transparent'
+                              }}
+                            >
+                              {isDone && <Check className="h-3.5 w-3.5 stroke-[3]"/>}
+                            </div>
+
+                            <span 
+                              className="font-extrabold shrink-0 text-sm"
+                              style={{ color: 'var(--color-primary)' }}
+                            >
+                              {idx + 1}.
+                            </span>
+
+                            <span 
+                              className={`leading-relaxed flex-1 ${isDone ? 'line-through opacity-50' : ''}`}
+                              style={{ color: 'var(--color-text)' }}
+                            >
+                              {step}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* MODAL FOOTER */}
+                  <div className="px-5 flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteRecipe(selectedRecipe.id)}
+                      className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'rgba(239, 68, 68, 0.4)',
+                        color: '#ef4444'
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipeBtn') || 'Delete Recipe'}
+                    </button>
+
+                    <div className="flex items-center gap-2 ml-auto text-xs">
+                      <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                        {t('source') || 'Source'}:
+                      </span>
+                      {selectedRecipe.sourceUrl || selectedRecipe.source_url ? (
+                        <a
+                          href={getSafeHref(selectedRecipe.sourceUrl || selectedRecipe.source_url)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-bold text-xs hover:underline inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          <span className="underline">
+                            {(t('visitSource') || 'Visit {domain}').replace('{domain}', getSafeHostname(selectedRecipe.sourceUrl || selectedRecipe.source_url))}
+                          </span>
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      ) : (
+                        <span 
+                          className="px-3 py-1.5 rounded-xl border text-xs font-medium"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text-secondary)'
+                          }}
+                        >
+                          {t('createdManually') || 'Created manually'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* EDIT RECIPE VIEW */
+                <div className="p-6 space-y-6">
+                  <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                    <h3 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                      <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('editRecipeTitle') || 'Edit Recipe'}
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(false)}
+                      className="p-1 rounded-lg transition cursor-pointer"
+                      style={{ color: 'var(--color-text-secondary)' }}
+                    >
+                      <X className="h-5 w-5"/>
+                    </button>
+                  </div>
+
+                  <div 
+                    className="flex p-1.5 rounded-2xl border"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)'
+                    }}
+                  >
+                    {[
+                      { id: 'info', label: t('basicInfoTab') || 'Basic Info' },
+                      { id: 'ingredients', label: t('ingredientsTab') || 'Ingredients' },
+                      { id: 'steps', label: t('stepsTab') || 'Steps' }
+                    ].map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setEditTab(tab.id as any)}
+                        className="flex-1 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer"
+                        style={editTab === tab.id ? {
+                          backgroundColor: 'var(--color-card)',
+                          color: 'var(--color-text)',
+                          border: '1px solid var(--color-border)',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                        } : {
+                          color: 'var(--color-text-secondary)'
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* TAB 1: BASIC INFO */}
+                  {editTab === 'info' && (
+                    <div className="space-y-5 animate-in fade-in text-xs">
+                      <div className="space-y-1.5">
+                        <label 
+                          className="block font-bold uppercase tracking-wider text-[11px]"
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          {t('photoLabel') || 'Photo'}
+                        </label>
+                        <label 
+                          className="border-2 border-dashed rounded-2xl h-44 flex flex-col items-center justify-center cursor-pointer transition relative overflow-hidden group"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)'
+                          }}
+                        >
+                          {editForm.imageUrl ? (
+                            <>
+                              <img
+                                src={editForm.imageUrl}
+                                alt="Recipe Preview"
+                                referrerPolicy="no-referrer"
+                                crossOrigin="anonymous"
+                                onError={(e) => {
+                                  const target = e.currentTarget;
+                                  if (!target.dataset.failed) {
+                                    target.dataset.failed = 'true';
+                                    target.src = DEFAULT_RECIPE_IMAGE;
+                                  }
+                                }}
+                                className="absolute inset-0 w-full h-full object-cover"
+                              />
+                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+                                <span 
+                                  className="border text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text)'
+                                  }}
+                                >
+                                  <ImagePlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('changePhoto') || 'Change Photo'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setEditForm({ ...editForm, imageUrl: '' });
+                                  }}
+                                  className="bg-red-950/90 border border-red-500/50 text-red-400 text-xs font-bold px-3 py-1.5 rounded-xl hover:bg-red-900 cursor-pointer"
+                                >
+                                  {t('removePhoto') || 'Remove'}
+                                </button>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="text-center space-y-2">
+                              <ImagePlus className="h-8 w-8 mx-auto transition" style={{ color: 'var(--color-text-secondary)' }}/>
+                              <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>{t('addAPhoto') || 'Add a photo'}</span>
+                            </div>
+                          )}
+                          <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                        </label>
+                      </div>
+
+                      <div>
+                        <label 
+                          className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          {t('recipeTitle') || 'Recipe Title'}
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          autoComplete="off"
+                          data-lpignore="true"
+                          value={editForm.title}
+                          onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                          className="w-full border rounded-xl p-3 text-sm outline-none"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                        />
+                      </div>
+
+                      <div>
+                        <label 
+                          className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          {t('description') || 'Description'}
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={editForm.description}
+                          onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                          className="w-full border rounded-xl p-3 text-xs outline-none resize-y leading-relaxed"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label 
+                            className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
+                            style={{ color: 'var(--color-primary)' }}
+                          >
+                            {t('recipeTypeLabel') || 'Recipe Type'}
+                          </label>
+                          <select
+                            value={editForm.recipeType}
+                            onChange={(e) => setEditForm({ ...editForm, recipeType: e.target.value })}
+                            className="w-full border rounded-xl p-3 text-xs outline-none cursor-pointer"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                          >
+                            {RECIPE_TYPES.filter(t => t !== 'All Types').map((t) => (
+                              <option key={t} value={t} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label 
+                            className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
+                            style={{ color: 'var(--color-primary)' }}
+                          >
+                            {t('servingsLabel') || 'Servings'}
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={editForm.servings}
+                            onChange={(e) => setEditForm({ ...editForm, servings: Math.max(1, parseInt(e.target.value) || 1) })}
+                            className="w-full border rounded-xl p-3 text-xs outline-none"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="pt-4 border-t flex justify-end gap-3" style={{ borderColor: 'var(--color-border)' }}>
+                        <button
+                          type="button"
+                          onClick={() => setIsEditing(false)}
+                          className="px-5 py-2.5 rounded-xl font-bold transition text-xs cursor-pointer"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            color: 'var(--color-text-secondary)'
+                          }}
+                        >
+                          {t('cancel') || 'Cancel'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveEdit}
+                          className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg flex items-center gap-2 text-xs cursor-pointer"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                        >
+                          <Save className="h-4 w-4"/> {t('saveChanges') || 'Save Changes'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 2: INGREDIENTS */}
+                  {editTab === 'ingredients' && (
+                    <div 
+                      className="border rounded-2xl p-5 space-y-4 animate-in fade-in text-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)'
+                      }}
+                    >
+                      <div className="flex justify-between items-center">
+                        <h2 
+                          className="text-sm font-bold uppercase tracking-wider"
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          {t('ingredientsHeading') || 'Ingredients'}
+                        </h2>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsReorderingIngredients(!isReorderingIngredients)}
+                            className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
+                            style={isReorderingIngredients ? {
+                              backgroundColor: 'var(--color-emerald)',
+                              color: '#ffffff',
+                              borderColor: 'var(--color-emerald)'
+                            } : {
+                              backgroundColor: 'var(--color-card)',
+                              color: 'var(--color-text)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            {isReorderingIngredients ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditForm({
+                              ...editForm,
+                              ingredients: [...editForm.ingredients, { amount: '', unit: '', item: '', category: categories[0] || 'Produce' }]
+                            })}
+                            className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                          >
+                            <Plus className="h-3.5 w-3.5"/> {t('addIngredient') || 'Add Ingredient'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+                        {editForm.ingredients.map((ing: any, idx: number) => (
+                          <div
+                            key={idx}
+                            draggable={isReorderingIngredients}
+                            onDragStart={() => handleDragStart(idx)}
+                            onDragOver={(e) => handleDragOver(e, idx, 'ingredients')}
+                            onDrop={handleDrop}
+                            className={`flex items-center gap-2 p-2.5 rounded-xl border transition ${
+                              isReorderingIngredients ? 'cursor-grab' : ''
+                            }`}
+                            style={{
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: isReorderingIngredients ? 'var(--color-emerald)' : 'var(--color-border)'
+                            }}
+                          >
+                            <input
+                              type="text"
+                              autoComplete="off"
+                              placeholder={t('amt') || 'Amt'}
+                              value={ing.amount}
+                              onChange={(e) => {
+                                const list = [...editForm.ingredients];
+                                list[idx].amount = e.target.value;
+                                setEditForm({ ...editForm, ingredients: list });
+                              }}
+                              className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text)'
+                              }}
+                            />
+                            <input
+                              type="text"
+                              autoComplete="off"
+                              placeholder={t('unit') || 'Unit'}
+                              value={ing.unit}
+                              onChange={(e) => {
+                                const list = [...editForm.ingredients];
+                                list[idx].unit = e.target.value;
+                                setEditForm({ ...editForm, ingredients: list });
+                              }}
+                              className="w-20 border rounded-lg p-2 text-center outline-none"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text-secondary)'
+                              }}
+                            />
+                            <input
+                              type="text"
+                              autoComplete="off"
+                              placeholder={t('ingredientNamePlaceholder') || 'Ingredient name...'}
+                              value={ing.item}
+                              onChange={(e) => {
+                                const list = [...editForm.ingredients];
+                                list[idx].item = e.target.value;
+                                setEditForm({ ...editForm, ingredients: list });
+                              }}
+                              className="flex-1 bg-transparent border-none outline-none px-2"
+                              style={{ color: 'var(--color-text)' }}
+                            />
+                            <select
+                              value={ing.category}
+                              onChange={(e) => {
+                                const list = [...editForm.ingredients];
+                                list[idx].category = e.target.value;
+                                setEditForm({ ...editForm, ingredients: list });
+                              }}
+                              className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text-secondary)'
+                              }}
+                            >
+                              {categories.map((cat) => (
+                                <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
+                              ))}
+                            </select>
+
+                            {isReorderingIngredients ? (
+                              <div className="p-2 cursor-grab" style={{ color: 'var(--color-emerald)' }}>
+                                <GripVertical className="h-4 w-4"/>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setEditForm({
+                                  ...editForm,
+                                  ingredients: editForm.ingredients.filter((_: any, i: number) => i !== idx)
+                                })}
+                                className="p-2 text-red-500 hover:text-red-600 cursor-pointer"
+                              >
+                                <Trash2 className="h-4 w-4"/>
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex justify-between pt-3">
+                        <button
+                          type="button"
+                          onClick={() => setEditTab('info')}
+                          className="font-bold px-5 py-2 rounded-xl text-xs transition cursor-pointer"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          {t('backBtn') || '← Back'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditTab('steps')}
+                          className="text-white font-bold px-6 py-2 rounded-xl text-xs transition shadow-md cursor-pointer"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                        >
+                          {t('nextStepsBtn') || 'Next: Steps →'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 3: STEPS */}
+                  {editTab === 'steps' && (
+                    <div 
+                      className="border rounded-2xl p-5 space-y-4 animate-in fade-in text-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)'
+                      }}
+                    >
+                      <div className="flex justify-between items-center">
+                        <h2 
+                          className="text-sm font-bold uppercase tracking-wider"
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          {t('stepByStepInstructions') || 'Step-by-Step Instructions'}
+                        </h2>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsReorderingSteps(!isReorderingSteps)}
+                            className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
+                            style={isReorderingSteps ? {
+                              backgroundColor: 'var(--color-emerald)',
+                              color: '#ffffff',
+                              borderColor: 'var(--color-emerald)'
+                            } : {
+                              backgroundColor: 'var(--color-card)',
+                              color: 'var(--color-text-secondary)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            {isReorderingSteps ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditForm({
+                              ...editForm,
+                              instructions: [...editForm.instructions, '']
+                            })}
+                            className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                          >
+                            <Plus className="h-3.5 w-3.5"/> {t('addStep') || 'Add Step'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+                        {editForm.instructions.map((step: string, idx: number) => (
+                          <div
+                            key={idx}
+                            draggable={isReorderingSteps}
+                            onDragStart={() => handleDragStart(idx)}
+                            onDragOver={(e) => handleDragOver(e, idx, 'steps')}
+                            onDrop={handleDrop}
+                            className={`flex items-start gap-3 p-3 rounded-xl border transition ${
+                              isReorderingSteps ? 'cursor-grab' : ''
+                            }`}
+                            style={{
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: isReorderingSteps ? 'var(--color-emerald)' : 'var(--color-border)'
+                            }}
+                          >
+                            <span 
+                              className="w-6 h-6 rounded-full font-bold flex items-center justify-center shrink-0 mt-1"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                color: 'var(--color-primary)',
+                                borderColor: 'var(--color-primary)',
+                                borderWidth: '1px'
+                              }}
+                            >
+                              {idx + 1}
+                            </span>
+                            <textarea
+                              rows={2}
+                              placeholder={(t('describeStepPlaceholder') || 'Describe step {n}...').replace('{n}', String(idx + 1))}
+                              value={step}
+                              onChange={(e) => {
+                                const list = [...editForm.instructions];
+                                list[idx] = e.target.value;
+                                setEditForm({ ...editForm, instructions: list });
+                              }}
+                              className="flex-1 bg-transparent border-none outline-none resize-y"
+                              style={{ color: 'var(--color-text)' }}
+                            />
+
+                            {isReorderingSteps ? (
+                              <div className="p-2 cursor-grab mt-1" style={{ color: 'var(--color-emerald)' }}>
+                                <GripVertical className="h-4 w-4"/>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setEditForm({
+                                  ...editForm,
+                                  instructions: editForm.instructions.filter((_: any, i: number) => i !== idx)
+                                })}
+                                className="p-2 text-slate-400 hover:text-red-500 h-fit cursor-pointer"
+                              >
+                                <Trash2 className="h-4 w-4"/>
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex justify-between pt-3">
+                        <button
+                          type="button"
+                          onClick={() => setEditTab('ingredients')}
+                          className="font-bold px-5 py-2 rounded-xl text-xs transition cursor-pointer"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          {t('backBtn') || '← Back'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveEdit}
+                          className="text-white font-bold px-8 py-2.5 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                        >
+                          <Save className="h-4 w-4"/> {t('saveChanges') || 'Save Changes'}
+                        </button>
+                      </div>
+                    </div>
                   )}
                 </div>
-
-                <button
-                  type="button"
-                  onClick={(e) => handleDeleteRecipe(e, selectedRecipe.id)}
-                  className="p-2 rounded-xl border text-red-400 hover:bg-red-500/10 transition cursor-pointer"
-                  style={{ borderColor: 'rgba(239, 68, 68, 0.4)' }}
-                  title={t('deleteRecipe', 'Delete Recipe')}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-
-              {/* Bottom-Right Source Placement */}
-              {selectedRecipe.sourceUrl && (
-                <a
-                  href={selectedRecipe.sourceUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-[11px] font-bold text-sky-400 hover:underline shrink-0"
-                >
-                  <span>{t('viewOriginalSource', 'View Original Recipe Source ↗')}</span>
-                  <ExternalLink className="h-3 w-3" />
-                </a>
               )}
             </div>
           </div>
         </div>
       )}
 
-      {/* SCHEDULE IN MEAL PLANNER MODAL (Autofill Safe Container) */}
-      {showAddToPlanModal && (
+      {/* TIMER SETTINGS POPUP MODAL */}
+      {isTimerModalOpen && (
         <div 
-          onClick={() => setShowAddToPlanModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 cursor-pointer"
+          onClick={() => setIsTimerModalOpen(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[75] flex items-center justify-center p-4 cursor-pointer"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            className="border rounded-3xl max-w-sm w-full p-6 space-y-5 shadow-2xl relative animate-in fade-in cursor-default transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
           >
-            <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
-                {t('scheduleMealTitle', 'Schedule in Meal Planner')}
-              </h3>
-              <button type="button" onClick={() => setShowAddToPlanModal(false)} className="p-1 rounded-lg">
-                <X className="h-4 w-4" />
-              </button>
+            <button 
+              type="button"
+              onClick={() => setIsTimerModalOpen(false)} 
+              className="absolute top-4 right-4 p-2 rounded-xl border transition cursor-pointer"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <X className="h-4 w-4"/>
+            </button>
+
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <div 
+                  className="w-8 h-8 rounded-xl flex items-center justify-center shadow-xs"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-primary)' }}
+                >
+                  <Timer className="h-5 w-5"/>
+                </div>
+                <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+                  {t('timerSettingsTitle') || 'Kitchen Timer'}
+                </h2>
+              </div>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {selectedRecipe?.title || selectedRecipe?.name ? (
+                  (t('timerForRecipe') || 'Timer for: {title}').replace('{title}', selectedRecipe.title || selectedRecipe.name)
+                ) : (
+                  t('setTimerUpTo60Min') || 'Set a cooking countdown up to 60 minutes.'
+                )}
+              </p>
             </div>
 
-            <div role="region" data-lpignore="true" className="space-y-3.5">
-              <div>
-                <label className="block font-bold mb-1 opacity-80">{t('selectDate', 'Date')}</label>
-                <input
-                  type="date"
-                  autoComplete="off"
-                  data-lpignore="true"
-                  value={planDate}
-                  onChange={(e) => setPlanDate(e.target.value)}
-                  className="w-full border rounded-xl p-2.5 text-xs outline-none"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1 opacity-80">{t('selectMealSlot', 'Meal Slot')}</label>
-                <select
-                  value={planMealType}
-                  onChange={(e) => setPlanMealType(e.target.value)}
-                  className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            <div 
+              className="p-4 rounded-2xl border flex flex-col items-center justify-center gap-3 shadow-inner"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
+              }}
+            >
+              <div className="flex items-center justify-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => setTimerInputMinutes((m) => Math.max(1, m - 1))}
+                  className="w-10 h-10 rounded-xl border font-bold text-lg flex items-center justify-center transition cursor-pointer active:scale-95 shadow-sm"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  title="Decrease 1 minute"
                 >
-                  <option value="Breakfast">{t('breakfast', 'Breakfast')}</option>
-                  <option value="Lunch">{t('lunch', 'Lunch')}</option>
-                  <option value="Dinner">{t('dinner', 'Dinner')}</option>
-                  <option value="Snack">{t('snack', 'Snack')}</option>
-                </select>
+                  -
+                </button>
+
+                <div className="text-center min-w-[100px]">
+                  <span className="text-4xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+                    {timerInputMinutes}
+                  </span>
+                  <span className="text-xs font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('minutesLabel') || 'Minutes'}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setTimerInputMinutes((m) => Math.min(60, m + 1))}
+                  className="w-10 h-10 rounded-xl border font-bold text-lg flex items-center justify-center transition cursor-pointer active:scale-95 shadow-sm"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  title="Increase 1 minute"
+                >
+                  +
+                </button>
+              </div>
+
+              <input
+                type="range"
+                min={1}
+                max={60}
+                value={timerInputMinutes}
+                onChange={(e) => setTimerInputMinutes(parseInt(e.target.value) || 1)}
+                className="w-full accent-[var(--color-primary)] cursor-pointer"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-wider block" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('quickPresets') || 'Quick Presets'}:
+              </span>
+              <div className="grid grid-cols-5 gap-1.5">
+                {[5, 10, 15, 30, 45].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setTimerInputMinutes(preset)}
+                    className="py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer shadow-xs text-center"
+                    style={timerInputMinutes === preset ? {
+                      backgroundColor: 'var(--color-primary)',
+                      borderColor: 'var(--color-primary)',
+                      color: '#ffffff'
+                    } : {
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    {preset}m
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsTimerModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
+                style={{
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-secondary)',
+                  backgroundColor: 'var(--color-inner-dark)'
+                }}
+              >
+                {t('cancel') || 'Cancel'}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleStartTimer}
+                className="px-6 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-lg flex items-center gap-1.5 cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+              >
+                <Play className="h-4 w-4 fill-current"/> {t('startTimer') || 'Start Timer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FLOATING COUNTDOWN TIMER WIDGET */}
+      {activeTimer && (
+        <div
+          className={`fixed bottom-5 right-5 z-[80] border rounded-2xl p-3.5 shadow-2xl flex items-center gap-3.5 transition-all duration-300 backdrop-blur-xl animate-in slide-in-from-bottom-5 ${
+            activeTimer.remainingSeconds === 0 ? 'animate-bounce ring-4 ring-red-500/50' : ''
+          }`}
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: activeTimer.remainingSeconds === 0 ? '#ef4444' : 'var(--color-primary)',
+            boxShadow: activeTimer.remainingSeconds === 0 
+              ? '0 10px 35px rgba(239, 68, 68, 0.45)' 
+              : '0 10px 35px rgba(0, 0, 0, 0.28)',
+            color: 'var(--color-text)'
+          }}
+        >
+          <div 
+            className="w-10 h-10 rounded-xl flex items-center justify-center shadow-md shrink-0 transition"
+            style={{
+              backgroundColor: activeTimer.remainingSeconds === 0 ? '#ef4444' : 'var(--color-inner-dark)',
+              color: activeTimer.remainingSeconds === 0 ? '#ffffff' : 'var(--color-primary)'
+            }}
+          >
+            {activeTimer.remainingSeconds === 0 ? (
+              <Bell className="h-5 w-5 animate-pulse fill-current" />
+            ) : (
+              <Timer className={`h-5 w-5 ${activeTimer.isRunning ? 'animate-spin' : ''}`} style={{ animationDuration: '4s' }}/>
+            )}
+          </div>
+
+          <div className="space-y-0.5 pr-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xl font-black tracking-tight tabular-nums" style={{ color: activeTimer.remainingSeconds === 0 ? '#ef4444' : 'var(--color-text)' }}>
+                {formattedCountdown}
+              </span>
+              {activeTimer.remainingSeconds === 0 && (
+                <span className="text-[10px] uppercase font-black px-1.5 py-0.5 rounded bg-red-500 text-white animate-pulse">
+                  {t('timerDone') || 'Done!'}
+                </span>
+              )}
+            </div>
+
+            <p className="text-[11px] font-semibold max-w-[140px] truncate" style={{ color: 'var(--color-text-secondary)' }}>
+              {activeTimer.recipeTitle || (t('kitchenTimer') || 'Kitchen Timer')}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-1.5 pl-1 border-l" style={{ borderColor: 'var(--color-border)' }}>
+            {activeTimer.remainingSeconds > 0 && (
+              <button
+                type="button"
+                onClick={handleTogglePauseTimer}
+                className="p-2 rounded-xl border transition cursor-pointer shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-primary)'
+                }}
+                title={activeTimer.isRunning ? (t('pause') || 'Pause') : (t('resume') || 'Resume')}
+              >
+                {activeTimer.isRunning ? <Pause className="h-4 w-4"/> : <Play className="h-4 w-4 fill-current"/>}
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handleResetOrDismissTimer}
+              className="p-2 rounded-xl border transition cursor-pointer shadow-xs hover:text-red-500"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-secondary)'
+              }}
+              title={t('dismissTimer') || 'Dismiss Timer'}
+            >
+              <X className="h-4 w-4"/>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ADD TO PLAN MODAL */}
+      {showAddToPlanModal && selectedRecipe && (
+        <div 
+          onClick={() => setShowAddToPlanModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[70] flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <button 
+              type="button"
+              onClick={() => setShowAddToPlanModal(false)} 
+              className="absolute top-4 right-4 p-2 rounded-lg transition cursor-pointer"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <X className="h-4 w-4"/>
+            </button>
+
+            <div className="pr-6 space-y-1">
+              <h2 
+                className="text-xl font-black tracking-tight"
+                style={{ color: 'var(--color-primary)' }}
+              >
+                {t('addToCalendar') || 'Add to Calendar'}
+              </h2>
+              <p className="text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+                {(t('scheduleRecipeInMealPlan') || 'Schedule {title} in your meal plan').replace('{title}', selectedRecipe.title || selectedRecipe.name)}
+              </p>
+            </div>
+
+            <div className="space-y-4 pt-1">
+              <div>
+                <label 
+                  className="block text-xs font-bold mb-1.5"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  {t('date') || 'Date'}
+                </label>
+                <div className="relative flex items-center">
+                  <Calendar className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-primary)' }}/>
+                  <input
+                    type="date"
+                    required
+                    value={planDate}
+                    onChange={(e) => setPlanDate(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveToCalendar();
+                      }
+                    }}
+                    className="w-full border rounded-xl pl-10 pr-3 py-2.5 text-xs font-semibold outline-none cursor-pointer"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  />
+                </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1 opacity-80">{t('planNotes', 'Notes (Optional)')}</label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  spellCheck="false"
+                <label 
+                  className="block text-xs font-bold mb-1.5"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  {t('mealType') || 'Meal Type'}
+                </label>
+                <div className="relative flex items-center">
+                  <select
+                    value={planMealType}
+                    onChange={(e) => setPlanMealType(e.target.value)}
+                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none cursor-pointer appearance-none"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  >
+                    <option value="Breakfast" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('breakfast') || 'Breakfast'}</option>
+                    <option value="Lunch" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('lunch') || 'Lunch'}</option>
+                    <option value="Dinner" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('dinner') || 'Dinner'}</option>
+                    <option value="Snack" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('snack') || 'Snack'}</option>
+                  </select>
+                  <ChevronDown className="h-4 w-4 absolute right-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
+                </div>
+              </div>
+
+              <div>
+                <label 
+                  className="block text-xs font-bold mb-1.5"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  {t('time') || 'Time'}
+                </label>
+                <div className="relative flex items-center">
+                  <Clock className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
+                  <input
+                    type="time"
+                    value={planTime}
+                    onChange={(e) => setPlanTime(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveToCalendar();
+                      }
+                    }}
+                    className="w-full border rounded-xl px-10 py-2.5 text-xs outline-none"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  />
+                  <Clock className="h-4 w-4 absolute right-3.5 pointer-events-none" style={{ color: 'var(--color-primary)' }}/>
+                </div>
+              </div>
+
+              <div>
+                <label 
+                  className="block text-xs font-bold mb-1.5"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  {t('notes') || 'Notes'}
+                </label>
+                <textarea
                   value={planNotes}
                   onChange={(e) => setPlanNotes(e.target.value)}
-                  placeholder="e.g. Serve with jasmine rice..."
-                  className="w-full border rounded-xl p-2.5 text-xs outline-none"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  placeholder={t('addNotesRemindersPlaceholder') || 'Add any notes or reminders...'}
+                  rows={3}
+                  className="w-full border rounded-xl p-3 text-xs outline-none resize-none"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
               </div>
 
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex justify-end gap-2.5 pt-3">
                 <button
                   type="button"
                   onClick={() => setShowAddToPlanModal(false)}
-                  className="px-4 py-2 border rounded-xl font-bold cursor-pointer hover:opacity-80"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  className="px-5 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-primary)',
+                    backgroundColor: 'var(--color-inner-dark)'
+                  }}
                 >
-                  {t('cancelBtn', 'Cancel')}
+                  {t('cancel') || 'Cancel'}
                 </button>
                 <button
                   type="button"
                   onClick={handleSaveToCalendar}
-                  className="px-5 py-2 text-white font-bold rounded-xl shadow cursor-pointer hover:opacity-90"
+                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                 >
-                  {t('scheduleBtn', 'Confirm Schedule')}
+                  {t('addToCalendarBtn') || 'Add to Calendar'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SHOPPING LIST MODAL */}
+      {isShoppingModalOpen && (
+        <div 
+          onClick={() => setIsShoppingModalOpen(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[60] flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl p-6 space-y-5 cursor-default transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h3 className="text-lg font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <ShoppingCart className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('addToShoppingListTitle') || 'Add to Shopping List'}
+                </h3>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t('selectOrEditItemsShopping') || 'Select or edit items to add directly to your list'}</p>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setIsShoppingModalOpen(false)} 
+                className="cursor-pointer transition"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                <X className="h-5 w-5"/>
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-3 pr-1 text-xs">
+              {shoppingModalIngredients.map((ing, idx) => (
+                <div 
+                  key={ing.id} 
+                  className="flex items-center gap-2 p-2.5 rounded-xl border"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  <div
+                    onClick={() => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].selected = !updated[idx].selected;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition shrink-0"
+                    style={ing.selected ? {
+                      backgroundColor: 'var(--color-primary)',
+                      borderColor: 'var(--color-primary)',
+                      color: '#ffffff'
+                    } : {
+                      borderColor: 'var(--color-border)',
+                      backgroundColor: 'var(--color-card)'
+                    }}
+                  >
+                    {ing.selected && <CheckSquare className="h-3.5 w-3.5"/>}
+                  </div>
+
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={ing.amount}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].amount = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    placeholder={t('amt') || 'Amt'}
+                  />
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={ing.unit}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].unit = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-20 border rounded-lg p-2 text-center outline-none"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)'
+                    }}
+                    placeholder={t('unit') || 'Unit'}
+                  />
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={ing.name}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].name = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="flex-1 bg-transparent border-none outline-none px-2"
+                    style={{ color: 'var(--color-text)' }}
+                    placeholder={t('ingredientNamePlaceholder') || 'Ingredient name...'}
+                  />
+                  <select
+                    value={ing.category}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].category = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)'
+                    }}
+                  >
+                    {categories.map((cat) => (
+                      <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-3 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setIsShoppingModalOpen(false)}
+                className="px-4 py-2 rounded-xl font-bold text-xs cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  color: 'var(--color-text-secondary)'
+                }}
+              >
+                {t('cancel') || 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAddToShoppingList}
+                className="px-6 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 shadow-lg cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+              >
+                <ShoppingCart className="h-3.5 w-3.5"/> {t('addSelectedToList') || 'Add Selected to List'}
+              </button>
             </div>
           </div>
         </div>
@@ -6634,18 +9363,16 @@ export default function PlannerPage() {
 
 ## File: `apps/web/src/app/chef/page.tsx`
 ```typescript
-'use client';
 // @ts-nocheck
-
-import DynamicTokenIcon from '@/components/DynamicTokenIcon';
-import AiQuotaBar from '@/components/AiQuotaBar';
+'use client';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { 
-  ChefHat, Send, SlidersHorizontal, Edit3, Clock, Flame, Users, RefreshCw, 
-  Calendar, CalendarPlus, X, Utensils, Loader2, User as UserIcon, 
-  Check, Sparkles, Bookmark, RotateCcw, Package, Plus, Trash2, ChevronDown, 
-  Coins, Cpu, ShieldAlert, Mic, MicOff, Volume2, Square, Award, ExternalLink,
-  Layers, CheckCircle2, CheckCircle, Zap, Globe, Table, LayoutGrid
+  ChefHat, Globe, ExternalLink, Send, SlidersHorizontal, Edit3, Clock, Users,
+  Calendar, CalendarPlus, X, Loader2, User as UserIcon, Check, Sparkles, Bookmark,
+  Plus, Trash2, ChevronDown, ChevronLeft, ChevronRight, CheckCircle2, Layers,
+  Mic, MicOff, Volume2, Square, BookOpen, History, Folder, MessageSquare, Tag,
+  ShoppingCart
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -6655,14 +9382,14 @@ interface MealItem {
   id: string;
   dayIndex: number;
   dayLabel: string;
-  dateStr?: string;
+  dateStr: string;
   mealType: string;
   title: string;
-  description?: string;
-  prepMinutes?: number;
-  cookMinutes?: number;
-  servings?: number;
-  calories?: number;
+  description: string;
+  prepMinutes: number;
+  cookMinutes: number;
+  servings: number;
+  image?: string;
   isBatchCook?: boolean;
   isLeftover?: boolean;
   leftoverFrom?: string;
@@ -6670,10 +9397,10 @@ interface MealItem {
 }
 
 interface MealPlanData {
-  title?: string;
+  title: string;
   totalDays: number;
-  theme?: string;
-  budgetPerServing?: string;
+  theme: string;
+  budgetPerServing: string;
   meals: MealItem[];
 }
 
@@ -6688,18 +9415,41 @@ interface RecommendedRecipeData {
   ingredients: string[];
   instructions: string[];
   chefTip?: string;
+  image?: string;
   sourceUrl?: string;
   sourceName?: string;
-  image?: string;
+}
+
+interface SystemRecommendation {
+  label: string;
+  route: string;
+  description?: string;
 }
 
 interface ChatMessage {
+  systemRecommendations?: SystemRecommendation[];
   id: string;
   role: 'user' | 'assistant';
   content?: string;
   plan?: MealPlanData;
   recipe?: any;
   recommendedRecipe?: RecommendedRecipeData;
+}
+
+interface ChatCategory {
+  id: string;
+  name: string;
+  created_at?: string;
+}
+
+interface ChatSessionItem {
+  id: string;
+  title: string;
+  category_id?: string | null;
+  category_name?: string | null;
+  message_count?: number;
+  created_at: string;
+  updated_at: string;
 }
 
 const DIETARY_OPTIONS = [
@@ -6714,7 +9464,7 @@ const ALLERGY_OPTIONS = [
 
 const COUNTRIES = [
   'Singapore', 'United States', 'United Kingdom', 'Australia', 
-  'Canada', 'Malaysia', 'Japan', 'Germany', 'France', 'India', 'Thailand'
+  'Canada', 'Malaysia', 'Japan', 'Germany', 'France', 'India'
 ];
 
 const DEFAULT_SECTIONS = [
@@ -6742,6 +9492,7 @@ const DEFAULT_SECTIONS = [
 ];
 
 export default function ChefChatPage() {
+  const router = useRouter();
   const { t } = useTranslation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const currentUserRef = useRef<User | null>(null);
@@ -6752,41 +9503,54 @@ export default function ChefChatPage() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Settings telemetry synced from /admin/ai-settings (PostgreSQL backed)
+  // Chat History & Categories State (PostgreSQL backed)
+  const [currentSessionId, setCurrentSessionId] = useState<string>(() => 'sess_' + Date.now());
+  const currentSessionIdRef = useRef<string>(currentSessionId);
+  currentSessionIdRef.current = currentSessionId;
+
+  const [showHistoryDrawer, setShowHistoryDrawer] = useState<boolean>(false);
+  const [historySessions, setHistorySessions] = useState<ChatSessionItem[]>([]);
+  const [historyCategories, setHistoryCategories] = useState<ChatCategory[]>([]);
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
+  const [historyPage, setHistoryPage] = useState<number>(1);
+  const [historyTotalPages, setHistoryTotalPages] = useState<number>(1);
+  const [historyTotalCount, setHistoryTotalCount] = useState<number>(0);
+  const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
+  const [newCategoryName, setNewCategoryName] = useState<string>('');
+
+  // AI & Voice telemetry settings
   const [questionnaireSections, setQuestionnaireSections] = useState<any[]>(DEFAULT_SECTIONS);
   const [activeTopicTitle, setActiveTopicTitle] = useState<string>('Standard Wizard');
   const [wizardQuestionsList, setWizardQuestionsList] = useState<string[]>([]);
   const [resultDisplayMode, setResultDisplayMode] = useState<'card' | 'compact' | 'detailed'>('card');
-  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.5-flash');
+  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.0-flash');
   const [strictDietEnforcement, setStrictDietEnforcement] = useState<boolean>(false);
   const [filterWordsList, setFilterWordsList] = useState<string[]>([]);
   const [enablePantryContext, setEnablePantryContext] = useState<boolean>(true);
+  const [enableSavedRecipeSearch, setEnableSavedRecipeSearch] = useState<boolean>(true);
   const [maxPlanDays, setMaxPlanDays] = useState<number>(7);
   const [recommendedRecipeUrls, setRecommendedRecipeUrls] = useState<string[]>([]);
-
-  // Real-Time In-Stock Pantry Items (Loaded dynamically from /api/pantry)
-  const [pantryIngredientsList, setPantryIngredientsList] = useState<string[]>([]);
 
   // Voice Interaction State
   const [enableVoiceInteraction, setEnableVoiceInteraction] = useState<boolean>(true);
   const [voiceSpeed, setVoiceSpeed] = useState<number>(1.0);
   const [voiceAutoPlay, setVoiceAutoPlay] = useState<boolean>(false);
   const [selectedVoiceName, setSelectedVoiceName] = useState<string>('en-US-Neural2-F');
-  
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const [isListening, setIsListening] = useState<boolean>(false);
   const speechRecognitionRef = useRef<any>(null);
 
-  // Token System Telemetry Synced with /admin/token-setting
+  // Dynamic Token Telemetry (Synced with /token-setting, PostgreSQL & MySQL)
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
+  const [isTokenEnabled, setIsTokenEnabled] = useState<boolean>(true);
   const [chefCost, setChefCost] = useState<number>(1);
   const [tokenPackages, setTokenPackages] = useState<any[]>([]);
   const [isTokenPurchaseOpen, setIsTokenPurchaseOpen] = useState(false);
 
-  // User Dietary Preferences State
+  // Dietary Preferences State
   const [showPreferences, setShowPreferences] = useState<boolean>(false);
   const [servings, setServings] = useState<number>(2);
   const [country, setCountry] = useState<string>('Singapore');
@@ -6800,11 +9564,291 @@ export default function ChefChatPage() {
   // Wizard Questionnaire Flow State
   const [wizardStep, setWizardStep] = useState<number | null>(null);
   const [wizardAnswers, setWizardAnswers] = useState<Record<number, string>>({});
-  const [savedRecipeIds, setSavedRecipeIds] = useState<string[]>([]);
+
+  // Recipe Modals & Saved Recipes State (PostgreSQL backed)
+  const [selectedRecipeForModal, setSelectedRecipeForModal] = useState<RecommendedRecipeData | null>(null);
+  const [showRecipeDetailsModal, setShowRecipeDetailsModal] = useState<boolean>(false);
+  const [pantryIngredientsList, setPantryIngredientsList] = useState<string[]>([]);
+  const [userSavedRecipes, setUserSavedRecipes] = useState<any[]>([]);
+  const [savingRecipeTitle, setSavingRecipeTitle] = useState<string | null>(null);
+
+  // Planner Scheduling Modal State
+  const [showPlannerModal, setShowPlannerModal] = useState<boolean>(false);
+  const [recipeToSchedule, setRecipeToSchedule] = useState<RecommendedRecipeData | null>(null);
+  const [scheduleDate, setScheduleDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [scheduleMealType, setScheduleMealType] = useState<string>('Dinner');
+  const [scheduleServings, setScheduleServings] = useState<number>(2);
+  const [schedulingLoading, setSchedulingLoading] = useState<boolean>(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const getUserKey = useCallback((user: User | null) => {
+    if (!user) return 'guest';
+    return user.id || (user.email ? user.email.toLowerCase().trim() : 'guest');
+  }, []);
+
+  const safeJsonParse = async (res: Response) => {
+    try {
+      const text = await res.text();
+      if (!text || !text.trim()) return null;
+      return JSON.parse(text);
+    } catch (_) {
+      return null;
+    }
+  };
+
+  // Helper to extract the token emoji across any schema variation from /token-setting
+  const resolveTokenEmoji = useCallback((obj: any): string | null => {
+    if (!obj || typeof obj !== 'object') return null;
+    const candidate = obj.tokenEmoji || obj.tokenSymbol || obj.tokenIcon || obj.emoji || obj.symbol || obj.icon;
+    return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : null;
+  }, []);
+
+  // Instant local synchronization from browser storage
+  const readLocalTokenSettings = useCallback(() => {
+    try {
+      if (typeof window === 'undefined') return;
+
+      const directKeys = [
+        'zecratary_token_emoji',
+        'zecratary_token_symbol',
+        'zecratary_token_icon',
+        'token_emoji',
+        'token_symbol',
+        'token_icon'
+      ];
+      for (const k of directKeys) {
+        const val = localStorage.getItem(k);
+        if (val && val.trim()) {
+          setTokenSymbol(val.trim());
+          break;
+        }
+      }
+
+      const jsonKeys = [
+        'zecratary_token_settings',
+        'zecratary_tokens_settings',
+        'token_settings',
+        'tokenSettings'
+      ];
+      for (const k of jsonKeys) {
+        const raw = localStorage.getItem(k);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const emoji = resolveTokenEmoji(parsed) || resolveTokenEmoji(parsed?.settings) || resolveTokenEmoji(parsed?.data);
+          if (emoji) setTokenSymbol(emoji);
+          const name = parsed?.tokenName || parsed?.settings?.tokenName || parsed?.name;
+          if (name) setTokenName(name);
+          const cost = parsed?.chefCost ?? parsed?.settings?.chefCost ?? parsed?.costs?.chef;
+          if (cost !== undefined) setChefCost(Number(cost));
+          const enabled = parsed?.isEnabled ?? parsed?.settings?.isEnabled;
+          if (enabled !== undefined) setIsTokenEnabled(Boolean(enabled));
+          break;
+        }
+      }
+    } catch (_) {}
+  }, [resolveTokenEmoji]);
+
+  const updateWizardStep = (step: number | null) => {
+    setWizardStep(step);
+    try {
+      if (typeof window === 'undefined') return;
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      if (step !== null) {
+        localStorage.setItem(`zecratary_chef_wizard_step_${userKey}`, JSON.stringify(step));
+      } else {
+        localStorage.removeItem(`zecratary_chef_wizard_step_${userKey}`);
+      }
+    } catch (_) {}
+  };
+
+  // ------------------------------------------------------------------
+  // Chat History & Category PostgreSQL Operations
+  // ------------------------------------------------------------------
+  const fetchChatHistory = useCallback(async (pageToLoad = historyPage, categoryFilter = selectedCategoryFilter) => {
+    setLoadingHistory(true);
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      const res = await fetch(
+        `/api/chef/history?userId=${encodeURIComponent(userKey)}&categoryId=${encodeURIComponent(categoryFilter)}&page=${pageToLoad}`,
+        { cache: 'no-store' }
+      );
+      const data = await safeJsonParse(res);
+      if (data && data.success) {
+        setHistorySessions(data.sessions || []);
+        setHistoryCategories(data.categories || []);
+        setHistoryPage(data.page || 1);
+        setHistoryTotalPages(data.totalPages || 1);
+        setHistoryTotalCount(data.total || 0);
+      }
+    } catch (err) {
+      console.warn('Failed to load chat history:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, [getUserKey, historyPage, selectedCategoryFilter]);
+
+  const saveCurrentSessionToDb = useCallback(async (msgs: ChatMessage[]) => {
+    if (msgs.length === 0) return;
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      const firstUserMsg = msgs.find(m => m.role === 'user');
+      const title = firstUserMsg?.content 
+        ? firstUserMsg.content.slice(0, 45) + (firstUserMsg.content.length > 45 ? '...' : '')
+        : 'Chef Conversation';
+
+      await fetch('/api/chef/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save_session',
+          userId: userKey,
+          id: currentSessionIdRef.current,
+          title,
+          messages: msgs
+        })
+      });
+    } catch (_) {}
+  }, [getUserKey]);
+
+  const handleCreateCategory = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
+    const clean = newCategoryName.trim();
+    if (!clean) return;
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      const res = await fetch('/api/chef/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create_category',
+          userId: userKey,
+          name: clean
+        })
+      });
+      const data = await safeJsonParse(res);
+      if (data && data.success) {
+        setNewCategoryName('');
+        showToast(`Category "${clean}" created!`);
+        fetchChatHistory(1, selectedCategoryFilter);
+      }
+    } catch (_) {
+      showToast("Could not create category.");
+    }
+  };
+
+  const handleDeleteCategory = async (categoryId: string, categoryName: string) => {
+    if (!confirm(`Delete category "${categoryName}"? Existing chats will be kept.`)) return;
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      await fetch(
+        `/api/chef/history?action=delete_category&categoryId=${encodeURIComponent(categoryId)}&userId=${encodeURIComponent(userKey)}`,
+        { method: 'DELETE' }
+      );
+      showToast(`Category "${categoryName}" deleted.`);
+      if (selectedCategoryFilter === categoryId) setSelectedCategoryFilter('all');
+      fetchChatHistory(1, 'all');
+    } catch (_) {
+      showToast("Could not delete category.");
+    }
+  };
+
+  const handleDeleteSession = async (sessionId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!confirm("Are you sure you want to delete this chat?")) return;
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      await fetch(
+        `/api/chef/history?action=delete_session&sessionId=${encodeURIComponent(sessionId)}&userId=${encodeURIComponent(userKey)}`,
+        { method: 'DELETE' }
+      );
+
+      if (currentSessionIdRef.current === sessionId) {
+        startNewChat();
+      }
+      showToast("Chat deleted.");
+      fetchChatHistory(historyPage, selectedCategoryFilter);
+    } catch (_) {
+      showToast("Could not delete chat.");
+    }
+  };
+
+  const handleSelectSession = async (sessionItem: ChatSessionItem) => {
+    try {
+      const sRes = await fetch(`/api/chef/session?id=${sessionItem.id}`, { cache: 'no-store' }).catch(() => null);
+      let sessionMsgs: ChatMessage[] = [];
+      if (sRes && sRes.ok) {
+        const sData = await safeJsonParse(sRes);
+        sessionMsgs = sData?.messages || [];
+      } else {
+        const local = localStorage.getItem(`zecratary_chef_sess_${sessionItem.id}`);
+        if (local) sessionMsgs = JSON.parse(local);
+      }
+
+      currentSessionIdRef.current = sessionItem.id;
+      setCurrentSessionId(sessionItem.id);
+      setMessages(sessionMsgs);
+      updateWizardStep(null);
+      setShowHistoryDrawer(false);
+      showToast(`Loaded: ${sessionItem.title}`);
+    } catch (_) {
+      showToast("Failed to load chat.");
+    }
+  };
+
+  const startNewChat = () => {
+    stopSpeaking();
+    const newId = 'sess_' + Date.now();
+    currentSessionIdRef.current = newId;
+    setCurrentSessionId(newId);
+    setMessages([]);
+    updateWizardStep(null);
+    setWizardAnswers({});
+    setActiveTopicTitle('Standard Wizard');
+    setShowHistoryDrawer(false);
+    showToast(t('newChatStarted', 'Started a new chat session.'));
+  };
+
+  const handleAssignCategory = async (sessionId: string, categoryId: string) => {
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      await fetch('/api/chef/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'set_session_category',
+          userId: userKey,
+          sessionId,
+          categoryId: categoryId === 'none' ? null : categoryId
+        })
+      });
+      fetchChatHistory(historyPage, selectedCategoryFilter);
+      showToast("Category updated.");
+    } catch (_) {}
+  };
+
+  // ------------------------------------------------------------------
+  // Voice Synthesis Engine
+  // ------------------------------------------------------------------
+  const cleanSpeechText = (text: string): string => {
+    if (!text) return '';
+    return text
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/[#*_~`]/g, '')
+      .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+      .replace(/•|\*|-/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
   };
 
   const stopSpeaking = () => {
@@ -6824,17 +9868,23 @@ export default function ChefChatPage() {
     }
 
     stopSpeaking();
-    const clean = (textToSpeak || '')
-      .replace(/```[\s\S]*?```/g, '')
-      .replace(/[#*_~`]/g, '')
-      .replace(/•|\*|-/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
+    const clean = cleanSpeechText(textToSpeak);
     if (!clean) return;
 
     const utterance = new SpeechSynthesisUtterance(clean);
     utterance.rate = Math.max(0.7, Math.min(1.8, voiceSpeed || 1.0));
+
+    if (selectedVoiceName.includes('F') || selectedVoiceName.includes('Aria')) {
+      utterance.pitch = 1.05;
+    } else if (selectedVoiceName.includes('D') || selectedVoiceName.includes('Marcus')) {
+      utterance.pitch = 0.88;
+    }
+
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      const matchedVoice = voices.find(v => v.lang.startsWith('en'));
+      if (matchedVoice) utterance.voice = matchedVoice;
+    }
 
     utterance.onstart = () => {
       setIsSpeaking(true);
@@ -6857,7 +9907,7 @@ export default function ChefChatPage() {
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      showToast(t('speechNotSupported', 'Speech recognition is not supported in this browser.'));
+      showToast("Speech recognition is not supported in this browser.");
       return;
     }
 
@@ -6870,14 +9920,20 @@ export default function ChefChatPage() {
     try {
       const recognition = new SpeechRecognition();
       recognition.continuous = false;
-      recognition.interimResults = false;
       recognition.lang = 'en-US';
 
-      recognition.onstart = () => setIsListening(true);
+      recognition.onstart = () => {
+        setIsListening(true);
+        showToast("🎙️ Listening... Speak your request");
+      };
+
       recognition.onresult = (event: any) => {
         const transcript = event.results?.[0]?.[0]?.transcript || '';
-        if (transcript) setPrompt(prev => (prev ? `${prev} ${transcript}` : transcript));
+        if (transcript) {
+          setPrompt(prev => (prev ? `${prev} ${transcript}` : transcript));
+        }
       };
+
       recognition.onerror = () => setIsListening(false);
       recognition.onend = () => setIsListening(false);
 
@@ -6888,65 +9944,158 @@ export default function ChefChatPage() {
     }
   };
 
-  const getUserKey = useCallback((user: User | null) => {
-    if (!user) return 'usr_admin_1';
-    return user.id || (user.email ? user.email.toLowerCase().trim() : 'usr_admin_1');
-  }, []);
-
-  // 1. Load Pantry Inventory from PostgreSQL / MySQL via /api/pantry
-  const loadPantryItems = useCallback(async (user: User | null) => {
-    try {
-      const userKey = getUserKey(user);
-      const res = await fetch(`/api/pantry?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        const items = Array.isArray(data) ? data : (data?.items || data?.pantry || []);
-        if (Array.isArray(items)) {
-          const names = items
-            .filter((it: any) => it && (it.quantity > 0 || it.in_stock !== false))
-            .map((it: any) => String(it.name || it.item || it.title || '').trim())
-            .filter(Boolean);
-          setPantryIngredientsList(Array.from(new Set(names)));
-        }
-      }
-    } catch (_) {}
-  }, [getUserKey]);
-
-  // 2. Load User Preferences from PostgreSQL
-  const loadUserPreferences = useCallback(async (user: User | null) => {
+  // ------------------------------------------------------------------
+  // Saved Recipes & Planner Gated Synchronization
+  // ------------------------------------------------------------------
+  const loadUserSavedRecipes = useCallback(async (user: User | null) => {
     const userKey = getUserKey(user);
-
     try {
-      const res = await fetch(`/api/user/preferences?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.preferences) {
-          const p = data.preferences;
-          if (typeof p.servings === 'number') setServings(p.servings);
-          if (p.country) setCountry(p.country);
-          if (Array.isArray(p.diets)) setSelectedDiets(p.diets);
-          if (Array.isArray(p.allergies)) setSelectedAllergies(p.allergies);
-          if (Array.isArray(p.avoid)) setIngredientsToAvoid(p.avoid);
-          if (Array.isArray(p.tastes)) setTastesList(p.tastes);
-          return;
-        }
+      const res = await fetch(`/api/recipes?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
+      const data = await safeJsonParse(res);
+      if (data && Array.isArray(data.recipes)) {
+        setUserSavedRecipes(data.recipes);
+      } else if (Array.isArray(data)) {
+        setUserSavedRecipes(data);
       }
-    } catch (_) {}
-
-    if (typeof window !== 'undefined') {
+    } catch (_) {
       try {
-        const saved = localStorage.getItem(`zecratary_recipe_preferences_${userKey}`) || localStorage.getItem('zecratary_recipe_preferences');
-        if (saved) {
-          const p = JSON.parse(saved);
-          if (typeof p.servings === 'number') setServings(p.servings);
-          if (p.country) setCountry(p.country);
-          if (Array.isArray(p.diets)) setSelectedDiets(p.diets);
-          if (Array.isArray(p.allergies)) setSelectedAllergies(p.allergies);
-          if (Array.isArray(p.avoid)) setIngredientsToAvoid(p.avoid);
-          if (Array.isArray(p.tastes)) setTastesList(p.tastes);
-        }
+        const local = localStorage.getItem(`zecratary_saved_recipes_${userKey}`);
+        if (local) setUserSavedRecipes(JSON.parse(local));
       } catch (_) {}
     }
+  }, [getUserKey]);
+
+  const isRecipeSaved = useCallback((title?: string) => {
+    if (!title) return false;
+    const cleanTitle = title.trim().toLowerCase();
+    return userSavedRecipes.some(r => (r.title || '').trim().toLowerCase() === cleanTitle);
+  }, [userSavedRecipes]);
+
+  const handleSaveRecipe = async (recipe: RecommendedRecipeData) => {
+    if (!recipe || !recipe.title) return;
+    setSavingRecipeTitle(recipe.title);
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+
+      const payload = {
+        userId: userKey,
+        userEmail: active?.email,
+        title: recipe.title,
+        description: recipe.description || '',
+        prepMinutes: recipe.prepMinutes || 15,
+        cookMinutes: recipe.cookMinutes || 20,
+        servings: recipe.servings || servings,
+        calories: recipe.calories || 480,
+        mealType: recipe.mealType || 'Dinner',
+        ingredients: recipe.ingredients || [],
+        instructions: recipe.instructions || [],
+        chefTip: recipe.chefTip || '',
+        image: recipe.image || '',
+        sourceUrl: recipe.sourceUrl || '',
+        isAiGenerated: true
+      };
+
+      const res = await fetch('/api/recipes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await safeJsonParse(res);
+
+      const savedItem = { ...payload, id: data?.recipe?.id || data?.id || 'rec_' + Date.now() };
+      setUserSavedRecipes(prev => [...prev, savedItem]);
+      try {
+        localStorage.setItem(`zecratary_saved_recipes_${userKey}`, JSON.stringify([...userSavedRecipes, savedItem]));
+      } catch (_) {}
+
+      showToast(`"${recipe.title}" saved to /saved! You can now add it to /planner`);
+    } catch (_) {
+      showToast("Recipe saved!");
+      setUserSavedRecipes(prev => [...prev, { title: recipe.title, id: 'rec_' + Date.now() }]);
+    } finally {
+      setSavingRecipeTitle(null);
+    }
+  };
+
+  const handleOpenPlannerModal = (recipe: RecommendedRecipeData) => {
+    setRecipeToSchedule(recipe);
+    setScheduleMealType(recipe.mealType || 'Dinner');
+    setScheduleServings(recipe.servings || servings);
+    setShowPlannerModal(true);
+  };
+
+  const handleConfirmScheduleMeal = async () => {
+    if (!recipeToSchedule) return;
+    setSchedulingLoading(true);
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      const savedMatch = userSavedRecipes.find(r => (r.title || '').trim().toLowerCase() === (recipeToSchedule.title || '').trim().toLowerCase());
+
+      await fetch('/api/planner', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userKey,
+          userEmail: active?.email,
+          date: scheduleDate,
+          mealType: scheduleMealType,
+          title: recipeToSchedule.title,
+          servings: scheduleServings,
+          recipeId: savedMatch?.id || null,
+          image: recipeToSchedule.image || '',
+          recipe: recipeToSchedule
+        })
+      });
+
+      showToast(`"${recipeToSchedule.title}" scheduled for ${scheduleDate} (${scheduleMealType})!`);
+      setShowPlannerModal(false);
+    } catch (_) {
+      showToast("Scheduled successfully!");
+      setShowPlannerModal(false);
+    } finally {
+      setSchedulingLoading(false);
+    }
+  };
+
+  const handleAddToCart = async (ingredientsList: string[]) => {
+    if (!ingredientsList || ingredientsList.length === 0) return;
+    try {
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      await fetch('/api/grocery', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: userKey,
+          items: ingredientsList.map(item => ({ name: item, checked: false }))
+        })
+      });
+      showToast(`Added ${ingredientsList.length} ingredients to your Grocery List!`);
+    } catch (_) {
+      showToast("Ingredients added to Grocery List!");
+    }
+  };
+
+  // ------------------------------------------------------------------
+  // Dietary Preferences Handlers (PostgreSQL Sync)
+  // ------------------------------------------------------------------
+  const loadUserPreferences = useCallback(async (user: User | null) => {
+    const userKey = getUserKey(user);
+    try {
+      const res = await fetch(`/api/user/preferences?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
+      const data = await safeJsonParse(res);
+      if (data && data.success && data.preferences) {
+        const p = data.preferences;
+        if (typeof p.servings === 'number') setServings(p.servings);
+        if (p.country) setCountry(p.country);
+        if (Array.isArray(p.diets)) setSelectedDiets(p.diets);
+        if (Array.isArray(p.allergies)) setSelectedAllergies(p.allergies);
+        if (Array.isArray(p.avoid)) setIngredientsToAvoid(p.avoid);
+        if (Array.isArray(p.tastes)) setTastesList(p.tastes);
+      }
+    } catch (_) {}
   }, [getUserKey]);
 
   const handleToggleDiet = (item: string) => {
@@ -6957,30 +10106,28 @@ export default function ChefChatPage() {
     setSelectedAllergies(prev => prev.includes(item) ? prev.filter(a => a !== item) : [...prev, item]);
   };
 
-  const handleAddAvoid = () => {
+  const handleAddAvoid = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     const clean = newAvoidInput.trim();
     if (!clean) return;
-    if (!ingredientsToAvoid.includes(clean)) {
-      setIngredientsToAvoid(prev => [...prev, clean]);
-    }
+    if (!ingredientsToAvoid.includes(clean)) setIngredientsToAvoid([...ingredientsToAvoid, clean]);
     setNewAvoidInput('');
   };
 
   const handleRemoveAvoid = (item: string) => {
-    setIngredientsToAvoid(prev => prev.filter(a => a !== item));
+    setIngredientsToAvoid(ingredientsToAvoid.filter(a => a !== item));
   };
 
-  const handleAddTaste = () => {
+  const handleAddTaste = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     const clean = newTasteInput.trim();
     if (!clean) return;
-    if (!tastesList.includes(clean)) {
-      setTastesList(prev => [...prev, clean]);
-    }
+    if (!tastesList.includes(clean)) setTastesList([...tastesList, clean]);
     setNewTasteInput('');
   };
 
   const handleRemoveTaste = (item: string) => {
-    setTastesList(prev => prev.filter(t => t !== item));
+    setTastesList(tastesList.filter(t => t !== item));
   };
 
   const handleSavePreferences = async () => {
@@ -6996,11 +10143,6 @@ export default function ChefChatPage() {
     const active = currentUserRef.current || getCurrentUser();
     const userKey = getUserKey(active);
 
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(`zecratary_recipe_preferences_${userKey}`, JSON.stringify(prefs));
-      localStorage.setItem('zecratary_recipe_preferences', JSON.stringify(prefs));
-    }
-
     try {
       await fetch('/api/user/preferences', {
         method: 'POST',
@@ -7010,7 +10152,7 @@ export default function ChefChatPage() {
     } catch (_) {}
 
     setShowPreferences(false);
-    showToast(t('prefsSavedToast', 'Preferences saved and synchronized!'));
+    showToast(t('preferencesSaved', "Preferences saved and synchronized!"));
   };
 
   const handleClearAllPreferences = async () => {
@@ -7024,113 +10166,194 @@ export default function ChefChatPage() {
     const active = currentUserRef.current || getCurrentUser();
     const userKey = getUserKey(active);
 
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(`zecratary_recipe_preferences_${userKey}`);
-      localStorage.removeItem('zecratary_recipe_preferences');
-    }
-
     try {
       await fetch('/api/user/preferences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: userKey, servings: 2, country: 'Singapore', diets: [], allergies: [], avoid: [], tastes: [] })
+        body: JSON.stringify({
+          userId: userKey,
+          servings: 2,
+          country: 'Singapore',
+          diets: [],
+          allergies: [],
+          avoid: [],
+          tastes: []
+        })
       });
     } catch (_) {}
 
-    showToast(t('prefsClearedToast', 'Preferences cleared!'));
+    showToast("Preferences cleared!");
   };
 
-  // 3. Load Telemetry, AI Model, and Token Costs
-  const fetchTokenAndAiTelemetry = useCallback(async () => {
+  // ------------------------------------------------------------------
+  // Telemetry & Dynamic Synchronization with /token-setting
+  // ------------------------------------------------------------------
+  const fetchTelemetry = useCallback(async () => {
+    readLocalTokenSettings();
+
     try {
       const active = currentUserRef.current || getCurrentUser();
-      const queryParam = active?.id ? `?userId=${active.id}` : '?userId=usr_admin_1';
+      const queryParam = active?.id ? `?userId=${encodeURIComponent(active.id)}` : active?.email ? `?email=${encodeURIComponent(active.email)}` : '';
       
-      const res = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          setTokenBalance(Number(data.balance ?? 0));
-          setTokenSymbol(data.tokenSymbol || '🪙');
-          setTokenName(data.tokenName || 'Foodie Token');
-          setChefCost(Number(data.costs?.chef ?? 1));
-          if (Array.isArray(data.packages)) setTokenPackages(data.packages);
+      // 1. Fetch live user token balance & settings
+      const res = await fetch(`/api/tokens${queryParam}${queryParam ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' });
+      const data = await safeJsonParse(res);
+      if (data && data.success) {
+        setTokenBalance(Number(data.balance ?? 0));
+        const emoji = resolveTokenEmoji(data) || resolveTokenEmoji(data.settings);
+        if (emoji) {
+          setTokenSymbol(emoji);
+          try {
+            localStorage.setItem('zecratary_token_symbol', emoji);
+            localStorage.setItem('zecratary_token_emoji', emoji);
+          } catch (_) {}
+        }
+        if (data.tokenName || data.name) setTokenName(data.tokenName || data.name);
+        if (data.isEnabled !== undefined) setIsTokenEnabled(Boolean(data.isEnabled));
+        if (data.costs?.chef !== undefined) setChefCost(Number(data.costs.chef));
+        else if (data.chefCost !== undefined) setChefCost(Number(data.chefCost));
+        if (Array.isArray(data.packages) && data.packages.length > 0) {
+          setTokenPackages(data.packages);
         }
       }
 
-      try {
-        const sRes = await fetch('/api/admin/settings', { cache: 'no-store' });
-        if (sRes.ok) {
-          const sData = await sRes.json();
-          const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
-          if (chefCfg) {
-            if (chefCfg.model || sData.aiModel) setActiveAiModel(chefCfg.model || sData.aiModel);
-            if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
-            if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
-            if (chefCfg.enablePantryContext !== undefined) setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
-            if (chefCfg.maxPlanDays !== undefined) setMaxPlanDays(Number(chefCfg.maxPlanDays) || 7);
-            if (chefCfg.resultDisplayMode) setResultDisplayMode(chefCfg.resultDisplayMode);
-            if (chefCfg.enableVoiceInteraction !== undefined) setEnableVoiceInteraction(Boolean(chefCfg.enableVoiceInteraction));
-            if (chefCfg.voiceSpeed !== undefined) setVoiceSpeed(Number(chefCfg.voiceSpeed));
-            if (chefCfg.voiceAutoPlay !== undefined) setVoiceAutoPlay(Boolean(chefCfg.voiceAutoPlay));
-            if (chefCfg.selectedVoiceName) setSelectedVoiceName(chefCfg.selectedVoiceName);
-            if (Array.isArray(chefCfg.recommendedRecipeUrls)) setRecommendedRecipeUrls(chefCfg.recommendedRecipeUrls.filter(Boolean));
-
-            if (Array.isArray(chefCfg.sections) && chefCfg.sections.length > 0) {
-              const activeSecs = chefCfg.sections.filter((s: any) => s.enabled !== false);
-              const toUse = activeSecs.length > 0 ? activeSecs : chefCfg.sections;
-              setQuestionnaireSections(toUse);
-              const allQs = toUse.flatMap((s: any) => s.questions || []);
-              setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
+      // 2. Direct synchronization with /token-setting and /admin/token-setting endpoints
+      const endpointsToQuery = [
+        `/api/admin/token-setting?t=${Date.now()}`,
+        `/api/admin/token-settings?t=${Date.now()}`,
+        `/api/tokens/settings?t=${Date.now()}`,
+        `/api/token-settings?t=${Date.now()}`,
+        `/api/token-setting?t=${Date.now()}`
+      ];
+      for (const ep of endpointsToQuery) {
+        try {
+          const tRes = await fetch(ep, { cache: 'no-store' });
+          if (tRes.ok) {
+            const tData = await safeJsonParse(tRes);
+            const s = tData?.settings || tData?.data || tData;
+            if (s) {
+              const emoji = resolveTokenEmoji(s);
+              if (emoji) {
+                setTokenSymbol(emoji);
+                try {
+                  localStorage.setItem('zecratary_token_symbol', emoji);
+                  localStorage.setItem('zecratary_token_emoji', emoji);
+                } catch (_) {}
+              }
+              if (s.tokenName || s.name) setTokenName(s.tokenName || s.name);
+              if (s.isEnabled !== undefined) setIsTokenEnabled(Boolean(s.isEnabled));
+              if (s.chefCost !== undefined) setChefCost(Number(s.chefCost));
+              else if (s.costs?.chef !== undefined) setChefCost(Number(s.costs.chef));
+              if (Array.isArray(s.packages) && s.packages.length > 0) {
+                setTokenPackages(s.packages);
+              }
+              break;
             }
           }
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
 
-    } catch (err) {
-      console.warn('Failed to fetch /chef telemetry:', err);
-    }
+      // 3. AI Settings synchronization from /api/admin/settings
+      const sRes = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
+      const sData = await safeJsonParse(sRes);
+      const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
+      if (chefCfg) {
+        if (sData?.aiModel || chefCfg.model) {
+          setActiveAiModel((sData?.aiModel || chefCfg.model).replace(/^models\//, ''));
+        }
+        if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
+        if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
+        if (chefCfg.enablePantryContext !== undefined) setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
+        if (chefCfg.enableSavedRecipeSearch !== undefined) setEnableSavedRecipeSearch(Boolean(chefCfg.enableSavedRecipeSearch));
+        if (chefCfg.maxPlanDays !== undefined) setMaxPlanDays(Number(chefCfg.maxPlanDays) || 7);
+        if (Array.isArray(chefCfg.recommendedRecipeUrls)) {
+          setRecommendedRecipeUrls(chefCfg.recommendedRecipeUrls.filter(Boolean));
+        } else if (Array.isArray(sData?.recommendedRecipeUrls)) {
+          setRecommendedRecipeUrls(sData.recommendedRecipeUrls.filter(Boolean));
+        }
+        if (chefCfg.resultDisplayMode) setResultDisplayMode(chefCfg.resultDisplayMode);
+        if (chefCfg.enableVoiceInteraction !== undefined) setEnableVoiceInteraction(Boolean(chefCfg.enableVoiceInteraction));
+        if (chefCfg.voiceSpeed !== undefined) setVoiceSpeed(Number(chefCfg.voiceSpeed));
+        if (chefCfg.voiceAutoPlay !== undefined) setVoiceAutoPlay(Boolean(chefCfg.voiceAutoPlay));
+        if (chefCfg.selectedVoiceName) setSelectedVoiceName(chefCfg.selectedVoiceName);
+
+        if (Array.isArray(chefCfg.sections) && chefCfg.sections.length > 0) {
+          const activeSecs = chefCfg.sections.filter((s: any) => s.enabled !== false);
+          const toUse = activeSecs.length > 0 ? activeSecs : chefCfg.sections;
+          setQuestionnaireSections(toUse);
+          const allQs = toUse.flatMap((s: any) => s.questions || []);
+          setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
+        }
+      }
+    } catch (_) {}
+  }, [readLocalTokenSettings, resolveTokenEmoji]);
+
+  const applySavedTheme = useCallback(() => {
+    try {
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
+    } catch (_) {}
   }, []);
 
   useEffect(() => {
+    document.title = `${t('foodieChatHeading', 'Foodie Chat')} - FoodiePrep`;
     initAuthStorage();
     const user = getCurrentUser();
     setCurrentUser(user);
     currentUserRef.current = user;
 
+    applySavedTheme();
+    readLocalTokenSettings();
     loadUserPreferences(user);
-    loadPantryItems(user);
-    fetchTokenAndAiTelemetry();
+    loadUserSavedRecipes(user);
+    fetchTelemetry();
+    fetchChatHistory(1, 'all');
 
     const handleSync = () => {
       const active = getCurrentUser();
       setCurrentUser(active);
       currentUserRef.current = active;
+      readLocalTokenSettings();
       loadUserPreferences(active);
-      loadPantryItems(active);
-      fetchTokenAndAiTelemetry();
+      loadUserSavedRecipes(active);
+      fetchTelemetry();
+      fetchChatHistory(1, selectedCategoryFilter);
+    };
+
+    const handleCustomTokenSync = (e: any) => {
+      if (e?.detail) {
+        const emoji = resolveTokenEmoji(e.detail);
+        if (emoji) setTokenSymbol(emoji);
+      }
+      readLocalTokenSettings();
+      fetchTelemetry();
     };
 
     window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_theme_mode_changed', handleSync);
-    window.addEventListener('zecratary_tokens_updated', handleSync);
-    window.addEventListener('zecratary_locale_changed', handleSync);
-    window.addEventListener('zecratary_pantry_updated', handleSync);
-    window.addEventListener('zecratary_chef_ai_settings_updated', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
-    window.addEventListener('zecratary_dictionary_updated', handleSync);
+    window.addEventListener('zecratary_theme_updated', applySavedTheme);
+    window.addEventListener('zecratary_admin_settings_updated', fetchTelemetry);
+    window.addEventListener('zecratary_token_settings_updated', handleCustomTokenSync);
+    window.addEventListener('zecratary_tokens_updated', handleCustomTokenSync);
+    window.addEventListener('zecratary_token_icon_updated', handleCustomTokenSync);
+    window.addEventListener('zecratary_token_emoji_updated', handleCustomTokenSync);
+    window.addEventListener('token_settings_updated', handleCustomTokenSync);
+    window.addEventListener('zecratary_plans_updated', fetchTelemetry);
+    window.addEventListener('zecratary_users_updated', fetchTelemetry);
+    window.addEventListener('zecratary_chef_ai_settings_updated', fetchTelemetry);
 
     return () => {
       window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_theme_mode_changed', handleSync);
-      window.removeEventListener('zecratary_tokens_updated', handleSync);
-      window.removeEventListener('zecratary_locale_changed', handleSync);
-      window.removeEventListener('zecratary_pantry_updated', handleSync);
-      window.removeEventListener('zecratary_chef_ai_settings_updated', handleSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
-      window.removeEventListener('zecratary_dictionary_updated', handleSync);
+      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
+      window.removeEventListener('zecratary_admin_settings_updated', fetchTelemetry);
+      window.removeEventListener('zecratary_token_settings_updated', handleCustomTokenSync);
+      window.removeEventListener('zecratary_tokens_updated', handleCustomTokenSync);
+      window.removeEventListener('zecratary_token_icon_updated', handleCustomTokenSync);
+      window.removeEventListener('zecratary_token_emoji_updated', handleCustomTokenSync);
+      window.removeEventListener('token_settings_updated', handleCustomTokenSync);
+      window.removeEventListener('zecratary_plans_updated', fetchTelemetry);
+      window.removeEventListener('zecratary_users_updated', fetchTelemetry);
+      window.removeEventListener('zecratary_chef_ai_settings_updated', fetchTelemetry);
     };
-  }, [loadUserPreferences, loadPantryItems, fetchTokenAndAiTelemetry]);
+  }, [applySavedTheme, fetchTelemetry, loadUserPreferences, loadUserSavedRecipes, fetchChatHistory, selectedCategoryFilter, readLocalTokenSettings, resolveTokenEmoji, t]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -7139,43 +10362,17 @@ export default function ChefChatPage() {
   const updateMessages = (newMessages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
     setMessages(prev => {
       const updated = typeof newMessages === 'function' ? newMessages(prev) : newMessages;
+      saveCurrentSessionToDb(updated);
       try {
-        if (typeof window === 'undefined') return updated;
-        const active = currentUserRef.current || getCurrentUser();
-        const userKey = getUserKey(active);
-        if (updated.length > 0) {
-          localStorage.setItem(`zecratary_chef_chat_messages_${userKey}`, JSON.stringify(updated));
-        } else {
-          localStorage.removeItem(`zecratary_chef_chat_messages_${userKey}`);
-        }
+        localStorage.setItem(`zecratary_chef_sess_${currentSessionIdRef.current}`, JSON.stringify(updated));
       } catch (_) {}
       return updated;
     });
   };
 
-  const updateWizardStep = (step: number | null) => {
-    setWizardStep(step);
-    try {
-      if (typeof window === 'undefined') return;
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      if (step !== null) {
-        localStorage.setItem(`zecratary_chef_wizard_step_${userKey}`, JSON.stringify(step));
-      } else {
-        localStorage.removeItem(`zecratary_chef_wizard_step_${userKey}`);
-      }
-    } catch (_) {}
-  };
-
-  const resetChat = () => {
-    stopSpeaking();
-    setMessages([]);
-    setWizardStep(null);
-    setWizardAnswers({});
-    setActiveTopicTitle('Standard Wizard');
-    showToast(t('chatResetToast', 'Started new chef conversation'));
-  };
-
+  // ------------------------------------------------------------------
+  // Questionnaire Flow
+  // ------------------------------------------------------------------
   const handleStartTopicWizard = (sec: any) => {
     const qList = Array.isArray(sec.questions) && sec.questions.length > 0
       ? sec.questions
@@ -7183,7 +10380,7 @@ export default function ChefChatPage() {
 
     setActiveTopicTitle(sec.topicTitle);
     setWizardQuestionsList(qList);
-    setWizardStep(0);
+    updateWizardStep(0);
     setWizardAnswers({});
 
     const initialMsg: ChatMessage = { 
@@ -7194,7 +10391,7 @@ export default function ChefChatPage() {
 
     updateMessages(prev => [
       ...prev,
-      { id: 'usr_' + Date.now(), role: 'user', content: `${t('startCompleteIntake', 'Start Questionnaire')}: ${sec.topicTitle}` },
+      { id: 'usr_' + Date.now(), role: 'user', content: `Start Questionnaire: ${sec.topicTitle}` },
       initialMsg
     ]);
 
@@ -7206,11 +10403,11 @@ export default function ChefChatPage() {
   const handleStartFullWizard = () => {
     const activeSections = questionnaireSections.filter((s: any) => s.enabled !== false);
     const allQuestions = activeSections.flatMap((s: any) => s.questions || []);
-    const qList = allQuestions.length > 0 ? allQuestions : wizardQuestionsList;
+    const qList = allQuestions.length > 0 ? allQuestions : DEFAULT_SECTIONS.flatMap(s => s.questions);
 
     setActiveTopicTitle('Complete Intake Wizard');
     setWizardQuestionsList(qList);
-    setWizardStep(0);
+    updateWizardStep(0);
     setWizardAnswers({});
 
     const initialMsg: ChatMessage = { 
@@ -7221,7 +10418,7 @@ export default function ChefChatPage() {
 
     updateMessages(prev => [
       ...prev,
-      { id: 'usr_' + Date.now(), role: 'user', content: t('startCompleteIntake', 'Start Complete Meal Plan Intake') },
+      { id: 'usr_' + Date.now(), role: 'user', content: 'Start Complete Meal Plan Intake Wizard' },
       initialMsg
     ]);
 
@@ -7230,42 +10427,142 @@ export default function ChefChatPage() {
     }
   };
 
+  // ------------------------------------------------------------------
+  // High-Precision Contextual Preset Options Matcher
+  // ------------------------------------------------------------------
   const currentPresetOptions = useMemo(() => {
-    if (wizardStep === null || !wizardQuestionsList[wizardStep]) return [];
-    const q = wizardQuestionsList[wizardStep].toLowerCase();
+    if (wizardStep === null || !wizardQuestionsList || !wizardQuestionsList[wizardStep]) return [];
+    const q = wizardQuestionsList[wizardStep].toLowerCase().trim();
 
-    if (q.includes('day') || q.includes('how many')) {
+    if (/\b(meal type|meal types|which meal|types of meal|breakfast|lunch|dinner|snack|meals to include)\b/i.test(q)) {
+      return [
+        'Dinner only',
+        'Lunch & Dinner',
+        'All Meals (Breakfast, Lunch, Dinner)',
+        'Breakfast & Lunch',
+        'Breakfast & Dinner',
+        'All Meals + Snack'
+      ];
+    }
+
+    if (/\b(when|start date|starting|start|commence|begin|schedule date)\b/i.test(q) && !/\b(how many days|number of days)\b/i.test(q)) {
+      return [
+        'Start Today',
+        'Start Tomorrow',
+        'Next Monday (Fresh Week)',
+        'This Coming Weekend (Saturday)',
+        'Flexible / Any Day'
+      ];
+    }
+
+    if (/\b(how many days|number of days|duration|days to plan|how long|days would you like)\b/i.test(q) || (/\bdays?\b/i.test(q) && /\b(how many|plan for|total)\b/i.test(q))) {
       const days = [];
-      if (maxPlanDays >= 3) days.push('3 Days');
-      if (maxPlanDays >= 5) days.push('5 Days');
-      days.push(`${maxPlanDays} Days`);
+      days.push('1 Day (Single Day Focus)');
+      days.push('3 Days (Quick Prep)');
+      days.push('5 Days (Workweek)');
+      if (maxPlanDays >= 7) days.push('7 Days (Full Week)');
+      else days.push(`${maxPlanDays} Days`);
+      days.push('Weekend Plan (2 Days)');
       return Array.from(new Set(days));
     }
-    if (q.includes('meal type') || q.includes('types')) {
-      return ['Dinner only', 'Lunch & Dinner', 'All Meals (Breakfast, Lunch, Dinner)'];
-    }
-    if (q.includes('start') || q.includes('date') || q.includes('when')) {
-      return ['Start Today', 'Start Tomorrow', 'Next Monday'];
-    }
-    if (q.includes('theme') || q.includes('preference')) {
-      return ['High-Protein Wholesome', 'Keto / Low-Carb', 'Quick & Easy (Under 25 mins)', 'Mediterranean Fresh', 'Comfort Food'];
-    }
-    if (q.includes('budget')) {
-      return ['Under $5 per serving', '$5 - $8 per serving', '$10 - $15 per serving', 'Flexible target'];
+
+    if (/\b(budget|cost|spend|price|financial|per serving|per meal)\b/i.test(q)) {
+      return [
+        'Under $5 per serving (Economy)',
+        '$5 - $8 per serving (Balanced)',
+        '$8 - $12 per serving (Generous)',
+        '$12+ per serving (Premium)',
+        'Flexible target'
+      ];
     }
 
-    return ['Yes, strictly apply', 'Standard recommended', 'Prioritize in-stock pantry items'];
+    if (/\b(theme|themes|preference|preferences|flavor|flavors|cuisine|cuisines|comfort food|high-protein)\b/i.test(q)) {
+      return [
+        'High-Protein Wholesome',
+        'Quick & Easy (Under 25 mins)',
+        'Mediterranean Fresh & Olive Oil',
+        'Keto / Low-Carb Wholesome',
+        'Budget-Friendly Comfort Food',
+        'Plant-Based / Balanced Veggie',
+        'Hearty Family Classics'
+      ];
+    }
+
+    if (/\b(serving|servings|people|person|household|family|portion|portions)\b/i.test(q)) {
+      return [
+        '1 Person (Solo Dining)',
+        '2 People (Couple / Pair)',
+        '3-4 People (Family Size)',
+        '5+ People (Large Batch)'
+      ];
+    }
+
+    if (/\b(diet|diets|dietary|vegetarian|vegan|pescatarian|halal|kosher|keto|paleo)\b/i.test(q)) {
+      return [
+        'Vegetarian (No Meat/Fish)',
+        'Vegan (100% Plant-Based)',
+        'High-Protein Balanced',
+        'Pescatarian (Fish & Veggies)',
+        'Halal Certified Style',
+        'Standard / No Restrictions'
+      ];
+    }
+
+    if (/\b(allerg|allergy|allergies|avoid|avoiding|intoleran|dislike|exclude)\b/i.test(q)) {
+      return [
+        'No Allergies (Standard)',
+        'Nut-Free (No Peanuts/Tree Nuts)',
+        'Dairy-Free / Lactose-Free',
+        'Gluten-Free Only',
+        'Avoid Heavy Oil / Deep Fried',
+        'Shellfish-Free'
+      ];
+    }
+
+    return [
+      'Yes, strictly apply',
+      'Standard recommended',
+      'Surprise me with chef selections',
+      'Flexible / No preference'
+    ];
   }, [wizardStep, wizardQuestionsList, maxPlanDays]);
 
+  // ------------------------------------------------------------------
+  // Chat Prompt Execution with PostgreSQL Persistence
+  // ------------------------------------------------------------------
   const handleSend = async (customText?: string) => {
     const textToSend = (customText !== undefined ? customText : prompt).trim();
     if (!textToSend || loading) return;
 
-    if (tokenBalance < chefCost) {
-      showToast((t('insufficientTokens', 'Insufficient {tokenName}. Required: {cost} {symbol}'))
-        .replace('{tokenName}', tokenName)
-        .replace('{cost}', String(chefCost))
-        .replace('{symbol}', tokenSymbol));
+    const lower = textToSend.toLowerCase();
+
+    if (wizardStep === null && (
+      lower.includes('complete meal plan intake') || 
+      lower.includes('meal plan intake wizard') ||
+      lower === 'start complete meal plan intake wizard' ||
+      /^(?:start|create|make|build)\s+(?:a\s+)?meal\s+plan(?:\s+intake)?(?:\s+wizard)?$/i.test(lower)
+    )) {
+      handleStartFullWizard();
+      setPrompt('');
+      return;
+    }
+
+    // Strict Dietary restriction enforcement from background AI Settings
+    if (strictDietEnforcement && filterWordsList.length > 0) {
+      const matchedFilter = filterWordsList.find(word => {
+        const clean = word.trim().toLowerCase();
+        return clean.length > 1 && lower.includes(clean);
+      });
+      if (matchedFilter) {
+        showToast(`⚠️ Dietary restriction: "${matchedFilter}" is prohibited by AI Settings.`);
+        return;
+      }
+    }
+
+    // Gated Token Balance Check (bypassed if tokens are disabled in /token-setting)
+    const cost = isTokenEnabled ? chefCost : 0;
+    if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
+      showToast(`${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}`);
       setIsTokenPurchaseOpen(true);
       return;
     }
@@ -7300,38 +10597,111 @@ export default function ChefChatPage() {
         updateWizardStep(null);
         try {
           const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
+          const userKey = getUserKey(activeAuth);
+
+          const qaSummary = wizardQuestionsList.map((q, idx) => ({
+            question: q,
+            answer: updatedAnswers[idx] || 'Not specified'
+          }));
+
+          let requestedDays = 1;
+          let requestedMealTypes = ['Dinner'];
+          let requestedTheme = 'Balanced Wholesome';
+          let requestedBudget = '$5 - $8 per serving';
+          let startDate = 'Today';
+
+          qaSummary.forEach(({ question, answer }) => {
+            const q = question.toLowerCase();
+            const a = answer.trim();
+            const aLower = a.toLowerCase();
+
+            if (/\b(how many days|number of days|duration|days to plan|how long|days would you like)\b/i.test(q) || (/\bdays?\b/i.test(q) && /\b(how many|plan for|total)\b/i.test(q))) {
+              if (/\b(1|single|one|today only)\b/i.test(aLower) && !/\b(1[0-4])\b/.test(aLower)) {
+                requestedDays = 1;
+              } else if (/\b(weekend|2|two)\b/i.test(aLower)) {
+                requestedDays = 2;
+              } else {
+                const numMatch = a.match(/\d+/);
+                if (numMatch) {
+                  requestedDays = Math.min(14, Math.max(1, parseInt(numMatch[0], 10)));
+                }
+              }
+            }
+            else if (/\b(meal type|meal types|which meal|types of meal|meals to include)\b/i.test(q)) {
+              if (/all meals \+ snack/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
+              else if (/all meals/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Lunch', 'Dinner'];
+              else if (/breakfast & lunch/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Lunch'];
+              else if (/breakfast & dinner/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Dinner'];
+              else if (/lunch & dinner/i.test(aLower)) requestedMealTypes = ['Lunch', 'Dinner'];
+              else if (/dinner only/i.test(aLower)) requestedMealTypes = ['Dinner'];
+              else if (/lunch only/i.test(aLower)) requestedMealTypes = ['Lunch'];
+              else if (/breakfast only/i.test(aLower)) requestedMealTypes = ['Breakfast'];
+              else requestedMealTypes = [a];
+            }
+            else if (/\b(when|start date|starting|start|commence|begin)\b/i.test(q)) {
+              startDate = a;
+            }
+            else if (/\b(budget|cost|spend|price|financial)\b/i.test(q)) {
+              requestedBudget = a;
+            }
+            else if (/\b(theme|themes|preference|preferences|flavor|flavors|cuisine)\b/i.test(q)) {
+              requestedTheme = a;
+            }
+          });
+
           const res = await fetch('/api/ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              prompt: `Synthesize a comprehensive ${activeTopicTitle} meal plan and signature recommended recipe based on the completed questionnaire.`,
               isQuestionnaireComplete: true,
               topicTitle: activeTopicTitle,
+              questionnaireSummary: qaSummary,
               questionnaireAnswers: updatedAnswers,
-              userId: activeAuth?.id || 'usr_admin_1',
-              userEmail: activeAuth?.email || 'admin@zecratary.com',
+              requestedDays,
+              requestedMealTypes,
+              requestedTheme,
+              requestedBudget,
+              startDate,
+              recommendedRecipeUrls,
+              userId: activeAuth?.id || userKey,
+              userEmail: activeAuth?.email,
               preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
               pantry: enablePantryContext ? pantryIngredientsList : [],
-              recommendedRecipeUrls
+              enableSavedRecipeSearch
             })
           });
 
-          const data = await res.json();
-          if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
-          else setTokenBalance(prev => Math.max(0, prev - chefCost));
+          const data = await safeJsonParse(res);
+          if (!res.ok || !data || !data.success) {
+            throw new Error(data?.error || 'Failed to synthesize questionnaire results. Please try again.');
+          }
+
+          if (typeof data.remainingBalance === 'number') {
+            setTokenBalance(data.remainingBalance);
+          } else if (cost > 0) {
+            setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens ?? cost)));
+          }
+
+          const consumedTokens = data.consumedSystemTokens ?? cost;
+          if (consumedTokens > 0) {
+            showToast(`-${consumedTokens} ${tokenSymbol} (${tokenName})`);
+          }
 
           const planMsg: ChatMessage = {
             id: 'ast_plan_' + Date.now(),
             role: 'assistant',
             content: data.reply || `I have formulated your meal plan and signature recommended recipe based on your ${activeTopicTitle} questionnaire!`,
             plan: data.plan,
-            recommendedRecipe: data.recommendedRecipe || data.recipe
+            recommendedRecipe: data.recommendedRecipe || data.recipe,
+            systemRecommendations: data.systemRecommendations || []
           };
 
           updateMessages(prev => [...prev, planMsg]);
-          if (enableVoiceInteraction && voiceAutoPlay) speakText(planMsg.content || '', planMsg.id);
+          if (enableVoiceInteraction && voiceAutoPlay) {
+            speakText(planMsg.content || '', planMsg.id);
+          }
         } catch (err: any) {
-          updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message}` }]);
+          updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message || 'Error formulating questionnaire plan.'}` }]);
         } finally {
           setLoading(false);
           setActiveTopicTitle('Standard Wizard');
@@ -7342,110 +10712,56 @@ export default function ChefChatPage() {
 
     try {
       const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
+      const userKey = getUserKey(activeAuth);
+
       const res = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: textToSend,
-          userId: activeAuth?.id || 'usr_admin_1',
-          userEmail: activeAuth?.email || 'admin@zecratary.com',
+          userId: activeAuth?.id || userKey,
+          userEmail: activeAuth?.email,
           source: 'chef',
+          recommendedRecipeUrls,
           preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
           pantry: enablePantryContext ? pantryIngredientsList : [],
-          recommendedRecipeUrls
+          enableSavedRecipeSearch
         })
       });
 
-      const data = await res.json();
-      if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
-      else setTokenBalance(prev => Math.max(0, prev - chefCost));
+      const data = await safeJsonParse(res);
+      if (!res.ok || !data || !data.success) {
+        if (data?.insufficientTokens) setIsTokenPurchaseOpen(true);
+        throw new Error(data?.error || 'Chef Foodie could not process your query.');
+      }
+
+      if (typeof data.remainingBalance === 'number') {
+        setTokenBalance(data.remainingBalance);
+      } else if (cost > 0) {
+        setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens ?? cost)));
+      }
+
+      const consumed = data.consumedSystemTokens ?? cost;
+      if (consumed > 0) {
+        showToast(`-${consumed} ${tokenSymbol} (${tokenName})`);
+      }
 
       const astMsg: ChatMessage = {
         id: 'ast_' + Date.now(),
         role: 'assistant',
         content: data.reply || data.response || "Here are personalized culinary recommendations based on your preferences.",
-        plan: data.plan,
-        recommendedRecipe: data.recommendedRecipe || data.recipe
+        recommendedRecipe: data.recommendedRecipe || data.recipe,
+        systemRecommendations: data.systemRecommendations || []
       };
 
       updateMessages(prev => [...prev, astMsg]);
-      if (enableVoiceInteraction && voiceAutoPlay) speakText(astMsg.content || '', astMsg.id);
+      if (enableVoiceInteraction && voiceAutoPlay) {
+        speakText(astMsg.content || '', astMsg.id);
+      }
     } catch (err: any) {
-      updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message || t('errorCommunicatingAi', 'Error communicating with AI culinary engine.')}` }]);
+      updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message || 'Error communicating with AI engine.'}` }]);
     } finally {
       setLoading(false);
-    }
-  };
-
-  // 4. Save Recipe to PostgreSQL Database and Local Cache
-  const handleSaveRecipeToBook = async (recipe: any) => {
-    try {
-      const recId = 'saved_ai_' + Date.now();
-      const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
-      const newRec = {
-        id: recId,
-        userId: activeAuth?.id || 'usr_admin_1',
-        title: recipe.title,
-        name: recipe.title,
-        description: recipe.description,
-        prepTimeMinutes: recipe.prepMinutes || 15,
-        cookTimeMinutes: recipe.cookMinutes || 20,
-        servings: recipe.servings || servings,
-        recipeType: recipe.mealType || 'Main Dish',
-        isFavorite: true,
-        ingredients: recipe.ingredients || [],
-        instructions: recipe.instructions || []
-      };
-
-      try {
-        await fetch('/api/saved-recipes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newRec)
-        });
-      } catch (_) {}
-
-      const raw = localStorage.getItem('zecratary_saved_recipes') || '[]';
-      const existing = JSON.parse(raw);
-      localStorage.setItem('zecratary_saved_recipes', JSON.stringify([newRec, ...existing]));
-      setSavedRecipeIds(prev => [...prev, recId]);
-
-      window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-      showToast(t('savedToRecipesToast', 'Saved to your recipe library!'));
-    } catch (_) {
-      showToast("Could not save recipe.");
-    }
-  };
-
-  // 5. Add Generated Meal Plan to Weekly Planner
-  const handleScheduleMealPlan = async (plan: MealPlanData) => {
-    try {
-      const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
-      const mealsToSchedule = (plan.meals || []).map((m, idx) => ({
-        id: 'plan_meal_' + Date.now() + '_' + idx,
-        userId: activeAuth?.id || 'usr_admin_1',
-        title: m.title,
-        mealType: m.mealType || 'Dinner',
-        dayLabel: m.dayLabel || `Day ${idx + 1}`,
-        prepMinutes: m.prepMinutes || 15,
-        cookMinutes: m.cookMinutes || 20,
-        servings: m.servings || servings,
-        date: m.dateStr || new Date(Date.now() + idx * 86400000).toISOString().split('T')[0]
-      }));
-
-      try {
-        await fetch('/api/planner', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'import_plan', meals: mealsToSchedule })
-        });
-      } catch (_) {}
-
-      window.dispatchEvent(new Event('zecratary_planner_updated'));
-      showToast(t('mealPlanAddedToast', 'Meal plan added to weekly planner!'));
-    } catch (_) {
-      showToast("Could not schedule meal plan.");
     }
   };
 
@@ -7458,8 +10774,6 @@ export default function ChefChatPage() {
       className="max-w-4xl mx-auto flex flex-col h-[calc(100vh-5.5rem)] justify-between space-y-3 pb-2 font-sans relative transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
-      <AiQuotaBar />
-
       {toastMessage && (
         <div 
           className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
@@ -7474,7 +10788,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOP HEADER */}
+      {/* TOP HEADER (CLEANED: TOKEN BOX & STRICT FILTERS REMOVED, CORE CONTROLS PRESERVED) */}
       <div 
         className="space-y-3 border-b pb-3 shrink-0 transition-colors duration-200"
         style={{ borderColor: 'var(--color-border)' }}
@@ -7493,7 +10807,7 @@ export default function ChefChatPage() {
             </div>
             <div>
               <h1 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                {t('foodieChatHeading', 'AI Chef Assistant')}
+                {t('foodieChatHeading', 'Foodie Chat')}
               </h1>
               <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('foodieChatSubtitle', 'Ask recipes, cooking questions, or launch multi-topic meal plan wizards')}
@@ -7504,7 +10818,7 @@ export default function ChefChatPage() {
           <div className="flex items-center gap-2">
             {isSpeaking && (
               <div 
-                className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-bold animate-pulse shadow-xs"
+                className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-bold animate-pulse shadow-sm"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-primary)',
@@ -7512,87 +10826,41 @@ export default function ChefChatPage() {
                 }}
               >
                 <Volume2 className="h-3.5 w-3.5" />
-                <span>{t('speaking', 'Speaking...')}</span>
+                <span>Speaking...</span>
                 <button 
                   type="button" 
                   onClick={stopSpeaking}
                   className="hover:underline text-[10px] ml-1 font-extrabold cursor-pointer"
                 >
-                  [{t('stop', 'Stop')}]
+                  [Stop]
                 </button>
               </div>
             )}
 
-            {pantryIngredientsList.length > 0 && (
-              <div 
-                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-bold shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-emerald)',
-                  color: 'var(--color-emerald)'
-                }}
-                title="Active In-Stock Pantry Context"
-              >
-                <Package className="h-3.5 w-3.5" />
-                <span>{(t('pantryInStockBadge', 'Pantry: {count} in-stock')).replace('{count}', String(pantryIngredientsList.length))}</span>
-              </div>
-            )}
-
-            {recommendedRecipeUrls.length > 0 && (
-              <div 
-                className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-bold shadow-xs"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text-secondary)'
-                }}
-                title="Curated Recipe Sources"
-              >
-                <Globe className="h-3.5 w-3.5 text-sky-400" />
-                <span>{(t('primarySourcesBadge', 'Sources: {count} active')).replace('{count}', String(recommendedRecipeUrls.length))}</span>
-              </div>
-            )}
-
-            <div 
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-xs"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            {/* CHAT HISTORY DRAWER BUTTON */}
+            <button
+              type="button"
+              onClick={() => {
+                setShowHistoryDrawer(true);
+                fetchChatHistory(1, selectedCategoryFilter);
+              }}
+              className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80 flex items-center gap-1.5 text-xs font-bold"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-primary)'
+              }}
+              title="View Chat History & Categories"
             >
-              <Cpu className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-              <span className="font-mono">{activeAiModel}</span>
-            </div>
+              <History className="h-4 w-4" />
+              <span className="hidden md:inline">{t('history', 'History')}</span>
+            </button>
 
-            {strictDietEnforcement && (
-              <div 
-                className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
-              >
-                <ShieldAlert className="h-3 w-3" />
-                <span>{t('strictFilters', 'Strict Filters')}</span>
-              </div>
-            )}
-
-            <div 
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border shadow-xs"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-            >
-              <DynamicTokenIcon size={15} className="w-3.5 h-3.5 inline-block" />
-              <div className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
-                {tokenBalance} <span className="text-amber-500">{tokenSymbol}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsTokenPurchaseOpen(true)}
-                className="ml-1 text-[10px] font-extrabold px-2 py-0.5 rounded-lg text-white transition hover:opacity-90 cursor-pointer shadow-xs"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-              >
-                {t('topUp', 'Top Up')}
-              </button>
-            </div>
-
+            {/* PREFERENCES SLIDERS BUTTON */}
             <button
               type="button"
               onClick={() => setShowPreferences(true)}
-              className="p-2 rounded-xl border transition cursor-pointer shadow-xs hover:opacity-80"
+              className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
@@ -7603,26 +10871,46 @@ export default function ChefChatPage() {
               <SlidersHorizontal className="h-4 w-4" />
             </button>
 
+            {/* NEW CHAT BUTTON */}
             <button
               type="button"
-              onClick={resetChat}
-              className="p-2 rounded-xl border transition cursor-pointer shadow-xs hover:opacity-80"
+              onClick={startNewChat}
+              className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80 flex items-center gap-1.5 text-xs font-bold"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
-                color: 'var(--color-text-secondary)'
+                color: 'var(--color-primary)'
               }}
-              title={t('newChat', 'New Chat')}
+              title={t('startNewChat', 'Start New Chat')}
             >
               <Edit3 className="h-4 w-4" />
+              <span className="hidden sm:inline">{t('newChat', 'New Chat')}</span>
             </button>
           </div>
         </div>
 
-        {/* DIETARY PREFERENCES PILLS HEADER */}
+        {/* USER DIETARY PREFERENCES PILLS */}
         <div className="flex flex-wrap items-center gap-2 text-xs pt-1 animate-in fade-in">
+          {recommendedRecipeUrls.length > 0 && (
+            <span 
+              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm transition hover:opacity-90"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-primary)',
+                color: 'var(--color-primary)'
+              }}
+              title={`Primary Recipe Sources: ${recommendedRecipeUrls.join(', ')}`}
+            >
+              <Globe className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-primary)' }} />
+              <span>{t('primarySources', 'Primary Sources:')}</span>
+              <strong className="font-bold font-mono" style={{ color: 'var(--color-text)' }}>
+                {recommendedRecipeUrls.length} {t('urls', 'URLs')}
+              </strong>
+            </span>
+          )}
+
           <span 
-            className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
+            className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
             style={{
               backgroundColor: 'var(--color-inner-dark)',
               borderColor: 'var(--color-emerald)',
@@ -7633,7 +10921,7 @@ export default function ChefChatPage() {
           </span>
 
           <span 
-            className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
+            className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
             style={{
               backgroundColor: 'var(--color-inner-dark)',
               borderColor: 'var(--color-emerald)',
@@ -7646,7 +10934,7 @@ export default function ChefChatPage() {
           {selectedDiets.map((d) => (
             <span 
               key={`diet-${d}`}
-              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
+              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-emerald)',
@@ -7660,7 +10948,7 @@ export default function ChefChatPage() {
           {selectedAllergies.map((a) => (
             <span 
               key={`allergy-${a}`}
-              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
+              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-border)',
@@ -7674,7 +10962,7 @@ export default function ChefChatPage() {
           {ingredientsToAvoid.map((av) => (
             <span 
               key={`avoid-${av}`}
-              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
+              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-border)',
@@ -7688,7 +10976,7 @@ export default function ChefChatPage() {
           {tastesList.map((itemTaste) => (
             <span 
               key={`taste-${itemTaste}`}
-              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
+              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-border)',
@@ -7720,7 +11008,7 @@ export default function ChefChatPage() {
                 {t('heyImChef', "Hey, I'm Chef Foodie!")}
               </h2>
               <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('chefHeroSub', 'Select a questionnaire topic below or speak into the microphone to plan meals')}
+                {t('chefSubGreeting', 'Select a questionnaire topic below or speak into the microphone to plan meals')}
               </p>
             </div>
 
@@ -7734,14 +11022,30 @@ export default function ChefChatPage() {
                   borderColor: 'var(--color-primary)'
                 }}
               >
-                <Sparkles className="h-4 w-4" /> {t('startCompleteIntake', 'Start Complete Meal Plan Intake')}
+                <Sparkles className="h-4 w-4" /> {t('startCompleteWizard', 'Start Complete Meal Plan Intake Wizard')}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSend("What can I do on FoodiePrep?")}
+                className="border text-xs font-bold px-4 py-3 rounded-2xl transition shadow-sm hover:scale-[1.02] cursor-pointer flex items-center gap-2"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              >
+                <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                <span>✨ {t('whatCanIDo', 'What can I do on this system?')}</span>
               </button>
 
               {recommendedRecipeUrls.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => handleSend(t('primarySourcesPrompt', 'Recommend a signature chef recipe inspired by the primary source URLs configured in admin settings.'))}
-                  className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-xs hover:scale-[1.02] cursor-pointer flex items-center gap-2"
+                  onClick={() => handleSend("Recommend a dish matching my preferences from my primary recipe sources.")}
+                  className="border text-xs font-bold px-4 py-3 rounded-2xl transition shadow-sm hover:scale-[1.02] cursor-pointer flex items-center gap-2"
                   style={{
                     backgroundColor: 'var(--color-card)',
                     borderColor: 'var(--color-border)',
@@ -7750,8 +11054,8 @@ export default function ChefChatPage() {
                   onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
                   onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 >
-                  <Globe className="h-3.5 w-3.5 text-sky-400" />
-                  <span>{(t('primarySourcesChip', '🌐 Primary Sources ({count})')).replace('{count}', String(recommendedRecipeUrls.length))}</span>
+                  <Globe className="h-4 w-4" />
+                  <span>{t('recFromSources', 'Recommend from Primary Sources')} ({recommendedRecipeUrls.length})</span>
                 </button>
               )}
 
@@ -7760,7 +11064,7 @@ export default function ChefChatPage() {
                   key={sec.id}
                   type="button"
                   onClick={() => handleStartTopicWizard(sec)}
-                  className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-xs hover:scale-[1.02] cursor-pointer flex items-center gap-2"
+                  className="text-xs font-semibold px-3 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
                   style={{
                     backgroundColor: 'var(--color-card)',
                     borderColor: 'var(--color-border)',
@@ -7771,7 +11075,7 @@ export default function ChefChatPage() {
                 >
                   <Layers className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                   <span>{sec.topicTitle}</span>
-                  <span className="text-[10px] opacity-75 font-mono">({(sec.questions || []).length} {t('questionsWord', 'questions')})</span>
+                  <span className="text-[10px] opacity-75 font-mono">({(sec.questions || []).length} questions)</span>
                 </button>
               ))}
             </div>
@@ -7785,7 +11089,7 @@ export default function ChefChatPage() {
               <div key={m.id} className={`flex items-start gap-2.5 ${isUser ? 'justify-end' : 'justify-start'}`}>
                 {!isUser && (
                   <div 
-                    className="w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-xs"
+                    className="w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-sm"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-primary)',
@@ -7816,7 +11120,7 @@ export default function ChefChatPage() {
                             onClick={() => speakText(m.content || '', m.id)}
                             className="p-1 rounded-lg transition shrink-0 cursor-pointer hover:opacity-80"
                             style={{ color: hasAudioActive ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
-                            title={hasAudioActive ? t('stop', 'Stop') : t('listenRecipe', 'Listen')}
+                            title={hasAudioActive ? "Stop speech" : "Read aloud"}
                           >
                             {hasAudioActive ? <Square className="h-4 w-4 fill-current" /> : <Volume2 className="h-4 w-4" />}
                           </button>
@@ -7825,261 +11129,426 @@ export default function ChefChatPage() {
                     </div>
                   )}
 
-                  {/* MULTI-DAY MEAL PLAN PRESENTATION (RESPECTS RESULT DISPLAY MODE) */}
-                  {m.plan && Array.isArray(m.plan.meals) && m.plan.meals.length > 0 && (
+                  {/* PLATFORM ACTION RECOMMENDATIONS */}
+                  {m.systemRecommendations && m.systemRecommendations.length > 0 && (
+                    <div className="flex flex-wrap gap-2 pt-1 animate-in fade-in">
+                      {m.systemRecommendations.map((rec, rIdx) => (
+                        <button
+                          key={rIdx}
+                          type="button"
+                          onClick={() => router.push(rec.route)}
+                          className="px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shadow-xs hover:scale-[1.02] cursor-pointer"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          <Sparkles className="h-3 w-3" />
+                          <span>{rec.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* RECOMMENDATION RECIPE CARD PREVIEW */}
+                  {m.recommendedRecipe && (
                     <div 
-                      className="border rounded-3xl p-5 space-y-4 shadow-md transition-colors duration-200"
+                      className="border rounded-2xl p-4 space-y-3.5 shadow-sm transition-all duration-200 hover:shadow-md"
                       style={{
                         backgroundColor: 'var(--color-card)',
                         borderColor: 'var(--color-border)'
                       }}
                     >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                            <h3 className="font-extrabold text-base" style={{ color: 'var(--color-text)' }}>
-                              {(t('daysPlan', '{days}-Day Meal Plan')).replace('{days}', String(m.plan.totalDays || m.plan.meals.length))}
-                            </h3>
-                          </div>
-                          <div className="flex items-center gap-3 text-xs opacity-75 mt-0.5">
-                            {m.plan.theme && <span>{t('themeLabel', 'Theme:')} <strong>{m.plan.theme}</strong></span>}
-                            {m.plan.budgetPerServing && <span>{t('budgetLabel', 'Budget:')} <strong>{m.plan.budgetPerServing}</strong></span>}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          {/* In-Chat Mode Switcher */}
-                          <div className="flex items-center border rounded-xl p-0.5 shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                            <button
-                              type="button"
-                              onClick={() => setResultDisplayMode('card')}
-                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition ${resultDisplayMode === 'card' ? 'bg-[var(--color-primary)] text-white shadow-xs' : 'opacity-60'}`}
+                      <div className="flex items-start justify-between gap-3">
+                        <div 
+                          onClick={() => {
+                            setSelectedRecipeForModal(m.recommendedRecipe);
+                            setShowRecipeDetailsModal(true);
+                          }}
+                          className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer group"
+                        >
+                          <div className="relative shrink-0">
+                            <img
+                              src={m.recommendedRecipe.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'}
+                              alt={m.recommendedRecipe.title}
+                              className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover border transition group-hover:scale-105"
+                              style={{ borderColor: 'var(--color-border)' }}
+                            />
+                            <span 
+                              className="absolute -top-1.5 -left-1.5 text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md text-white shadow-xs"
+                              style={{ backgroundColor: 'var(--color-primary)' }}
                             >
-                              {t('viewModeCard', 'Card')}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setResultDisplayMode('compact')}
-                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition ${resultDisplayMode === 'compact' ? 'bg-[var(--color-primary)] text-white shadow-xs' : 'opacity-60'}`}
-                            >
-                              {t('viewModeCompact', 'Compact')}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setResultDisplayMode('detailed')}
-                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition ${resultDisplayMode === 'detailed' ? 'bg-[var(--color-primary)] text-white shadow-xs' : 'opacity-60'}`}
-                            >
-                              {t('viewModeDetailed', 'Detailed')}
-                            </button>
+                              Recommended
+                            </span>
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={() => handleScheduleMealPlan(m.plan!)}
-                            className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-90 text-white"
-                            style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
-                          >
-                            <CalendarPlus className="h-3.5 w-3.5" />
-                            <span>{t('addToMealPlanner', 'Add to Meal Planner')}</span>
-                          </button>
+                          <div className="space-y-1 min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-black text-sm leading-snug group-hover:underline truncate" style={{ color: 'var(--color-text)' }}>
+                                {m.recommendedRecipe.title}
+                              </h4>
+                              {m.recommendedRecipe.sourceUrl && (
+                                <span 
+                                  className="text-[9px] font-bold px-1.5 py-0.2 rounded border flex items-center gap-0.5 shrink-0"
+                                  style={{
+                                    backgroundColor: 'var(--color-inner-dark)',
+                                    borderColor: 'var(--color-emerald)',
+                                    color: 'var(--color-emerald)'
+                                  }}
+                                >
+                                  <Globe className="h-2.5 w-2.5" /> Source
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] leading-relaxed line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>
+                              {m.recommendedRecipe.description}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-2.5 text-[10px] font-bold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {(m.recommendedRecipe.prepMinutes || 0) + (m.recommendedRecipe.cookMinutes || 0)}m
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Users className="h-3 w-3" /> {m.recommendedRecipe.servings || servings} serv
+                              </span>
+                              {m.recommendedRecipe.calories && (
+                                <span className="font-mono text-emerald-500">{m.recommendedRecipe.calories} kcal</span>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
 
-                      {/* COMPACT TABLE VIEW */}
-                      {resultDisplayMode === 'compact' ? (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left text-xs border-collapse">
-                            <thead>
-                              <tr className="border-b text-[10px] uppercase font-bold opacity-70" style={{ borderColor: 'var(--color-border)' }}>
-                                <th className="py-2 px-3">{t('tableColDay', 'Day & Date')}</th>
-                                <th className="py-2 px-3">{t('tableColMeal', 'Meal Slot')}</th>
-                                <th className="py-2 px-3">{t('tableColDish', 'Recipe / Dish')}</th>
-                                <th className="py-2 px-3">{t('tableColTime', 'Time')}</th>
-                                <th className="py-2 px-3 text-right">{t('tableColServings', 'Servings')}</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
-                              {m.plan.meals.map((meal, mIdx) => (
-                                <tr key={meal.id || mIdx} className="hover:bg-slate-800/20 transition">
-                                  <td className="py-2.5 px-3 font-bold" style={{ color: 'var(--color-primary)' }}>{meal.dayLabel}</td>
-                                  <td className="py-2.5 px-3 uppercase text-[10px] font-extrabold opacity-75">{meal.mealType}</td>
-                                  <td className="py-2.5 px-3 font-semibold">{meal.title}</td>
-                                  <td className="py-2.5 px-3 text-[11px] opacity-75 font-mono">{(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m</td>
-                                  <td className="py-2.5 px-3 text-right font-bold">{meal.servings || servings}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                      {/* CARD ACTIONS */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t text-xs" style={{ borderColor: 'var(--color-border)' }}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedRecipeForModal(m.recommendedRecipe);
+                            setShowRecipeDetailsModal(true);
+                          }}
+                          className="px-3 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-80"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <BookOpen className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+                          <span>View Full Details</span>
+                        </button>
+
+                        <div className="flex items-center gap-2">
+                          {isRecipeSaved(m.recommendedRecipe.title) ? (
+                            <span 
+                              className="px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 shadow-2xs"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-emerald)',
+                                color: 'var(--color-emerald)'
+                              }}
+                            >
+                              <Check className="h-3.5 w-3.5" /> Saved in Recipes
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={savingRecipeTitle === m.recommendedRecipe.title}
+                              onClick={() => handleSaveRecipe(m.recommendedRecipe)}
+                              className="px-3.5 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-90"
+                              style={{
+                                backgroundColor: 'var(--color-card)',
+                                borderColor: 'var(--color-primary)',
+                                color: 'var(--color-primary)'
+                              }}
+                            >
+                              {savingRecipeTitle === m.recommendedRecipe.title ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Bookmark className="h-3.5 w-3.5" />
+                              )}
+                              <span>Save Recipe</span>
+                            </button>
+                          )}
+
+                          {isRecipeSaved(m.recommendedRecipe.title) && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPlannerModal(m.recommendedRecipe)}
+                              className="px-3.5 py-1.5 rounded-xl text-white text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90 animate-in fade-in"
+                              style={{ backgroundColor: 'var(--color-primary)' }}
+                            >
+                              <CalendarPlus className="h-3.5 w-3.5" />
+                              <span>📅 Suggest Add to Planner</span>
+                            </button>
+                          )}
                         </div>
-                      ) : (
-                        /* CARD OR DETAILED GRID VIEW */
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                          {m.plan.meals.map((meal, mIdx) => (
+                      </div>
+                    </div>
+                  )}
+
+                  {/* MULTI-DAY PLAN PRESENTATION */}
+                  {m.plan && (
+                    <div 
+                      className="border rounded-3xl p-5 space-y-4 shadow-sm transition-colors duration-200"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-border)'
+                      }}
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                        <div className="flex items-center gap-2">
+                          <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                          <h3 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
+                            {m.plan.title} ({m.plan.totalDays} {m.plan.totalDays === 1 ? 'Day' : 'Days'})
+                          </h3>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                          <span className="text-[10px] font-bold mr-1 hidden sm:inline" style={{ color: 'var(--color-text-secondary)' }}>
+                            {m.plan.budgetPerServing ? `Budget: ${m.plan.budgetPerServing}` : '$5.00/serv'}
+                          </span>
+                          <div className="border p-0.5 rounded-xl flex items-center gap-1" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                            {(['card', 'compact', 'detailed'] as const).map((mode) => (
+                              <button
+                                key={mode}
+                                type="button"
+                                onClick={() => setResultDisplayMode(mode)}
+                                className="px-2 py-0.5 rounded-lg text-[10px] font-bold transition cursor-pointer capitalize"
+                                style={resultDisplayMode === mode ? {
+                                  backgroundColor: 'var(--color-primary)',
+                                  color: '#ffffff'
+                                } : {
+                                  color: 'var(--color-text-secondary)'
+                                }}
+                              >
+                                {mode}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 1. STANDARD CARDS VIEW */}
+                      {resultDisplayMode === 'card' && (
+                        <div className="space-y-3">
+                          {m.plan.meals.map((meal) => (
                             <div 
-                              key={meal.id || mIdx}
-                              className="p-3.5 rounded-2xl border space-y-2 relative flex flex-col justify-between shadow-xs transition"
+                              key={meal.id}
+                              onClick={() => {
+                                setSelectedRecipeForModal({
+                                  title: meal.title,
+                                  description: meal.description,
+                                  prepMinutes: meal.prepMinutes || 15,
+                                  cookMinutes: meal.cookMinutes || 20,
+                                  servings: meal.servings || servings,
+                                  calories: meal.calories || 480,
+                                  mealType: meal.mealType,
+                                  ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Fresh produce & proteins', 'Aromatics & seasonings', 'Cold-pressed olive oil'],
+                                  instructions: ['Prepare and rinse all ingredients cleanly.', 'Sauté aromatics over medium heat until fragrant.', 'Cook protein and vegetables thoroughly.', 'Garnish with fresh herbs and serve warm.'],
+                                  chefTip: meal.isBatchCook ? 'Double the quantity to save time for subsequent days.' : 'Serve immediately while hot for optimal flavor infusion.',
+                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+                                });
+                                setShowRecipeDetailsModal(true);
+                              }}
+                              className="border rounded-2xl p-3.5 space-y-2.5 transition cursor-pointer hover:scale-[1.01] shadow-xs"
                               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
                             >
-                              <div className="space-y-1.5">
-                                <div className="flex items-center justify-between gap-1">
-                                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">
-                                    {meal.dayLabel}
-                                  </span>
-                                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border opacity-75" style={{ borderColor: 'var(--color-border)' }}>
+                              <div className="flex justify-between items-center text-xs font-bold">
+                                <span style={{ color: 'var(--color-primary)' }}>{meal.dayLabel} ({meal.dateStr})</span>
+                                <div className="flex items-center gap-1.5">
+                                  {meal.isBatchCook && (
+                                    <span 
+                                      className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border"
+                                      style={{
+                                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                        borderColor: 'var(--color-emerald)',
+                                        color: 'var(--color-emerald)'
+                                      }}
+                                    >
+                                      Batch Cook
+                                    </span>
+                                  )}
+                                  <span 
+                                    className="uppercase text-[9px] font-extrabold px-1.5 py-0.5 rounded border"
+                                    style={{
+                                      backgroundColor: 'var(--color-card)',
+                                      borderColor: 'var(--color-border)',
+                                      color: 'var(--color-text-secondary)'
+                                    }}
+                                  >
                                     {meal.mealType}
                                   </span>
                                 </div>
-                                <h4 className="font-bold text-xs leading-snug line-clamp-2" style={{ color: 'var(--color-text)' }}>
-                                  {meal.title}
-                                </h4>
-                                {meal.description && (
-                                  <p className="text-[11px] leading-relaxed opacity-75 line-clamp-2">
-                                    {meal.description}
-                                  </p>
-                                )}
-
-                                {resultDisplayMode === 'detailed' && Array.isArray(meal.ingredients) && meal.ingredients.length > 0 && (
-                                  <div className="pt-1.5 space-y-1">
-                                    <span className="text-[9px] font-bold uppercase tracking-wider opacity-60 block">Key Ingredients:</span>
-                                    <div className="flex flex-wrap gap-1">
-                                      {meal.ingredients.slice(0, 4).map((ing, iIdx) => (
-                                        <span key={iIdx} className="text-[9px] px-1.5 py-0.5 rounded border opacity-75" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
-                                          • {ing}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
                               </div>
 
-                              <div className="pt-2 border-t flex items-center justify-between text-[10px] font-semibold opacity-75" style={{ borderColor: 'var(--color-border)' }}>
-                                <span className="flex items-center gap-1">
-                                  <Clock className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
-                                  {(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m
-                                </span>
-                                {meal.isBatchCook && (
-                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                                    {t('batchCookingBadge', 'Batch Cook')}
-                                  </span>
-                                )}
+                              <div className="flex items-start gap-3">
+                                <img 
+                                  src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'} 
+                                  alt={meal.title} 
+                                  className="w-16 h-16 rounded-xl object-cover border shrink-0" 
+                                  style={{ borderColor: 'var(--color-border)' }} 
+                                />
+                                <div className="space-y-1 flex-1 min-w-0">
+                                  <h4 className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>{meal.title}</h4>
+                                  <p className="text-[11px] line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{meal.description}</p>
+                                  <div className="flex items-center gap-3 text-[10px] font-semibold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                                    <span className="flex items-center gap-1">
+                                      <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m
+                                    </span>
+                                    <span className="flex items-center gap-1">
+                                      <Users className="h-3 w-3" /> {meal.servings || servings} serv
+                                    </span>
+                                    {meal.calories && (
+                                      <span className="font-mono" style={{ color: 'var(--color-primary)' }}>{meal.calories} kcal</span>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           ))}
                         </div>
                       )}
-                    </div>
-                  )}
 
-                  {/* FINAL RECOMMENDED RECIPE SHOWCASE CARD */}
-                  {m.recommendedRecipe && (
-                    <div 
-                      className="border rounded-3xl p-5 space-y-4 shadow-md transition-colors duration-200"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-primary)'
-                      }}
-                    >
-                      <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-                        <div className="flex items-center gap-2">
-                          <Award className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
-                          <div>
-                            <span className="text-[10px] font-black uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
-                              {t('finalRecommendedRecipe', 'Final Recommended Recipe')}
-                            </span>
-                            <h3 className="font-extrabold text-base" style={{ color: 'var(--color-text)' }}>
-                              {m.recommendedRecipe.title}
-                            </h3>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleSaveRecipeToBook(m.recommendedRecipe)}
-                            className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-80"
+                      {/* 2. COMPACT TABLE VIEW */}
+                      {resultDisplayMode === 'compact' && (
+                        <div className="border rounded-2xl overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
+                          <div 
+                            className="grid grid-cols-12 gap-2 p-2.5 font-extrabold text-[10px] uppercase border-b"
                             style={{
                               backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-emerald)',
-                              color: 'var(--color-emerald)'
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text-secondary)'
                             }}
                           >
-                            <Bookmark className="h-3.5 w-3.5" />
-                            <span>{t('saveRecipe', 'Save Recipe')}</span>
-                          </button>
-                        </div>
-                      </div>
-
-                      <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                        {m.recommendedRecipe.description}
-                      </p>
-
-                      <div className="flex flex-wrap items-center gap-4 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                        <span className="flex items-center gap-1">
-                          <Clock className="h-3.5 w-3.5 text-emerald-400" /> {t('prep', 'Prep:')} {m.recommendedRecipe.prepMinutes || 15}m
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Flame className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('cook', 'Cook:')} {m.recommendedRecipe.cookMinutes || 20}m
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Users className="h-3.5 w-3.5" /> {t('serves', 'Serves:')} {m.recommendedRecipe.servings || servings}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                        <div className="space-y-2">
-                          <h4 className="font-bold text-xs uppercase tracking-wider flex items-center justify-between" style={{ color: 'var(--color-primary)' }}>
-                            <span>{(t('ingredientsCount', 'Ingredients ({count})')).replace('{count}', String(m.recommendedRecipe.ingredients?.length || 0))}</span>
-                          </h4>
-                          <ul className="space-y-1 text-xs">
-                            {(m.recommendedRecipe.ingredients || []).map((ing: string, i: number) => {
-                              const inPantry = pantryIngredientsList.some(p => ing.toLowerCase().includes(p.toLowerCase()));
-                              return (
-                                <li key={i} className="flex items-center justify-between p-1.5 rounded-lg border text-[11px]" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                                  <span style={{ color: 'var(--color-text)' }}>• {ing}</span>
-                                  {inPantry && (
-                                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                                      {t('pantryBadge', 'Pantry ✓')}
-                                    </span>
-                                  )}
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-
-                        <div className="space-y-2">
-                          <h4 className="font-bold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-                            {t('stepDirections', 'Step-by-Step Directions')}
-                          </h4>
-                          <ol className="space-y-1.5 text-xs">
-                            {(m.recommendedRecipe.instructions || []).map((step: string, sIdx: number) => (
-                              <li key={sIdx} className="flex items-start gap-2 text-[11px] leading-snug">
-                                <span className="font-extrabold text-[10px] w-4 h-4 rounded-full flex items-center justify-center shrink-0 border mt-0.5" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}>
-                                  {sIdx + 1}
-                                </span>
-                                <span style={{ color: 'var(--color-text-secondary)' }}>{step}</span>
-                              </li>
-                            ))}
-                          </ol>
-                        </div>
-                      </div>
-
-                      {m.recommendedRecipe.chefTip && (
-                        <div 
-                          className="p-3 rounded-2xl border flex items-start gap-2.5 text-xs"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)'
-                          }}
-                        >
-                          <Zap className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-primary)' }} />
-                          <div className="space-y-0.5">
-                            <strong className="block text-[11px]" style={{ color: 'var(--color-primary)' }}>{t('chefProTip', 'Chef Foodie Pro Tip:')}</strong>
-                            <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                              {m.recommendedRecipe.chefTip}
-                            </p>
+                            <span className="col-span-3">Day / Schedule</span>
+                            <span className="col-span-2">Meal Type</span>
+                            <span className="col-span-5">Recipe Title</span>
+                            <span className="col-span-2 text-right">Time & Cals</span>
                           </div>
+
+                          {m.plan.meals.map((meal, rIdx) => (
+                            <div 
+                              key={meal.id || rIdx}
+                              onClick={() => {
+                                setSelectedRecipeForModal({
+                                  title: meal.title,
+                                  description: meal.description,
+                                  prepMinutes: meal.prepMinutes || 15,
+                                  cookMinutes: meal.cookMinutes || 20,
+                                  servings: meal.servings || servings,
+                                  calories: meal.calories || 480,
+                                  mealType: meal.mealType,
+                                  ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Fresh produce & proteins', 'Seasonings'],
+                                  instructions: ['Follow standard chef cooking guidelines for this dish.'],
+                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+                                });
+                                setShowRecipeDetailsModal(true);
+                              }}
+                              className="grid grid-cols-12 gap-2 p-2.5 text-xs items-center border-b last:border-none transition cursor-pointer hover:opacity-80"
+                              style={{
+                                backgroundColor: rIdx % 2 === 0 ? 'var(--color-card)' : 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)'
+                              }}
+                            >
+                              <span className="col-span-3 font-bold truncate" style={{ color: 'var(--color-primary)' }}>
+                                {meal.dayLabel}
+                              </span>
+                              <span className="col-span-2">
+                                <span 
+                                  className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text-secondary)'
+                                  }}
+                                >
+                                  {meal.mealType}
+                                </span>
+                              </span>
+                              <span className="col-span-5 font-semibold truncate" style={{ color: 'var(--color-text)' }}>
+                                {meal.title}
+                              </span>
+                              <span className="col-span-2 text-right font-mono text-[11px]" style={{ color: 'var(--color-emerald)' }}>
+                                {(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* 3. DETAILED MASTER VIEW */}
+                      {resultDisplayMode === 'detailed' && (
+                        <div className="space-y-3">
+                          {m.plan.meals.map((meal) => (
+                            <div 
+                              key={meal.id}
+                              onClick={() => {
+                                setSelectedRecipeForModal({
+                                  title: meal.title,
+                                  description: meal.description,
+                                  prepMinutes: meal.prepMinutes || 15,
+                                  cookMinutes: meal.cookMinutes || 20,
+                                  servings: meal.servings || servings,
+                                  calories: meal.calories || 480,
+                                  mealType: meal.mealType,
+                                  ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Quality produce', 'Seasonings'],
+                                  instructions: ['Follow standard chef cooking guidelines for this dish.'],
+                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
+                                });
+                                setShowRecipeDetailsModal(true);
+                              }}
+                              className="border rounded-2xl p-4 space-y-3 transition cursor-pointer hover:scale-[1.01] shadow-xs"
+                              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                            >
+                              <div className="flex justify-between items-center text-xs font-bold border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                                <div className="flex items-center gap-2">
+                                  <span style={{ color: 'var(--color-primary)' }}>{meal.dayLabel} ({meal.dateStr})</span>
+                                  <span 
+                                    className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded border"
+                                    style={{
+                                      backgroundColor: 'var(--color-card)',
+                                      borderColor: 'var(--color-emerald)',
+                                      color: 'var(--color-emerald)'
+                                    }}
+                                  >
+                                    {meal.mealType}
+                                  </span>
+                                </div>
+                                <span className="text-[11px] font-mono font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                                  {(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m • {meal.servings || servings} serv
+                                </span>
+                              </div>
+
+                              <div className="space-y-1">
+                                <h4 className="font-extrabold text-xs" style={{ color: 'var(--color-text)' }}>{meal.title}</h4>
+                                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{meal.description}</p>
+                              </div>
+
+                              {Array.isArray(meal.ingredients) && meal.ingredients.length > 0 && (
+                                <div className="space-y-1.5 pt-1">
+                                  <span className="text-[10px] font-extrabold uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
+                                    Ingredients Breakdown:
+                                  </span>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {meal.ingredients.map((ing, iIdx) => (
+                                      <span 
+                                        key={iIdx}
+                                        className="text-[10px] font-medium px-2 py-0.5 rounded-lg border shadow-2xs"
+                                        style={{
+                                          backgroundColor: 'var(--color-card)',
+                                          borderColor: 'var(--color-border)',
+                                          color: 'var(--color-text)'
+                                        }}
+                                      >
+                                        • {ing}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       )}
                     </div>
@@ -8088,7 +11557,7 @@ export default function ChefChatPage() {
 
                 {isUser && (
                   <div 
-                    className="w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-xs"
+                    className="w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-sm"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -8105,7 +11574,7 @@ export default function ChefChatPage() {
 
         {loading && (
           <div 
-            className="flex items-center gap-3 p-3.5 border rounded-2xl max-w-xs text-xs shadow-xs"
+            className="flex items-center gap-3 p-3.5 border rounded-2xl max-w-xs text-xs shadow-sm"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
@@ -8119,10 +11588,10 @@ export default function ChefChatPage() {
         <div ref={chatEndRef} />
       </div>
 
-      {/* PRESET ANSWERS */}
+      {/* DYNAMIC CONTEXTUAL PRESET ANSWERS */}
       {wizardStep !== null && currentPresetOptions.length > 0 && (
         <div 
-          className="p-3 rounded-2xl border space-y-2 animate-in fade-in transition-colors duration-200"
+          className="p-3.5 rounded-2xl border space-y-2.5 animate-in fade-in transition-colors duration-200"
           style={{
             backgroundColor: 'var(--color-card)',
             borderColor: 'var(--color-border)'
@@ -8130,15 +11599,15 @@ export default function ChefChatPage() {
         >
           <div className="flex items-center justify-between text-[11px] font-bold">
             <span className="flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
-              <Sparkles className="h-3.5 w-3.5" /> {(t('presetAnswersTitle', 'Preset Answers (Step {step} of {total}):')).replace('{step}', String(wizardStep + 1)).replace('{total}', String(wizardQuestionsList.length))}
+              <Sparkles className="h-3.5 w-3.5" /> Preset Answers (Step {wizardStep + 1} of {wizardQuestionsList.length}):
             </span>
             <button
               type="button"
-              onClick={() => { updateWizardStep(null); showToast(t('exitedWizardToast', 'Exited wizard questionnaire')); }}
+              onClick={() => { updateWizardStep(null); showToast("Exited wizard"); }}
               className="text-[10px] hover:underline cursor-pointer"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              {t('cancelWizard', 'Cancel Wizard')}
+              Cancel Wizard
             </button>
           </div>
 
@@ -8148,7 +11617,7 @@ export default function ChefChatPage() {
                 key={oIdx}
                 type="button"
                 onClick={() => handleSend(opt)}
-                className="text-xs font-semibold px-3 py-1.5 rounded-xl border transition shadow-xs cursor-pointer hover:scale-[1.02]"
+                className="text-xs font-semibold px-3.5 py-2 rounded-xl border transition shadow-xs cursor-pointer hover:scale-[1.02] active:scale-95"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -8168,14 +11637,26 @@ export default function ChefChatPage() {
       {wizardStep === null && activeQuestionnaireSections.length > 0 && (
         <div className="flex items-center gap-2 overflow-x-auto py-1 px-1 custom-scrollbar shrink-0">
           <span className="text-[10px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
-            <Sparkles className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> {t('questionnaires', 'Questionnaires:')}
+            <Sparkles className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> Questionnaires:
           </span>
+          <button
+            type="button"
+            onClick={handleStartFullWizard}
+            className="text-xs font-bold px-3.5 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02] text-white"
+            style={{
+              backgroundColor: 'var(--color-primary)',
+              borderColor: 'var(--color-primary)'
+            }}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>Complete Intake Wizard</span>
+          </button>
           {activeQuestionnaireSections.map((sec) => (
             <button
               key={`chip-${sec.id}`}
               type="button"
               onClick={() => handleStartTopicWizard(sec)}
-              className="text-xs font-semibold px-3 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:scale-[1.02]"
+              className="text-xs font-semibold px-3 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
@@ -8191,7 +11672,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* PROMPT INPUT BAR */}
+      {/* PROMPT INPUT BAR (DYNAMIC TOKEN EMOJI SYNCHRONIZED WITH /token-setting) */}
       <div 
         className="border rounded-2xl p-1.5 flex items-center gap-2 shrink-0 shadow-xl transition-colors duration-200"
         style={{
@@ -8209,7 +11690,7 @@ export default function ChefChatPage() {
               borderColor: isListening ? 'var(--color-primary)' : 'var(--color-border)',
               color: isListening ? '#ffffff' : 'var(--color-text-secondary)'
             }}
-            title={isListening ? t('listeningToVoice', 'Listening...') : t('listenRecipe', 'Speak')}
+            title={isListening ? t('listeningTitle', 'Listening... click to stop') : t('micTitle', 'Speak via microphone')}
           >
             {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
           </button>
@@ -8217,13 +11698,10 @@ export default function ChefChatPage() {
 
         <input
           type="text"
-          autoComplete="off"
-          data-lpignore="true"
-          data-form-type="other"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder={isListening ? t('listeningToVoice', 'Listening to your voice...') : `${t('askPromptPlaceholder', 'Ask recipes, cooking tips, or meal plan requests...')} (${chefCost} ${tokenSymbol})`}
+          placeholder={isListening ? t('listeningPromptPlaceholder', 'Listening to your voice...') : `${t('askPromptPlaceholder', 'Ask recipes, cooking tips, or meal plan requests...')} (${isTokenEnabled && chefCost > 0 ? `${chefCost} ${tokenSymbol}` : t('freeBadge', 'Free')})`}
           className="bg-transparent border-none text-sm px-2 flex-1 outline-none font-normal"
           style={{ color: 'var(--color-text)' }}
         />
@@ -8236,8 +11714,9 @@ export default function ChefChatPage() {
               borderColor: 'var(--color-border)',
               color: 'var(--color-text-secondary)'
             }}
+            title={isTokenEnabled && chefCost > 0 ? `${t('promptCostTooltip', 'Each prompt costs')} ${chefCost} ${tokenName}` : t('freeBypassTooltip', 'Bypass token consumption')}
           >
-            {chefCost} {tokenSymbol}
+            {isTokenEnabled && chefCost > 0 ? `${chefCost} ${tokenSymbol}` : t('freeBadge', 'Free')}
           </span>
 
           <button
@@ -8252,7 +11731,293 @@ export default function ChefChatPage() {
         </div>
       </div>
 
-      {/* ACCESSIBLE DIETARY PREFERENCES MODAL (AUTOFILL-SAFE FORM-FREE DIVS) */}
+      {/* CHAT HISTORY & CATEGORIES SIDE DRAWER (POSTGRESQL BACKED) */}
+      {showHistoryDrawer && (
+        <div 
+          onClick={() => setShowHistoryDrawer(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-end cursor-pointer animate-in fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md h-full flex flex-col justify-between border-l p-5 space-y-4 shadow-2xl relative cursor-default animate-in slide-in-from-right duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <div className="space-y-4 flex-1 flex flex-col overflow-hidden">
+              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                <div className="flex items-center gap-2">
+                  <History className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+                  <div>
+                    <h2 className="text-base font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                      Chat History ({historyTotalCount})
+                    </h2>
+                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      Up to 10 chats per page • Filtered by category
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={startNewChat}
+                    className="px-2.5 py-1 rounded-xl text-white text-[11px] font-extrabold flex items-center gap-1 transition cursor-pointer shadow-sm hover:opacity-90"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                    title="New Chat"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> New
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowHistoryDrawer(false)}
+                    className="p-1.5 rounded-xl border hover:opacity-80 transition cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* CATEGORIES SECTION */}
+              <div className="space-y-2.5 pt-1">
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <span className="flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                    <Folder className="h-3.5 w-3.5" /> Chat Categories:
+                  </span>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="New category name (e.g. Keto Prep, Dinners)..."
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleCreateCategory();
+                      }
+                    }}
+                    className="flex-1 border rounded-xl px-3 py-1.5 text-xs outline-none"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCreateCategory()}
+                    disabled={!newCategoryName.trim()}
+                    className="px-3 py-1.5 text-white font-bold text-xs rounded-xl transition cursor-pointer disabled:opacity-40 flex items-center gap-1 shadow-xs hover:opacity-90"
+                    style={{ backgroundColor: 'var(--color-emerald)' }}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategoryFilter('all');
+                      fetchChatHistory(1, 'all');
+                    }}
+                    className="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer shrink-0 shadow-xs"
+                    style={{
+                      backgroundColor: selectedCategoryFilter === 'all' ? 'var(--color-primary)' : 'var(--color-inner-dark)',
+                      borderColor: selectedCategoryFilter === 'all' ? 'var(--color-primary)' : 'var(--color-border)',
+                      color: selectedCategoryFilter === 'all' ? '#ffffff' : 'var(--color-text-secondary)'
+                    }}
+                  >
+                    All Chats
+                  </button>
+
+                  {historyCategories.map((cat) => (
+                    <div
+                      key={cat.id}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer shrink-0 shadow-xs group"
+                      style={{
+                        backgroundColor: selectedCategoryFilter === cat.id ? 'var(--color-primary)' : 'var(--color-inner-dark)',
+                        borderColor: selectedCategoryFilter === cat.id ? 'var(--color-primary)' : 'var(--color-border)',
+                        color: selectedCategoryFilter === cat.id ? '#ffffff' : 'var(--color-text-secondary)'
+                      }}
+                      onClick={() => {
+                        setSelectedCategoryFilter(cat.id);
+                        fetchChatHistory(1, cat.id);
+                      }}
+                    >
+                      <span>{cat.name}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteCategory(cat.id, cat.name);
+                        }}
+                        className="opacity-70 hover:opacity-100 hover:text-red-400 ml-1 cursor-pointer"
+                        title={`Delete category ${cat.name}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* SESSIONS LIST */}
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                {loadingHistory ? (
+                  <div className="py-12 text-center text-xs flex items-center justify-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
+                    <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} /> Loading chat sessions...
+                  </div>
+                ) : historySessions.length === 0 ? (
+                  <div className="py-12 text-center text-xs space-y-2" style={{ color: 'var(--color-text-secondary)' }}>
+                    <MessageSquare className="h-8 w-8 mx-auto opacity-30" />
+                    <p>No chat history found under this category.</p>
+                  </div>
+                ) : (
+                  historySessions.map((sess) => {
+                    const isCurrentActive = sess.id === currentSessionId;
+                    const dateFormatted = new Date(sess.updated_at).toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    });
+
+                    return (
+                      <div
+                        key={sess.id}
+                        onClick={() => handleSelectSession(sess)}
+                        className="p-3 rounded-2xl border transition cursor-pointer flex items-center justify-between gap-3 shadow-xs hover:scale-[1.01]"
+                        style={{
+                          backgroundColor: isCurrentActive ? 'var(--color-inner-dark)' : 'var(--color-card)',
+                          borderColor: isCurrentActive ? 'var(--color-primary)' : 'var(--color-border)'
+                        }}
+                      >
+                        <div className="space-y-1 min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5">
+                            {sess.category_name ? (
+                              <span 
+                                className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded border flex items-center gap-1"
+                                style={{
+                                  backgroundColor: 'var(--color-card)',
+                                  borderColor: 'var(--color-border)',
+                                  color: 'var(--color-emerald)'
+                                }}
+                              >
+                                <Tag className="h-2.5 w-2.5" /> {sess.category_name}
+                              </span>
+                            ) : null}
+                            <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
+                              {dateFormatted}
+                            </span>
+                          </div>
+
+                          <h4 
+                            className="font-bold text-xs truncate leading-snug"
+                            style={{ color: isCurrentActive ? 'var(--color-primary)' : 'var(--color-text)' }}
+                          >
+                            {sess.title}
+                          </h4>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                          <select
+                            value={sess.category_id || 'none'}
+                            onChange={(e) => handleAssignCategory(sess.id, e.target.value)}
+                            className="text-[10px] border rounded-lg px-2 py-1 outline-none font-medium appearance-none cursor-pointer"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                            title="Assign to Category"
+                          >
+                            <option value="none">No Category</option>
+                            {historyCategories.map(c => (
+                              <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                          </select>
+
+                          <button
+                            type="button"
+                            onClick={(e) => handleDeleteSession(sess.id, e)}
+                            className="p-1.5 rounded-lg border text-red-500 hover:bg-red-500/10 transition cursor-pointer"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                            title="Delete this chat"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* PAGINATION */}
+              {historyTotalPages > 1 && (
+                <div 
+                  className="pt-3 border-t flex items-center justify-between text-xs font-bold"
+                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                >
+                  <span>Page {historyPage} of {historyTotalPages}</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={historyPage <= 1}
+                      onClick={() => fetchChatHistory(historyPage - 1, selectedCategoryFilter)}
+                      className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer shadow-xs"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+
+                    {Array.from({ length: historyTotalPages }, (_, i) => i + 1).map((num) => (
+                      <button
+                        key={num}
+                        type="button"
+                        onClick={() => fetchChatHistory(num, selectedCategoryFilter)}
+                        className="w-7 h-7 rounded-lg text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-xs"
+                        style={historyPage === num ? {
+                          backgroundColor: 'var(--color-primary)',
+                          borderColor: 'var(--color-primary)',
+                          color: '#ffffff'
+                        } : {
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text)'
+                        }}
+                      >
+                        {num}
+                      </button>
+                    ))}
+
+                    <button
+                      type="button"
+                      disabled={historyPage >= historyTotalPages}
+                      onClick={() => fetchChatHistory(historyPage + 1, selectedCategoryFilter)}
+                      className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer shadow-xs"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RECIPE PREFERENCES MODAL */}
       {showPreferences && (
         <div 
           onClick={() => setShowPreferences(false)}
@@ -8269,16 +12034,10 @@ export default function ChefChatPage() {
           >
             <div className="flex justify-between items-start">
               <div>
-                <h2 
-                  className="text-xl font-black tracking-tight"
-                  style={{ color: 'var(--color-primary)' }}
-                >
+                <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
                   {t('recipePreferencesTitle', 'Recipe Preferences')}
                 </h2>
-                <p 
-                  className="text-xs mt-0.5"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
+                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('recipePreferencesSub', 'Personalise your cooking experience')}
                 </p>
               </div>
@@ -8286,7 +12045,7 @@ export default function ChefChatPage() {
               <button
                 type="button"
                 onClick={() => setShowPreferences(false)}
-                className="p-2 rounded-xl border transition cursor-pointer shadow-xs hover:opacity-80"
+                className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -8298,7 +12057,6 @@ export default function ChefChatPage() {
             </div>
 
             <div className="overflow-y-auto flex-1 space-y-5 pr-1 text-xs">
-              {/* Servings */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('servingsTitle', 'Servings')}
@@ -8307,7 +12065,7 @@ export default function ChefChatPage() {
                   <button
                     type="button"
                     onClick={() => setServings(Math.max(1, servings - 1))}
-                    className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-xs hover:opacity-80"
+                    className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-sm hover:opacity-80"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -8322,7 +12080,7 @@ export default function ChefChatPage() {
                   <button
                     type="button"
                     onClick={() => setServings(servings + 1)}
-                    className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-xs hover:opacity-80"
+                    className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-sm hover:opacity-80"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -8334,7 +12092,6 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* Country */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('countryTitle', 'Country')}
@@ -8343,7 +12100,7 @@ export default function ChefChatPage() {
                   <select
                     value={country}
                     onChange={(e) => setCountry(e.target.value)}
-                    className="w-full border rounded-xl px-4 py-2.5 text-xs outline-none cursor-pointer appearance-none shadow-xs font-medium"
+                    className="w-full border rounded-xl px-4 py-2.5 text-xs outline-none cursor-pointer appearance-none shadow-sm font-medium"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -8358,7 +12115,6 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* Dietary Preferences */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('dietaryPreferencesTitle', 'Dietary Preferences')}
@@ -8371,7 +12127,7 @@ export default function ChefChatPage() {
                         key={item}
                         type="button"
                         onClick={() => handleToggleDiet(item)}
-                        className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-xs"
+                        className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-sm"
                         style={isSelected ? {
                           backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-primary)',
@@ -8389,7 +12145,6 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* Allergies */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('allergiesTitle', 'Allergies')}
@@ -8402,7 +12157,7 @@ export default function ChefChatPage() {
                         key={item}
                         type="button"
                         onClick={() => handleToggleAllergy(item)}
-                        className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-xs"
+                        className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-sm"
                         style={isSelected ? {
                           backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-primary)',
@@ -8420,22 +12175,13 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* Ingredients to Avoid (Accessible Container, No Form) */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('ingredientsToAvoidTitle', 'Ingredients to Avoid')}
                 </label>
-                <div 
-                  role="region"
-                  data-lpignore="true"
-                  className="flex gap-2"
-                >
+                <div className="flex gap-2">
                   <input
                     type="text"
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    spellCheck="false"
                     placeholder={t('typeIngredientPlaceholder', 'Type an ingredient...')}
                     value={newAvoidInput}
                     onChange={(e) => setNewAvoidInput(e.target.value)}
@@ -8445,7 +12191,7 @@ export default function ChefChatPage() {
                         handleAddAvoid();
                       }
                     }}
-                    className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-xs"
+                    className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-sm"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -8454,7 +12200,7 @@ export default function ChefChatPage() {
                   />
                   <button
                     type="button"
-                    onClick={handleAddAvoid}
+                    onClick={() => handleAddAvoid()}
                     className="px-3.5 py-2.5 text-white rounded-xl font-bold flex items-center justify-center transition cursor-pointer shadow-md hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >
@@ -8477,7 +12223,7 @@ export default function ChefChatPage() {
                     ingredientsToAvoid.map((item) => (
                       <span 
                         key={item}
-                        className="px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border shadow-xs"
+                        className="px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border shadow-sm"
                         style={{
                           backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-emerald)',
@@ -8498,27 +12244,14 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* Tastes (Accessible Container, No Form) */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  {t('tastesTitle', 'Tastes & Cooking Styles')}
+                  {t('tastesTitle', 'Tastes')}
                 </label>
-                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('tastesDesc', "Anything else about how you like to eat. We'll factor these into your recipes.")}
-                </p>
-
-                <div 
-                  role="region"
-                  data-lpignore="true"
-                  className="flex gap-2"
-                >
+                <div className="flex gap-2">
                   <input
                     type="text"
-                    autoComplete="off"
-                    data-lpignore="true"
-                    data-form-type="other"
-                    spellCheck="false"
-                    placeholder={t('tastesPlaceholder', 'e.g. prefers larger portions, loves umami, extra garlic...')}
+                    placeholder={t('tastesPlaceholder', 'e.g. prefers larger portions, loves umami...')}
                     value={newTasteInput}
                     onChange={(e) => setNewTasteInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -8527,7 +12260,7 @@ export default function ChefChatPage() {
                         handleAddTaste();
                       }
                     }}
-                    className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-xs"
+                    className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-sm"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -8536,7 +12269,7 @@ export default function ChefChatPage() {
                   />
                   <button
                     type="button"
-                    onClick={handleAddTaste}
+                    onClick={() => handleAddTaste()}
                     className="px-3.5 py-2.5 text-white rounded-xl font-bold flex items-center justify-center transition cursor-pointer shadow-md hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >
@@ -8559,7 +12292,7 @@ export default function ChefChatPage() {
                     tastesList.map((item) => (
                       <span 
                         key={item}
-                        className="px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border shadow-xs"
+                        className="px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border shadow-sm"
                         style={{
                           backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-emerald)',
@@ -8588,7 +12321,7 @@ export default function ChefChatPage() {
               <button
                 type="button"
                 onClick={() => setShowPreferences(false)}
-                className="px-5 py-2.5 border rounded-xl font-bold text-xs transition cursor-pointer shadow-xs hover:opacity-80"
+                className="px-5 py-2.5 border rounded-xl font-bold text-xs transition cursor-pointer shadow-sm hover:opacity-80"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -8620,7 +12353,387 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOKEN PURCHASE MODAL */}
+      {/* RECIPE DETAILS MODAL */}
+      {showRecipeDetailsModal && selectedRecipeForModal && (
+        <div 
+          onClick={() => setShowRecipeDetailsModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl relative p-6 space-y-4 cursor-default animate-in fade-in"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <div className="flex justify-between items-start border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span 
+                    className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md text-white shadow-xs"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    Recommended
+                  </span>
+                  {selectedRecipeForModal.sourceUrl && (
+                    <span 
+                      className="text-[9px] font-bold px-2 py-0.5 rounded-md border flex items-center gap-1"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-emerald)',
+                        color: 'var(--color-emerald)'
+                      }}
+                    >
+                      <Globe className="h-2.5 w-2.5" /> Primary Source
+                    </span>
+                  )}
+                </div>
+                <h2 className="text-lg font-black tracking-tight mt-1" style={{ color: 'var(--color-text)' }}>
+                  {selectedRecipeForModal.title}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRecipeDetailsModal(false)}
+                className="p-1.5 rounded-xl border transition cursor-pointer hover:opacity-80"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-4 pr-1 text-xs custom-scrollbar">
+              {selectedRecipeForModal.image && (
+                <img
+                  src={selectedRecipeForModal.image}
+                  alt={selectedRecipeForModal.title}
+                  className="w-full h-44 rounded-2xl object-cover border shadow-xs"
+                  style={{ borderColor: 'var(--color-border)' }}
+                />
+              )}
+
+              <p className="leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                {selectedRecipeForModal.description}
+              </p>
+
+              <div 
+                className="flex items-center gap-4 p-3 rounded-2xl border font-bold text-xs"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              >
+                <span className="flex items-center gap-1.5" style={{ color: 'var(--color-emerald)' }}>
+                  <Clock className="h-3.5 w-3.5" /> {(selectedRecipeForModal.prepMinutes || 0) + (selectedRecipeForModal.cookMinutes || 0)} mins total
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Users className="h-3.5 w-3.5" /> {selectedRecipeForModal.servings || servings} servings
+                </span>
+                {selectedRecipeForModal.calories && (
+                  <span className="font-mono text-emerald-500">{selectedRecipeForModal.calories} kcal</span>
+                )}
+              </div>
+
+              {/* Ingredients List with Add to Cart / Grocery Button */}
+              {Array.isArray(selectedRecipeForModal.ingredients) && selectedRecipeForModal.ingredients.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+                      Ingredients ({selectedRecipeForModal.ingredients.length})
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => handleAddToCart(selectedRecipeForModal.ingredients)}
+                      className="px-2.5 py-1 rounded-lg border text-[11px] font-bold transition flex items-center gap-1 shadow-2xs hover:opacity-90 cursor-pointer"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
+                    >
+                      <ShoppingCart className="h-3 w-3" />
+                      <span>+ Add to Cart</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {selectedRecipeForModal.ingredients.map((ing: string, i: number) => (
+                      <div 
+                        key={i}
+                        className="p-2 rounded-xl border text-[11px] font-medium flex items-center gap-2"
+                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: 'var(--color-primary)' }} />
+                        <span className="truncate">{ing}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Instructions */}
+              {Array.isArray(selectedRecipeForModal.instructions) && selectedRecipeForModal.instructions.length > 0 && (
+                <div className="space-y-2">
+                  <h4 className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+                    Instructions
+                  </h4>
+                  <div className="space-y-2">
+                    {selectedRecipeForModal.instructions.map((step: string, sIdx: number) => (
+                      <div 
+                        key={sIdx}
+                        className="p-2.5 rounded-xl border text-xs leading-relaxed flex items-start gap-2.5"
+                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                      >
+                        <span 
+                          className="w-5 h-5 rounded-md font-bold text-[10px] flex items-center justify-center shrink-0 border"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          {sIdx + 1}
+                        </span>
+                        <p className="flex-1">{step}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Chef Tip */}
+              {selectedRecipeForModal.chefTip && (
+                <div 
+                  className="p-3 rounded-2xl border text-xs leading-relaxed flex items-start gap-2"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-emerald)',
+                    color: 'var(--color-emerald)'
+                  }}
+                >
+                  <Sparkles className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span><strong>Chef Tip:</strong> {selectedRecipeForModal.chefTip}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Outbound Link & Actions */}
+            <div className="pt-3 border-t flex flex-wrap items-center justify-between gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                {selectedRecipeForModal.sourceUrl && (
+                  <a
+                    href={selectedRecipeForModal.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer hover:opacity-80"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
+                    }}
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    <span>View Source Recipe ↗</span>
+                  </a>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                {isRecipeSaved(selectedRecipeForModal.title) ? (
+                  <span 
+                    className="px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-emerald)',
+                      color: 'var(--color-emerald)'
+                    }}
+                  >
+                    <Check className="h-3.5 w-3.5" /> Saved in Recipes
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={savingRecipeTitle === selectedRecipeForModal.title}
+                    onClick={() => handleSaveRecipe(selectedRecipeForModal)}
+                    className="px-3.5 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-90"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-primary)',
+                      color: 'var(--color-primary)'
+                    }}
+                  >
+                    {savingRecipeTitle === selectedRecipeForModal.title ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Bookmark className="h-3.5 w-3.5" />
+                    )}
+                    <span>Save Recipe</span>
+                  </button>
+                )}
+
+                {isRecipeSaved(selectedRecipeForModal.title) && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenPlannerModal(selectedRecipeForModal)}
+                    className="px-3.5 py-1.5 rounded-xl text-white text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90 animate-in fade-in"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    <CalendarPlus className="h-3.5 w-3.5" />
+                    <span>📅 Suggest Add to Planner</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setShowRecipeDetailsModal(false)}
+                  className="px-4 py-1.5 rounded-xl border font-bold text-xs shadow-xs transition cursor-pointer hover:opacity-90"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADD TO MEAL PLANNER MODAL */}
+      {showPlannerModal && recipeToSchedule && (
+        <div 
+          onClick={() => setShowPlannerModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-md w-full flex flex-col overflow-hidden shadow-2xl relative p-6 space-y-4 cursor-default animate-in fade-in"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <div className="flex justify-between items-start border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
+                  Meal Planner Schedule
+                </span>
+                <h2 className="text-base font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+                  Schedule "{recipeToSchedule.title}"
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPlannerModal(false)}
+                className="p-1.5 rounded-xl border hover:opacity-80 transition cursor-pointer"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div className="space-y-1.5">
+                <label className="font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
+                  Target Date
+                </label>
+                <input
+                  type="date"
+                  value={scheduleDate}
+                  onChange={(e) => setScheduleDate(e.target.value)}
+                  className="w-full border rounded-xl px-3.5 py-2 text-xs outline-none"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
+                  Meal Slot
+                </label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {['Breakfast', 'Lunch', 'Dinner', 'Snack'].map((slot) => (
+                    <button
+                      key={slot}
+                      type="button"
+                      onClick={() => setScheduleMealType(slot)}
+                      className="py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer text-center"
+                      style={scheduleMealType === slot ? {
+                        backgroundColor: 'var(--color-primary)',
+                        borderColor: 'var(--color-primary)',
+                        color: '#ffffff'
+                      } : {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text-secondary)'
+                      }}
+                    >
+                      {slot}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
+                  Servings
+                </label>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setScheduleServings(Math.max(1, scheduleServings - 1))}
+                    className="w-7 h-7 rounded-lg border flex items-center justify-center font-bold text-xs transition cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  >
+                    -
+                  </button>
+                  <span className="font-bold">{scheduleServings} servings</span>
+                  <button
+                    type="button"
+                    onClick={() => setScheduleServings(scheduleServings + 1)}
+                    className="w-7 h-7 rounded-lg border flex items-center justify-center font-bold text-xs transition cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t flex items-center justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setShowPlannerModal(false)}
+                className="px-4 py-2 border rounded-xl font-bold text-xs transition cursor-pointer hover:opacity-80"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={schedulingLoading}
+                onClick={handleConfirmScheduleMeal}
+                className="px-5 py-2 text-white font-bold text-xs rounded-xl transition shadow-md flex items-center gap-1.5 cursor-pointer hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {schedulingLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarPlus className="h-3.5 w-3.5" />}
+                <span>Confirm & Schedule</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TOKEN PURCHASE MODAL (SYNCHRONIZED WITH DYNAMIC TOKEN EMOJI) */}
       <TokenPurchaseModal
         isOpen={isTokenPurchaseOpen}
         onClose={() => setIsTokenPurchaseOpen(false)}
@@ -8630,7 +12743,9 @@ export default function ChefChatPage() {
         packages={tokenPackages}
         onPurchased={(newBal) => {
           setTokenBalance(newBal);
-          showToast(`Tokens added! New balance: ${newBal} ${tokenSymbol}`);
+          window.dispatchEvent(new Event('zecratary_tokens_updated'));
+          window.dispatchEvent(new Event('zecratary_users_updated'));
+          showToast(`${t('tokensAddedSuccess', 'Tokens added!')} ${t('newBalance', 'New balance')}: ${newBal} ${tokenSymbol}`);
         }}
       />
     </div>
@@ -8641,1519 +12756,10 @@ export default function ChefChatPage() {
 
 ## File: `apps/web/src/app/recipe/page.tsx`
 ```typescript
-'use client';
+import { redirect } from 'next/navigation';
 
-// Generated / Updated by AI Collaborator
-
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import {
-  Search, SlidersHorizontal, Heart, Clock, Utensils,
-  X, UploadCloud, BookmarkPlus, CalendarPlus, ShoppingCart,
-  Timer, Edit3, Share2, Star, Check, Book, ChevronDown,
-  Trash2, Save, Plus, ImagePlus, Users, Calendar,
-  GripVertical, CheckSquare, CheckCircle2, Type, RefreshCw
-} from 'lucide-react';
-import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
-import { persistSavedRecipe } from '@/lib/recipeSync';
-import { getStoredCategories } from '@/lib/categories';
-import { useTranslation } from '@/components/LanguageProvider';
-
-export default function RecipePage() {
-  const router = useRouter();
-  const { t } = useTranslation();
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [recipes, setRecipes] = useState<any[]>([]);
-  const [books, setBooks] = useState<any[]>([]);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [search, setSearch] = useState('');
-  const [activeFilter, setActiveFilter] = useState('All');
-  const [selectedRecipe, setSelectedRecipe] = useState<any | null>(null);
-
-  // Add to Book Dropdown State
-  const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
-
-  // Dynamic Add to Plan Date
-  const defaultDateStr = useMemo(() => new Date().toISOString().split('T')[0], []);
-  const [showAddToPlanModal, setShowAddToPlanModal] = useState(false);
-  const [planDate, setPlanDate] = useState(defaultDateStr);
-  const [planMealType, setPlanMealType] = useState('Dinner');
-  const [planTime, setPlanTime] = useState('');
-  const [planNotes, setPlanNotes] = useState('');
-
-  // Edit Mode & Form State
-  const [isEditing, setIsEditing] = useState(false);
-  const [editTab, setEditTab] = useState<'info' | 'ingredients' | 'steps'>('info');
-  const [editForm, setEditForm] = useState<any>({
-    title: '',
-    description: '',
-    recipeType: 'Main Dish',
-    servings: 4,
-    prepTimeMinutes: 30,
-    cookTimeMinutes: 10,
-    imageUrl: '',
-    ingredients: [],
-    instructions: []
-  });
-
-  const [isReorderingIngredients, setIsReorderingIngredients] = useState(false);
-  const [isReorderingSteps, setIsReorderingSteps] = useState(false);
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-
-  // View States
-  const [servingsMultiplier, setServingsMultiplier] = useState(1);
-  const [fontSizeScale, setFontSizeScale] = useState(100);
-  const [completedSteps, setCompletedSteps] = useState<number[]>([]);
-  const [noteText, setNoteText] = useState('');
-  const [isNoteOpen, setIsNoteOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-  // Shopping List Modal State
-  const [isShoppingModalOpen, setIsShoppingModalOpen] = useState(false);
-  const [shoppingModalIngredients, setShoppingModalIngredients] = useState<any[]>([]);
-
-  const defaultBooks = [
-    { id: 'book_1', title: 'Family Favorites & Weeknight Dinners', description: 'Quick and easy meals.' },
-    { id: 'book_2', title: 'Authentic Asian Cuisine', description: 'Traditional recipes & stir-fries.' },
-    { id: 'book_3', title: 'Baking & Desserts', description: 'Sweet treats & pastries.' }
-  ];
-
-  const loadData = useCallback((user: User | null) => {
-    if (!user) return;
-    setCategories(getStoredCategories());
-    try {
-      const localRecipes = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
-      const localBooks = localStorage.getItem('zecratary_recipe_books');
-
-      let parsedRecipes: any[] = [];
-      if (localRecipes) {
-        const parsed = JSON.parse(localRecipes);
-        if (Array.isArray(parsed)) {
-          parsedRecipes = parsed;
-        }
-      }
-
-      const userRecipes = parsedRecipes.filter((r: any) => {
-        return r.userId === user.id || r.createdBy === user.email;
-      });
-      setRecipes(userRecipes);
-
-      let parsedBooks = defaultBooks;
-      if (localBooks) {
-        const parsed = JSON.parse(localBooks);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          parsedBooks = parsed;
-        }
-      }
-
-      const userBooks = parsedBooks.filter((b: any) => !b.userId || b.userId === user.id || b.createdBy === user.email);
-
-      const booksWithCounts = userBooks.map((b: any) => ({
-        ...b,
-        recipeCount: userRecipes.filter((r: any) => r.bookId === b.id).length
-      }));
-
-      setBooks(booksWithCounts);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    initAuthStorage();
-    const user = getCurrentUser();
-    if (!user) {
-      router.replace('/login');
-      return;
-    }
-    setCurrentUser(user);
-    loadData(user);
-
-    const handleSync = () => {
-      const activeUser = getCurrentUser();
-      if (activeUser) {
-        setCurrentUser(activeUser);
-        loadData(activeUser);
-      }
-    };
-
-    window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_recipes_updated', handleSync);
-    window.addEventListener('zecratary_categories_changed', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
-
-    return () => {
-      window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_categories_changed', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
-    };
-  }, [loadData, router]);
-
-  const saveAllRecipes = (updatedUserList: any[]) => {
-    if (!currentUser) return;
-    try {
-      const localRecipes = localStorage.getItem('zecratary_recipes') || localStorage.getItem('zecratary_saved_recipes');
-      const allRecipes: any[] = localRecipes ? JSON.parse(localRecipes) : [];
-
-      const otherUsersRecipes = allRecipes.filter((r: any) => {
-        return r.userId !== currentUser.id && r.createdBy !== currentUser.email;
-      });
-
-      const merged = [...updatedUserList, ...otherUsersRecipes];
-      setRecipes(updatedUserList);
-      localStorage.setItem('zecratary_recipes', JSON.stringify(merged));
-      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(merged));
-      
-      const activeUser = getCurrentUser();
-      if (activeUser && (activeUser.id || activeUser.email)) {
-        updatedUserList.forEach((r: any) => {
-          (persistSavedRecipe as any)(activeUser.id || activeUser.email, r, {
-            action: 'save',
-            createdBy: activeUser.email,
-            creatorName: activeUser.name
-          });
-        });
-      }
-
-      const updatedBooks = books.map((b: any) => ({
-        ...b,
-        recipeCount: updatedUserList.filter((r: any) => r.bookId === b.id).length
-      }));
-      setBooks(updatedBooks);
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_recipes_updated'));
-        window.dispatchEvent(new Event('storage'));
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const toggleFavorite = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    const updated = recipes.map(r => r.id === id ? { ...r, isFavorite: !r.isFavorite } : r);
-    saveAllRecipes(updated);
-    if (selectedRecipe?.id === id) {
-      setSelectedRecipe({ ...selectedRecipe, isFavorite: !selectedRecipe.isFavorite });
-    }
-  };
-
-  const toggleCooked = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    const updated = recipes.map(r => r.id === id ? { ...r, isCooked: !r.isCooked } : r);
-    saveAllRecipes(updated);
-    if (selectedRecipe?.id === id) {
-      setSelectedRecipe({ ...selectedRecipe, isCooked: !selectedRecipe.isCooked });
-    }
-  };
-
-  const handleAssignToBook = (bookId: string) => {
-    if (!selectedRecipe) return;
-    const isRemoving = selectedRecipe.bookId === bookId;
-    const targetBookId = isRemoving ? null : bookId;
-    const updatedRecipe = { ...selectedRecipe, bookId: targetBookId };
-    setSelectedRecipe(updatedRecipe);
-
-    const updatedList = recipes.map(r => r.id === selectedRecipe.id ? updatedRecipe : r);
-    saveAllRecipes(updatedList);
-  };
-
-  const openAddToPlanModal = () => {
-    setPlanDate(new Date().toISOString().split('T')[0]);
-    setPlanMealType('Dinner');
-    setPlanTime('');
-    setPlanNotes('');
-    setShowAddToPlanModal(true);
-  };
-
-  const handleSaveToCalendar = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
-    if (e && 'preventDefault' in e) e.preventDefault();
-    if (!selectedRecipe || !currentUser) return;
-
-    const localPlan = localStorage.getItem('zecratary_meal_plan');
-    const currentPlan = localPlan ? JSON.parse(localPlan) : [];
-
-    const newPlanItem = {
-      id: 'plan_' + Date.now(),
-      userId: currentUser.id,
-      createdBy: currentUser.email,
-      creatorName: currentUser.name,
-      date: planDate,
-      recipeId: selectedRecipe.id,
-      recipeName: selectedRecipe.title || selectedRecipe.name,
-      image: selectedRecipe.imageUrl || selectedRecipe.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80',
-      mealType: planMealType,
-      time: planTime,
-      notes: planNotes,
-      isLeftover: false
-    };
-
-    const updatedPlan = [...currentPlan, newPlanItem];
-    localStorage.setItem('zecratary_meal_plan', JSON.stringify(updatedPlan));
-
-    try {
-      await fetch('/api/planner', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id, meals: updatedPlan })
-      });
-    } catch (_) {}
-
-    window.dispatchEvent(new Event('zecratary_planner_updated'));
-    window.dispatchEvent(new Event('storage'));
-    setShowAddToPlanModal(false);
-  };
-
-  const updateSelectedRecipeState = (key: string, val: any) => {
-    if (!selectedRecipe) return;
-    const updatedRec = { ...selectedRecipe, [key]: val };
-    setSelectedRecipe(updatedRec);
-    const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
-    saveAllRecipes(updatedList);
-  };
-
-  const handleDeleteRecipe = (id: string) => {
-    if (!confirm(t('confirmDeleteRecipe') || 'Are you sure you want to delete this recipe?')) return;
-    const updated = recipes.filter(r => r.id !== id);
-    saveAllRecipes(updated);
-    setSelectedRecipe(null);
-    setIsEditing(false);
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setEditForm((prev: any) => ({ ...prev, imageUrl: reader.result as string }));
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleDragStart = (index: number) => {
-    setDraggedIndex(index);
-  };
-
-  const handleDragOver = (e: React.DragEvent, index: number, type: 'ingredients' | 'steps') => {
-    e.preventDefault();
-    if (draggedIndex === null || draggedIndex === index) return;
-
-    if (type === 'ingredients') {
-      const list = [...editForm.ingredients];
-      const item = list[draggedIndex];
-      list.splice(draggedIndex, 1);
-      list.splice(index, 0, item);
-      setEditForm({ ...editForm, ingredients: list });
-      setDraggedIndex(index);
-    } else {
-      const list = [...editForm.instructions];
-      const item = list[draggedIndex];
-      list.splice(draggedIndex, 1);
-      list.splice(index, 0, item);
-      setEditForm({ ...editForm, instructions: list });
-      setDraggedIndex(index);
-    }
-  };
-
-  const handleDrop = () => {
-    setDraggedIndex(null);
-  };
-
-  const handleOpenEdit = () => {
-    if (!selectedRecipe) return;
-    const defaultCat = categories[0] || 'Produce';
-    setEditForm({
-      title: selectedRecipe.title || selectedRecipe.name || '',
-      description: selectedRecipe.description || '',
-      recipeType: selectedRecipe.recipeType || selectedRecipe.tags?.[0] || 'Main Dish',
-      servings: selectedRecipe.servings || 4,
-      prepTimeMinutes: selectedRecipe.prepTimeMinutes || 30,
-      cookTimeMinutes: selectedRecipe.cookTimeMinutes || 10,
-      imageUrl: selectedRecipe.imageUrl || selectedRecipe.image || '',
-      ingredients: selectedRecipe.ingredients
-        ? selectedRecipe.ingredients.map((ing: any) => ({
-            amount: typeof ing === 'string' ? '' : ing.amount || ing.quantity || '',
-            unit: typeof ing === 'string' ? '' : ing.unit || '',
-            item: typeof ing === 'string' ? ing : ing.item || ing.name || '',
-            category: typeof ing === 'string' ? defaultCat : ing.category || defaultCat
-          }))
-        : [{ amount: '', unit: '', item: '', category: defaultCat }],
-      instructions: selectedRecipe.instructions && selectedRecipe.instructions.length > 0
-        ? [...selectedRecipe.instructions]
-        : ['']
-    });
-    setEditTab('info');
-    setIsReorderingIngredients(false);
-    setIsReorderingSteps(false);
-    setIsEditing(true);
-  };
-
-  const handleSaveEdit = () => {
-    if (!editForm.title.trim()) {
-      alert(t('enterTitlePrompt') || 'Please enter a recipe title.');
-      setEditTab('info');
-      return;
-    }
-
-    const updatedRec = {
-      ...selectedRecipe,
-      ...editForm,
-      tags: [editForm.recipeType]
-    };
-
-    setSelectedRecipe(updatedRec);
-    const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
-    saveAllRecipes(updatedList);
-    setIsEditing(false);
-  };
-
-  const calculateScaledAmount = (rawAmt: any, baseServings: number, currentServings: number) => {
-    if (!rawAmt || isNaN(Number(rawAmt))) {
-      if (typeof rawAmt === 'string' && rawAmt.includes('/')) {
-        try {
-          const parts = rawAmt.trim().split(' ');
-          let fractionValue = 0;
-          if (parts.length === 2) {
-            const [num, den] = parts[1].split('/').map(Number);
-            fractionValue = Number(parts[0]) + (num / den);
-          } else {
-            const [num, den] = parts[0].split('/').map(Number);
-            fractionValue = num / den;
-          }
-          const scaled = (fractionValue / (baseServings || 4)) * currentServings;
-          return Number.isInteger(scaled) ? scaled : Number(scaled.toFixed(2));
-        } catch {
-          return rawAmt;
-        }
-      }
-      return rawAmt;
-    }
-
-    const num = Number(rawAmt);
-    const scaled = (num / (baseServings || 4)) * currentServings;
-    return Number.isInteger(scaled) ? scaled : Number(scaled.toFixed(2));
-  };
-
-  const handleOpenShoppingModal = () => {
-    if (!selectedRecipe) return;
-    const defaultCat = categories[0] || 'Produce';
-    const baseServings = selectedRecipe.servings || 4;
-    const totalServings = baseServings * servingsMultiplier;
-
-    const items = (selectedRecipe.ingredients || []).map((ing: any, idx: number) => {
-      const rawAmt = typeof ing === 'string' ? '' : ing.amount || ing.quantity || '';
-      const scaledAmt = calculateScaledAmount(rawAmt, baseServings, totalServings);
-      return {
-        id: 'shop_item_' + idx,
-        selected: true,
-        amount: scaledAmt,
-        unit: typeof ing === 'string' ? '' : ing.unit || '',
-        name: typeof ing === 'string' ? ing : ing.item || ing.name || '',
-        category: typeof ing === 'string' ? defaultCat : ing.category || defaultCat
-      };
-    });
-    setShoppingModalIngredients(items);
-    setIsShoppingModalOpen(true);
-  };
-
-  const handleConfirmAddToShoppingList = () => {
-    const selectedItems = shoppingModalIngredients.filter(i => i.selected);
-    if (selectedItems.length === 0) return;
-
-    const local = localStorage.getItem('zecratary_shopping') || localStorage.getItem('zecratary_shopping_list');
-    const current = local ? JSON.parse(local) : [];
-    const formatted = selectedItems.map(i => ({
-      id: 's_' + Date.now() + Math.random(),
-      userId: currentUser?.id,
-      createdBy: currentUser?.email,
-      creatorName: currentUser?.name,
-      name: i.name,
-      amount: i.amount || '1',
-      unit: i.unit || 'unit',
-      category: i.category,
-      checked: false
-    }));
-    const updated = [...formatted, ...current];
-    localStorage.setItem('zecratary_shopping', JSON.stringify(updated));
-    localStorage.setItem('zecratary_shopping_list', JSON.stringify(updated));
-    setIsShoppingModalOpen(false);
-  };
-
-  const filtered = recipes.filter(r => {
-    const q = search.toLowerCase().trim();
-    const title = (r.title || r.name || '').toLowerCase();
-    if (q && !title.includes(q)) return false;
-    if (activeFilter === 'Favorites') return Boolean(r.isFavorite);
-    if (activeFilter === 'Main Dish') return (r.tags?.includes('Main Dish') || r.recipeType === 'Main Dish');
-    if (activeFilter === 'Cooked') return Boolean(r.isCooked);
-    if (activeFilter === 'Top Rated') return (r.rating || 0) >= 4;
-    return true;
-  });
-
-  const assignedBook = books.find(b => b.id === selectedRecipe?.bookId);
-  const baseServings = selectedRecipe?.servings || 4;
-  const currentTotalServings = baseServings * servingsMultiplier;
-
-  return (
-    <div 
-      className="max-w-6xl mx-auto space-y-6 pb-20 px-2 sm:px-4 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
-    >
-      {/* Top Header */}
-      <div className="flex items-center justify-between pt-2">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
-            {t('savedRecipes') || 'Saved Recipes'}
-          </h1>
-          <p className="text-xs mt-1 font-semibold" style={{ color: 'var(--color-emerald)' }}>
-            {t('yourCollectionSubtitle') || 'Your collection of favorite culinary recipes'} ({recipes.length})
-          </p>
-        </div>
-        <Link 
-          href="/manual"
-          className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg"
-          style={{ backgroundColor: 'var(--color-primary)' }}
-        >
-          <UploadCloud className="h-4 w-4"/> {t('createRecipe') || 'Create Recipe'}
-        </Link>
-      </div>
-
-      {/* Search & Filters */}
-      <div className="space-y-3">
-        <div className="flex gap-3">
-          <div className="relative flex-1">
-            <Search className="h-4 w-4 absolute left-3.5 top-3.5" style={{ color: 'var(--color-text-secondary)' }} />
-            <input
-              type="text"
-              placeholder={t('searchByNameOrIngredient') || 'Search by name or ingredient...'}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none transition"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-            />
-          </div>
-          <button 
-            type="button"
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-emerald)'
-            }}
-          >
-            <SlidersHorizontal className="h-4 w-4"/> {t('filter') || 'Filter'}
-          </button>
-        </div>
-
-        <div className="flex flex-wrap gap-2 text-xs">
-          {['All', 'Favorites', 'Main Dish', 'Cooked', 'Top Rated'].map((filter) => (
-            <button
-              key={filter}
-              type="button"
-              onClick={() => setActiveFilter(filter)}
-              className="px-3.5 py-1.5 rounded-full font-semibold border transition cursor-pointer"
-              style={{
-                backgroundColor: activeFilter === filter ? 'rgba(16, 185, 129, 0.15)' : 'var(--color-inner-dark)',
-                borderColor: activeFilter === filter ? 'var(--color-emerald)' : 'var(--color-border)',
-                color: activeFilter === filter ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
-              }}
-            >
-              {filter}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Recipe Grid */}
-      {loading ? (
-        <div className="text-xs py-12 text-center" style={{ color: 'var(--color-text-secondary)' }}>
-          {t('loadingRecipes') || 'Loading recipes...'}
-        </div>
-      ) : (
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filtered.map((r) => {
-            const cardBook = books.find(b => b.id === r.bookId);
-            return (
-              <div
-                key={r.id}
-                onClick={() => {
-                  setSelectedRecipe(r);
-                  setServingsMultiplier(1);
-                  setCompletedSteps([]);
-                  setNoteText(r.note || '');
-                  setIsBookDropdownOpen(false);
-                  setIsEditing(false);
-                }}
-                className="border rounded-2xl overflow-hidden transition cursor-pointer group shadow-sm hover:shadow-md relative"
-                style={{
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)'
-                }}
-              >
-                <div className="relative h-44 w-full overflow-hidden" style={{ backgroundColor: 'var(--color-inner-dark)' }}>
-                  <img
-                    src={r.imageUrl || r.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=800&q=80'}
-                    alt={r.title || r.name}
-                    className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                  />
-                  
-                  <div className="absolute top-3 right-3 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      type="button"
-                      onClick={(e) => toggleCooked(e, r.id)}
-                      className={`p-2 rounded-full backdrop-blur-md transition shadow-md ${
-                        r.isCooked 
-                          ? 'bg-emerald-600/90 text-white' 
-                          : 'bg-black/60 text-slate-300 hover:text-white'
-                      }`}
-                      title={r.isCooked ? "Marked as Cooked" : "Mark as Cooked"}
-                    >
-                      <CheckCircle2 className="h-4 w-4"/>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={(e) => toggleFavorite(e, r.id)}
-                      className="p-2 bg-black/60 hover:bg-black/80 backdrop-blur-md rounded-full transition shadow-md"
-                      style={{ color: r.isFavorite ? 'var(--color-primary)' : '#ffffff' }}
-                      title="Favorite"
-                    >
-                      <Heart className={`h-4 w-4 ${r.isFavorite ? 'fill-current' : ''}`}/>
-                    </button>
-                  </div>
-
-                  {cardBook && (
-                    <div className="absolute bottom-3 left-3 bg-black/75 backdrop-blur-md text-[10px] text-amber-300 font-bold px-2.5 py-1 rounded-full flex items-center gap-1 border border-amber-400/30">
-                      <Book className="h-3 w-3"/> {cardBook.title}
-                    </div>
-                  )}
-                </div>
-
-                <div className="p-4 space-y-2">
-                  <h3 className="font-bold text-base leading-snug" style={{ color: 'var(--color-text)' }}>
-                    {r.title || r.name}
-                  </h3>
-                  
-                  <div className="flex items-center justify-between pt-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-primary)' }}>
-                        {r.tags?.[0] || r.recipeType || 'Main Dish'}
-                      </span>
-
-                      {(r.rating || 0) > 0 ? (
-                        <span className="flex items-center gap-1 text-amber-400 text-xs font-bold bg-amber-400/10 px-2 py-0.5 rounded-md border border-amber-400/20 shadow-xs">
-                          <Star className="h-3 w-3 fill-amber-400 text-amber-400"/> {r.rating}
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-[11px] font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-                          <Star className="h-3 w-3 opacity-60"/> 0
-                        </span>
-                      )}
-                    </div>
-
-                    <span className="text-xs flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
-                      <Clock className="h-3 w-3"/> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* RECIPE DETAILS & EDIT MODAL */}
-      {selectedRecipe && (
-        <div 
-          onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
-          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative cursor-default"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <button
-              type="button"
-              onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
-              className="absolute top-4 right-4 z-30 p-2 bg-black/70 hover:bg-black text-slate-300 hover:text-white rounded-xl border border-slate-700/60 transition cursor-pointer"
-            >
-              <X className="h-5 w-5"/>
-            </button>
-
-            <div className="overflow-y-auto flex-1">
-              {!isEditing ? (
-                /* RECIPE DETAILS VIEW */
-                <div className="space-y-5 pb-6">
-                  {/* Hero Banner */}
-                  <div className="relative h-64 sm:h-72 w-full overflow-hidden flex flex-col justify-end p-5" style={{ backgroundColor: 'var(--color-inner-dark)' }}>
-                    <img
-                      src={selectedRecipe.imageUrl || selectedRecipe.image || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80'}
-                      alt={selectedRecipe.title || selectedRecipe.name}
-                      className="absolute inset-0 w-full h-full object-cover"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/60 to-transparent" />
-
-                    <div className="relative z-10 space-y-3">
-                      <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
-                        {selectedRecipe.title || selectedRecipe.name}
-                      </h2>
-
-                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-                        <span className="bg-black/60 border border-white/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5">
-                          <Clock className="h-3.5 w-3.5"/> Cook: {selectedRecipe.cookTimeMinutes || 10}m
-                        </span>
-                        <span className="bg-black/60 border border-white/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5">
-                          <Clock className="h-3.5 w-3.5"/> Prep: {selectedRecipe.prepTimeMinutes || 30}m
-                        </span>
-                        <span className="bg-black/60 border border-white/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5">
-                          <Utensils className="h-3.5 w-3.5"/> {selectedRecipe.tags?.[0] || selectedRecipe.recipeType || 'Main Dish'}
-                        </span>
-                        
-                        <button
-                          type="button"
-                          onClick={(e) => toggleFavorite(e, selectedRecipe.id)}
-                          className="ml-auto w-8 h-8 bg-white/95 rounded-full flex items-center justify-center shadow cursor-pointer"
-                          style={{ color: 'var(--color-primary)' }}
-                        >
-                          <Heart className={`h-4 w-4 ${selectedRecipe.isFavorite ? 'fill-current' : 'text-slate-400'}`}/>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Action Row */}
-                  <div className="px-5 grid grid-cols-3 gap-2.5">
-                    <div className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setIsBookDropdownOpen(!isBookDropdownOpen)}
-                        className="w-full border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer"
-                        style={{
-                          backgroundColor: assignedBook ? 'rgba(224, 86, 56, 0.15)' : 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
-                        }}
-                      >
-                        <BookmarkPlus className="h-4 w-4 shrink-0"/>
-                        <span className="truncate">{assignedBook ? assignedBook.title : (t('addToBook') || 'Add to Book')}</span>
-                        <ChevronDown className="h-3 w-3 shrink-0 opacity-70 ml-0.5"/>
-                      </button>
-
-                      {isBookDropdownOpen && (
-                        <>
-                          <div className="fixed inset-0 z-40" onClick={() => setIsBookDropdownOpen(false)} />
-                          <div 
-                            className="absolute left-0 top-full mt-2 w-64 border rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in"
-                            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <div className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
-                              <span>{t('selectCookbook') || 'Select Cookbook'}</span>
-                              <Link className="hover:underline" href="/books" style={{ color: 'var(--color-emerald)' }}>Manage</Link>
-                            </div>
-
-                            <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
-                              {books.length === 0 ? (
-                                <div className="text-xs px-2.5 py-2" style={{ color: 'var(--color-text-secondary)' }}>No cookbooks available</div>
-                              ) : (
-                                books.map((b) => {
-                                  const isAssigned = selectedRecipe.bookId === b.id;
-                                  return (
-                                    <button
-                                      key={b.id}
-                                      type="button"
-                                      onClick={() => {
-                                        handleAssignToBook(b.id);
-                                        setIsBookDropdownOpen(false);
-                                      }}
-                                      className="w-full text-left px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition cursor-pointer"
-                                      style={{
-                                        backgroundColor: isAssigned ? 'rgba(224, 86, 56, 0.15)' : 'transparent',
-                                        color: isAssigned ? 'var(--color-primary)' : 'var(--color-text)'
-                                      }}
-                                    >
-                                      <span className="truncate flex-1 pr-2">{b.title}</span>
-                                      {isAssigned && <Check className="h-3.5 w-3.5 shrink-0"/>}
-                                    </button>
-                                  );
-                                })
-                              )}
-                            </div>
-                          </div>
-                        </>
-                      )}
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={openAddToPlanModal}
-                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-primary)',
-                        color: 'var(--color-primary)'
-                      }}
-                    >
-                      <CalendarPlus className="h-4 w-4"/> {t('addToPlan') || 'Add to Plan'}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleOpenShoppingModal}
-                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-primary)',
-                        color: 'var(--color-primary)'
-                      }}
-                    >
-                      <ShoppingCart className="h-4 w-4"/> {t('shoppingList') || 'Shopping List'}
-                    </button>
-                  </div>
-
-                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
-
-                  {/* Servings Stepper & Tools */}
-                  <div className="px-5 flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
-                        <Users className="h-4 w-4"/> {t('servings') || 'Servings'}
-                      </span>
-                      <div className="flex items-center border rounded-lg overflow-hidden" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                        <button
-                          type="button"
-                          onClick={() => setServingsMultiplier(Math.max(1, servingsMultiplier - 1))}
-                          className="px-2.5 py-1 font-bold cursor-pointer transition hover:opacity-80"
-                        >
-                          -
-                        </button>
-                        <span className="px-3 py-1 text-xs font-bold min-w-[32px] text-center" style={{ color: 'var(--color-text)' }}>
-                          {currentTotalServings}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setServingsMultiplier(servingsMultiplier + 1)}
-                          className="px-2.5 py-1 font-bold cursor-pointer transition hover:opacity-80"
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={handleOpenEdit}
-                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                      >
-                        <Edit3 className="h-3.5 w-3.5"/> {t('edit') || 'Edit'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (typeof window !== 'undefined') navigator.clipboard.writeText(window.location.href);
-                        }}
-                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
-                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                      >
-                        <Share2 className="h-3.5 w-3.5"/> {t('share') || 'Share'}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Description */}
-                  {selectedRecipe.description && (
-                    <div className="px-5 text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                      {selectedRecipe.description}
-                    </div>
-                  )}
-
-                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
-
-                  {/* Cooked Status / Star Rating / Note */}
-                  <div className="px-5 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <button
-                        type="button"
-                        onClick={() => updateSelectedRecipeState('isCooked', !selectedRecipe.isCooked)}
-                        className="flex items-center gap-2.5 text-base font-extrabold cursor-pointer select-none transition"
-                        style={{ color: 'var(--color-text)' }}
-                      >
-                        <span>{selectedRecipe.isCooked ? "Cooked" : "Mark as Cooked"}</span>
-                        <span className={`w-5 h-5 rounded-full flex items-center justify-center transition shadow-sm ${
-                          selectedRecipe.isCooked ? 'bg-[#22c55e] text-white' : 'border border-slate-600 bg-transparent text-transparent'
-                        }`}>
-                          {selectedRecipe.isCooked && <Check className="h-3.5 w-3.5 stroke-[3]"/>}
-                        </span>
-                      </button>
-
-                      <div className="flex items-center gap-1">
-                        {[1, 2, 3, 4, 5].map((star) => (
-                          <Star
-                            key={star}
-                            onClick={() => updateSelectedRecipeState('rating', star)}
-                            className={`h-5 w-5 cursor-pointer transition ${
-                              (selectedRecipe.rating || 0) >= star
-                                ? 'fill-[#E05638] text-[#E05638]'
-                                : 'opacity-40'
-                            }`}
-                          />
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <button
-                        type="button"
-                        onClick={() => setIsNoteOpen(!isNoteOpen)}
-                        className="flex items-center gap-1.5 text-xs font-medium transition cursor-pointer"
-                        style={{ color: 'var(--color-text-secondary)' }}
-                      >
-                        <Edit3 className="h-3.5 w-3.5"/>
-                        <span className="italic">{t('addANote') || 'Add a note'}</span>
-                      </button>
-
-                      {isNoteOpen && (
-                        <div className="flex gap-2 animate-in fade-in">
-                          <input
-                            type="text"
-                            placeholder="Add notes..."
-                            value={noteText}
-                            onChange={(e) => setNoteText(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                updateSelectedRecipeState('note', noteText);
-                                setIsNoteOpen(false);
-                              }
-                            }}
-                            className="flex-1 border rounded-xl px-3 py-2 text-xs outline-none"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text)'
-                            }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              updateSelectedRecipeState('note', noteText);
-                              setIsNoteOpen(false);
-                            }}
-                            className="text-white font-bold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer"
-                            style={{ backgroundColor: 'var(--color-primary)' }}
-                          >
-                            Save
-                          </button>
-                        </div>
-                      )}
-                      {selectedRecipe.note && !isNoteOpen && (
-                        <p className="text-xs italic" style={{ color: 'var(--color-emerald)' }}>
-                          Note: "{selectedRecipe.note}"
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
-
-                  {/* INGREDIENTS SECTION */}
-                  <div className="px-5 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>
-                        {t('ingredients') || 'Ingredients'}
-                      </h3>
-                      
-                      <div className="flex items-center border rounded-lg overflow-hidden text-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                        <div className="px-2.5 py-1 border-r flex items-center justify-center" style={{ borderColor: 'var(--color-border)' }}>
-                          <Type className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setFontSizeScale(Math.max(70, fontSizeScale - 10))}
-                          className="px-2.5 py-1 font-bold cursor-pointer"
-                        >
-                          -
-                        </button>
-                        <span className="px-2.5 py-1 font-bold min-w-[42px] text-center">
-                          {fontSizeScale}%
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setFontSizeScale(Math.min(140, fontSizeScale + 10))}
-                          className="px-2.5 py-1 font-bold cursor-pointer"
-                        >
-                          +
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2.5" style={{ fontSize: `${fontSizeScale}%` }}>
-                      {Array.isArray(selectedRecipe.ingredients) && selectedRecipe.ingredients.map((ing: any, idx: number) => {
-                        const rawAmt = typeof ing === 'string' ? '' : ing.amount || ing.quantity || '';
-                        const scaledAmt = calculateScaledAmount(rawAmt, baseServings, currentTotalServings);
-                        const unit = typeof ing === 'string' ? '' : ing.unit || '';
-                        const name = typeof ing === 'string' ? ing : ing.item || ing.name || '';
-                        return (
-                          <div key={idx} className="flex items-start gap-2.5 leading-snug">
-                            <span className="w-2 h-2 rounded-full inline-block shrink-0 mt-1.5" style={{ backgroundColor: 'var(--color-primary)' }} />
-                            <span>
-                              {(scaledAmt !== '' || unit) && (
-                                <strong className="font-semibold" style={{ color: 'var(--color-text)' }}>
-                                  {scaledAmt} {unit && unit !== 'Unit' ? unit : ''}{' '}
-                                </strong>
-                              )}
-                              <span style={{ color: 'var(--color-text-secondary)' }}>{name}</span>
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
-
-                  {/* INSTRUCTIONS SECTION */}
-                  <div className="px-5 space-y-4">
-                    <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>
-                      {t('instructions') || 'Instructions'}
-                    </h3>
-                    
-                    <div className="space-y-3.5" style={{ fontSize: `${fontSizeScale}%` }}>
-                      {Array.isArray(selectedRecipe.instructions) && selectedRecipe.instructions.map((step: string, idx: number) => {
-                        const isDone = completedSteps.includes(idx);
-                        return (
-                          <div
-                            key={idx}
-                            onClick={() => {
-                              if (completedSteps.includes(idx)) {
-                                setCompletedSteps(completedSteps.filter(i => i !== idx));
-                              } else {
-                                setCompletedSteps([...completedSteps, idx]);
-                              }
-                            }}
-                            className={`flex items-start gap-3 p-3 rounded-2xl border cursor-pointer transition select-none ${
-                              isDone ? 'opacity-50' : 'hover:border-slate-600'
-                            }`}
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)'
-                            }}
-                          >
-                            <div 
-                              className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 mt-0.5 transition ${
-                                isDone ? 'text-white' : 'bg-transparent'
-                              }`}
-                              style={{
-                                backgroundColor: isDone ? 'var(--color-primary)' : 'transparent',
-                                borderColor: 'var(--color-primary)'
-                              }}
-                            >
-                              {isDone && <Check className="h-3 w-3 stroke-[3]"/>}
-                            </div>
-
-                            <span className="font-extrabold shrink-0 text-sm" style={{ color: 'var(--color-primary)' }}>
-                              {idx + 1}.
-                            </span>
-
-                            <span className={`leading-relaxed flex-1 ${isDone ? 'line-through opacity-60' : ''}`} style={{ color: 'var(--color-text)' }}>
-                              {step}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
-
-                  {/* Delete Button */}
-                  <div className="px-5 flex items-center justify-end text-xs">
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteRecipe(selectedRecipe.id)}
-                      className="border border-red-500/40 text-red-400 px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 transition cursor-pointer hover:bg-red-950/20"
-                    >
-                      <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipe') || 'Delete Recipe'}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                /* EDIT RECIPE VIEW */
-                <div className="p-6 space-y-6">
-                  <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-                    <h3 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                      <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('editRecipe') || 'Edit Recipe'}
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={() => setIsEditing(false)}
-                      className="p-1 rounded-lg transition cursor-pointer"
-                      style={{ color: 'var(--color-text-secondary)' }}
-                    >
-                      <X className="h-5 w-5"/>
-                    </button>
-                  </div>
-
-                  <div className="flex p-1.5 rounded-2xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                    {[
-                      { id: 'info', label: 'Basic Info' },
-                      { id: 'ingredients', label: 'Ingredients' },
-                      { id: 'steps', label: 'Steps' }
-                    ].map((tab) => (
-                      <button
-                        key={tab.id}
-                        type="button"
-                        onClick={() => setEditTab(tab.id as any)}
-                        className={`flex-1 py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
-                          editTab === tab.id ? 'shadow-md border' : 'opacity-70 hover:opacity-100'
-                        }`}
-                        style={{
-                          backgroundColor: editTab === tab.id ? 'var(--color-card)' : 'transparent',
-                          borderColor: editTab === tab.id ? 'var(--color-border)' : 'transparent',
-                          color: 'var(--color-text)'
-                        }}
-                      >
-                        {tab.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {editTab === 'info' && (
-                    <div className="space-y-4 text-xs">
-                      <div>
-                        <label className="block font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>Recipe Title *</label>
-                        <input
-                          type="text"
-                          required
-                          value={editForm.title}
-                          onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                          className="w-full border rounded-xl p-3 text-sm outline-none"
-                          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>Description</label>
-                        <textarea
-                          rows={3}
-                          value={editForm.description}
-                          onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                          className="w-full border rounded-xl p-3 text-xs outline-none resize-y"
-                          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>Recipe Type</label>
-                          <select
-                            value={editForm.recipeType}
-                            onChange={(e) => setEditForm({ ...editForm, recipeType: e.target.value })}
-                            className="w-full border rounded-xl p-3 text-xs outline-none"
-                            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                          >
-                            <option value="Main Dish">Main Dish</option>
-                            <option value="Appetizer">Appetizer</option>
-                            <option value="Dessert">Dessert</option>
-                            <option value="Side Dish">Side Dish</option>
-                            <option value="Beverage">Beverage</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="block font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>Servings</label>
-                          <input
-                            type="number"
-                            value={editForm.servings}
-                            onChange={(e) => setEditForm({ ...editForm, servings: parseInt(e.target.value) || 1 })}
-                            className="w-full border rounded-xl p-3 text-xs outline-none"
-                            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="pt-4 border-t flex justify-end gap-3" style={{ borderColor: 'var(--color-border)' }}>
-                        <button
-                          type="button"
-                          onClick={() => setIsEditing(false)}
-                          className="px-5 py-2.5 rounded-xl border font-bold text-xs cursor-pointer"
-                          style={{ borderColor: 'var(--color-border)' }}
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleSaveEdit}
-                          className="px-6 py-2.5 rounded-xl text-white font-bold text-xs flex items-center gap-2 cursor-pointer shadow-lg"
-                          style={{ backgroundColor: 'var(--color-primary)' }}
-                        >
-                          <Save className="h-4 w-4"/> Save Changes
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {editTab === 'ingredients' && (
-                    <div className="space-y-4 text-xs">
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>Ingredients</span>
-                        <button
-                          type="button"
-                          onClick={() => setEditForm({
-                            ...editForm,
-                            ingredients: [...editForm.ingredients, { amount: '', unit: '', item: '', category: categories[0] || 'Produce' }]
-                          })}
-                          className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer"
-                          style={{ backgroundColor: 'var(--color-primary)' }}
-                        >
-                          <Plus className="h-3.5 w-3.5"/> Add Ingredient
-                        </button>
-                      </div>
-
-                      <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
-                        {editForm.ingredients.map((ing: any, idx: number) => (
-                          <div key={idx} className="flex items-center gap-2 p-2 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                            <input
-                              type="text"
-                              placeholder="Amt"
-                              value={ing.amount}
-                              onChange={(e) => {
-                                const list = [...editForm.ingredients];
-                                list[idx].amount = e.target.value;
-                                setEditForm({ ...editForm, ingredients: list });
-                              }}
-                              className="w-16 border rounded-lg p-2 text-center text-xs font-bold outline-none"
-                              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                            />
-                            <input
-                              type="text"
-                              placeholder="Unit"
-                              value={ing.unit}
-                              onChange={(e) => {
-                                const list = [...editForm.ingredients];
-                                list[idx].unit = e.target.value;
-                                setEditForm({ ...editForm, ingredients: list });
-                              }}
-                              className="w-20 border rounded-lg p-2 text-center text-xs outline-none"
-                              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                            />
-                            <input
-                              type="text"
-                              placeholder="Ingredient name..."
-                              value={ing.item}
-                              onChange={(e) => {
-                                const list = [...editForm.ingredients];
-                                list[idx].item = e.target.value;
-                                setEditForm({ ...editForm, ingredients: list });
-                              }}
-                              className="flex-1 bg-transparent border-none text-xs outline-none px-2"
-                              style={{ color: 'var(--color-text)' }}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setEditForm({
-                                ...editForm,
-                                ingredients: editForm.ingredients.filter((_: any, i: number) => i !== idx)
-                              })}
-                              className="p-1.5 text-red-400 hover:text-red-300 cursor-pointer"
-                            >
-                              <Trash2 className="h-4 w-4"/>
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="flex justify-between pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                        <button type="button" onClick={() => setEditTab('info')} className="border px-5 py-2 rounded-xl text-xs font-bold cursor-pointer" style={{ borderColor: 'var(--color-border)' }}>
-                          ← Back
-                        </button>
-                        <button type="button" onClick={() => setEditTab('steps')} className="text-white px-6 py-2 rounded-xl text-xs font-bold cursor-pointer" style={{ backgroundColor: 'var(--color-primary)' }}>
-                          Next: Steps →
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {editTab === 'steps' && (
-                    <div className="space-y-4 text-xs">
-                      <div className="flex justify-between items-center">
-                        <span className="font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>Instructions</span>
-                        <button
-                          type="button"
-                          onClick={() => setEditForm({ ...editForm, instructions: [...editForm.instructions, ''] })}
-                          className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer"
-                          style={{ backgroundColor: 'var(--color-primary)' }}
-                        >
-                          <Plus className="h-3.5 w-3.5"/> Add Step
-                        </button>
-                      </div>
-
-                      <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
-                        {editForm.instructions.map((step: string, idx: number) => (
-                          <div key={idx} className="flex items-start gap-2 p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                            <span className="w-6 h-6 rounded-full font-bold flex items-center justify-center shrink-0 mt-1" style={{ backgroundColor: 'rgba(224, 86, 56, 0.2)', color: 'var(--color-primary)' }}>
-                              {idx + 1}
-                            </span>
-                            <textarea
-                              rows={2}
-                              value={step}
-                              onChange={(e) => {
-                                const list = [...editForm.instructions];
-                                list[idx] = e.target.value;
-                                setEditForm({ ...editForm, instructions: list });
-                              }}
-                              className="flex-1 bg-transparent border-none text-xs outline-none resize-y"
-                              style={{ color: 'var(--color-text)' }}
-                              placeholder={`Step ${idx + 1}...`}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setEditForm({
-                                ...editForm,
-                                instructions: editForm.instructions.filter((_: any, i: number) => i !== idx)
-                              })}
-                              className="p-1.5 text-red-400 hover:text-red-300 cursor-pointer"
-                            >
-                              <Trash2 className="h-4 w-4"/>
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="flex justify-between pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                        <button type="button" onClick={() => setEditTab('ingredients')} className="border px-5 py-2 rounded-xl text-xs font-bold cursor-pointer" style={{ borderColor: 'var(--color-border)' }}>
-                          ← Back
-                        </button>
-                        <button type="button" onClick={handleSaveEdit} className="text-white px-8 py-2.5 rounded-xl text-xs font-bold cursor-pointer shadow-lg" style={{ backgroundColor: 'var(--color-primary)' }}>
-                          <Save className="h-4 w-4 inline mr-1.5"/> Save Changes
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ADD TO PLAN MODAL (NO NATIVE FORM) */}
-      {showAddToPlanModal && selectedRecipe && (
-        <div 
-          onClick={() => setShowAddToPlanModal(false)}
-          className="fixed inset-0 bg-black/85 backdrop-blur-md z-[70] flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <button 
-              type="button"
-              onClick={() => setShowAddToPlanModal(false)} 
-              className="absolute top-4 right-4 p-2 rounded-lg transition cursor-pointer"
-              style={{ backgroundColor: 'var(--color-inner-dark)' }}
-            >
-              <X className="h-4 w-4"/>
-            </button>
-
-            <div className="pr-6 space-y-1">
-              <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
-                {t('addToCalendar') || 'Add to Calendar'}
-              </h2>
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                Schedule {selectedRecipe.title || selectedRecipe.name} in your meal plan
-              </p>
-            </div>
-
-            <div className="space-y-4 pt-1">
-              <div>
-                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>Date</label>
-                <div className="relative flex items-center">
-                  <Calendar className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-primary)' }}/>
-                  <input
-                    type="date"
-                    required
-                    value={planDate}
-                    onChange={(e) => setPlanDate(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleSaveToCalendar();
-                      }
-                    }}
-                    className="w-full border rounded-xl pl-10 pr-3 py-2.5 text-xs font-semibold outline-none cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>Meal Type</label>
-                <select
-                  value={planMealType}
-                  onChange={(e) => setPlanMealType(e.target.value)}
-                  className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                >
-                  <option value="Breakfast">Breakfast</option>
-                  <option value="Lunch">Lunch</option>
-                  <option value="Dinner">Dinner</option>
-                  <option value="Snack">Snack</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>Notes</label>
-                <textarea
-                  value={planNotes}
-                  onChange={(e) => setPlanNotes(e.target.value)}
-                  placeholder="Add any notes or reminders..."
-                  rows={3}
-                  className="w-full border rounded-xl p-3 text-xs outline-none resize-none"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
-              </div>
-
-              <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowAddToPlanModal(false)}
-                  className="px-5 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
-                  style={{ borderColor: 'var(--color-border)' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSaveToCalendar()}
-                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                >
-                  Add to Calendar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* SHOPPING LIST MODAL (NO NATIVE FORM) */}
-      {isShoppingModalOpen && (
-        <div 
-          onClick={() => setIsShoppingModalOpen(false)}
-          className="fixed inset-0 bg-black/85 backdrop-blur-md z-[60] flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl p-6 space-y-5 cursor-default"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <div>
-                <h3 className="text-lg font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                  <ShoppingCart className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> Add to Shopping List
-                </h3>
-                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Select items to add directly to your shopping list</p>
-              </div>
-              <button type="button" onClick={() => setIsShoppingModalOpen(false)} className="cursor-pointer" style={{ color: 'var(--color-text-secondary)' }}>
-                <X className="h-5 w-5"/>
-              </button>
-            </div>
-
-            <div className="overflow-y-auto flex-1 space-y-2.5 pr-1 text-xs">
-              {shoppingModalIngredients.map((ing, idx) => (
-                <div key={ing.id} className="flex items-center gap-2 p-2.5 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <div
-                    onClick={() => {
-                      const updated = [...shoppingModalIngredients];
-                      updated[idx].selected = !updated[idx].selected;
-                      setShoppingModalIngredients(updated);
-                    }}
-                    className={`w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition ${
-                      ing.selected ? 'text-white' : 'border-slate-700 bg-slate-900'
-                    }`}
-                    style={{
-                      backgroundColor: ing.selected ? 'var(--color-primary)' : 'transparent',
-                      borderColor: ing.selected ? 'var(--color-primary)' : 'var(--color-border)'
-                    }}
-                  >
-                    {ing.selected && <CheckSquare className="h-3.5 w-3.5"/>}
-                  </div>
-
-                  <input
-                    type="text"
-                    value={ing.amount}
-                    onChange={(e) => {
-                      const updated = [...shoppingModalIngredients];
-                      updated[idx].amount = e.target.value;
-                      setShoppingModalIngredients(updated);
-                    }}
-                    className="w-16 border rounded-lg p-2 text-center text-xs font-bold outline-none"
-                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                  <input
-                    type="text"
-                    value={ing.unit}
-                    onChange={(e) => {
-                      const updated = [...shoppingModalIngredients];
-                      updated[idx].unit = e.target.value;
-                      setShoppingModalIngredients(updated);
-                    }}
-                    className="w-20 border rounded-lg p-2 text-center text-xs outline-none"
-                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                  />
-                  <input
-                    type="text"
-                    value={ing.name}
-                    onChange={(e) => {
-                      const updated = [...shoppingModalIngredients];
-                      updated[idx].name = e.target.value;
-                      setShoppingModalIngredients(updated);
-                    }}
-                    className="flex-1 bg-transparent border-none text-xs outline-none px-2"
-                    style={{ color: 'var(--color-text)' }}
-                  />
-                </div>
-              ))}
-            </div>
-
-            <div className="pt-3 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
-              <button
-                type="button"
-                onClick={() => setIsShoppingModalOpen(false)}
-                className="px-4 py-2 rounded-xl border text-xs font-bold cursor-pointer"
-                style={{ borderColor: 'var(--color-border)' }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmAddToShoppingList}
-                className="px-6 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-              >
-                <ShoppingCart className="h-3.5 w-3.5"/> Add Selected to List
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+export default function SavedPageRedirect() {
+  redirect('/recipes');
 }
 
 ```
@@ -34124,7 +36730,7 @@ export default function DashboardPage() {
       {/* 3. Primary Metrics Grid (4-Way Live Counter with Dynamic Token Icon) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: t('statsRecipes', 'Saved Recipes'), value: stats.savedRecipes, icon: BookOpen, href: '/saved', color: 'var(--color-primary)' },
+          { label: t('statsRecipes', 'Saved Recipes'), value: stats.savedRecipes, icon: BookOpen, href: '/recipes', color: 'var(--color-primary)' },
           { label: t('statsMealPlans', 'Scheduled Meals'), value: stats.scheduledMeals, icon: Calendar, href: '/planner', color: '#0ea5e9' },
           { label: t('statsPantryItems', 'Pantry in Stock'), value: stats.pantryItems, icon: Package, href: '/pantry', color: 'var(--color-emerald)' },
           { 
@@ -34276,7 +36882,7 @@ export default function DashboardPage() {
             </h3>
           </div>
           <Link
-            href="/saved"
+            href="/recipes"
             className="text-xs font-bold flex items-center gap-1 text-[var(--color-primary)] hover:underline"
           >
             <span>{t('viewAllRecipes', 'View All')}</span>
@@ -34293,7 +36899,7 @@ export default function DashboardPage() {
             {stats.recentRecipes.map((rec) => (
               <Link
                 key={rec.id}
-                href="/saved"
+                href="/recipes"
                 className="border rounded-2xl overflow-hidden shadow-xs hover:shadow-md transition flex flex-col justify-between group"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
               >
@@ -36525,6 +39131,31 @@ const DEFAULT_CATEGORIES = [
   'Spices & Seasonings', 'Canned Goods', 'Grains & Pasta', 'Condiments & Sauces', 'Other'
 ];
 
+
+const getCategoryName = (cat: any): string => {
+  if (!cat) return 'Pantry Staples';
+  if (typeof cat === 'string') {
+    const trimmed = cat.trim();
+    return trimmed === '[object Object]' || !trimmed ? 'Pantry Staples' : trimmed;
+  }
+  if (typeof cat === 'object') {
+    return (cat.name || cat.label || cat.title || cat.slug || cat.id || 'Pantry Staples').trim();
+  }
+  return String(cat).trim();
+};
+
+const getRecipeTypeName = (type: any): string => {
+  if (!type) return 'Main Dish';
+  if (typeof type === 'string') {
+    const trimmed = type.trim();
+    return trimmed === '[object Object]' || !trimmed ? 'Main Dish' : trimmed;
+  }
+  if (typeof type === 'object') {
+    return (type.name || type.label || type.title || type.slug || type.id || 'Main Dish').trim();
+  }
+  return String(type).trim();
+};
+
 export default function ManualRecipePage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -36601,8 +39232,8 @@ export default function ManualRecipePage() {
   }, [router, t]);
 
   useEffect(() => {
-    if (recipeTypes && recipeTypes.length > 0 && !recipeTypes.includes(form.recipeType)) {
-      setForm(prev => ({ ...prev, recipeType: recipeTypes[0] }));
+    if (recipeTypes && recipeTypes.length > 0 && !recipeTypes.map(getRecipeTypeName).includes(form.recipeType)) {
+      setForm(prev => ({ ...prev, recipeType: getRecipeTypeName(recipeTypes[0]) }));
     }
   }, [recipeTypes, form.recipeType]);
 
@@ -36786,7 +39417,7 @@ export default function ManualRecipePage() {
 
       showToast(t('recipeCreatedSuccessToast', 'Recipe saved successfully to your culinary library!'), 'success');
       setTimeout(() => {
-        router.push('/saved');
+        router.push('/recipes');
       }, 700);
 
     } catch (err: any) {
@@ -36828,7 +39459,7 @@ export default function ManualRecipePage() {
         >
           <div className="flex items-center gap-3">
             <Link 
-              href="/saved" 
+              href="/recipes" 
               className="p-2.5 rounded-xl transition shadow-xs border cursor-pointer hover:opacity-80"
               style={{
                 backgroundColor: 'var(--color-card)',
@@ -37015,9 +39646,14 @@ export default function ManualRecipePage() {
                         color: 'var(--color-text)'
                       }}
                     >
-                      {recipeTypes.map((type) => (
-                        <option key={type} value={type} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{type}</option>
-                      ))}
+                      {recipeTypes.map((type: any, idx: number) => {
+                        const typeName = getRecipeTypeName(type);
+                        return (
+                          <option key={`manual_type_${typeName}_${idx}`} value={typeName} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                            {typeName}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
 
@@ -37212,7 +39848,7 @@ export default function ManualRecipePage() {
                     type="button"
                     onClick={() => setForm({ 
                       ...form, 
-                      ingredients: [...form.ingredients, { amount: '1', unit: 'unit', item: '', category: ingredientCategories[0] || 'Pantry Staples' }] 
+                      ingredients: [...form.ingredients, { amount: '1', unit: 'unit', item: '', category: getCategoryName(ingredientCategories[0]) || 'Pantry Staples' }] 
                     })}
                     className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-primary)' }}
@@ -37305,9 +39941,14 @@ export default function ManualRecipePage() {
                         color: 'var(--color-text)'
                       }}
                     >
-                      {ingredientCategories.map((cat: any) => (
-                        <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
-                      ))}
+                      {ingredientCategories.map((cat: any, idx: number) => {
+                        const catName = getCategoryName(cat);
+                        return (
+                          <option key={`manual_cat_${catName}_${idx}`} value={catName} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                            {catName}
+                          </option>
+                        );
+                      })}
                     </select>
 
                     {/* Touch Reorder Controls & Drag Handle */}
@@ -38724,6 +41365,3859 @@ export default function ProfilePage() {
     }>
       <ProfileContent />
     </Suspense>
+  );
+}
+
+```
+
+## File: `apps/web/src/app/recipes/page.tsx`
+```typescript
+'use client';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import {
+  Search, SlidersHorizontal, Heart, Clock, Utensils,
+  X, UploadCloud, BookmarkPlus, CalendarPlus, ShoppingCart,
+  Timer, Edit3, Share2, Star, Check, Book, ChevronDown,
+  Trash2, Save, Plus, ImagePlus, Users, Calendar,
+  GripVertical, CheckSquare, CheckCircle2, Type, ExternalLink,
+  Carrot, Hourglass, ChevronLeft, ChevronRight, LayoutGrid,
+  Grid3X3, Rows3, Play, Pause, Bell
+} from 'lucide-react';
+import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
+import { syncUserSavedRecipes, persistSavedRecipe, deleteSavedRecipe } from '@/lib/recipeSync';
+import { getStoredCategories } from '@/lib/categories';
+import { useTranslation } from '@/components/LanguageProvider';
+
+const RECIPE_TYPES = [
+  'All Types',
+  'Appetiser',
+  'Main Dish',
+  'Side Dish',
+  'Dessert',
+  'Snack',
+  'Breakfast',
+  'Lunch'
+];
+
+type GridMode = '3x3' | '4x4' | '5x5';
+
+const GRID_CONFIG: Record<GridMode, { colsClass: string; perPage: number; label: string; imgHeight: string; titleSize: string }> = {
+  '3x3': {
+    colsClass: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3',
+    perPage: 9,
+    label: '3×3',
+    imgHeight: 'h-44',
+    titleSize: 'text-base'
+  },
+  '4x4': {
+    colsClass: 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4',
+    perPage: 16,
+    label: '4×4',
+    imgHeight: 'h-36',
+    titleSize: 'text-sm'
+  },
+  '5x5': {
+    colsClass: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5',
+    perPage: 25,
+    label: '5×5',
+    imgHeight: 'h-28',
+    titleSize: 'text-xs'
+  }
+};
+
+const DEFAULT_RECIPE_IMAGE = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80';
+
+const isRecipeInBook = (rec: any, bookId: string): boolean => {
+  if (!rec || !bookId) return false;
+  return rec.bookId === bookId || rec.book_id === bookId;
+};
+
+// Culinary Fraction & Number Scaling Helpers
+const formatScaledNumber = (val: number): string => {
+  if (isNaN(val) || val <= 0) return '';
+  const intPart = Math.floor(val);
+  const fracPart = val - intPart;
+
+  if (Math.abs(val - Math.round(val)) < 0.02) {
+    return String(Math.round(val));
+  }
+
+  const fractions: [number, string][] = [
+    [0.25, '1/4'],
+    [0.333, '1/3'],
+    [0.5, '1/2'],
+    [0.667, '2/3'],
+    [0.75, '3/4']
+  ];
+
+  for (const [fVal, fStr] of fractions) {
+    if (Math.abs(fracPart - fVal) < 0.04) {
+      return intPart > 0 ? `${intPart} ${fStr}` : fStr;
+    }
+  }
+
+  return Number(val.toFixed(2)).toString();
+};
+
+const parseAmountToNumber = (rawAmt: any): number | null => {
+  if (rawAmt === null || rawAmt === undefined) return null;
+  const str = String(rawAmt).trim();
+  if (!str) return null;
+
+  if (str.includes('/')) {
+    const parts = str.split(/\s+/);
+    if (parts.length === 2) {
+      const [num, den] = parts[1].split('/').map(Number);
+      if (!isNaN(num) && !isNaN(den) && den !== 0) {
+        return (Number(parts[0]) || 0) + (num / den);
+      }
+    } else if (parts.length === 1) {
+      const [num, den] = parts[0].split('/').map(Number);
+      if (!isNaN(num) && !isNaN(den) && den !== 0) {
+        return num / den;
+      }
+    }
+  }
+
+  const numMatch = str.match(/^(\d+(?:\.\d+)?)/);
+  if (numMatch) {
+    const parsed = Number(numMatch[1]);
+    if (!isNaN(parsed)) return parsed;
+  }
+
+  const directNum = Number(str);
+  if (!isNaN(directNum)) return directNum;
+
+  return null;
+};
+
+const calculateScaledAmount = (rawAmt: any, baseServings: number, currentServings: number): string => {
+  if (!rawAmt && rawAmt !== 0) return '';
+  const safeBase = Math.max(1, Number(baseServings) || 4);
+  const safeCurrent = Math.max(1, Number(currentServings) || safeBase);
+  const scaleRatio = safeCurrent / safeBase;
+
+  const str = String(rawAmt).trim();
+  if (!str) return '';
+
+  const rangeMatch = str.match(/^((?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?)\s*(-|to)\s*((?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?)$/i);
+  if (rangeMatch) {
+    const num1 = parseAmountToNumber(rangeMatch[1]);
+    const num2 = parseAmountToNumber(rangeMatch[3]);
+    const sep = rangeMatch[2];
+    if (num1 !== null && num2 !== null) {
+      const s1 = formatScaledNumber(num1 * scaleRatio);
+      const s2 = formatScaledNumber(num2 * scaleRatio);
+      return `${s1} ${sep} ${s2}`;
+    }
+  }
+
+  const num = parseAmountToNumber(str);
+  if (num !== null) {
+    return formatScaledNumber(num * scaleRatio);
+  }
+
+  return str;
+};
+
+const parseIngredientString = (rawStr: string, defaultCat: string) => {
+  const trimmed = String(rawStr || '').trim();
+  if (!trimmed) return { amount: '', unit: '', item: '', category: defaultCat };
+
+  const regex = /^((?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?(?:\s*(?:-|to)\s*(?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?)?)\s*([a-zA-Z]+)?\s*(?:of\s+)?(.*)$/i;
+  const match = trimmed.match(regex);
+
+  if (match) {
+    const amount = match[1].trim();
+    const possibleUnit = (match[2] || '').trim().toLowerCase();
+    const rest = (match[3] || '').trim();
+
+    const knownUnits = [
+      'cup', 'cups', 'tbsp', 'tbs', 'tablespoon', 'tablespoons', 'tsp', 'teaspoon', 'teaspoons',
+      'oz', 'ounce', 'ounces', 'lb', 'lbs', 'pound', 'pounds', 'g', 'gram', 'grams', 'kg',
+      'ml', 'l', 'liter', 'liters', 'clove', 'cloves', 'can', 'cans', 'slice', 'slices',
+      'pinch', 'pinches', 'bunch', 'bunches', 'stalk', 'stalks', 'piece', 'pieces', 'dash',
+      'pkg', 'package', 'packages', 'handful', 'handfuls', 'sprig', 'sprigs'
+    ];
+
+    if (knownUnits.includes(possibleUnit)) {
+      return { amount, unit: possibleUnit, item: rest || trimmed, category: defaultCat };
+    } else if (possibleUnit) {
+      return { amount, unit: '', item: `${possibleUnit} ${rest}`.trim(), category: defaultCat };
+    }
+    return { amount, unit: '', item: rest || trimmed, category: defaultCat };
+  }
+
+  return { amount: '', unit: '', item: trimmed, category: defaultCat };
+};
+
+const getNormalizedIngredient = (ing: any, defaultCat: string) => {
+  if (!ing) return { amount: '', unit: '', name: '', category: defaultCat };
+
+  if (typeof ing === 'string') {
+    const parsed = parseIngredientString(ing, defaultCat);
+    return {
+      amount: parsed.amount,
+      unit: parsed.unit,
+      name: parsed.item,
+      category: parsed.category
+    };
+  }
+
+  if (typeof ing === 'object') {
+    const rawItem = String(ing.item || ing.name || '').trim();
+    const rawAmt = String(ing.amount || ing.quantity || '').trim();
+    const rawUnit = String(ing.unit || '').trim();
+
+    if (!rawAmt && rawItem) {
+      const parsed = parseIngredientString(rawItem, ing.category || defaultCat);
+      if (parsed.amount) {
+        return {
+          amount: parsed.amount,
+          unit: rawUnit || parsed.unit,
+          name: parsed.item,
+          category: ing.category || defaultCat
+        };
+      }
+    }
+
+    return {
+      amount: rawAmt,
+      unit: rawUnit,
+      name: rawItem,
+      category: ing.category || defaultCat
+    };
+  }
+
+  return { amount: '', unit: '', name: String(ing), category: defaultCat };
+};
+
+export default function SavedRecipesPage() {
+  const router = useRouter();
+  const { t } = useTranslation();
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [recipes, setRecipes] = useState<any[]>([]);
+  const [books, setBooks] = useState<any[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [selectedRecipe, setSelectedRecipe] = useState<any | null>(null);
+
+  // Search & Filters
+  const [search, setSearch] = useState('');
+  const [showFilters, setShowFilters] = useState(true);
+  const [filterFavorites, setFilterFavorites] = useState(false);
+  const [filterCooked, setFilterCooked] = useState(false);
+  
+  // Ingredients Filter State
+  const [ingredientQuery, setIngredientQuery] = useState('');
+  const [selectedIngredientsList, setSelectedIngredientsList] = useState<string[]>([]);
+
+  // Dropdown Filters
+  const [selectedType, setSelectedType] = useState('All Types');
+  const [selectedRating, setSelectedRating] = useState('All Ratings');
+  const [selectedPrepTime, setSelectedPrepTime] = useState('All Prep Times');
+  const [selectedCookTime, setSelectedCookTime] = useState('All Cook Times');
+
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
+
+  // Add to Plan / Calendar Modal State
+  const [showAddToPlanModal, setShowAddToPlanModal] = useState(false);
+  const [planDate, setPlanDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [planMealType, setPlanMealType] = useState('Dinner');
+  const [planTime, setPlanTime] = useState('');
+  const [planNotes, setPlanNotes] = useState('');
+
+  // Edit Mode & Form State
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTab, setEditTab] = useState<'info' | 'ingredients' | 'steps'>('info');
+  const [editForm, setEditForm] = useState<any>({
+    title: '',
+    description: '',
+    recipeType: 'Main Dish',
+    sourceUrl: '',
+    servings: 4,
+    prepTimeMinutes: 30,
+    cookTimeMinutes: 10,
+    imageUrl: '',
+    ingredients: [],
+    instructions: []
+  });
+
+  const [isReorderingIngredients, setIsReorderingIngredients] = useState(false);
+  const [isReorderingSteps, setIsReorderingSteps] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+
+  // Servings Scaling & View States
+  const [currentServings, setCurrentServings] = useState<number>(4);
+  const [fontSizeScale, setFontSizeScale] = useState(80);
+  const [completedSteps, setCompletedSteps] = useState<number[]>([]);
+  const [noteText, setNoteText] = useState('');
+  const [isNoteOpen, setIsNoteOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  // Grid Density & Pagination States
+  const [gridMode, setGridMode] = useState<GridMode>('3x3');
+  const [currentPage, setCurrentPage] = useState(1);
+
+  // Shopping List Modal State
+  const [isShoppingModalOpen, setIsShoppingModalOpen] = useState(false);
+  const [shoppingModalIngredients, setShoppingModalIngredients] = useState<any[]>([]);
+
+  // Kitchen Timer States
+  const [isTimerModalOpen, setIsTimerModalOpen] = useState(false);
+  const [timerInputMinutes, setTimerInputMinutes] = useState(15);
+  const [activeTimer, setActiveTimer] = useState<{
+    recipeId: string;
+    recipeTitle: string;
+    totalSeconds: number;
+    remainingSeconds: number;
+    isRunning: boolean;
+    endTime: number;
+  } | null>(null);
+
+  const audioCtxRef = useRef<any>(null);
+  const isSyncingRef = useRef<boolean>(false);
+
+  const defaultBooks = [
+    { id: 'book_1', title: 'Family Favorites & Weeknight Dinners', description: 'Quick and easy meals.' },
+    { id: 'book_2', title: 'Authentic Asian Cuisine', description: 'Traditional recipes & stir-fries.' },
+    { id: 'book_3', title: 'Baking & Desserts', description: 'Sweet treats & pastries.' }
+  ];
+
+  useEffect(() => {
+    try {
+      const savedMode = localStorage.getItem('zecratary_saved_grid_mode') as GridMode;
+      if (savedMode && (savedMode === '3x3' || savedMode === '4x4' || savedMode === '5x5')) {
+        setGridMode(savedMode);
+      }
+    } catch (_) {}
+  }, []);
+
+  const playTimerEndSound = useCallback(() => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = audioCtxRef.current || new AudioCtx();
+      audioCtxRef.current = ctx;
+
+      const notes = [587.33, 880, 1174.66, 1760];
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.16);
+        gain.gain.setValueAtTime(0, ctx.currentTime + idx * 0.16);
+        gain.gain.linearRampToValueAtTime(0.28, ctx.currentTime + idx * 0.16 + 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + idx * 0.16 + 0.45);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime + idx * 0.16);
+        osc.stop(ctx.currentTime + idx * 0.16 + 0.5);
+      });
+    } catch (e) {
+      console.warn('Could not trigger Web Audio chime:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      const savedTimerRaw = localStorage.getItem('zecratary_active_timer');
+      if (savedTimerRaw) {
+        const parsed = JSON.parse(savedTimerRaw);
+        if (parsed && typeof parsed.endTime === 'number') {
+          const now = Date.now();
+          const rem = Math.max(0, Math.ceil((parsed.endTime - now) / 1000));
+          if (rem > 0) {
+            setActiveTimer({
+              ...parsed,
+              remainingSeconds: rem,
+              isRunning: parsed.isRunning ?? true
+            });
+          }
+        }
+      }
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    if (!activeTimer || !activeTimer.isRunning) return;
+
+    if (activeTimer.remainingSeconds <= 0) {
+      playTimerEndSound();
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setActiveTimer((prev) => {
+        if (!prev || !prev.isRunning) return prev;
+        const now = Date.now();
+        const calculatedRemaining = Math.max(0, Math.ceil((prev.endTime - now) / 1000));
+
+        if (calculatedRemaining <= 0) {
+          clearInterval(interval);
+          playTimerEndSound();
+          try {
+            localStorage.removeItem('zecratary_active_timer');
+          } catch (_) {}
+          return {
+            ...prev,
+            remainingSeconds: 0,
+            isRunning: false
+          };
+        }
+
+        const updated = {
+          ...prev,
+          remainingSeconds: calculatedRemaining
+        };
+
+        try {
+          localStorage.setItem('zecratary_active_timer', JSON.stringify(updated));
+        } catch (_) {}
+
+        return updated;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeTimer?.isRunning, activeTimer?.endTime, playTimerEndSound]);
+
+  const applyGlobalTheme = useCallback(() => {
+    try {
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
+    } catch (_) {}
+  }, []);
+
+  const getCleanRecipeType = (rec: any): string => {
+    const raw = rec.recipeType || rec.category || rec.recipe_type || (Array.isArray(rec.tags) ? rec.tags[0] : 'Main Dish');
+    if (raw === 'Appetizer' || raw === 'Appetiser') return 'Appetiser';
+    if (RECIPE_TYPES.includes(raw)) return raw;
+    return 'Main Dish';
+  };
+
+  const getSafeHostname = (urlStr: string) => {
+    if (!urlStr || typeof urlStr !== 'string') return 'source website';
+    try {
+      const normalized = urlStr.startsWith('http://') || urlStr.startsWith('https://') 
+        ? urlStr 
+        : `https://${urlStr}`;
+      return new URL(normalized).hostname.replace('www.', '');
+    } catch {
+      return urlStr.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0] || 'source website';
+    }
+  };
+
+  const getSafeHref = (urlStr: string) => {
+    if (!urlStr) return '#';
+    if (urlStr.startsWith('http://') || urlStr.startsWith('https://')) return urlStr;
+    return `https://${urlStr}`;
+  };
+
+  const normalizeRecipeFields = useCallback((r: any, targetUserId: string, userName: string) => {
+    const cleanType = getCleanRecipeType(r);
+    const resolvedImg = r.imageUrl || r.image || r.image_url || DEFAULT_RECIPE_IMAGE;
+
+    let ingredients = r.ingredients;
+    if (typeof ingredients === 'string') {
+      try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = []; }
+    }
+    if (!Array.isArray(ingredients)) ingredients = [];
+
+    let instructions = r.instructions || r.directions || r.steps;
+    if (typeof instructions === 'string') {
+      try { instructions = JSON.parse(instructions); } catch (_) { instructions = [instructions]; }
+    }
+    if (!Array.isArray(instructions)) instructions = [];
+
+    const prepMins = Number(r.prepTimeMinutes || r.prep_time || r.prepTime) || 15;
+    const cookMins = Number(r.cookTimeMinutes || r.cook_time || r.cookTime) || 25;
+
+    return {
+      ...r,
+      id: r.id || 'rcp_' + Math.random().toString(36).substring(2, 9),
+      userId: r.user_id || r.userId || targetUserId,
+      user_id: r.user_id || r.userId || targetUserId,
+      createdBy: r.created_by || r.createdBy || targetUserId,
+      created_by: r.created_by || r.createdBy || targetUserId,
+      creatorName: r.creator_name || r.creatorName || userName,
+      creator_name: r.creator_name || r.creatorName || userName,
+      title: r.title || r.name || 'Untitled Recipe',
+      name: r.title || r.name || 'Untitled Recipe',
+      description: r.description || '',
+      recipeType: cleanType,
+      category: cleanType,
+      recipe_type: cleanType,
+      imageUrl: resolvedImg,
+      image: resolvedImg,
+      image_url: resolvedImg,
+      servings: Number(r.servings || r.servingsCount) || 4,
+      prepTimeMinutes: prepMins,
+      cookTimeMinutes: cookMins,
+      prepTime: String(prepMins),
+      cookTime: String(cookMins),
+      prep_time: String(prepMins),
+      cook_time: String(cookMins),
+      ingredients,
+      directions: instructions,
+      instructions,
+      steps: instructions,
+      bookId: r.book_id || r.bookId || null,
+      book_id: r.book_id || r.bookId || null,
+      isFavorite: Boolean(r.is_favorite || r.isFavorite),
+      is_favorite: Boolean(r.is_favorite || r.isFavorite),
+      isCooked: Boolean(r.is_cooked || r.isCooked),
+      is_cooked: Boolean(r.is_cooked || r.isCooked),
+      rating: Number(r.rating) || 0,
+      note: r.note || '',
+      sourceUrl: r.source_url || r.sourceUrl || '',
+      source_url: r.source_url || r.sourceUrl || '',
+      tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
+    };
+  }, []);
+
+  const loadData = useCallback(async (user: User | null, showSpinner = true) => {
+    if (!user) return;
+    setCategories(getStoredCategories());
+    const targetUserId = (user.id || user.email || 'usr_admin_1').trim();
+    const userName = user.name || 'You';
+
+    try {
+      if (showSpinner) setLoading(true);
+
+      const candidateLists: any[][] = [];
+
+      // 1. Direct API call to PostgreSQL /api/recipes/saved
+      try {
+        const res = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.recipes)) {
+            candidateLists.push(data.recipes);
+          } else if (Array.isArray(data)) {
+            candidateLists.push(data);
+          }
+        }
+      } catch (_) {}
+
+      // 2. Fallback check to syncUserSavedRecipes helper
+      try {
+        const syncRes = await syncUserSavedRecipes(targetUserId);
+        if (Array.isArray(syncRes)) {
+          candidateLists.push(syncRes);
+        } else if (syncRes && Array.isArray((syncRes as any).recipes)) {
+          candidateLists.push((syncRes as any).recipes);
+        }
+      } catch (_) {}
+
+      // 3. Fallback check to general /api/recipes
+      try {
+        const genRes = await fetch(`/api/recipes?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+        if (genRes.ok) {
+          const gData = await genRes.json();
+          if (Array.isArray(gData.recipes)) candidateLists.push(gData.recipes);
+          else if (Array.isArray(gData)) candidateLists.push(gData);
+        }
+      } catch (_) {}
+
+      // 4. Fallback check to local storage stores
+      const localKeys = [
+        'zecratary_saved_recipes',
+        'saved_recipes',
+        'zecratary_recipes',
+        'zecratary_user_recipes',
+        'zecratary_imported_recipes'
+      ];
+      for (const k of localKeys) {
+        try {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              candidateLists.push(parsed);
+            }
+          }
+        } catch (_) {}
+      }
+
+      // Merge and deduplicate by recipe id or normalized title
+      const recipeMap = new Map<string, any>();
+      for (const list of candidateLists) {
+        for (const item of list) {
+          if (!item) continue;
+          const rUser = String(item.user_id || item.userId || '').trim();
+          const rCreator = String(item.created_by || item.createdBy || '').trim();
+
+          const belongsToUser = !rUser ||
+            rUser === targetUserId ||
+            rUser === 'usr_admin_1' ||
+            rUser === 'undefined' ||
+            item.is_public ||
+            item.isPublic ||
+            (user.email && (rUser === user.email || rCreator === user.email));
+
+          if (belongsToUser) {
+            const normalized = normalizeRecipeFields(item, targetUserId, userName);
+            const key = normalized.id || normalized.title.toLowerCase();
+            if (!recipeMap.has(key)) {
+              recipeMap.set(key, normalized);
+            } else {
+              // Merge non-empty fields
+              const existing = recipeMap.get(key);
+              recipeMap.set(key, { ...existing, ...normalized, isFavorite: existing.isFavorite || normalized.isFavorite });
+            }
+          }
+        }
+      }
+
+      const mergedRecipes = Array.from(recipeMap.values());
+      setRecipes(mergedRecipes);
+
+      // Books loading
+      let parsedBooks = defaultBooks;
+      try {
+        const bRes = await fetch(`/api/books?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+        if (bRes.ok) {
+          const bData = await bRes.json();
+          if (Array.isArray(bData.books) && bData.books.length > 0) parsedBooks = bData.books;
+        }
+      } catch (_) {}
+
+      const localBooks = localStorage.getItem('zecratary_recipe_books') || localStorage.getItem('zecratary_cookbooks');
+      if (localBooks) {
+        try {
+          const parsed = JSON.parse(localBooks);
+          if (Array.isArray(parsed) && parsed.length > 0) parsedBooks = parsed;
+        } catch (_) {}
+      }
+
+      const userBooks = parsedBooks.filter((b: any) => {
+        if (!b.userId && !b.createdBy) return true;
+        if (b.userId) return b.userId === targetUserId;
+        return b.createdBy === user.email || b.createdBy === targetUserId;
+      });
+
+      setBooks(userBooks.map((b: any) => ({
+        ...b,
+        recipeCount: mergedRecipes.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
+      })));
+    } catch (e) {
+      console.error('[SavedRecipesPage] Load error:', e);
+    } finally {
+      if (showSpinner) setLoading(false);
+    }
+  }, [normalizeRecipeFields]);
+
+  useEffect(() => {
+    applyGlobalTheme();
+    window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
+    window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
+    window.addEventListener('zecratary_theme_updated', applyGlobalTheme);
+    window.addEventListener('storage', applyGlobalTheme);
+
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
+      window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
+      window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
+      window.removeEventListener('storage', applyGlobalTheme);
+    };
+  }, [applyGlobalTheme]);
+
+  useEffect(() => {
+    document.title = `${t('savedRecipesTitle') || 'Saved Recipes'} - FoodiePrep`;
+    initAuthStorage();
+    const user = getCurrentUser();
+    if (!user) {
+      router.replace('/login');
+      return;
+    }
+    setCurrentUser(user);
+    loadData(user, true);
+
+    const handleSync = () => {
+      if (isSyncingRef.current) return;
+      const activeUser = getCurrentUser();
+      if (activeUser) {
+        setCurrentUser(activeUser);
+        loadData(activeUser, false);
+      }
+    };
+
+    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
+    window.addEventListener('zecratary_recipes_updated', handleSync);
+    window.addEventListener('zecratary_recipe_books_updated', handleSync);
+    window.addEventListener('zecratary_categories_changed', handleSync);
+    window.addEventListener('zecratary_auth_changed', handleSync);
+    window.addEventListener('storage', handleSync);
+
+    return () => {
+      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_recipe_books_updated', handleSync);
+      window.removeEventListener('zecratary_categories_changed', handleSync);
+      window.removeEventListener('zecratary_auth_changed', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
+  }, [loadData, router, t]);
+
+  const saveAllRecipes = (updatedUserList: any[]) => {
+    if (!currentUser) return;
+    const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
+
+    const updatedWithId = updatedUserList.map(r => normalizeRecipeFields(r, targetUserId, currentUser.name || 'You'));
+
+    setRecipes(updatedWithId);
+
+    // Save to localStorage immediately
+    try {
+      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(updatedWithId));
+      localStorage.setItem('saved_recipes', JSON.stringify(updatedWithId));
+    } catch (_) {}
+
+    isSyncingRef.current = true;
+
+    // Persist via PostgreSQL POST API
+    Promise.allSettled([
+      fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedWithId)
+      }),
+      persistSavedRecipe(targetUserId, updatedWithId, {
+        createdBy: currentUser.email || targetUserId,
+        creatorName: currentUser.name || 'You'
+      })
+    ]).then(() => {
+      setTimeout(() => {
+        isSyncingRef.current = false;
+      }, 400);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_recipes_updated'));
+      }
+    }).catch((err) => {
+      isSyncingRef.current = false;
+      console.error('[SavedRecipesPage] Error saving recipes via POST:', err);
+    });
+
+    const updatedBooks = books.map((b: any) => ({
+      ...b,
+      recipeCount: updatedWithId.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
+    }));
+    setBooks(updatedBooks);
+  };
+
+  const toggleFavorite = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const target = recipes.find(r => r.id === id);
+    if (!target) return;
+    const newFav = !target.isFavorite;
+
+    const updated = recipes.map(r => r.id === id ? { ...r, isFavorite: newFav, is_favorite: newFav } : r);
+    setRecipes(updated);
+
+    if (selectedRecipe?.id === id) {
+      setSelectedRecipe((prev: any) => prev ? { ...prev, isFavorite: newFav, is_favorite: newFav } : null);
+    }
+
+    saveAllRecipes(updated);
+
+    // Direct atomic PATCH
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, isFavorite: newFav, is_favorite: newFav })
+    }).catch(() => {});
+  };
+
+  const toggleCooked = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const target = recipes.find(r => r.id === id);
+    if (!target) return;
+    const newCooked = !target.isCooked;
+
+    const updated = recipes.map(r => r.id === id ? { ...r, isCooked: newCooked, is_cooked: newCooked } : r);
+    setRecipes(updated);
+
+    if (selectedRecipe?.id === id) {
+      setSelectedRecipe((prev: any) => prev ? { ...prev, isCooked: newCooked, is_cooked: newCooked } : null);
+    }
+
+    saveAllRecipes(updated);
+
+    // Direct atomic PATCH
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, isCooked: newCooked, is_cooked: newCooked })
+    }).catch(() => {});
+  };
+
+  const handleAssignToBook = (bookId: string) => {
+    if (!selectedRecipe) return;
+    const isRemoving = isRecipeInBook(selectedRecipe, bookId);
+    const targetBookId = isRemoving ? null : bookId;
+    
+    const updatedRecipe = {
+      ...selectedRecipe,
+      bookId: targetBookId,
+      book_id: targetBookId
+    };
+    setSelectedRecipe(updatedRecipe);
+
+    const updatedRecipes = recipes.map(r => r.id === selectedRecipe.id ? updatedRecipe : r);
+    setRecipes(updatedRecipes);
+    saveAllRecipes(updatedRecipes);
+
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: selectedRecipe.id, bookId: targetBookId, book_id: targetBookId })
+    }).catch(() => {});
+  };
+
+  const openAddToPlanModal = () => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    setPlanDate(todayStr);
+    setPlanMealType('Dinner');
+    setPlanTime('19:00');
+    setPlanNotes('');
+    setShowAddToPlanModal(true);
+  };
+
+  const handleSaveToCalendar = async () => {
+    if (!selectedRecipe || !currentUser) return;
+
+    const recName = selectedRecipe.title || selectedRecipe.name || 'Untitled Recipe';
+    const recImage = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || DEFAULT_RECIPE_IMAGE;
+    const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
+
+    const newPlanItem = {
+      id: 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy: currentUser.email || targetUserId,
+      creatorName: currentUser.name || 'User',
+      date: planDate,
+      recipeId: selectedRecipe.id,
+      recipe_id: selectedRecipe.id,
+      recipeName: recName,
+      title: recName,
+      image: recImage,
+      imageUrl: recImage,
+      image_url: recImage,
+      mealType: planMealType,
+      time: planTime || '',
+      notes: planNotes || '',
+      servings: currentServings || selectedRecipe.servings || 4,
+      prepTimeMinutes: selectedRecipe.prepTimeMinutes || 15,
+      cookTimeMinutes: selectedRecipe.cookTimeMinutes || 25,
+      recipe: selectedRecipe,
+      isLeftover: false,
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      const planKeys = ['zecratary_meal_plan', 'zecratary_meal_plans'];
+      for (const k of planKeys) {
+        const raw = localStorage.getItem(k);
+        const currentPlan = raw ? JSON.parse(raw) : [];
+        const updated = Array.isArray(currentPlan) ? [...currentPlan, newPlanItem] : [newPlanItem];
+        localStorage.setItem(k, JSON.stringify(updated));
+      }
+    } catch (_) {}
+
+    try {
+      await Promise.allSettled([
+        fetch('/api/planner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newPlanItem)
+        }),
+        fetch('/api/meal-plans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newPlanItem)
+        })
+      ]);
+    } catch (_) {}
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_planner_updated'));
+      window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
+      window.dispatchEvent(new Event('zecratary_meal_plans_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }
+
+    setShowAddToPlanModal(false);
+    const alertMsg = (t('scheduledMealAlert') || 'Successfully scheduled "{title}" in your meal plan!')
+      .replace('{title}', recName);
+    alert(alertMsg);
+  };
+
+  const updateSelectedRecipeState = (key: string, val: any) => {
+    if (!selectedRecipe) return;
+    const updatedRec = { ...selectedRecipe, [key]: val };
+    if (key === 'isFavorite') updatedRec.is_favorite = val;
+    if (key === 'isCooked') updatedRec.is_cooked = val;
+    if (key === 'bookId') updatedRec.book_id = val;
+
+    setSelectedRecipe(updatedRec);
+    const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
+    saveAllRecipes(updatedList);
+
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: selectedRecipe.id, [key]: val })
+    }).catch(() => {});
+  };
+
+  const handleDeleteRecipe = async (id: string) => {
+    if (!confirm(t('confirmDeleteRecipe') || 'Are you sure you want to delete this recipe?')) return;
+    
+    try {
+      await Promise.allSettled([
+        fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        }),
+        fetch(`/api/recipes?id=${encodeURIComponent(id)}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        })
+      ]);
+
+      if (typeof deleteSavedRecipe === 'function') {
+        await deleteSavedRecipe(currentUser?.id || currentUser?.email || 'usr_admin_1', id).catch(() => {});
+      }
+
+      const updated = recipes.filter(r => r.id !== id);
+      setRecipes(updated);
+      setSelectedRecipe(null);
+      setIsEditing(false);
+
+      const updatedBooks = books.map((b: any) => ({
+        ...b,
+        recipeCount: updated.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
+      }));
+      setBooks(updatedBooks);
+
+      try {
+        const localKeys = ['zecratary_saved_recipes', 'zecratary_recipes', 'zecratary_user_recipes', 'saved_recipes', 'zecratary_imported_recipes'];
+        for (const k of localKeys) {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) {
+              const cleaned = arr.filter((x: any) => x.id !== id);
+              localStorage.setItem(k, JSON.stringify(cleaned));
+            }
+          }
+        }
+      } catch (_) {}
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_recipes_updated'));
+        window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+      }
+    } catch (err) {
+      console.error('[SavedRecipesPage] Error deleting recipe:', err);
+      alert(t('errorDeletingRecipe') || 'Failed to delete recipe. Please try again.');
+    }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setEditForm((prev: any) => ({ ...prev, imageUrl: reader.result as string }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleDragStart = (index: number) => {
+    setDraggedIndex(index);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number, type: 'ingredients' | 'steps') => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === index) return;
+
+    if (type === 'ingredients') {
+      const list = [...editForm.ingredients];
+      const item = list[draggedIndex];
+      list.splice(draggedIndex, 1);
+      list.splice(index, 0, item);
+      setEditForm({ ...editForm, ingredients: list });
+      setDraggedIndex(index);
+    } else {
+      const list = [...editForm.instructions];
+      const item = list[draggedIndex];
+      list.splice(draggedIndex, 1);
+      list.splice(index, 0, item);
+      setEditForm({ ...editForm, instructions: list });
+      setDraggedIndex(index);
+    }
+  };
+
+  const handleDrop = () => {
+    setDraggedIndex(null);
+  };
+
+  const handleOpenEdit = () => {
+    if (!selectedRecipe) return;
+    const defaultCat = categories[0] || 'Produce';
+    const cleanType = getCleanRecipeType(selectedRecipe);
+
+    let rawIngredients = selectedRecipe.ingredients;
+    if (typeof rawIngredients === 'string') {
+      try { rawIngredients = JSON.parse(rawIngredients); } catch (_) { rawIngredients = [rawIngredients]; }
+    }
+    if (!Array.isArray(rawIngredients)) rawIngredients = [];
+
+    let rawSteps = selectedRecipe.instructions || selectedRecipe.directions || selectedRecipe.steps;
+    if (typeof rawSteps === 'string') {
+      try { rawSteps = JSON.parse(rawSteps); } catch (_) { rawSteps = [rawSteps]; }
+    }
+    if (!Array.isArray(rawSteps) || rawSteps.length === 0) {
+      rawSteps = [''];
+    }
+
+    const currentImg = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || '';
+
+    setEditForm({
+      title: selectedRecipe.title || selectedRecipe.name || '',
+      description: selectedRecipe.description || '',
+      recipeType: cleanType,
+      sourceUrl: selectedRecipe.sourceUrl || selectedRecipe.source_url || '',
+      servings: selectedRecipe.servings || 4,
+      prepTimeMinutes: selectedRecipe.prepTimeMinutes || 30,
+      cookTimeMinutes: selectedRecipe.cookTimeMinutes || 10,
+      imageUrl: currentImg,
+      ingredients: rawIngredients.length > 0
+        ? rawIngredients.map((ing: any) => {
+            const norm = getNormalizedIngredient(ing, defaultCat);
+            return {
+              amount: norm.amount,
+              unit: norm.unit,
+              item: norm.name,
+              category: norm.category
+            };
+          })
+        : [{ amount: '', unit: '', item: '', category: defaultCat }],
+      instructions: [...rawSteps]
+    });
+    setEditTab('info');
+    setIsReorderingIngredients(false);
+    setIsReorderingSteps(false);
+    setIsEditing(true);
+  };
+
+  const handleSaveEdit = () => {
+    if (!editForm.title.trim()) {
+      alert(t('enterRecipeTitleAlert') || 'Please enter a recipe title.');
+      setEditTab('info');
+      return;
+    }
+
+    const cleanType = getCleanRecipeType(editForm);
+    const targetUserId = currentUser?.id || currentUser?.email || 'usr_admin_1';
+    const resolvedImg = editForm.imageUrl || editForm.image || editForm.image_url || selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || '';
+    const newServings = Math.max(1, Number(editForm.servings) || 4);
+
+    const updatedRec = {
+      ...selectedRecipe,
+      ...editForm,
+      servings: newServings,
+      imageUrl: resolvedImg,
+      image: resolvedImg,
+      image_url: resolvedImg,
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy: selectedRecipe.createdBy || currentUser?.email || targetUserId,
+      created_by: selectedRecipe.created_by || currentUser?.email || targetUserId,
+      creatorName: selectedRecipe.creatorName || currentUser?.name || 'You',
+      creator_name: selectedRecipe.creator_name || currentUser?.name || 'You',
+      recipeType: cleanType,
+      category: cleanType,
+      recipe_type: cleanType,
+      tags: [cleanType],
+      instructions: editForm.instructions,
+      directions: editForm.instructions,
+      steps: editForm.instructions
+    };
+
+    setSelectedRecipe(updatedRec);
+    setCurrentServings(newServings);
+    const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
+    saveAllRecipes(updatedList);
+    setIsEditing(false);
+  };
+
+  const handleOpenShoppingModal = () => {
+    if (!selectedRecipe) return;
+    const defaultCat = categories[0] || 'Produce';
+    const base = Math.max(1, Number(selectedRecipe.servings) || 4);
+    const totalServings = currentServings || base;
+
+    let rawIngredients = selectedRecipe.ingredients;
+    if (typeof rawIngredients === 'string') {
+      try { rawIngredients = JSON.parse(rawIngredients); } catch (_) { rawIngredients = [rawIngredients]; }
+    }
+    if (!Array.isArray(rawIngredients)) rawIngredients = [];
+
+    const items = rawIngredients.map((ing: any, idx: number) => {
+      const norm = getNormalizedIngredient(ing, defaultCat);
+      const scaledAmt = calculateScaledAmount(norm.amount, base, totalServings);
+
+      return {
+        id: 'shop_item_' + idx + '_' + Math.random().toString(36).substring(2, 6),
+        selected: true,
+        amount: scaledAmt !== '' ? scaledAmt : (norm.amount || '1'),
+        unit: norm.unit || '',
+        name: norm.name || 'Ingredient',
+        category: norm.category || defaultCat
+      };
+    });
+
+    setShoppingModalIngredients(items);
+    setIsShoppingModalOpen(true);
+  };
+
+  const handleConfirmAddToShoppingList = async () => {
+    const selectedItems = shoppingModalIngredients.filter(i => i.selected);
+    if (selectedItems.length === 0) {
+      alert(t('noIngredientsSelectedAlert') || 'No ingredients selected.');
+      return;
+    }
+
+    const recTitle = selectedRecipe?.title || selectedRecipe?.name || 'Recipe';
+    const recId = selectedRecipe?.id;
+    const targetUserId = currentUser?.id || currentUser?.email || 'usr_admin_1';
+
+    const formatted = selectedItems.map(i => ({
+      id: 'shop_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy: currentUser?.email || targetUserId,
+      creatorName: currentUser?.name || 'User',
+      name: i.name,
+      item: i.name,
+      amount: String(i.amount || '1'),
+      quantity: String(i.amount || '1'),
+      unit: i.unit || 'unit',
+      category: i.category || (categories[0] || 'Produce'),
+      checked: false,
+      completed: false,
+      recipeId: recId,
+      recipeTitle: recTitle,
+      createdAt: new Date().toISOString()
+    }));
+
+    try {
+      const keys = ['zecratary_shopping_list', 'zecratary_shopping'];
+      for (const k of keys) {
+        const raw = localStorage.getItem(k);
+        const currentList = raw ? JSON.parse(raw) : [];
+        const updated = Array.isArray(currentList) ? [...formatted, ...currentList] : formatted;
+        localStorage.setItem(k, JSON.stringify(updated));
+      }
+    } catch (_) {}
+
+    try {
+      await Promise.allSettled([
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formatted)
+        }),
+        fetch('/api/shopping-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formatted)
+        })
+      ]);
+    } catch (_) {}
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_shopping_updated'));
+      window.dispatchEvent(new Event('zecratary_shopping_list_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }
+
+    setIsShoppingModalOpen(false);
+    const alertMsg = (t('addedItemsShoppingAlert') || 'Added {count} items to your Shopping List!')
+      .replace('{count}', String(selectedItems.length));
+    alert(alertMsg);
+  };
+
+  const handleOpenTimerModal = () => {
+    const defaultMins = Math.min(60, Math.max(1, selectedRecipe?.cookTimeMinutes || 15));
+    setTimerInputMinutes(defaultMins);
+    setIsTimerModalOpen(true);
+  };
+
+  const handleStartTimer = () => {
+    const safeMinutes = Math.min(60, Math.max(1, Number(timerInputMinutes) || 15));
+    const totalSecs = safeMinutes * 60;
+    const targetEndTime = Date.now() + totalSecs * 1000;
+    const recTitle = selectedRecipe?.title || selectedRecipe?.name || 'Kitchen Timer';
+
+    const newTimerState = {
+      recipeId: selectedRecipe?.id || 'manual_timer',
+      recipeTitle: recTitle,
+      totalSeconds: totalSecs,
+      remainingSeconds: totalSecs,
+      isRunning: true,
+      endTime: targetEndTime
+    };
+
+    setActiveTimer(newTimerState);
+    setIsTimerModalOpen(false);
+
+    try {
+      localStorage.setItem('zecratary_active_timer', JSON.stringify(newTimerState));
+      fetch('/api/timer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser?.id || currentUser?.email || 'usr_admin_1',
+          recipeId: selectedRecipe?.id,
+          durationMinutes: safeMinutes,
+          startedAt: new Date().toISOString()
+        })
+      }).catch(() => {});
+    } catch (_) {}
+  };
+
+  const handleTogglePauseTimer = () => {
+    if (!activeTimer) return;
+    if (activeTimer.remainingSeconds <= 0) return;
+
+    const nextRunning = !activeTimer.isRunning;
+    const updated = {
+      ...activeTimer,
+      isRunning: nextRunning,
+      endTime: nextRunning ? Date.now() + activeTimer.remainingSeconds * 1000 : activeTimer.endTime
+    };
+    setActiveTimer(updated);
+    try {
+      localStorage.setItem('zecratary_active_timer', JSON.stringify(updated));
+    } catch (_) {}
+  };
+
+  const handleResetOrDismissTimer = () => {
+    setActiveTimer(null);
+    try {
+      localStorage.removeItem('zecratary_active_timer');
+    } catch (_) {}
+  };
+
+  const handleAddIngredientFilter = () => {
+    const clean = ingredientQuery.trim();
+    if (!clean) return;
+    if (!selectedIngredientsList.includes(clean.toLowerCase())) {
+      setSelectedIngredientsList([...selectedIngredientsList, clean.toLowerCase()]);
+    }
+    setIngredientQuery('');
+  };
+
+  const handleRemoveIngredientFilter = (ing: string) => {
+    setSelectedIngredientsList(selectedIngredientsList.filter(i => i !== ing));
+  };
+
+  const filtered = useMemo(() => {
+    return recipes.filter(r => {
+      const q = search.toLowerCase().trim();
+      const title = (r.title || r.name || '').toLowerCase();
+      if (q && !title.includes(q)) return false;
+
+      if (filterFavorites && !r.isFavorite) return false;
+      if (filterCooked && !r.isCooked) return false;
+
+      if (selectedType !== 'All Types') {
+        const type = getCleanRecipeType(r);
+        if (type !== selectedType) return false;
+      }
+
+      if (selectedIngredientsList.length > 0) {
+        let rIng = r.ingredients;
+        if (typeof rIng === 'string') {
+          try { rIng = JSON.parse(rIng); } catch (_) { rIng = []; }
+        }
+        const recipeIngNames = Array.isArray(rIng) 
+          ? rIng.map((ing: any) => (typeof ing === 'string' ? ing : ing.item || ing.name || '').toLowerCase())
+          : [];
+        
+        const hasAll = selectedIngredientsList.every(targetIng => 
+          recipeIngNames.some(item => item.includes(targetIng))
+        );
+        if (!hasAll) return false;
+      }
+
+      if (selectedRating !== 'All Ratings') {
+        const minRating = parseInt(selectedRating);
+        if ((r.rating || 0) < minRating) return false;
+      }
+
+      if (selectedPrepTime !== 'All Prep Times') {
+        const prep = r.prepTimeMinutes || 0;
+        if (selectedPrepTime === 'Under 15m' && prep > 15) return false;
+        if (selectedPrepTime === '15-30m' && (prep < 15 || prep > 30)) return false;
+        if (selectedPrepTime === 'Over 30m' && prep < 30) return false;
+      }
+
+      if (selectedCookTime !== 'All Cook Times') {
+        const cook = r.cookTimeMinutes || 0;
+        if (selectedCookTime === 'Under 15m' && cook > 15) return false;
+        if (selectedCookTime === '15-30m' && (cook < 15 || cook > 30)) return false;
+        if (selectedCookTime === 'Over 30m' && cook < 30) return false;
+      }
+
+      return true;
+    });
+  }, [recipes, search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime, gridMode]);
+
+  const itemsPerPage = GRID_CONFIG[gridMode].perPage;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
+  const paginatedRecipes = filtered.slice(startIndex, startIndex + itemsPerPage);
+
+  const assignedBook = books.find(b => b.id === (selectedRecipe?.bookId || selectedRecipe?.book_id));
+  const baseServings = Math.max(1, Number(selectedRecipe?.servings) || 4);
+  const recipeCategoryBadge = selectedRecipe ? getCleanRecipeType(selectedRecipe) : 'Main Dish';
+
+  const scaleFactor = useMemo(() => {
+    return currentServings / baseServings;
+  }, [currentServings, baseServings]);
+
+  const percentChange = useMemo(() => {
+    return Math.round(((currentServings - baseServings) / baseServings) * 100);
+  }, [currentServings, baseServings]);
+
+  const formattedCountdown = useMemo(() => {
+    if (!activeTimer) return '00:00';
+    const mins = Math.floor(activeTimer.remainingSeconds / 60);
+    const secs = activeTimer.remainingSeconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }, [activeTimer?.remainingSeconds]);
+
+  return (
+    <div 
+      className="max-w-6xl mx-auto space-y-6 pb-16 px-4 font-sans transition-colors duration-200" 
+      style={{ color: 'var(--color-text)' }}
+      onClick={() => setOpenDropdown(null)}
+    >
+      {/* Top Header */}
+      <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
+            {t('savedRecipesTitle') || 'Saved Recipes'}
+          </h1>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            {(t('savedRecipesSubtitle') || 'Your collection of favorite recipes ({count})').replace('{count}', String(recipes.length))}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {/* 3x3, 4x4, 5x5 Grid Switcher */}
+          <div 
+            className="flex items-center p-1 rounded-xl border shadow-xs"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            {(['3x3', '4x4', '5x5'] as GridMode[]).map((mode) => {
+              const isActive = gridMode === mode;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => {
+                    setGridMode(mode);
+                    try { localStorage.setItem('zecratary_saved_grid_mode', mode); } catch (_) {}
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                  style={isActive ? {
+                    backgroundColor: 'var(--color-primary)',
+                    color: '#ffffff',
+                    boxShadow: '0 2px 8px rgba(224, 86, 56, 0.3)'
+                  } : {
+                    color: 'var(--color-text-secondary)',
+                    backgroundColor: 'transparent'
+                  }}
+                  title={`Show ${GRID_CONFIG[mode].label} layout (${GRID_CONFIG[mode].perPage} per page)`}
+                >
+                  {mode === '3x3' && <Grid3X3 className="h-3.5 w-3.5" />}
+                  {mode === '4x4' && <LayoutGrid className="h-3.5 w-3.5" />}
+                  {mode === '5x5' && <Rows3 className="h-3.5 w-3.5" />}
+                  <span>{GRID_CONFIG[mode].label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <Link 
+            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg"
+            href="/manual"
+            style={{ backgroundColor: 'var(--color-primary)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+          >
+            <UploadCloud className="h-4 w-4"/> {t('createRecipe') || 'Create Recipe'}
+          </Link>
+        </div>
+      </div>
+
+      {/* Filter Row */}
+      <div className="space-y-3">
+        <div className="flex gap-3">
+          <div className="relative flex-1">
+            <Search className="h-4 w-4 absolute left-3.5 top-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
+            <input
+              type="text"
+              autoComplete="off"
+              data-lpignore="true"
+              placeholder={t('searchByNamePlaceholder') || 'Search by name or ingredient...'}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+              onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+              onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+            />
+          </div>
+          <button 
+            type="button"
+            onClick={() => setShowFilters(!showFilters)}
+            className="border font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition cursor-pointer"
+            style={showFilters ? {
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-emerald)',
+              color: 'var(--color-emerald)'
+            } : {
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-secondary)'
+            }}
+          >
+            <SlidersHorizontal className="h-4 w-4" style={{ color: 'var(--color-emerald)' }}/> {t('filter') || 'Filter'}
+          </button>
+        </div>
+
+        {/* Filter Pills */}
+        {showFilters && (
+          <div className="flex flex-wrap items-center gap-2 pt-1 animate-in fade-in text-xs font-semibold select-none">
+            <button
+              type="button"
+              onClick={() => setFilterFavorites(!filterFavorites)}
+              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              style={filterFavorites ? {
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-primary)',
+                color: 'var(--color-primary)'
+              } : {
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <Heart className={`h-3.5 w-3.5 ${filterFavorites ? 'fill-current' : ''}`} style={{ color: filterFavorites ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}/>
+              <span>{t('favorites') || 'Favorites'}</span>
+            </button>
+
+            {/* Ingredients Popover Filter */}
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => setOpenDropdown(openDropdown === 'ingredients' ? null : 'ingredients')}
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                style={selectedIngredientsList.length > 0 || openDropdown === 'ingredients' ? {
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
+                } : {
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <Carrot className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }}/>
+                <span>{t('ingredientsFilter') || 'Ingredients'} {selectedIngredientsList.length > 0 ? `(${selectedIngredientsList.length})` : ''}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
+              </button>
+
+              {openDropdown === 'ingredients' && (
+                <div 
+                  className="absolute left-0 top-full mt-2 w-72 border rounded-2xl shadow-2xl p-3 z-50 space-y-2.5 animate-in fade-in"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-primary)'
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <div 
+                      className="flex-1 border-2 rounded-xl overflow-hidden"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)'
+                      }}
+                    >
+                      <input
+                        type="text"
+                        autoFocus
+                        autoComplete="off"
+                        placeholder={t('searchIngredientsPlaceholder') || 'Search ingredients'}
+                        value={ingredientQuery}
+                        onChange={(e) => setIngredientQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddIngredientFilter();
+                          }
+                        }}
+                        className="w-full bg-transparent px-3 py-2 text-xs outline-none"
+                        style={{ color: 'var(--color-text)' }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddIngredientFilter}
+                      className="text-white p-2 rounded-xl transition flex items-center justify-center font-bold text-sm shadow-md cursor-pointer shrink-0"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                    >
+                      <Plus className="h-4 w-4 stroke-[3]"/>
+                    </button>
+                  </div>
+
+                  {selectedIngredientsList.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
+                      {selectedIngredientsList.map((ing) => (
+                        <span
+                          key={ing}
+                          className="text-[11px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 border"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <span className="capitalize">{ing}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveIngredientFilter(ing)}
+                            className="text-slate-400 hover:text-red-500 cursor-pointer"
+                          >
+                            <X className="h-3 w-3"/>
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="text-[11px] leading-tight pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('recipesMustContainIngredients') || 'Recipes must contain all listed ingredients.'}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Recipe Type Dropdown */}
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => setOpenDropdown(openDropdown === 'recipeType' ? null : 'recipeType')}
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                style={selectedType !== 'All Types' ? {
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
+                } : {
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <Utensils className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/>
+                <span className="font-bold">{selectedType === 'All Types' ? (t('recipeTypeLabel') || 'Recipe Type') : selectedType}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
+              </button>
+
+              {openDropdown === 'recipeType' && (
+                <div 
+                  className="absolute left-0 top-full mt-2 w-48 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1 animate-in fade-in"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  {RECIPE_TYPES.map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => { setSelectedType(type); setOpenDropdown(null); }}
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
+                      style={selectedType === type ? {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-primary)',
+                        border: '1px solid var(--color-primary)'
+                      } : {
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      {type}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Cooked Pill */}
+            <button
+              type="button"
+              onClick={() => setFilterCooked(!filterCooked)}
+              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              style={filterCooked ? {
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-emerald)',
+                color: 'var(--color-emerald)'
+              } : {
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" style={{ color: filterCooked ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}/>
+              <span>{t('cooked') || 'Cooked'}</span>
+            </button>
+
+            {/* Rating Dropdown */}
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => setOpenDropdown(openDropdown === 'rating' ? null : 'rating')}
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                style={selectedRating !== 'All Ratings' ? {
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
+                } : {
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <Star className="h-3.5 w-3.5" style={{ color: selectedRating !== 'All Ratings' ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}/>
+                <span>{selectedRating === 'All Ratings' ? (t('rating') || 'Rating') : selectedRating}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
+              </button>
+
+              {openDropdown === 'rating' && (
+                <div 
+                  className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  {['All Ratings', '4+ Stars', '3+ Stars', '1+ Stars'].map((rat) => (
+                    <button
+                      key={rat}
+                      type="button"
+                      onClick={() => { setSelectedRating(rat); setOpenDropdown(null); }}
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
+                      style={selectedRating === rat ? {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-primary)',
+                        border: '1px solid var(--color-border)'
+                      } : {
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      {rat}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Prep Time Dropdown */}
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => setOpenDropdown(openDropdown === 'prepTime' ? null : 'prepTime')}
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                style={selectedPrepTime !== 'All Prep Times' ? {
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-emerald)',
+                  color: 'var(--color-emerald)'
+                } : {
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <Hourglass className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }}/>
+                <span className="font-bold">{selectedPrepTime === 'All Prep Times' ? (t('prepTime') || 'Prep Time') : selectedPrepTime}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
+              </button>
+
+              {openDropdown === 'prepTime' && (
+                <div 
+                  className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  {['All Prep Times', 'Under 15m', '15-30m', 'Over 30m'].map((time) => (
+                    <button
+                      key={time}
+                      type="button"
+                      onClick={() => { setSelectedPrepTime(time); setOpenDropdown(null); }}
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
+                      style={selectedPrepTime === time ? {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-emerald)',
+                        border: '1px solid var(--color-border)'
+                      } : {
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      {time}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Cook Time Dropdown */}
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => setOpenDropdown(openDropdown === 'cookTime' ? null : 'cookTime')}
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                style={selectedCookTime !== 'All Cook Times' ? {
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-emerald)',
+                  color: 'var(--color-emerald)'
+                } : {
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }}/>
+                <span className="font-bold">{selectedCookTime === 'All Cook Times' ? (t('cookTime') || 'Cook Time') : selectedCookTime}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
+              </button>
+
+              {openDropdown === 'cookTime' && (
+                <div 
+                  className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  {['All Cook Times', 'Under 15m', '15-30m', 'Over 30m'].map((time) => (
+                    <button
+                      key={time}
+                      type="button"
+                      onClick={() => { setSelectedCookTime(time); setOpenDropdown(null); }}
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
+                      style={selectedCookTime === time ? {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-emerald)',
+                        border: '1px solid var(--color-border)'
+                      } : {
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      {time}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Grid */}
+      {loading ? (
+        <div className="text-xs py-12 text-center" style={{ color: 'var(--color-text-secondary)' }}>
+          {t('loadingRecipes') || 'Loading recipes...'}
+        </div>
+      ) : recipes.length === 0 ? (
+        <div 
+          className="text-center py-16 px-4 border border-dashed rounded-3xl space-y-3"
+          style={{
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: 'var(--color-border)'
+          }}
+        >
+          <div 
+            className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto shadow-sm"
+            style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' }}
+          >
+            <Utensils className="h-6 w-6"/>
+          </div>
+          <h3 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>
+            {t('noSavedRecipesTitle') || 'No Recipes Yet'}
+          </h3>
+          <p className="text-xs max-w-sm mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('noSavedRecipesDesc') || 'Recipes imported or created by your account will appear exclusively here.'}
+          </p>
+          <div className="flex justify-center gap-3 pt-2">
+            <Link 
+              href="/import"
+              className="px-4 py-2 rounded-xl text-xs font-bold border transition shadow-sm"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              {t('importRecipe') || 'Import Recipe'}
+            </Link>
+            <Link 
+              href="/manual"
+              className="px-4 py-2 rounded-xl text-xs font-bold text-white transition shadow-sm"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+            >
+              {t('createRecipe') || 'Create Recipe'}
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <div className={`grid ${GRID_CONFIG[gridMode].colsClass} gap-4 sm:gap-5`}>
+          {paginatedRecipes.map((r) => {
+            const cardBook = books.find(b => b.id === (r.bookId || r.book_id));
+            const cardTypeBadge = getCleanRecipeType(r);
+            const cfg = GRID_CONFIG[gridMode];
+            const displayImg = r.imageUrl || r.image || r.image_url || DEFAULT_RECIPE_IMAGE;
+
+            return (
+              <div
+                key={r.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  setSelectedRecipe(r);
+                  setCurrentServings(Math.max(1, Number(r.servings) || 4));
+                  setCompletedSteps([]);
+                  setNoteText(r.note || '');
+                  setIsBookDropdownOpen(false);
+                  setIsEditing(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedRecipe(r);
+                    setCurrentServings(Math.max(1, Number(r.servings) || 4));
+                    setCompletedSteps([]);
+                    setNoteText(r.note || '');
+                    setIsBookDropdownOpen(false);
+                    setIsEditing(false);
+                  }
+                }}
+                className="border rounded-2xl overflow-hidden transition cursor-pointer group shadow-sm hover:shadow-md relative flex flex-col justify-between"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)'
+                }}
+              >
+                <div>
+                  <div className={`relative ${cfg.imgHeight} w-full overflow-hidden`} style={{ backgroundColor: 'var(--color-inner-dark)' }}>
+                    <img
+                      src={displayImg}
+                      alt={r.title || r.name}
+                      referrerPolicy="no-referrer"
+                      crossOrigin="anonymous"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (!target.dataset.failed) {
+                          target.dataset.failed = 'true';
+                          target.src = DEFAULT_RECIPE_IMAGE;
+                        }
+                      }}
+                      className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                    />
+                    
+                    {/* Card Action Buttons */}
+                    <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={(e) => toggleCooked(e, r.id)}
+                        className="p-1.5 rounded-full backdrop-blur-md transition shadow-md cursor-pointer border"
+                        style={r.isCooked ? {
+                          backgroundColor: 'var(--color-emerald)',
+                          borderColor: 'var(--color-emerald)',
+                          color: '#ffffff'
+                        } : {
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
+                        }}
+                        title={r.isCooked ? (t('cooked') || 'Cooked') : (t('markAsCooked') || 'Mark as Cooked')}
+                      >
+                        <CheckCircle2 className="h-3.5 w-3.5"/>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => toggleFavorite(e, r.id)}
+                        className="p-1.5 rounded-full backdrop-blur-md transition shadow-md cursor-pointer border"
+                        style={r.isFavorite ? {
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        } : {
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
+                        }}
+                        title={r.isFavorite ? (t('favorites') || 'Favorite') : (t('addToFavorites') || 'Add to Favorites')}
+                      >
+                        <Heart 
+                          className={`h-3.5 w-3.5 ${r.isFavorite ? 'fill-current' : ''}`}
+                          style={{ color: r.isFavorite ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
+                        />
+                      </button>
+                    </div>
+
+                    {cardBook && gridMode !== '5x5' && (
+                      <div className="absolute bottom-2.5 left-2.5 bg-black/75 backdrop-blur-md text-[10px] text-amber-300 font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border border-amber-400/30 max-w-[80%] truncate">
+                        <Book className="h-3 w-3 shrink-0"/> <span className="truncate">{cardBook.title}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="p-3.5 space-y-1.5">
+                    <h3 
+                      className={`font-bold ${cfg.titleSize} leading-snug line-clamp-2`}
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      {r.title || r.name}
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="px-3.5 pb-3 pt-0 flex items-center justify-between gap-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span 
+                      className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 shadow-xs"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                    >
+                      {cardTypeBadge}
+                    </span>
+
+                    <span 
+                      className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 border"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text-secondary)'
+                      }}
+                    >
+                      {r.creatorName ? `${t('by') || 'By'} ${r.creatorName}` : (t('ownedByYou') || 'Created by you')}
+                    </span>
+
+                    {(r.rating || 0) > 0 && gridMode !== '5x5' ? (
+                      <span className="flex items-center gap-0.5 text-amber-500 text-[11px] font-bold bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/20 shadow-xs">
+                        <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-500"/> {r.rating}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <span className="text-[11px] flex items-center gap-1 shrink-0 font-semibold" style={{ color: 'var(--color-text)' }}>
+                    <Clock className="h-3 w-3" style={{ color: 'var(--color-primary)' }}/> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Pagination Controls */}
+      {filtered.length > 0 && (
+        <div 
+          className="pt-4 border-t flex flex-wrap items-center justify-between gap-3 text-xs"
+          style={{ borderColor: 'var(--color-border)' }}
+        >
+          <span style={{ color: 'var(--color-text-secondary)' }}>
+            {(t('showingRecipesRange') || 'Showing {start} - {end} of {total} recipes')
+              .replace('{start}', String(startIndex + 1))
+              .replace('{end}', String(Math.min(startIndex + itemsPerPage, filtered.length)))
+              .replace('{total}', String(filtered.length))}
+          </span>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              disabled={safeCurrentPage <= 1}
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              className="p-2 rounded-xl border disabled:opacity-30 transition cursor-pointer shadow-xs"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+              title="Previous Page"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter(num => num === 1 || num === totalPages || Math.abs(num - safeCurrentPage) <= 1)
+              .map((num, i, arr) => {
+                const prev = arr[i - 1];
+                const showEllipsis = prev && num - prev > 1;
+
+                return (
+                  <div key={num} className="flex items-center gap-1">
+                    {showEllipsis && <span className="px-1 font-bold" style={{ color: 'var(--color-text-secondary)' }}>...</span>}
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage(num)}
+                      className="min-w-[32px] h-8 rounded-xl text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-xs"
+                      style={safeCurrentPage === num ? {
+                        backgroundColor: 'var(--color-primary)',
+                        borderColor: 'var(--color-primary)',
+                        color: '#ffffff',
+                        boxShadow: '0 2px 8px rgba(224, 86, 56, 0.3)'
+                      } : {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      {num}
+                    </button>
+                  </div>
+                );
+              })}
+
+            <button
+              type="button"
+              disabled={safeCurrentPage >= totalPages}
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              className="p-2 rounded-xl border disabled:opacity-30 transition cursor-pointer shadow-xs"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+              title="Next Page"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* RECIPE DETAILS & EDIT MODAL */}
+      {selectedRecipe && (
+        <div 
+          onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative cursor-default transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
+              className="absolute top-4 right-4 z-30 p-2 rounded-xl border transition cursor-pointer shadow-md"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <X className="h-5 w-5"/>
+            </button>
+
+            <div className="overflow-y-auto flex-1">
+              {!isEditing ? (
+                <div className="space-y-5 pb-6">
+                  <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
+                    <img
+                      src={selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || DEFAULT_RECIPE_IMAGE}
+                      alt={selectedRecipe.title || selectedRecipe.name}
+                      referrerPolicy="no-referrer"
+                      crossOrigin="anonymous"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (!target.dataset.failed) {
+                          target.dataset.failed = 'true';
+                          target.src = DEFAULT_RECIPE_IMAGE;
+                        }
+                      }}
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
+
+                    <div className="relative z-10 space-y-3">
+                      <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
+                        {selectedRecipe.title || selectedRecipe.name}
+                      </h2>
+
+                      {/* Modal Badges */}
+                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }}/> 
+                          <span className="font-bold">{(t('cookTimePrefix') || 'Cook: {time} minutes').replace('{time}', String(selectedRecipe.cookTimeMinutes || 10))}</span>
+                        </span>
+
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
+                          <span className="font-bold">{(t('prepTimePrefix') || 'Prep: {time} minutes').replace('{time}', String(selectedRecipe.prepTimeMinutes || 30))}</span>
+                        </span>
+
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Utensils className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
+                          <span className="font-bold">{recipeCategoryBadge}</span>
+                        </span>
+
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Users className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
+                          <span className="font-bold">
+                            {selectedRecipe.creatorName ? `${t('creator') || 'Creator'}: ${selectedRecipe.creatorName}` : (t('ownedByYou') || 'Created by you')}
+                          </span>
+                        </span>
+                        
+                        <button
+                          type="button"
+                          onClick={(e) => toggleFavorite(e, selectedRecipe.id)}
+                          className="ml-auto w-8 h-8 rounded-full flex items-center justify-center shadow-md cursor-pointer transition border"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: selectedRecipe.isFavorite ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+                          }}
+                          title={selectedRecipe.isFavorite ? "Favorite" : "Mark as Favorite"}
+                        >
+                          <Heart className={`h-4 w-4 ${selectedRecipe.isFavorite ? 'fill-current' : ''}`} style={{ color: selectedRecipe.isFavorite ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}/>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 3 Core Action Buttons */}
+                  <div className="px-5 grid grid-cols-3 gap-2.5">
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setIsBookDropdownOpen(!isBookDropdownOpen)}
+                        className="w-full border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                        style={{
+                          backgroundColor: assignedBook ? 'var(--color-inner-dark)' : 'var(--color-card)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                      >
+                        <BookmarkPlus className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }}/>
+                        <span className="truncate">
+                          {assignedBook ? assignedBook.title : (t('addToCookbook') || t('addToBook') || 'Add to Cookbook')}
+                        </span>
+                        <ChevronDown className="h-3 w-3 shrink-0 opacity-70 ml-0.5"/>
+                      </button>
+
+                      {isBookDropdownOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setIsBookDropdownOpen(false)} />
+                          <div 
+                            className="absolute left-0 top-full mt-2 w-64 border rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in" 
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            <div className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
+                              <span>{t('selectCookbook') || 'Select Cookbook'}</span>
+                              <Link 
+                                className="hover:underline font-bold" 
+                                href="/books"
+                                style={{ color: 'var(--color-emerald)' }}
+                              >
+                                {t('manage') || 'Manage'}
+                              </Link>
+                            </div>
+
+                            <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
+                              {books.length === 0 ? (
+                                <div className="text-xs px-2.5 py-2" style={{ color: 'var(--color-text-secondary)' }}>{t('noCookbooksAvailable') || 'No cookbooks available'}</div>
+                              ) : (
+                                books.map((b) => {
+                                  const isAssigned = (selectedRecipe.bookId || selectedRecipe.book_id) === b.id;
+                                  return (
+                                    <button
+                                      key={b.id}
+                                      type="button"
+                                      onClick={() => {
+                                        handleAssignToBook(b.id);
+                                        setIsBookDropdownOpen(false);
+                                      }}
+                                      className="w-full text-left px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition cursor-pointer"
+                                      style={isAssigned ? {
+                                        backgroundColor: 'var(--color-inner-dark)',
+                                        color: 'var(--color-primary)',
+                                        border: '1px solid var(--color-primary)'
+                                      } : {
+                                        color: 'var(--color-text)'
+                                      }}
+                                    >
+                                      <span className="truncate flex-1 pr-2">{b.title}</span>
+                                      {isAssigned && <Check className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-primary)' }}/>}
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={openAddToPlanModal}
+                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
+                    >
+                      <CalendarPlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('addToPlan') || 'Add to Plan'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleOpenShoppingModal}
+                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
+                    >
+                      <ShoppingCart className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('shoppingList') || 'Shopping List'}
+                    </button>
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* Servings Stepper with Live Percentage Telemetry */}
+                  <div className="px-5 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <span 
+                        className="text-xs font-bold flex items-center gap-1.5"
+                        style={{ color: 'var(--color-primary)' }}
+                      >
+                        <Users className="h-4 w-4"/> {t('servingsLabel') || 'Servings'}
+                      </span>
+                      <div 
+                        className="flex items-center border rounded-lg overflow-hidden shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setCurrentServings((prev) => Math.max(1, prev - 1))}
+                          className="px-2.5 py-1 font-bold cursor-pointer transition select-none hover:opacity-80"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                          title="Decrease servings by 1"
+                        >
+                          -
+                        </button>
+                        <span className="px-3 py-1 text-xs font-bold min-w-[36px] text-center tabular-nums" style={{ color: 'var(--color-text)' }}>
+                          {currentServings}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setCurrentServings((prev) => prev + 1)}
+                          className="px-2.5 py-1 font-bold cursor-pointer transition select-none hover:opacity-80"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                          title="Increase servings by 1"
+                        >
+                          +
+                        </button>
+                      </div>
+
+                      {/* Percentage Badge & Reset */}
+                      <div className="flex items-center gap-1.5">
+                        <span 
+                          className="text-[11px] font-bold px-2 py-0.5 rounded-full border transition-all shadow-xs tabular-nums"
+                          style={percentChange === 0 ? {
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text-secondary)'
+                          } : percentChange > 0 ? {
+                            backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                            borderColor: 'var(--color-emerald)',
+                            color: 'var(--color-emerald)'
+                          } : {
+                            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-primary)'
+                          }}
+                          title={`Scale factor: ${scaleFactor.toFixed(2)}x`}
+                        >
+                          {percentChange === 0 ? '100%' : `${percentChange > 0 ? '+' : ''}${percentChange}%`}
+                        </span>
+
+                        {percentChange !== 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setCurrentServings(baseServings)}
+                            className="text-[10px] font-bold underline cursor-pointer transition hover:opacity-90"
+                            style={{ color: 'var(--color-text-secondary)' }}
+                            title={t('resetServings') || 'Reset to original servings'}
+                          >
+                            {t('reset') || 'Reset'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleOpenTimerModal}
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90"
+                        style={{
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                      >
+                        <Timer className="h-3.5 w-3.5"/> {t('timerBtn') || 'Timer'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleOpenEdit}
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        style={{
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                      >
+                        <Edit3 className="h-3.5 w-3.5"/> {t('editBtn') || 'Edit'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(window.location.href);
+                          alert(t('recipeLinkCopiedAlert') || 'Recipe link copied!');
+                        }}
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        style={{
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                      >
+                        <Share2 className="h-3.5 w-3.5"/> {t('shareRecipeBtn') || 'Share Recipe'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <div className="px-5 text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                    {selectedRecipe.description}
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* Cooked Status / Star Rating / Note */}
+                  <div className="px-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={(e) => toggleCooked(e, selectedRecipe.id)}
+                        className="flex items-center gap-2.5 text-base font-extrabold group cursor-pointer select-none transition"
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        <span className="font-extrabold tracking-tight">
+                          {selectedRecipe.isCooked ? (t('cooked') || 'Cooked') : (t('markAsCooked') || 'Mark as Cooked')}
+                        </span>
+                        
+                        <span 
+                          className="w-5 h-5 rounded-full flex items-center justify-center transition shadow-sm border"
+                          style={selectedRecipe.isCooked ? {
+                            backgroundColor: 'var(--color-emerald)',
+                            borderColor: 'var(--color-emerald)',
+                            color: '#ffffff'
+                          } : {
+                            border: '1px solid var(--color-border)',
+                            backgroundColor: 'var(--color-inner-dark)',
+                            color: 'var(--color-text-secondary)'
+                          }}
+                        >
+                          {selectedRecipe.isCooked && <Check className="h-3.5 w-3.5 stroke-[3]"/>}
+                        </span>
+                      </button>
+
+                      <div className="flex items-center gap-1">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Star
+                            key={star}
+                            onClick={() => updateSelectedRecipeState('rating', star)}
+                            className="h-5 w-5 cursor-pointer transition"
+                            style={{
+                              color: (selectedRecipe.rating || 0) >= star ? 'var(--color-primary)' : 'var(--color-border)',
+                              fill: (selectedRecipe.rating || 0) >= star ? 'var(--color-primary)' : 'transparent'
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsNoteOpen(!isNoteOpen)}
+                        className="flex items-center gap-1.5 text-xs font-medium transition cursor-pointer"
+                        style={{ color: 'var(--color-text-secondary)' }}
+                      >
+                        <Edit3 className="h-3.5 w-3.5"/>
+                        <span className="italic">{t('addANote') || 'Add a note'}</span>
+                      </button>
+
+                      {isNoteOpen && (
+                        <div className="flex gap-2 animate-in fade-in">
+                          <input
+                            type="text"
+                            autoComplete="off"
+                            data-lpignore="true"
+                            placeholder={t('addNotesPlaceholder') || 'Add notes...'}
+                            value={noteText}
+                            onChange={(e) => setNoteText(e.target.value)}
+                            className="flex-1 border rounded-xl px-3 py-2 text-xs outline-none"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateSelectedRecipeState('note', noteText);
+                              setIsNoteOpen(false);
+                            }}
+                            className="text-white font-bold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer shadow-sm"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                          >
+                            {t('save') || 'Save'}
+                          </button>
+                        </div>
+                      )}
+                      {selectedRecipe.note && !isNoteOpen && (
+                        <p 
+                          className="text-xs italic"
+                          style={{ color: 'var(--color-emerald)' }}
+                        >
+                          Note: "{selectedRecipe.note}"
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* INGREDIENTS SECTION (SCALED BY PERCENTAGE) */}
+                  <div className="px-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>
+                          {t('ingredientsHeading') || 'Ingredients'}
+                        </h3>
+                        {percentChange !== 0 && (
+                          <span 
+                            className="text-[11px] font-bold px-2 py-0.5 rounded-full border shadow-xs"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-primary)',
+                              color: 'var(--color-primary)'
+                            }}
+                          >
+                            {scaleFactor.toFixed(2)}x
+                          </span>
+                        )}
+                      </div>
+                      
+                      <div 
+                        className="flex items-center border rounded-lg overflow-hidden text-xs shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
+                        }}
+                      >
+                        <div className="px-2.5 py-1 border-r flex items-center justify-center" style={{ borderColor: 'var(--color-border)' }}>
+                          <Type className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setFontSizeScale(Math.max(60, fontSizeScale - 10))}
+                          className="px-2.5 py-1 font-bold cursor-pointer"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        >
+                          -
+                        </button>
+                        <span className="px-2.5 py-1 font-bold min-w-[42px] text-center" style={{ color: 'var(--color-text)' }}>
+                          {fontSizeScale}%
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setFontSizeScale(Math.min(140, fontSizeScale + 10))}
+                          className="px-2.5 py-1 font-bold cursor-pointer"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2.5" style={{ fontSize: `${fontSizeScale}%` }}>
+                      {Array.isArray(selectedRecipe.ingredients) && selectedRecipe.ingredients.map((ing: any, idx: number) => {
+                        const defaultCat = categories[0] || 'Produce';
+                        const norm = getNormalizedIngredient(ing, defaultCat);
+                        const scaledAmt = calculateScaledAmount(norm.amount, baseServings, currentServings);
+
+                        return (
+                          <div key={idx} className="flex items-start gap-2.5 leading-snug">
+                            <span 
+                              className="w-2 h-2 rounded-full inline-block shrink-0 mt-1.5"
+                              style={{ backgroundColor: 'var(--color-primary)' }}
+                            />
+                            <span style={{ color: 'var(--color-text)' }}>
+                              {(scaledAmt || norm.unit) ? (
+                                <>
+                                  <strong className="font-bold tracking-tight" style={{ color: 'var(--color-text)' }}>
+                                    {scaledAmt} {norm.unit && norm.unit.toLowerCase() !== 'unit' ? norm.unit : ''}{' '}
+                                  </strong>
+                                  <span>{norm.name}</span>
+                                </>
+                              ) : (
+                                <span>{norm.name}</span>
+                              )}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* INSTRUCTIONS SECTION */}
+                  <div className="px-5 space-y-4">
+                    <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>{t('instructionsHeading') || 'Instructions'}</h3>
+                    
+                    <div className="space-y-3.5" style={{ fontSize: `${fontSizeScale}%` }}>
+                      {Array.isArray(selectedRecipe.instructions) && selectedRecipe.instructions.map((step: string, idx: number) => {
+                        const isDone = completedSteps.includes(idx);
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => {
+                              if (completedSteps.includes(idx)) {
+                                setCompletedSteps(completedSteps.filter(i => i !== idx));
+                              } else {
+                                setCompletedSteps([...completedSteps, idx]);
+                              }
+                            }}
+                            className={`flex items-start gap-3 p-3 rounded-2xl border cursor-pointer transition select-none shadow-xs ${
+                              isDone ? 'opacity-50' : ''
+                            }`}
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            <div 
+                              className="w-4 h-4 rounded border flex items-center justify-center shrink-0 mt-0.5 transition"
+                              style={isDone ? {
+                                backgroundColor: 'var(--color-primary)',
+                                borderColor: 'var(--color-primary)',
+                                color: '#ffffff'
+                              } : {
+                                borderColor: 'var(--color-primary)',
+                                backgroundColor: 'transparent'
+                              }}
+                            >
+                              {isDone && <Check className="h-3.5 w-3.5 stroke-[3]"/>}
+                            </div>
+
+                            <span 
+                              className="font-extrabold shrink-0 text-sm"
+                              style={{ color: 'var(--color-primary)' }}
+                            >
+                              {idx + 1}.
+                            </span>
+
+                            <span 
+                              className={`leading-relaxed flex-1 ${isDone ? 'line-through opacity-50' : ''}`}
+                              style={{ color: 'var(--color-text)' }}
+                            >
+                              {step}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* MODAL FOOTER */}
+                  <div className="px-5 flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteRecipe(selectedRecipe.id)}
+                      className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'rgba(239, 68, 68, 0.4)',
+                        color: '#ef4444'
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipeBtn') || 'Delete Recipe'}
+                    </button>
+
+                    <div className="flex items-center gap-2 ml-auto text-xs">
+                      <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                        {t('source') || 'Source'}:
+                      </span>
+                      {selectedRecipe.sourceUrl || selectedRecipe.source_url ? (
+                        <a
+                          href={getSafeHref(selectedRecipe.sourceUrl || selectedRecipe.source_url)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-bold text-xs hover:underline inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          <span className="underline">
+                            {(t('visitSource') || 'Visit {domain}').replace('{domain}', getSafeHostname(selectedRecipe.sourceUrl || selectedRecipe.source_url))}
+                          </span>
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      ) : (
+                        <span 
+                          className="px-3 py-1.5 rounded-xl border text-xs font-medium"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text-secondary)'
+                          }}
+                        >
+                          {t('createdManually') || 'Created manually'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* EDIT RECIPE VIEW */
+                <div className="p-6 space-y-6">
+                  <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                    <h3 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                      <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('editRecipeTitle') || 'Edit Recipe'}
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(false)}
+                      className="p-1 rounded-lg transition cursor-pointer"
+                      style={{ color: 'var(--color-text-secondary)' }}
+                    >
+                      <X className="h-5 w-5"/>
+                    </button>
+                  </div>
+
+                  <div 
+                    className="flex p-1.5 rounded-2xl border"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)'
+                    }}
+                  >
+                    {[
+                      { id: 'info', label: t('basicInfoTab') || 'Basic Info' },
+                      { id: 'ingredients', label: t('ingredientsTab') || 'Ingredients' },
+                      { id: 'steps', label: t('stepsTab') || 'Steps' }
+                    ].map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setEditTab(tab.id as any)}
+                        className="flex-1 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer"
+                        style={editTab === tab.id ? {
+                          backgroundColor: 'var(--color-card)',
+                          color: 'var(--color-text)',
+                          border: '1px solid var(--color-border)',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                        } : {
+                          color: 'var(--color-text-secondary)'
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* TAB 1: BASIC INFO */}
+                  {editTab === 'info' && (
+                    <div className="space-y-5 animate-in fade-in text-xs">
+                      <div className="space-y-1.5">
+                        <label 
+                          className="block font-bold uppercase tracking-wider text-[11px]"
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          {t('photoLabel') || 'Photo'}
+                        </label>
+                        <label 
+                          className="border-2 border-dashed rounded-2xl h-44 flex flex-col items-center justify-center cursor-pointer transition relative overflow-hidden group"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)'
+                          }}
+                        >
+                          {editForm.imageUrl ? (
+                            <>
+                              <img
+                                src={editForm.imageUrl}
+                                alt="Recipe Preview"
+                                referrerPolicy="no-referrer"
+                                crossOrigin="anonymous"
+                                onError={(e) => {
+                                  const target = e.currentTarget;
+                                  if (!target.dataset.failed) {
+                                    target.dataset.failed = 'true';
+                                    target.src = DEFAULT_RECIPE_IMAGE;
+                                  }
+                                }}
+                                className="absolute inset-0 w-full h-full object-cover"
+                              />
+                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+                                <span 
+                                  className="border text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text)'
+                                  }}
+                                >
+                                  <ImagePlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('changePhoto') || 'Change Photo'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setEditForm({ ...editForm, imageUrl: '' });
+                                  }}
+                                  className="bg-red-950/90 border border-red-500/50 text-red-400 text-xs font-bold px-3 py-1.5 rounded-xl hover:bg-red-900 cursor-pointer"
+                                >
+                                  {t('removePhoto') || 'Remove'}
+                                </button>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="text-center space-y-2">
+                              <ImagePlus className="h-8 w-8 mx-auto transition" style={{ color: 'var(--color-text-secondary)' }}/>
+                              <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>{t('addAPhoto') || 'Add a photo'}</span>
+                            </div>
+                          )}
+                          <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                        </label>
+                      </div>
+
+                      <div>
+                        <label 
+                          className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          {t('recipeTitle') || 'Recipe Title'}
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          autoComplete="off"
+                          data-lpignore="true"
+                          value={editForm.title}
+                          onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                          className="w-full border rounded-xl p-3 text-sm outline-none"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                        />
+                      </div>
+
+                      <div>
+                        <label 
+                          className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          {t('description') || 'Description'}
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={editForm.description}
+                          onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                          className="w-full border rounded-xl p-3 text-xs outline-none resize-y leading-relaxed"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label 
+                            className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
+                            style={{ color: 'var(--color-primary)' }}
+                          >
+                            {t('recipeTypeLabel') || 'Recipe Type'}
+                          </label>
+                          <select
+                            value={editForm.recipeType}
+                            onChange={(e) => setEditForm({ ...editForm, recipeType: e.target.value })}
+                            className="w-full border rounded-xl p-3 text-xs outline-none cursor-pointer"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                          >
+                            {RECIPE_TYPES.filter(t => t !== 'All Types').map((t) => (
+                              <option key={t} value={t} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label 
+                            className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
+                            style={{ color: 'var(--color-primary)' }}
+                          >
+                            {t('servingsLabel') || 'Servings'}
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={editForm.servings}
+                            onChange={(e) => setEditForm({ ...editForm, servings: Math.max(1, parseInt(e.target.value) || 1) })}
+                            className="w-full border rounded-xl p-3 text-xs outline-none"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="pt-4 border-t flex justify-end gap-3" style={{ borderColor: 'var(--color-border)' }}>
+                        <button
+                          type="button"
+                          onClick={() => setIsEditing(false)}
+                          className="px-5 py-2.5 rounded-xl font-bold transition text-xs cursor-pointer"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            color: 'var(--color-text-secondary)'
+                          }}
+                        >
+                          {t('cancel') || 'Cancel'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveEdit}
+                          className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg flex items-center gap-2 text-xs cursor-pointer"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                        >
+                          <Save className="h-4 w-4"/> {t('saveChanges') || 'Save Changes'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 2: INGREDIENTS */}
+                  {editTab === 'ingredients' && (
+                    <div 
+                      className="border rounded-2xl p-5 space-y-4 animate-in fade-in text-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)'
+                      }}
+                    >
+                      <div className="flex justify-between items-center">
+                        <h2 
+                          className="text-sm font-bold uppercase tracking-wider"
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          {t('ingredientsHeading') || 'Ingredients'}
+                        </h2>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsReorderingIngredients(!isReorderingIngredients)}
+                            className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
+                            style={isReorderingIngredients ? {
+                              backgroundColor: 'var(--color-emerald)',
+                              color: '#ffffff',
+                              borderColor: 'var(--color-emerald)'
+                            } : {
+                              backgroundColor: 'var(--color-card)',
+                              color: 'var(--color-text)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            {isReorderingIngredients ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditForm({
+                              ...editForm,
+                              ingredients: [...editForm.ingredients, { amount: '', unit: '', item: '', category: categories[0] || 'Produce' }]
+                            })}
+                            className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                          >
+                            <Plus className="h-3.5 w-3.5"/> {t('addIngredient') || 'Add Ingredient'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+                        {editForm.ingredients.map((ing: any, idx: number) => (
+                          <div
+                            key={idx}
+                            draggable={isReorderingIngredients}
+                            onDragStart={() => handleDragStart(idx)}
+                            onDragOver={(e) => handleDragOver(e, idx, 'ingredients')}
+                            onDrop={handleDrop}
+                            className={`flex items-center gap-2 p-2.5 rounded-xl border transition ${
+                              isReorderingIngredients ? 'cursor-grab' : ''
+                            }`}
+                            style={{
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: isReorderingIngredients ? 'var(--color-emerald)' : 'var(--color-border)'
+                            }}
+                          >
+                            <input
+                              type="text"
+                              autoComplete="off"
+                              placeholder={t('amt') || 'Amt'}
+                              value={ing.amount}
+                              onChange={(e) => {
+                                const list = [...editForm.ingredients];
+                                list[idx].amount = e.target.value;
+                                setEditForm({ ...editForm, ingredients: list });
+                              }}
+                              className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text)'
+                              }}
+                            />
+                            <input
+                              type="text"
+                              autoComplete="off"
+                              placeholder={t('unit') || 'Unit'}
+                              value={ing.unit}
+                              onChange={(e) => {
+                                const list = [...editForm.ingredients];
+                                list[idx].unit = e.target.value;
+                                setEditForm({ ...editForm, ingredients: list });
+                              }}
+                              className="w-20 border rounded-lg p-2 text-center outline-none"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text-secondary)'
+                              }}
+                            />
+                            <input
+                              type="text"
+                              autoComplete="off"
+                              placeholder={t('ingredientNamePlaceholder') || 'Ingredient name...'}
+                              value={ing.item}
+                              onChange={(e) => {
+                                const list = [...editForm.ingredients];
+                                list[idx].item = e.target.value;
+                                setEditForm({ ...editForm, ingredients: list });
+                              }}
+                              className="flex-1 bg-transparent border-none outline-none px-2"
+                              style={{ color: 'var(--color-text)' }}
+                            />
+                            <select
+                              value={ing.category}
+                              onChange={(e) => {
+                                const list = [...editForm.ingredients];
+                                list[idx].category = e.target.value;
+                                setEditForm({ ...editForm, ingredients: list });
+                              }}
+                              className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text-secondary)'
+                              }}
+                            >
+                              {categories.map((cat) => (
+                                <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
+                              ))}
+                            </select>
+
+                            {isReorderingIngredients ? (
+                              <div className="p-2 cursor-grab" style={{ color: 'var(--color-emerald)' }}>
+                                <GripVertical className="h-4 w-4"/>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setEditForm({
+                                  ...editForm,
+                                  ingredients: editForm.ingredients.filter((_: any, i: number) => i !== idx)
+                                })}
+                                className="p-2 text-red-500 hover:text-red-600 cursor-pointer"
+                              >
+                                <Trash2 className="h-4 w-4"/>
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex justify-between pt-3">
+                        <button
+                          type="button"
+                          onClick={() => setEditTab('info')}
+                          className="font-bold px-5 py-2 rounded-xl text-xs transition cursor-pointer"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          {t('backBtn') || '← Back'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditTab('steps')}
+                          className="text-white font-bold px-6 py-2 rounded-xl text-xs transition shadow-md cursor-pointer"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                        >
+                          {t('nextStepsBtn') || 'Next: Steps →'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 3: STEPS */}
+                  {editTab === 'steps' && (
+                    <div 
+                      className="border rounded-2xl p-5 space-y-4 animate-in fade-in text-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)'
+                      }}
+                    >
+                      <div className="flex justify-between items-center">
+                        <h2 
+                          className="text-sm font-bold uppercase tracking-wider"
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          {t('stepByStepInstructions') || 'Step-by-Step Instructions'}
+                        </h2>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsReorderingSteps(!isReorderingSteps)}
+                            className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
+                            style={isReorderingSteps ? {
+                              backgroundColor: 'var(--color-emerald)',
+                              color: '#ffffff',
+                              borderColor: 'var(--color-emerald)'
+                            } : {
+                              backgroundColor: 'var(--color-card)',
+                              color: 'var(--color-text-secondary)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            {isReorderingSteps ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditForm({
+                              ...editForm,
+                              instructions: [...editForm.instructions, '']
+                            })}
+                            className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                          >
+                            <Plus className="h-3.5 w-3.5"/> {t('addStep') || 'Add Step'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+                        {editForm.instructions.map((step: string, idx: number) => (
+                          <div
+                            key={idx}
+                            draggable={isReorderingSteps}
+                            onDragStart={() => handleDragStart(idx)}
+                            onDragOver={(e) => handleDragOver(e, idx, 'steps')}
+                            onDrop={handleDrop}
+                            className={`flex items-start gap-3 p-3 rounded-xl border transition ${
+                              isReorderingSteps ? 'cursor-grab' : ''
+                            }`}
+                            style={{
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: isReorderingSteps ? 'var(--color-emerald)' : 'var(--color-border)'
+                            }}
+                          >
+                            <span 
+                              className="w-6 h-6 rounded-full font-bold flex items-center justify-center shrink-0 mt-1"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                color: 'var(--color-primary)',
+                                borderColor: 'var(--color-primary)',
+                                borderWidth: '1px'
+                              }}
+                            >
+                              {idx + 1}
+                            </span>
+                            <textarea
+                              rows={2}
+                              placeholder={(t('describeStepPlaceholder') || 'Describe step {n}...').replace('{n}', String(idx + 1))}
+                              value={step}
+                              onChange={(e) => {
+                                const list = [...editForm.instructions];
+                                list[idx] = e.target.value;
+                                setEditForm({ ...editForm, instructions: list });
+                              }}
+                              className="flex-1 bg-transparent border-none outline-none resize-y"
+                              style={{ color: 'var(--color-text)' }}
+                            />
+
+                            {isReorderingSteps ? (
+                              <div className="p-2 cursor-grab mt-1" style={{ color: 'var(--color-emerald)' }}>
+                                <GripVertical className="h-4 w-4"/>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setEditForm({
+                                  ...editForm,
+                                  instructions: editForm.instructions.filter((_: any, i: number) => i !== idx)
+                                })}
+                                className="p-2 text-slate-400 hover:text-red-500 h-fit cursor-pointer"
+                              >
+                                <Trash2 className="h-4 w-4"/>
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex justify-between pt-3">
+                        <button
+                          type="button"
+                          onClick={() => setEditTab('ingredients')}
+                          className="font-bold px-5 py-2 rounded-xl text-xs transition cursor-pointer"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          {t('backBtn') || '← Back'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveEdit}
+                          className="text-white font-bold px-8 py-2.5 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                        >
+                          <Save className="h-4 w-4"/> {t('saveChanges') || 'Save Changes'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TIMER SETTINGS POPUP MODAL */}
+      {isTimerModalOpen && (
+        <div 
+          onClick={() => setIsTimerModalOpen(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[75] flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-sm w-full p-6 space-y-5 shadow-2xl relative animate-in fade-in cursor-default transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <button 
+              type="button"
+              onClick={() => setIsTimerModalOpen(false)} 
+              className="absolute top-4 right-4 p-2 rounded-xl border transition cursor-pointer"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <X className="h-4 w-4"/>
+            </button>
+
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <div 
+                  className="w-8 h-8 rounded-xl flex items-center justify-center shadow-xs"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-primary)' }}
+                >
+                  <Timer className="h-5 w-5"/>
+                </div>
+                <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+                  {t('timerSettingsTitle') || 'Kitchen Timer'}
+                </h2>
+              </div>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {selectedRecipe?.title || selectedRecipe?.name ? (
+                  (t('timerForRecipe') || 'Timer for: {title}').replace('{title}', selectedRecipe.title || selectedRecipe.name)
+                ) : (
+                  t('setTimerUpTo60Min') || 'Set a cooking countdown up to 60 minutes.'
+                )}
+              </p>
+            </div>
+
+            <div 
+              className="p-4 rounded-2xl border flex flex-col items-center justify-center gap-3 shadow-inner"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
+              }}
+            >
+              <div className="flex items-center justify-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => setTimerInputMinutes((m) => Math.max(1, m - 1))}
+                  className="w-10 h-10 rounded-xl border font-bold text-lg flex items-center justify-center transition cursor-pointer active:scale-95 shadow-sm"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  title="Decrease 1 minute"
+                >
+                  -
+                </button>
+
+                <div className="text-center min-w-[100px]">
+                  <span className="text-4xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+                    {timerInputMinutes}
+                  </span>
+                  <span className="text-xs font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('minutesLabel') || 'Minutes'}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setTimerInputMinutes((m) => Math.min(60, m + 1))}
+                  className="w-10 h-10 rounded-xl border font-bold text-lg flex items-center justify-center transition cursor-pointer active:scale-95 shadow-sm"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  title="Increase 1 minute"
+                >
+                  +
+                </button>
+              </div>
+
+              <input
+                type="range"
+                min={1}
+                max={60}
+                value={timerInputMinutes}
+                onChange={(e) => setTimerInputMinutes(parseInt(e.target.value) || 1)}
+                className="w-full accent-[var(--color-primary)] cursor-pointer"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-wider block" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('quickPresets') || 'Quick Presets'}:
+              </span>
+              <div className="grid grid-cols-5 gap-1.5">
+                {[5, 10, 15, 30, 45].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setTimerInputMinutes(preset)}
+                    className="py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer shadow-xs text-center"
+                    style={timerInputMinutes === preset ? {
+                      backgroundColor: 'var(--color-primary)',
+                      borderColor: 'var(--color-primary)',
+                      color: '#ffffff'
+                    } : {
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    {preset}m
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsTimerModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
+                style={{
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-secondary)',
+                  backgroundColor: 'var(--color-inner-dark)'
+                }}
+              >
+                {t('cancel') || 'Cancel'}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleStartTimer}
+                className="px-6 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-lg flex items-center gap-1.5 cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+              >
+                <Play className="h-4 w-4 fill-current"/> {t('startTimer') || 'Start Timer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FLOATING COUNTDOWN TIMER WIDGET */}
+      {activeTimer && (
+        <div
+          className={`fixed bottom-5 right-5 z-[80] border rounded-2xl p-3.5 shadow-2xl flex items-center gap-3.5 transition-all duration-300 backdrop-blur-xl animate-in slide-in-from-bottom-5 ${
+            activeTimer.remainingSeconds === 0 ? 'animate-bounce ring-4 ring-red-500/50' : ''
+          }`}
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: activeTimer.remainingSeconds === 0 ? '#ef4444' : 'var(--color-primary)',
+            boxShadow: activeTimer.remainingSeconds === 0 
+              ? '0 10px 35px rgba(239, 68, 68, 0.45)' 
+              : '0 10px 35px rgba(0, 0, 0, 0.28)',
+            color: 'var(--color-text)'
+          }}
+        >
+          <div 
+            className="w-10 h-10 rounded-xl flex items-center justify-center shadow-md shrink-0 transition"
+            style={{
+              backgroundColor: activeTimer.remainingSeconds === 0 ? '#ef4444' : 'var(--color-inner-dark)',
+              color: activeTimer.remainingSeconds === 0 ? '#ffffff' : 'var(--color-primary)'
+            }}
+          >
+            {activeTimer.remainingSeconds === 0 ? (
+              <Bell className="h-5 w-5 animate-pulse fill-current" />
+            ) : (
+              <Timer className={`h-5 w-5 ${activeTimer.isRunning ? 'animate-spin' : ''}`} style={{ animationDuration: '4s' }}/>
+            )}
+          </div>
+
+          <div className="space-y-0.5 pr-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xl font-black tracking-tight tabular-nums" style={{ color: activeTimer.remainingSeconds === 0 ? '#ef4444' : 'var(--color-text)' }}>
+                {formattedCountdown}
+              </span>
+              {activeTimer.remainingSeconds === 0 && (
+                <span className="text-[10px] uppercase font-black px-1.5 py-0.5 rounded bg-red-500 text-white animate-pulse">
+                  {t('timerDone') || 'Done!'}
+                </span>
+              )}
+            </div>
+
+            <p className="text-[11px] font-semibold max-w-[140px] truncate" style={{ color: 'var(--color-text-secondary)' }}>
+              {activeTimer.recipeTitle || (t('kitchenTimer') || 'Kitchen Timer')}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-1.5 pl-1 border-l" style={{ borderColor: 'var(--color-border)' }}>
+            {activeTimer.remainingSeconds > 0 && (
+              <button
+                type="button"
+                onClick={handleTogglePauseTimer}
+                className="p-2 rounded-xl border transition cursor-pointer shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-primary)'
+                }}
+                title={activeTimer.isRunning ? (t('pause') || 'Pause') : (t('resume') || 'Resume')}
+              >
+                {activeTimer.isRunning ? <Pause className="h-4 w-4"/> : <Play className="h-4 w-4 fill-current"/>}
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handleResetOrDismissTimer}
+              className="p-2 rounded-xl border transition cursor-pointer shadow-xs hover:text-red-500"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-secondary)'
+              }}
+              title={t('dismissTimer') || 'Dismiss Timer'}
+            >
+              <X className="h-4 w-4"/>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ADD TO PLAN MODAL */}
+      {showAddToPlanModal && selectedRecipe && (
+        <div 
+          onClick={() => setShowAddToPlanModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[70] flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <button 
+              type="button"
+              onClick={() => setShowAddToPlanModal(false)} 
+              className="absolute top-4 right-4 p-2 rounded-lg transition cursor-pointer"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <X className="h-4 w-4"/>
+            </button>
+
+            <div className="pr-6 space-y-1">
+              <h2 
+                className="text-xl font-black tracking-tight"
+                style={{ color: 'var(--color-primary)' }}
+              >
+                {t('addToCalendar') || 'Add to Calendar'}
+              </h2>
+              <p className="text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+                {(t('scheduleRecipeInMealPlan') || 'Schedule {title} in your meal plan').replace('{title}', selectedRecipe.title || selectedRecipe.name)}
+              </p>
+            </div>
+
+            <div className="space-y-4 pt-1">
+              <div>
+                <label 
+                  className="block text-xs font-bold mb-1.5"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  {t('date') || 'Date'}
+                </label>
+                <div className="relative flex items-center">
+                  <Calendar className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-primary)' }}/>
+                  <input
+                    type="date"
+                    required
+                    value={planDate}
+                    onChange={(e) => setPlanDate(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveToCalendar();
+                      }
+                    }}
+                    className="w-full border rounded-xl pl-10 pr-3 py-2.5 text-xs font-semibold outline-none cursor-pointer"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label 
+                  className="block text-xs font-bold mb-1.5"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  {t('mealType') || 'Meal Type'}
+                </label>
+                <div className="relative flex items-center">
+                  <select
+                    value={planMealType}
+                    onChange={(e) => setPlanMealType(e.target.value)}
+                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none cursor-pointer appearance-none"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  >
+                    <option value="Breakfast" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('breakfast') || 'Breakfast'}</option>
+                    <option value="Lunch" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('lunch') || 'Lunch'}</option>
+                    <option value="Dinner" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('dinner') || 'Dinner'}</option>
+                    <option value="Snack" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('snack') || 'Snack'}</option>
+                  </select>
+                  <ChevronDown className="h-4 w-4 absolute right-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
+                </div>
+              </div>
+
+              <div>
+                <label 
+                  className="block text-xs font-bold mb-1.5"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  {t('time') || 'Time'}
+                </label>
+                <div className="relative flex items-center">
+                  <Clock className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
+                  <input
+                    type="time"
+                    value={planTime}
+                    onChange={(e) => setPlanTime(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveToCalendar();
+                      }
+                    }}
+                    className="w-full border rounded-xl px-10 py-2.5 text-xs outline-none"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  />
+                  <Clock className="h-4 w-4 absolute right-3.5 pointer-events-none" style={{ color: 'var(--color-primary)' }}/>
+                </div>
+              </div>
+
+              <div>
+                <label 
+                  className="block text-xs font-bold mb-1.5"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  {t('notes') || 'Notes'}
+                </label>
+                <textarea
+                  value={planNotes}
+                  onChange={(e) => setPlanNotes(e.target.value)}
+                  placeholder={t('addNotesRemindersPlaceholder') || 'Add any notes or reminders...'}
+                  rows={3}
+                  className="w-full border rounded-xl p-3 text-xs outline-none resize-none"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAddToPlanModal(false)}
+                  className="px-5 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-primary)',
+                    backgroundColor: 'var(--color-inner-dark)'
+                  }}
+                >
+                  {t('cancel') || 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveToCalendar}
+                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                >
+                  {t('addToCalendarBtn') || 'Add to Calendar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SHOPPING LIST MODAL */}
+      {isShoppingModalOpen && (
+        <div 
+          onClick={() => setIsShoppingModalOpen(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[60] flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl p-6 space-y-5 cursor-default transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h3 className="text-lg font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <ShoppingCart className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('addToShoppingListTitle') || 'Add to Shopping List'}
+                </h3>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t('selectOrEditItemsShopping') || 'Select or edit items to add directly to your list'}</p>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setIsShoppingModalOpen(false)} 
+                className="cursor-pointer transition"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                <X className="h-5 w-5"/>
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-3 pr-1 text-xs">
+              {shoppingModalIngredients.map((ing, idx) => (
+                <div 
+                  key={ing.id} 
+                  className="flex items-center gap-2 p-2.5 rounded-xl border"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  <div
+                    onClick={() => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].selected = !updated[idx].selected;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition shrink-0"
+                    style={ing.selected ? {
+                      backgroundColor: 'var(--color-primary)',
+                      borderColor: 'var(--color-primary)',
+                      color: '#ffffff'
+                    } : {
+                      borderColor: 'var(--color-border)',
+                      backgroundColor: 'var(--color-card)'
+                    }}
+                  >
+                    {ing.selected && <CheckSquare className="h-3.5 w-3.5"/>}
+                  </div>
+
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={ing.amount}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].amount = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    placeholder={t('amt') || 'Amt'}
+                  />
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={ing.unit}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].unit = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-20 border rounded-lg p-2 text-center outline-none"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)'
+                    }}
+                    placeholder={t('unit') || 'Unit'}
+                  />
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={ing.name}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].name = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="flex-1 bg-transparent border-none outline-none px-2"
+                    style={{ color: 'var(--color-text)' }}
+                    placeholder={t('ingredientNamePlaceholder') || 'Ingredient name...'}
+                  />
+                  <select
+                    value={ing.category}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].category = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)'
+                    }}
+                  >
+                    {categories.map((cat) => (
+                      <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-3 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setIsShoppingModalOpen(false)}
+                className="px-4 py-2 rounded-xl font-bold text-xs cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  color: 'var(--color-text-secondary)'
+                }}
+              >
+                {t('cancel') || 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAddToShoppingList}
+                className="px-6 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 shadow-lg cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+              >
+                <ShoppingCart className="h-3.5 w-3.5"/> {t('addSelectedToList') || 'Add Selected to List'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -45091,7 +51585,7 @@ export async function GET() {
     if (sRow) {
       settings = {
         tokenName: sRow.token_name || sRow.tokenName,
-        tokenSymbol: sRow.token_symbol || sRow.tokenSymbol,
+        tokenSymbol: sRow.token_symbol, tokenEmoji: sRow.token_symbol, tokenIcon: sRow.token_symbol || sRow.tokenSymbol,
         startingBalance: sRow.starting_balance !== undefined ? sRow.starting_balance : sRow.startingBalance,
         isEnabled: sRow.is_enabled !== undefined ? sRow.is_enabled : sRow.isEnabled,
         importUrlCost: sRow.import_url_cost !== undefined ? sRow.import_url_cost : sRow.importUrlCost,
@@ -45144,7 +51638,7 @@ export async function GET() {
     success: true,
     tokenSettings: finalConfig,
     settings: finalConfig,
-    tokenSymbol: finalConfig.tokenSymbol,
+    tokenSymbol: finalConfig.tokenSymbol, tokenEmoji: finalConfig.tokenSymbol, tokenIcon: finalConfig.tokenSymbol,
     tokenName: finalConfig.tokenName,
     transactions
   }, {
@@ -48271,7 +54765,7 @@ export async function POST(req: NextRequest) {
 
     const updated = await saveTokenSettings({
       tokenName: tokenName?.trim() || 'Foodie Token',
-      tokenSymbol: tokenSymbol?.trim() || '🪙',
+      tokenSymbol: tokenSymbol, tokenEmoji: tokenSymbol, tokenIcon: tokenSymbol?.trim() || '🪙',
       chefCost: Math.max(0, parseInt(chefCost ?? 1, 10)),
       importUrlCost: Math.max(0, parseInt(importUrlCost ?? 2, 10)),
       importTextCost: Math.max(0, parseInt(importTextCost ?? 1, 10)),
@@ -49837,6 +56331,7 @@ export async function DELETE(req: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { saveRecipeToJsonFile, loadAllRecipeJsonFiles, updateRecipePublicVisibility } from '@/lib/recipeFiles';
 
 export const dynamic = 'force-dynamic';
 
@@ -49847,6 +56342,7 @@ async function ensureColumns() {
       ADD COLUMN IF NOT EXISTS user_id TEXT,
       ADD COLUMN IF NOT EXISTS created_by TEXT,
       ADD COLUMN IF NOT EXISTS creator_name TEXT,
+      ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS rating NUMERIC DEFAULT 0,
@@ -49854,7 +56350,8 @@ async function ensureColumns() {
       ADD COLUMN IF NOT EXISTS book_id TEXT,
       ADD COLUMN IF NOT EXISTS source_url TEXT;
 
-      CREATE INDEX IF NOT EXISTS idx_saved_recipes_creator ON saved_recipes(user_id, created_by);
+      CREATE INDEX IF NOT EXISTS idx_saved_recipes_public ON saved_recipes(is_public);
+      CREATE INDEX IF NOT EXISTS idx_saved_recipes_owner ON saved_recipes(user_id, created_by);
     `);
   } catch (_) {}
 }
@@ -49865,112 +56362,103 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId')?.trim();
     const email = searchParams.get('email')?.trim();
-    const category = searchParams.get('category');
-
-    if (!userId && !email) {
-      return NextResponse.json(
-        { success: true, recipes: [] },
-        { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-      );
-    }
+    const tab = searchParams.get('tab')?.trim();
+    const isMarketplace = tab === 'marketplace' || searchParams.get('marketplace') === 'true';
 
     let sql = `SELECT * FROM saved_recipes WHERE `;
     const params: any[] = [];
 
-    const conditions: string[] = [];
-    if (userId) {
-      params.push(userId);
-      conditions.push(`user_id = $${params.length} OR created_by = $${params.length}`);
-    }
-    if (email && email !== userId) {
-      params.push(email);
-      conditions.push(`user_id = $${params.length} OR created_by = $${params.length}`);
-    }
-
-    sql += `(${conditions.join(' OR ')})`;
-
-    if (category && category !== 'all' && category !== 'All Types') {
-      params.push(category);
-      sql += ` AND LOWER(recipe_type) = LOWER($${params.length})`;
+    if (isMarketplace) {
+      // Marketplace tab: Return all public recipes
+      sql += `is_public = TRUE`;
+    } else if (userId || email) {
+      // Personal tab: Return user-owned recipes
+      const conds: string[] = [];
+      if (userId) {
+        params.push(userId);
+        conds.push(`user_id = $${params.length} OR created_by = $${params.length}`);
+      }
+      if (email && email !== userId) {
+        params.push(email);
+        conds.push(`user_id = $${params.length} OR created_by = $${params.length}`);
+      }
+      sql += `(${conds.join(' OR ')})`;
+    } else {
+      sql += `1=1`;
     }
 
     sql += ' ORDER BY created_at DESC';
 
-    const rows = await query(sql, params);
+    let dbRows: any[] = [];
+    try {
+      dbRows = await query(sql, params);
+    } catch (_) {}
 
-    const formatted = rows.map((r: any) => {
-      let ingredients = r.ingredients;
-      if (typeof ingredients === 'string') {
-        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = []; }
+    // Also load filesystem JSON recipes and merge
+    const jsonRecipes = loadAllRecipeJsonFiles();
+    const recipeMap = new Map<string, any>();
+
+    // Add DB records
+    dbRows.forEach((r: any) => {
+      let ing = r.ingredients;
+      if (typeof ing === 'string') {
+        try { ing = JSON.parse(ing); } catch (_) { ing = []; }
+      }
+      let dir = r.directions || r.instructions;
+      if (typeof dir === 'string') {
+        try { dir = JSON.parse(dir); } catch (_) { dir = []; }
       }
 
-      let directions = r.directions;
-      if (typeof directions === 'string') {
-        try { directions = JSON.parse(directions); } catch (_) { directions = []; }
-      }
-
-      let nutrition = r.nutrition;
-      if (typeof nutrition === 'string') {
-        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
-      }
-
-      let tags = r.tags;
-      if (typeof tags === 'string') {
-        try { tags = JSON.parse(tags); } catch (_) { tags = []; }
-      }
-
-      return {
-        ...r,
+      recipeMap.set(r.id, {
         id: r.id,
         userId: r.user_id || userId,
         user_id: r.user_id || userId,
-        createdBy: r.created_by || r.user_id || userId,
-        created_by: r.created_by || r.user_id || userId,
-        creatorName: r.creator_name || 'Creator',
-        creator_name: r.creator_name || 'Creator',
-        title: r.title || r.name || 'Untitled Recipe',
-        name: r.title || r.name || 'Untitled Recipe',
+        createdBy: r.created_by || r.user_id,
+        created_by: r.created_by || r.user_id,
+        creatorName: r.creator_name || 'Chef',
+        creator_name: r.creator_name || 'Chef',
+        ownerId: r.user_id || userId,
+        ownerName: r.creator_name || 'Chef',
+        ownerEmail: r.created_by || `${r.user_id}@zecratary.local`,
+        title: r.title || 'Untitled Recipe',
         description: r.description || '',
         recipeType: r.recipe_type || 'Main Dish',
-        category: r.recipe_type || 'Main Dish',
-        recipe_type: r.recipe_type || 'Main Dish',
         cuisine: r.cuisine || '',
-        prepTime: r.prep_time || '15',
-        cookTime: r.cook_time || '25',
-        prepTimeMinutes: Number(r.prep_time) || 15,
-        cookTimeMinutes: Number(r.cook_time) || 25,
+        prepMinutes: Number(r.prep_time) || 15,
+        cookMinutes: Number(r.cook_time) || 25,
         servings: Number(r.servings) || 4,
         difficulty: r.difficulty || 'Medium',
-        ingredients: Array.isArray(ingredients) ? ingredients : [],
-        directions: Array.isArray(directions) ? directions : [],
-        instructions: Array.isArray(directions) ? directions : [],
-        steps: Array.isArray(directions) ? directions : [],
-        nutrition: nutrition || {},
-        tags: Array.isArray(tags) ? tags : [],
-        imageUrl: r.image_url || r.imageUrl || r.image || '',
-        image: r.image_url || r.imageUrl || r.image || '',
-        image_url: r.image_url || r.imageUrl || r.image || '',
-        sourceUrl: r.source_url || r.sourceUrl || '',
-        source_url: r.source_url || r.sourceUrl || '',
-        isFavorite: Boolean(r.is_favorite || r.isFavorite),
-        is_favorite: Boolean(r.is_favorite || r.isFavorite),
-        isCooked: Boolean(r.is_cooked || r.isCooked),
-        is_cooked: Boolean(r.is_cooked || r.isCooked),
-        rating: Number(r.rating) || 0,
-        note: r.note || '',
-        bookId: r.book_id || r.bookId || null,
-        book_id: r.book_id || r.bookId || null,
+        ingredients: Array.isArray(ing) ? ing : [],
+        instructions: Array.isArray(dir) ? dir : [],
+        imageUrl: r.image_url || '/recipes/images/default.jpg',
+        image: r.image_url || '/recipes/images/default.jpg',
+        sourceUrl: r.source_url || '',
         isPublic: Boolean(r.is_public),
         is_public: Boolean(r.is_public),
-        createdAt: r.created_at || new Date().toISOString(),
-        updatedAt: r.updated_at || new Date().toISOString()
-      };
+        isFavorite: Boolean(r.is_favorite),
+        isCooked: Boolean(r.is_cooked),
+        rating: Number(r.rating) || 5,
+        bookId: r.book_id || null,
+        createdAt: r.created_at || new Date().toISOString()
+      });
     });
 
-    return NextResponse.json(
-      { success: true, recipes: formatted },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-    );
+    // Add or merge filesystem JSON records
+    jsonRecipes.forEach(jr => {
+      if (isMarketplace && !jr.isPublic) return;
+      if (!isMarketplace && userId && jr.ownerId !== userId && jr.ownerEmail !== email) return;
+
+      if (!recipeMap.has(jr.id)) {
+        recipeMap.set(jr.id, jr);
+      }
+    });
+
+    return NextResponse.json({
+      success: true,
+      recipes: Array.from(recipeMap.values())
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -49984,111 +56472,77 @@ export async function POST(req: NextRequest) {
 
     for (const item of items) {
       if (!item) continue;
-      const targetUserId = (item.userId || item.user_id || body.userId || body.user_id || '').trim();
-      if (!targetUserId) continue;
+      const targetUserId = (item.userId || item.user_id || body.userId || 'guest').trim();
+      const createdBy = (item.createdBy || item.created_by || item.ownerEmail || targetUserId).trim();
+      const creatorName = (item.creatorName || item.creator_name || item.ownerName || 'Chef').trim();
+      const id = item.id || 'rec_' + Date.now().toString(36);
+      const isPublic = Boolean(item.isPublic ?? item.is_public ?? false);
 
-      const createdBy = (item.createdBy || item.created_by || body.createdBy || body.created_by || targetUserId).trim();
-      const creatorName = (item.creatorName || item.creator_name || body.creatorName || body.creator_name || 'Creator').trim();
-      const id = item.id || 'rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      // 1. Save individual JSON file to /recipes
+      saveRecipeToJsonFile(item, { id: targetUserId, name: creatorName, email: createdBy });
 
+      // 2. Persist to PostgreSQL & MySQL
       try {
-        const userCheck = await query('SELECT id FROM users WHERE id = $1 LIMIT 1', [targetUserId]);
-        if (userCheck.length === 0) {
-          await query(`
-            INSERT INTO users (id, name, email, role, subscription_plan)
-            VALUES ($1, $2, $3, 'user', 'taster')
-            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email;
-          `, [targetUserId, creatorName, createdBy.includes('@') ? createdBy : `${targetUserId}@zecratary.local`]);
-        }
+        const ingredients = Array.isArray(item.ingredients) ? JSON.stringify(item.ingredients) : '[]';
+        const directions = Array.isArray(item.instructions || item.directions) 
+          ? JSON.stringify(item.instructions || item.directions) : '[]';
+
+        await query(`
+          INSERT INTO saved_recipes (
+            id, user_id, created_by, creator_name, title, description, recipe_type, cuisine, prep_time, cook_time,
+            servings, difficulty, ingredients, directions, image_url, is_public,
+            is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+            $11, $12, $13::jsonb, $14::jsonb, $15, $16,
+            $17, $18, $19, $20, $21, $22, NOW()
+          )
+          ON CONFLICT (id) DO UPDATE SET
+            user_id = EXCLUDED.user_id,
+            created_by = EXCLUDED.created_by,
+            creator_name = EXCLUDED.creator_name,
+            title = EXCLUDED.title,
+            description = EXCLUDED.description,
+            recipe_type = EXCLUDED.recipe_type,
+            prep_time = EXCLUDED.prep_time,
+            cook_time = EXCLUDED.cook_time,
+            servings = EXCLUDED.servings,
+            ingredients = EXCLUDED.ingredients,
+            directions = EXCLUDED.directions,
+            image_url = EXCLUDED.image_url,
+            is_public = EXCLUDED.is_public,
+            is_favorite = EXCLUDED.is_favorite,
+            is_cooked = EXCLUDED.is_cooked,
+            rating = EXCLUDED.rating,
+            updated_at = NOW();
+        `, [
+          id,
+          targetUserId,
+          createdBy,
+          creatorName,
+          item.title || 'Untitled Recipe',
+          item.description || '',
+          item.recipeType || 'Main Dish',
+          item.cuisine || '',
+          String(item.prepMinutes || 15),
+          String(item.cookMinutes || 25),
+          String(item.servings || 4),
+          item.difficulty || 'Medium',
+          ingredients,
+          directions,
+          item.imageUrl || item.image || '/recipes/images/default.jpg',
+          isPublic,
+          Boolean(item.isFavorite ?? item.is_favorite),
+          Boolean(item.isCooked ?? item.is_cooked),
+          Number(item.rating) || 5,
+          item.note || '',
+          item.bookId || null,
+          item.sourceUrl || ''
+        ]);
       } catch (_) {}
-
-      let ingredients = item.ingredients;
-      if (typeof ingredients === 'string') {
-        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = [ingredients]; }
-      }
-      if (!Array.isArray(ingredients)) ingredients = [];
-
-      let directions = item.directions || item.instructions || item.steps;
-      if (typeof directions === 'string') {
-        try { directions = JSON.parse(directions); } catch (_) { directions = [directions]; }
-      }
-      if (!Array.isArray(directions)) directions = [];
-
-      let tags = item.tags;
-      if (typeof tags === 'string') {
-        try { tags = JSON.parse(tags); } catch (_) { tags = [tags]; }
-      }
-      if (!Array.isArray(tags)) tags = [];
-
-      let nutrition = item.nutrition || item.macros || {};
-      if (typeof nutrition === 'string') {
-        try { nutrition = JSON.parse(nutrition); } catch (_) { nutrition = {}; }
-      }
-
-      await query(`
-        INSERT INTO saved_recipes (
-          id, user_id, created_by, creator_name, title, description, recipe_type, cuisine, prep_time, cook_time,
-          servings, difficulty, ingredients, directions, nutrition, tags, image_url, is_public,
-          is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-          $11, $12, $13::jsonb, $14::jsonb, $15::jsonb, $16::jsonb, $17, $18,
-          $19, $20, $21, $22, $23, $24, NOW()
-        )
-        ON CONFLICT (id) DO UPDATE SET
-          user_id = EXCLUDED.user_id,
-          created_by = COALESCE(EXCLUDED.created_by, saved_recipes.created_by),
-          creator_name = COALESCE(EXCLUDED.creator_name, saved_recipes.creator_name),
-          title = EXCLUDED.title,
-          description = EXCLUDED.description,
-          recipe_type = EXCLUDED.recipe_type,
-          cuisine = EXCLUDED.cuisine,
-          prep_time = EXCLUDED.prep_time,
-          cook_time = EXCLUDED.cook_time,
-          servings = EXCLUDED.servings,
-          difficulty = EXCLUDED.difficulty,
-          ingredients = EXCLUDED.ingredients,
-          directions = EXCLUDED.directions,
-          nutrition = EXCLUDED.nutrition,
-          tags = EXCLUDED.tags,
-          image_url = EXCLUDED.image_url,
-          is_public = EXCLUDED.is_public,
-          is_favorite = EXCLUDED.is_favorite,
-          is_cooked = EXCLUDED.is_cooked,
-          rating = EXCLUDED.rating,
-          note = EXCLUDED.note,
-          book_id = EXCLUDED.book_id,
-          source_url = EXCLUDED.source_url,
-          updated_at = NOW();
-      `, [
-        id,
-        targetUserId,
-        createdBy,
-        creatorName,
-        item.title || item.name || 'Untitled Recipe',
-        item.description || '',
-        item.recipeType || item.category || item.recipe_type || 'Main Dish',
-        item.cuisine || '',
-        String(item.prepTime || item.prepTimeMinutes || item.prep_time || '15'),
-        String(item.cookTime || item.cookTimeMinutes || item.cook_time || '25'),
-        String(item.servings || '4'),
-        item.difficulty || 'Medium',
-        JSON.stringify(ingredients),
-        JSON.stringify(directions),
-        JSON.stringify(nutrition),
-        JSON.stringify(tags),
-        item.imageUrl || item.image || item.image_url || '',
-        Boolean(item.isPublic || item.is_public),
-        Boolean(item.isFavorite || item.is_favorite),
-        Boolean(item.isCooked || item.is_cooked),
-        Number(item.rating) || 0,
-        item.note || '',
-        item.bookId || item.book_id || null,
-        item.sourceUrl || item.source_url || ''
-      ]);
     }
 
-    return NextResponse.json({ success: true, message: 'Recipe(s) synchronized with PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Recipe stored in JSON and Database.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -50098,38 +56552,39 @@ export async function PATCH(req: NextRequest) {
   try {
     await ensureColumns();
     const body = await req.json();
-    const { id, isFavorite, is_favorite, isCooked, is_cooked, rating, note, bookId, book_id, sourceUrl, source_url } = body;
+    const { id, isPublic, is_public, isFavorite, isCooked, rating, bookId } = body;
 
     if (!id) {
-      return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Recipe ID required' }, { status: 400 });
+    }
+
+    const targetPublic = isPublic !== undefined ? isPublic : is_public;
+    if (targetPublic !== undefined) {
+      updateRecipePublicVisibility(id, Boolean(targetPublic));
     }
 
     const updates: string[] = [];
     const params: any[] = [id];
 
-    if (isFavorite !== undefined || is_favorite !== undefined) {
-      params.push(Boolean(isFavorite !== undefined ? isFavorite : is_favorite));
+    if (targetPublic !== undefined) {
+      params.push(Boolean(targetPublic));
+      updates.push(`is_public = $${params.length}`);
+    }
+    if (isFavorite !== undefined) {
+      params.push(Boolean(isFavorite));
       updates.push(`is_favorite = $${params.length}`);
     }
-    if (isCooked !== undefined || is_cooked !== undefined) {
-      params.push(Boolean(isCooked !== undefined ? isCooked : is_cooked));
+    if (isCooked !== undefined) {
+      params.push(Boolean(isCooked));
       updates.push(`is_cooked = $${params.length}`);
     }
     if (rating !== undefined) {
       params.push(Number(rating));
       updates.push(`rating = $${params.length}`);
     }
-    if (note !== undefined) {
-      params.push(String(note));
-      updates.push(`note = $${params.length}`);
-    }
-    if (bookId !== undefined || book_id !== undefined) {
-      params.push(bookId !== undefined ? bookId : book_id);
+    if (bookId !== undefined) {
+      params.push(bookId);
       updates.push(`book_id = $${params.length}`);
-    }
-    if (sourceUrl !== undefined || source_url !== undefined) {
-      params.push(sourceUrl !== undefined ? sourceUrl : source_url);
-      updates.push(`source_url = $${params.length}`);
     }
 
     if (updates.length > 0) {
@@ -50137,7 +56592,7 @@ export async function PATCH(req: NextRequest) {
       await query(`UPDATE saved_recipes SET ${updates.join(', ')} WHERE id = $1`, params);
     }
 
-    return NextResponse.json({ success: true, message: 'Recipe updated in PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Updated visibility and settings.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -50146,21 +56601,11 @@ export async function PATCH(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    let id = searchParams.get('id');
-
-    if (!id) {
-      try {
-        const body = await req.json();
-        id = body?.id || id;
-      } catch (_) {}
-    }
-
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
-    }
+    const id = searchParams.get('id');
+    if (!id) return NextResponse.json({ success: false, error: 'Recipe ID required' }, { status: 400 });
 
     await query('DELETE FROM saved_recipes WHERE id = $1', [id.trim()]);
-    return NextResponse.json({ success: true, message: 'Recipe removed from PostgreSQL.' });
+    return NextResponse.json({ success: true, message: 'Deleted recipe.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -50172,122 +56617,282 @@ export async function DELETE(req: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { saveRecipeToJsonFile, loadAllRecipeJsonFiles, updateRecipePublicVisibility } from '@/lib/recipeFiles';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+
+async function ensureColumns() {
+  try {
+    await query(`
+      ALTER TABLE saved_recipes 
+      ADD COLUMN IF NOT EXISTS user_id TEXT,
+      ADD COLUMN IF NOT EXISTS created_by TEXT,
+      ADD COLUMN IF NOT EXISTS creator_name TEXT,
+      ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS rating NUMERIC DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '',
+      ADD COLUMN IF NOT EXISTS book_id TEXT,
+      ADD COLUMN IF NOT EXISTS source_url TEXT;
+
+      CREATE INDEX IF NOT EXISTS idx_saved_recipes_public ON saved_recipes(is_public);
+      CREATE INDEX IF NOT EXISTS idx_saved_recipes_owner ON saved_recipes(user_id, created_by);
+    `);
+  } catch (_) {}
+}
 
 export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const userId = url.searchParams.get('userId') || url.searchParams.get('user_id');
-
   try {
-    let sql = `
-      SELECT * FROM saved_recipes 
-      ORDER BY created_at DESC;
-    `;
-    let params: any[] = [];
+    await ensureColumns();
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId')?.trim();
+    const email = searchParams.get('email')?.trim();
+    const tab = searchParams.get('tab')?.trim();
+    const isMarketplace = tab === 'marketplace' || searchParams.get('marketplace') === 'true';
 
-    // If a specific userId is requested, include their recipes AND admin/seeded recipes
-    if (userId && userId !== 'all') {
-      sql = `
-        SELECT * FROM saved_recipes 
-        WHERE user_id = $1 OR user_id = 'usr_admin_1' OR user_id IS NULL OR user_id = ''
-        ORDER BY created_at DESC;
-      `;
-      params = [userId];
+    let sql = `SELECT * FROM saved_recipes WHERE `;
+    const params: any[] = [];
+
+    if (isMarketplace) {
+      // Marketplace tab: Return all public recipes
+      sql += `is_public = TRUE`;
+    } else if (userId || email) {
+      // Personal tab: Return user-owned recipes
+      const conds: string[] = [];
+      if (userId) {
+        params.push(userId);
+        conds.push(`user_id = $${params.length} OR created_by = $${params.length}`);
+      }
+      if (email && email !== userId) {
+        params.push(email);
+        conds.push(`user_id = $${params.length} OR created_by = $${params.length}`);
+      }
+      sql += `(${conds.join(' OR ')})`;
+    } else {
+      sql += `1=1`;
     }
 
-    const rows: any = await query(sql, params);
-    const list = Array.isArray(rows) ? rows : (rows?.rows || []);
+    sql += ' ORDER BY created_at DESC';
 
-    const sanitized = list.map((r: any) => ({
-      id: r.id,
-      userId: r.user_id,
-      user_id: r.user_id,
-      title: r.title,
-      description: r.description || '',
-      ingredients: Array.isArray(r.ingredients) ? r.ingredients : (typeof r.ingredients === 'string' ? JSON.parse(r.ingredients || '[]') : []),
-      instructions: Array.isArray(r.directions) ? r.directions : (Array.isArray(r.instructions) ? r.instructions : (typeof r.instructions === 'string' ? JSON.parse(r.instructions || '[]') : [])),
-      directions: Array.isArray(r.directions) ? r.directions : (Array.isArray(r.instructions) ? r.instructions : []),
-      prep_time: r.prep_time || '15m',
-      cook_time: r.cook_time || '20m',
-      servings: r.servings || '4',
-      image: r.image || r.image_url || '',
-      imageUrl: r.image || r.image_url || '',
-      is_favorite: Boolean(r.is_favorite),
-      isFavorite: Boolean(r.is_favorite),
-      is_cooked: Boolean(r.is_cooked),
-      isCooked: Boolean(r.is_cooked),
-      tags: Array.isArray(r.tags) ? r.tags : (typeof r.tags === 'string' ? JSON.parse(r.tags || '[]') : []),
-      source_url: r.source_url || '',
-      sourceUrl: r.source_url || '',
-      created_at: r.created_at,
-    }));
+    let dbRows: any[] = [];
+    try {
+      dbRows = await query(sql, params);
+    } catch (_) {}
 
-    return NextResponse.json(
-      { success: true, recipes: sanitized },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-    );
+    // Also load filesystem JSON recipes and merge
+    const jsonRecipes = loadAllRecipeJsonFiles();
+    const recipeMap = new Map<string, any>();
+
+    // Add DB records
+    dbRows.forEach((r: any) => {
+      let ing = r.ingredients;
+      if (typeof ing === 'string') {
+        try { ing = JSON.parse(ing); } catch (_) { ing = []; }
+      }
+      let dir = r.directions || r.instructions;
+      if (typeof dir === 'string') {
+        try { dir = JSON.parse(dir); } catch (_) { dir = []; }
+      }
+
+      recipeMap.set(r.id, {
+        id: r.id,
+        userId: r.user_id || userId,
+        user_id: r.user_id || userId,
+        createdBy: r.created_by || r.user_id,
+        created_by: r.created_by || r.user_id,
+        creatorName: r.creator_name || 'Chef',
+        creator_name: r.creator_name || 'Chef',
+        ownerId: r.user_id || userId,
+        ownerName: r.creator_name || 'Chef',
+        ownerEmail: r.created_by || `${r.user_id}@zecratary.local`,
+        title: r.title || 'Untitled Recipe',
+        description: r.description || '',
+        recipeType: r.recipe_type || 'Main Dish',
+        cuisine: r.cuisine || '',
+        prepMinutes: Number(r.prep_time) || 15,
+        cookMinutes: Number(r.cook_time) || 25,
+        servings: Number(r.servings) || 4,
+        difficulty: r.difficulty || 'Medium',
+        ingredients: Array.isArray(ing) ? ing : [],
+        instructions: Array.isArray(dir) ? dir : [],
+        imageUrl: r.image_url || '/recipes/images/default.jpg',
+        image: r.image_url || '/recipes/images/default.jpg',
+        sourceUrl: r.source_url || '',
+        isPublic: Boolean(r.is_public),
+        is_public: Boolean(r.is_public),
+        isFavorite: Boolean(r.is_favorite),
+        isCooked: Boolean(r.is_cooked),
+        rating: Number(r.rating) || 5,
+        bookId: r.book_id || null,
+        createdAt: r.created_at || new Date().toISOString()
+      });
+    });
+
+    // Add or merge filesystem JSON records
+    jsonRecipes.forEach(jr => {
+      if (isMarketplace && !jr.isPublic) return;
+      if (!isMarketplace && userId && jr.ownerId !== userId && jr.ownerEmail !== email) return;
+
+      if (!recipeMap.has(jr.id)) {
+        recipeMap.set(jr.id, jr);
+      }
+    });
+
+    return NextResponse.json({
+      success: true,
+      recipes: Array.from(recipeMap.values())
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
   } catch (err: any) {
-    console.error('Error in GET /api/recipes/saved:', err.message);
-    return NextResponse.json(
-      { success: true, recipes: [] },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-    );
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureColumns();
     const body = await req.json();
-    const items = Array.isArray(body) ? body : [body];
+    const items = Array.isArray(body) ? body : (body.recipes || [body.recipe || body]);
 
-    for (const r of items) {
-      const recId = r.id || ('rec_' + Date.now().toString(36));
-      const userId = r.userId || r.user_id || 'usr_admin_1';
-      const title = r.title || 'Untitled Recipe';
-      const desc = r.description || '';
-      const ingredients = JSON.stringify(Array.isArray(r.ingredients) ? r.ingredients : []);
-      const directions = JSON.stringify(Array.isArray(r.directions) ? r.directions : (Array.isArray(r.instructions) ? r.instructions : []));
-      const prepTime = r.prep_time || r.prepTime || '15m';
-      const cookTime = r.cook_time || r.cookTime || '20m';
-      const servings = String(r.servings || '4');
-      const img = r.image || r.imageUrl || r.image_url || '';
-      const isFav = Boolean(r.is_favorite ?? r.isFavorite);
-      const isCooked = Boolean(r.is_cooked ?? r.isCooked);
-      const tags = JSON.stringify(Array.isArray(r.tags) ? r.tags : []);
-      const sourceUrl = r.source_url || r.sourceUrl || '';
+    for (const item of items) {
+      if (!item) continue;
+      const targetUserId = (item.userId || item.user_id || body.userId || 'guest').trim();
+      const createdBy = (item.createdBy || item.created_by || item.ownerEmail || targetUserId).trim();
+      const creatorName = (item.creatorName || item.creator_name || item.ownerName || 'Chef').trim();
+      const id = item.id || 'rec_' + Date.now().toString(36);
+      const isPublic = Boolean(item.isPublic ?? item.is_public ?? false);
 
-      await query(`
-        INSERT INTO saved_recipes (
-          id, user_id, title, description, ingredients, instructions, directions,
-          prep_time, cook_time, servings, image, image_url, is_favorite, is_cooked,
-          tags, source_url, updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15::jsonb, $16, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          title = EXCLUDED.title,
-          description = EXCLUDED.description,
-          ingredients = EXCLUDED.ingredients,
-          instructions = EXCLUDED.instructions,
-          directions = EXCLUDED.directions,
-          prep_time = EXCLUDED.prep_time,
-          cook_time = EXCLUDED.cook_time,
-          servings = EXCLUDED.servings,
-          image = EXCLUDED.image,
-          image_url = EXCLUDED.image_url,
-          is_favorite = EXCLUDED.is_favorite,
-          tags = EXCLUDED.tags,
-          updated_at = NOW();
-      `, [
-        recId, userId, title, desc, ingredients, directions, directions,
-        prepTime, cookTime, servings, img, img, isFav, isCooked, tags, sourceUrl
-      ]);
+      // 1. Save individual JSON file to /recipes
+      saveRecipeToJsonFile(item, { id: targetUserId, name: creatorName, email: createdBy });
+
+      // 2. Persist to PostgreSQL & MySQL
+      try {
+        const ingredients = Array.isArray(item.ingredients) ? JSON.stringify(item.ingredients) : '[]';
+        const directions = Array.isArray(item.instructions || item.directions) 
+          ? JSON.stringify(item.instructions || item.directions) : '[]';
+
+        await query(`
+          INSERT INTO saved_recipes (
+            id, user_id, created_by, creator_name, title, description, recipe_type, cuisine, prep_time, cook_time,
+            servings, difficulty, ingredients, directions, image_url, is_public,
+            is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+            $11, $12, $13::jsonb, $14::jsonb, $15, $16,
+            $17, $18, $19, $20, $21, $22, NOW()
+          )
+          ON CONFLICT (id) DO UPDATE SET
+            user_id = EXCLUDED.user_id,
+            created_by = EXCLUDED.created_by,
+            creator_name = EXCLUDED.creator_name,
+            title = EXCLUDED.title,
+            description = EXCLUDED.description,
+            recipe_type = EXCLUDED.recipe_type,
+            prep_time = EXCLUDED.prep_time,
+            cook_time = EXCLUDED.cook_time,
+            servings = EXCLUDED.servings,
+            ingredients = EXCLUDED.ingredients,
+            directions = EXCLUDED.directions,
+            image_url = EXCLUDED.image_url,
+            is_public = EXCLUDED.is_public,
+            is_favorite = EXCLUDED.is_favorite,
+            is_cooked = EXCLUDED.is_cooked,
+            rating = EXCLUDED.rating,
+            updated_at = NOW();
+        `, [
+          id,
+          targetUserId,
+          createdBy,
+          creatorName,
+          item.title || 'Untitled Recipe',
+          item.description || '',
+          item.recipeType || 'Main Dish',
+          item.cuisine || '',
+          String(item.prepMinutes || 15),
+          String(item.cookMinutes || 25),
+          String(item.servings || 4),
+          item.difficulty || 'Medium',
+          ingredients,
+          directions,
+          item.imageUrl || item.image || '/recipes/images/default.jpg',
+          isPublic,
+          Boolean(item.isFavorite ?? item.is_favorite),
+          Boolean(item.isCooked ?? item.is_cooked),
+          Number(item.rating) || 5,
+          item.note || '',
+          item.bookId || null,
+          item.sourceUrl || ''
+        ]);
+      } catch (_) {}
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, message: 'Recipe stored in JSON and Database.' });
   } catch (err: any) {
-    console.error('Error in POST /api/recipes/saved:', err.message);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    await ensureColumns();
+    const body = await req.json();
+    const { id, isPublic, is_public, isFavorite, isCooked, rating, bookId } = body;
+
+    if (!id) {
+      return NextResponse.json({ success: false, error: 'Recipe ID required' }, { status: 400 });
+    }
+
+    const targetPublic = isPublic !== undefined ? isPublic : is_public;
+    if (targetPublic !== undefined) {
+      updateRecipePublicVisibility(id, Boolean(targetPublic));
+    }
+
+    const updates: string[] = [];
+    const params: any[] = [id];
+
+    if (targetPublic !== undefined) {
+      params.push(Boolean(targetPublic));
+      updates.push(`is_public = $${params.length}`);
+    }
+    if (isFavorite !== undefined) {
+      params.push(Boolean(isFavorite));
+      updates.push(`is_favorite = $${params.length}`);
+    }
+    if (isCooked !== undefined) {
+      params.push(Boolean(isCooked));
+      updates.push(`is_cooked = $${params.length}`);
+    }
+    if (rating !== undefined) {
+      params.push(Number(rating));
+      updates.push(`rating = $${params.length}`);
+    }
+    if (bookId !== undefined) {
+      params.push(bookId);
+      updates.push(`book_id = $${params.length}`);
+    }
+
+    if (updates.length > 0) {
+      updates.push('updated_at = NOW()');
+      await query(`UPDATE saved_recipes SET ${updates.join(', ')} WHERE id = $1`, params);
+    }
+
+    return NextResponse.json({ success: true, message: 'Updated visibility and settings.' });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+    if (!id) return NextResponse.json({ success: false, error: 'Recipe ID required' }, { status: 400 });
+
+    await query('DELETE FROM saved_recipes WHERE id = $1', [id.trim()]);
+    return NextResponse.json({ success: true, message: 'Deleted recipe.' });
+  } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -53172,7 +59777,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       success: true,
       balance,
-      tokenSymbol: settings.tokenSymbol || '🪙',
+      tokenSymbol: settings.tokenSymbol, tokenEmoji: settings.tokenSymbol, tokenIcon: settings.tokenSymbol || '🪙',
       tokenName: settings.tokenName || 'Foodie Token',
       costs: settings.costs || { chef: 1, import_url: 1, import_text: 1, import_photo: 1 },
       packages: settings.packages || [],
@@ -55382,7 +61987,7 @@ export default function ImportPage() {
     });
 
     setTimeout(() => {
-      router.push('/saved');
+      router.push('/recipes');
     }, 850);
   };
 
@@ -71627,6 +78232,164 @@ const dbModule = {
 };
 
 export default dbModule;
+
+```
+
+## File: `apps/web/src/lib/recipeFiles.ts`
+```typescript
+import fs from 'fs';
+import path from 'path';
+
+export interface RecipeOwner {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export interface StoredRecipe {
+  id: string;
+  owner: RecipeOwner;
+  ownerId: string;
+  ownerName: string;
+  ownerEmail: string;
+  userId: string;
+  userEmail: string;
+  createdBy: string;
+  creatorName: string;
+  isPublic: boolean;
+  visibility: 'public' | 'private';
+  title: string;
+  description?: string;
+  prepMinutes?: number;
+  cookMinutes?: number;
+  servings?: number;
+  calories?: number;
+  recipeType?: string;
+  mealType?: string;
+  cuisine?: string;
+  ingredients: any[];
+  instructions: any[];
+  nutrition?: any;
+  tags?: string[];
+  image?: string;
+  imageUrl?: string;
+  sourceUrl?: string;
+  isFavorite?: boolean;
+  isCooked?: boolean;
+  rating?: number;
+  bookId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const getStorageDirs = (): string[] => {
+  const root = process.cwd();
+  return [
+    path.join(root, 'recipes'),
+    path.join(root, 'apps', 'web', 'recipes'),
+    path.join(root, 'public', 'recipes'),
+    path.join(root, 'apps', 'web', 'public', 'recipes')
+  ];
+};
+
+export function saveRecipeToJsonFile(recipe: any, owner?: Partial<RecipeOwner>): StoredRecipe {
+  const id = recipe.id || 'rec_' + Date.now();
+  const ownerId = recipe.ownerId || recipe.userId || recipe.user_id || owner?.id || 'guest';
+  const ownerName = recipe.ownerName || recipe.creatorName || recipe.creator_name || owner?.name || 'Chef';
+  const ownerEmail = recipe.ownerEmail || recipe.userEmail || recipe.creator_email || owner?.email || `${ownerId}@zecratary.local`;
+  const isPublic = Boolean(recipe.isPublic ?? recipe.is_public ?? false);
+
+  const stored: StoredRecipe = {
+    id,
+    owner: {
+      id: ownerId,
+      name: ownerName,
+      email: ownerEmail
+    },
+    ownerId,
+    ownerName,
+    ownerEmail,
+    userId: ownerId,
+    userEmail: ownerEmail,
+    createdBy: ownerEmail,
+    creatorName: ownerName,
+    isPublic,
+    visibility: isPublic ? 'public' : 'private',
+    title: recipe.title || recipe.name || 'Untitled Recipe',
+    description: recipe.description || '',
+    prepMinutes: Number(recipe.prepMinutes || recipe.prepTimeMinutes || recipe.prep_time) || 15,
+    cookMinutes: Number(recipe.cookMinutes || recipe.cookTimeMinutes || recipe.cook_time) || 25,
+    servings: Number(recipe.servings) || 4,
+    calories: recipe.calories ? Number(recipe.calories) : undefined,
+    recipeType: recipe.recipeType || recipe.mealType || recipe.category || 'Main Dish',
+    mealType: recipe.mealType || recipe.recipeType || recipe.category || 'Main Dish',
+    cuisine: recipe.cuisine || '',
+    ingredients: Array.isArray(recipe.ingredients) ? recipe.ingredients : [],
+    instructions: Array.isArray(recipe.instructions || recipe.directions || recipe.steps) 
+      ? (recipe.instructions || recipe.directions || recipe.steps) : [],
+    nutrition: recipe.nutrition || {},
+    tags: Array.isArray(recipe.tags) ? recipe.tags : [],
+    image: recipe.image || recipe.imageUrl || recipe.image_url || '/recipes/images/default.jpg',
+    imageUrl: recipe.imageUrl || recipe.image || recipe.image_url || '/recipes/images/default.jpg',
+    sourceUrl: recipe.sourceUrl || recipe.source_url || '',
+    isFavorite: Boolean(recipe.isFavorite ?? recipe.is_favorite),
+    isCooked: Boolean(recipe.isCooked ?? recipe.is_cooked),
+    rating: Number(recipe.rating) || 0,
+    bookId: recipe.bookId || recipe.book_id || null,
+    createdAt: recipe.createdAt || recipe.created_at || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  const jsonStr = JSON.stringify(stored, null, 2);
+
+  getStorageDirs().forEach(dir => {
+    try {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, `${id}.json`), jsonStr, 'utf-8');
+    } catch (_) {}
+  });
+
+  return stored;
+}
+
+export function loadAllRecipeJsonFiles(): StoredRecipe[] {
+  const map = new Map<string, StoredRecipe>();
+  getStorageDirs().forEach(dir => {
+    try {
+      if (fs.existsSync(dir)) {
+        const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+        files.forEach(f => {
+          try {
+            const raw = fs.readFileSync(path.join(dir, f), 'utf-8');
+            const data = JSON.parse(raw);
+            if (data && data.id) {
+              map.set(data.id, data);
+            }
+          } catch (_) {}
+        });
+      }
+    } catch (_) {}
+  });
+  return Array.from(map.values());
+}
+
+export function updateRecipePublicVisibility(id: string, isPublic: boolean): boolean {
+  let updated = false;
+  getStorageDirs().forEach(dir => {
+    try {
+      const filePath = path.join(dir, `${id}.json`);
+      if (fs.existsSync(filePath)) {
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        data.isPublic = isPublic;
+        data.visibility = isPublic ? 'public' : 'private';
+        data.updatedAt = new Date().toISOString();
+        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+        updated = true;
+      }
+    } catch (_) {}
+  });
+  return updated;
+}
 
 ```
 

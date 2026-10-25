@@ -36,18 +36,15 @@
   ],
   "nutrition": {},
   "tags": [
-    "Main Dish",
-    "Poultry",
-    "High Protein",
-    "Gluten-Free"
+    "Main Dish"
   ],
   "image": "https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=800&q=80",
   "imageUrl": "https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=800&q=80",
   "sourceUrl": "https://recipetineats.com",
   "isFavorite": true,
   "isCooked": false,
-  "rating": 0,
+  "rating": 5,
   "bookId": null,
-  "createdAt": "2026-10-23T19:41:20.421Z",
-  "updatedAt": "2026-10-25T17:11:30.944Z"
+  "createdAt": "2026-10-25T17:11:30.942Z",
+  "updatedAt": "2026-10-25T18:53:22.969Z"
 }

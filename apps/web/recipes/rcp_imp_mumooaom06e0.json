@@ -59,32 +59,17 @@
     "Add rolls - Place the cabbage rolls seam side down into the sauce. Dip a brush into the sauce in the pan and brush some on top of each roll, just enough to give the surface a thin coating.",
     "Warm cabbage rolls - Once the sauce starts simmering around the edges of the cabbage, turn the heat down to medium, cover with a lid and let the cabbage rolls warm through for 5 minutes. Remove the lid, scatter with parsley and serve."
   ],
-  "nutrition": {
-    "@type": "NutritionInformation",
-    "calories": "638 kcal",
-    "carbohydrateContent": "55 g",
-    "proteinContent": "36 g",
-    "fatContent": "33 g",
-    "saturatedFatContent": "13 g",
-    "transFatContent": "0.2 g",
-    "cholesterolContent": "149 mg",
-    "sodiumContent": "2828 mg",
-    "fiberContent": "12 g",
-    "sugarContent": "14 g",
-    "unsaturatedFatContent": "16 g",
-    "servingSize": "1 serving"
-  },
+  "nutrition": {},
   "tags": [
-    "Breakfast",
-    "URL"
+    "Breakfast"
   ],
   "image": "/uploads/recipes/scraped_1790686780402_9su3z.webp",
   "imageUrl": "/uploads/recipes/scraped_1790686780402_9su3z.webp",
   "sourceUrl": "https://www.recipetineats.com/polish-cabbage-rolls-golabki-recipe/",
   "isFavorite": false,
   "isCooked": false,
-  "rating": 0,
+  "rating": 5,
   "bookId": null,
   "createdAt": "2026-10-03T09:19:34.314Z",
-  "updatedAt": "2026-10-25T17:11:30.981Z"
+  "updatedAt": "2026-10-25T18:53:23.027Z"
 }
