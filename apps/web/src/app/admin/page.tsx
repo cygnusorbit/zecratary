@@ -1,5 +1,5 @@
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
@@ -350,7 +350,7 @@ export default function AdminSettingsPage() {
         const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
         const root = typeof document !== 'undefined' ? document.documentElement : null;
         const day = mode === 'light' || mode === 'day' || (root && root.classList.contains('light'));
-        setIsDayMode(day);
+        setIsDayMode(Boolean(day));
         const cur = colorsRef.current;
         applyColorsLocally(
           cur.primary,

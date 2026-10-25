@@ -1,5 +1,6 @@
-// Generated & Localized by AI Collaborator - Zero Syntax Error Guarantee
 'use client';
+
+// Generated & Localized by AI Collaborator - Zero Syntax Error Guarantee
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 

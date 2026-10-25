@@ -1,5 +1,6 @@
-// Generated / Updated by AI Collaborator
 'use client';
+
+// Generated / Updated by AI Collaborator
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';

@@ -1,7 +1,9 @@
-// Generated / Updated by AI Collaborator
 'use client';
 
+// Generated / Updated by AI Collaborator
+
 import packageInfo from '../../package.json';
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -130,6 +132,12 @@ export default function Sidebar() {
   // 3. Balances & Token Package State Hooks
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
+  const [tokenIcon, setTokenIcon] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try { return localStorage.getItem('zecratary_token_icon') || ''; } catch (_) {}
+    }
+    return '';
+  });
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
   const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
   const [showTopUpMenu, setShowTopUpMenu] = useState<boolean>(false);
@@ -201,7 +209,15 @@ export default function Sidebar() {
         const cfgData = await cfgRes.json();
         const cfg = cfgData.settings || cfgData.config || cfgData;
         if (cfg) {
-          if (cfg.tokenSymbol) setTokenSymbol(cfg.tokenSymbol);
+          if (cfg.tokenSymbol && cfg.tokenSymbol !== '🪙') {
+          setTokenSymbol(cfg.tokenSymbol);
+          try { localStorage.setItem('zecratary_token_symbol', cfg.tokenSymbol); } catch (_) {}
+        }
+        if (cfg.tokenIcon !== undefined && cfg.tokenIcon !== '') {
+          setTokenIcon(cfg.tokenIcon);
+          try { localStorage.setItem('zecratary_token_icon', cfg.tokenIcon); } catch (_) {}
+        }
+        if (cfg.tokenIcon !== undefined) { setTokenIcon(cfg.tokenIcon || ''); try { localStorage.setItem('zecratary_token_icon', cfg.tokenIcon || ''); } catch (_) {} }
           if (cfg.tokenName) setTokenName(cfg.tokenName);
           if (Array.isArray(cfg.packages) && cfg.packages.length > 0) {
             setTokenPackages(cfg.packages);
@@ -252,7 +268,15 @@ export default function Sidebar() {
           if (typeof tokenData.walletBalance === 'number') {
             setWalletBalance(tokenData.walletBalance);
           }
-          if (tokenData.tokenSymbol) setTokenSymbol(tokenData.tokenSymbol);
+          if (tokenData.tokenSymbol && tokenData.tokenSymbol !== '🪙') {
+            setTokenSymbol(tokenData.tokenSymbol);
+            try { localStorage.setItem('zecratary_token_symbol', tokenData.tokenSymbol); } catch (_) {}
+          }
+          if (tokenData.tokenIcon !== undefined && tokenData.tokenIcon !== '') {
+            setTokenIcon(tokenData.tokenIcon);
+            try { localStorage.setItem('zecratary_token_icon', tokenData.tokenIcon); } catch (_) {}
+          }
+        if (tokenData.tokenIcon !== undefined) { setTokenIcon(tokenData.tokenIcon || ''); try { localStorage.setItem('zecratary_token_icon', tokenData.tokenIcon || ''); } catch (_) {} }
         }
       }
     } catch (_) {}
@@ -336,6 +360,10 @@ export default function Sidebar() {
 
     window.addEventListener('zecratary_wallet_updated', handleExternalBalance);
     window.addEventListener('zecratary_tokens_updated', handleExternalBalance);
+    window.addEventListener('zecratary_token_settings_updated', (e: any) => {
+      if (e?.detail?.tokenSymbol) setTokenSymbol(e.detail.tokenSymbol);
+      if (e?.detail?.tokenIcon !== undefined) setTokenIcon(e.detail.tokenIcon || '');
+    });
     window.addEventListener('zecratary_token_updated', handleExternalBalance);
     window.addEventListener('focus', () => { fetchWalletData(); fetchUserTokenAndNotifications(); });
 
@@ -483,6 +511,10 @@ export default function Sidebar() {
     window.addEventListener('zecratary_theme_changed', handleThemeModeSync);
     window.addEventListener('zecratary_token_settings_updated', handleTokenSync);
     window.addEventListener('zecratary_tokens_updated', handleTokenSync);
+    window.addEventListener('zecratary_token_settings_updated', (e: any) => {
+      if (e?.detail?.tokenSymbol) setTokenSymbol(e.detail.tokenSymbol);
+      if (e?.detail?.tokenIcon !== undefined) setTokenIcon(e.detail.tokenIcon || '');
+    });
     window.addEventListener('zecratary_wallet_updated', handleWalletSync);
     window.addEventListener('zecratary_wallet_settings_updated', handleWalletSync);
 
@@ -784,7 +816,7 @@ export default function Sidebar() {
               }}
               className="flex items-center gap-1 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
             >
-              <Coins className="h-3.5 w-3.5 text-amber-500" />
+              <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block shrink-0" />
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
                 {mounted ? tokenBalance.toLocaleString() : '0'}
               </span>
@@ -802,7 +834,7 @@ export default function Sidebar() {
               >
                 <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
                   <div className="flex items-center gap-2">
-                    <Coins className="h-4 w-4 text-amber-500" />
+                    <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block shrink-0" />
                     <div>
                       <h3 className="text-xs font-black uppercase tracking-wider">{t('topUpTokens', 'Top Up Tokens')}</h3>
                       <p className="text-[10px] opacity-70">
@@ -1018,7 +1050,7 @@ export default function Sidebar() {
                   onClick={() => setShowProfileMenu(false)}
                   className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
                 >
-                  <Coins className="h-3.5 w-3.5 text-amber-500" />
+                  <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block shrink-0" />
                   <span>{t('topbarTokens', 'Token')}</span>
                 </Link>
 
@@ -1248,7 +1280,7 @@ export default function Sidebar() {
                 className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
                 title={t('viewTokenBalance', 'View Token Balance & Summary')}
               >
-                <Coins className="h-4 w-4 text-amber-500 group-hover:scale-110 transition-transform" />
+                <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 inline-block shrink-0" />
                 <span suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
                   {mounted ? tokenBalance.toLocaleString() : '0'}
                 </span>
@@ -1290,7 +1322,7 @@ export default function Sidebar() {
                 <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
                   <div className="flex items-center gap-2.5">
                     <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
-                      <Coins className="h-4 w-4 text-amber-500" />
+                      <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 inline-block shrink-0" />
                     </div>
                     <div>
                       <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
@@ -1615,7 +1647,7 @@ export default function Sidebar() {
                     className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
                     style={{ color: 'var(--color-text)' }}
                   >
-                    <Coins className="h-4 w-4 text-amber-500" />
+                    <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block shrink-0" />
                     <span>{t('topbarTokens', 'Token')}</span>
                   </Link>
 
@@ -1816,7 +1848,7 @@ export default function Sidebar() {
                   {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}
                 </Link>
                 <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} title="Token Settings">
-                  <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
+                  <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 shrink-0" />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">Token Settings</span>}
                 </Link>
                 <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} title="Wallet Settings">
@@ -1932,7 +1964,7 @@ export default function Sidebar() {
 
           {/* TOKEN */}
           <Link href="/token" className={navClass('/token')} title={t('topbarTokens', 'Token')}>
-            <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
+            <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 shrink-0" />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('topbarTokens', 'Token')}</span>}
           </Link>
 

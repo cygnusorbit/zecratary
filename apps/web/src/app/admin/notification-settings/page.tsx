@@ -1,15 +1,9 @@
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { 
-  BellRing, Bell, Send, CheckCircle2, AlertCircle, Save, RefreshCw, 
-  Check, Plus, Trash2, Edit3, Sliders, History, Activity, Database, 
-  Clock, Volume2, ShieldAlert, Sparkles, Filter, Search, X, 
-  VolumeX, Mail, Smartphone, ExternalLink, Moon, ArrowRight,
-  UserCheck, Users, Megaphone, Info
-} from 'lucide-react';
+import { BellRing, Bell, Send, CheckCircle2, AlertCircle, Save, RefreshCw, Check, Plus, Trash2, Edit3, Sliders, History, Activity, Database, Clock, Volume2, ShieldAlert, Sparkles, Filter, Search, X, VolumeX, Mail, Smartphone, ExternalLink, Moon, ArrowRight, UserCheck, Users, Megaphone, Info, Eye } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
 export interface NotificationSettingsState {

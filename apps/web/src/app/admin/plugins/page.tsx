@@ -1,5 +1,5 @@
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';

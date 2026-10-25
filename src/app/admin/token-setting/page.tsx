@@ -1,5 +1,5 @@
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
@@ -219,10 +219,10 @@ export default function AdminTokenSettingPage() {
     const newPkg: TokenPackage = {
       id: 'pkg_' + Date.now().toString(36),
       name: pkgName.trim() || 'Custom Bundle',
-      tokenAmount: Math.max(1, parseInt(pkgTokens, 10) || 500),
-      priceDollars: Math.max(0.01, parseFloat(pkgPrice) || 5.99),
+      tokenAmount: Math.max(1, Number(pkgTokens) || 500),
+      priceDollars: Math.max(0.01, Number(pkgPrice) || 5.99),
       badge: pkgBadge.trim() || undefined,
-      bonusTokens: parseInt(pkgBonus, 10) || 0,
+      bonusTokens: Number(pkgBonus) || 0,
       isPopular: false
     };
 
@@ -241,10 +241,10 @@ export default function AdminTokenSettingPage() {
       packages: prev.packages.map(p => p.id === pkgId ? {
         ...p,
         name: pkgName.trim(),
-        tokenAmount: Math.max(1, parseInt(pkgTokens, 10) || p.tokenAmount),
-        priceDollars: Math.max(0.01, parseFloat(pkgPrice) || p.priceDollars),
+        tokenAmount: Math.max(1, Number(pkgTokens) || p.tokenAmount),
+        priceDollars: Math.max(0.01, Number(pkgPrice) || p.priceDollars),
         badge: pkgBadge.trim() || undefined,
-        bonusTokens: parseInt(pkgBonus, 10) || 0
+        bonusTokens: Number(pkgBonus) || 0
       } : p)
     }));
 

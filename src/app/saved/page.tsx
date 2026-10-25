@@ -1,5 +1,5 @@
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -405,7 +405,7 @@ export default function SavedRecipesPage() {
 
       if (selectedIngredientsList.length > 0) {
         const rIngs = (r.ingredients || []).map((i: any) => (typeof i === 'string' ? i : i.name || i.item || '').toLowerCase());
-        const matchesAll = selectedIngredientsList.every(sel => rIngs.some(ri => ri.includes(sel.toLowerCase())));
+        const matchesAll = selectedIngredientsList.every(sel => rIngs.some((ri: any) => ri.includes(sel.toLowerCase())));
         if (!matchesAll) return false;
       }
 

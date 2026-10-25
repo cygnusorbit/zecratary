@@ -1,6 +1,7 @@
-import DynamicTokenIcon from '@/components/DynamicTokenIcon';
-// @ts-nocheck
 'use client';
+// @ts-nocheck
+
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 import AiQuotaBar from '@/components/AiQuotaBar';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 

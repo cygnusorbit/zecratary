@@ -1,7 +1,7 @@
-import DynamicTokenIcon from '@/components/DynamicTokenIcon';
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import {
@@ -220,10 +220,10 @@ export default function AdminTokenSettingPage() {
     const newPkg: TokenPackage = {
       id: 'pkg_' + Date.now().toString(36),
       name: pkgName.trim() || 'Custom Bundle',
-      tokenAmount: Math.max(1, parseInt(pkgTokens, 10) || 500),
-      priceDollars: Math.max(0.01, parseFloat(pkgPrice) || 5.99),
+      tokenAmount: Math.max(1, Number(pkgTokens) || 500),
+      priceDollars: Math.max(0.01, Number(pkgPrice) || 5.99),
       badge: pkgBadge.trim() || undefined,
-      bonusTokens: parseInt(pkgBonus, 10) || 0,
+      bonusTokens: Number(pkgBonus) || 0,
       isPopular: false
     };
 
@@ -242,10 +242,10 @@ export default function AdminTokenSettingPage() {
       packages: prev.packages.map(p => p.id === pkgId ? {
         ...p,
         name: pkgName.trim(),
-        tokenAmount: Math.max(1, parseInt(pkgTokens, 10) || p.tokenAmount),
-        priceDollars: Math.max(0.01, parseFloat(pkgPrice) || p.priceDollars),
+        tokenAmount: Math.max(1, Number(pkgTokens) || p.tokenAmount),
+        priceDollars: Math.max(0.01, Number(pkgPrice) || p.priceDollars),
         badge: pkgBadge.trim() || undefined,
-        bonusTokens: parseInt(pkgBonus, 10) || 0
+        bonusTokens: Number(pkgBonus) || 0
       } : p)
     }));
 
@@ -729,9 +729,9 @@ export default function AdminTokenSettingPage() {
                         +{pkg.tokenAmount.toLocaleString()}
                       </span>
                     </div>
-                    {pkg.bonusTokens > 0 && (
+                    {(pkg.bonusTokens ?? 0) > 0 && (
                       <span className="text-[10px] font-black px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                        +{pkg.bonusTokens} Bonus
+                        +{(pkg.bonusTokens ?? 0)} Bonus
                       </span>
                     )}
                   </div>

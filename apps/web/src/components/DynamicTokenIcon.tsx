@@ -22,48 +22,55 @@ export default function DynamicTokenIcon({
   fallbackClassName = 'text-amber-500'
 }: DynamicTokenIconProps) {
   const [activeSymbol, setActiveSymbol] = useState<string>(() => {
-    if (propSymbol) return propSymbol;
+    if (propSymbol && propSymbol !== '🪙') return propSymbol;
     if (typeof window !== 'undefined') {
       try {
-        return localStorage.getItem('zecratary_token_symbol') || '🪙';
+        const stored = localStorage.getItem('zecratary_token_symbol');
+        if (stored) return stored;
       } catch (_) {}
     }
-    return '🪙';
+    return propSymbol || '🪙';
   });
 
   const [activeIcon, setActiveIcon] = useState<string | undefined>(() => {
-    if (propIcon) return propIcon;
+    if (propIcon && propIcon.trim() !== '') return propIcon;
     if (typeof window !== 'undefined') {
       try {
-        return localStorage.getItem('zecratary_token_icon') || undefined;
+        const stored = localStorage.getItem('zecratary_token_icon');
+        if (stored && stored.trim() !== '') return stored;
       } catch (_) {}
     }
-    return undefined;
+    return propIcon || undefined;
   });
 
-  // Self-hydrating query from PostgreSQL if cache is missing or on initial load
   const fetchAuthoritativeSettings = useCallback(async () => {
     try {
-      const res = await fetch(`/api/tokens?t=${Date.now()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/admin/token-setting?t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        const sym = data?.tokenSymbol || data?.token_symbol;
-        const ic = data?.tokenIcon || data?.token_icon;
-        if (sym && !propSymbol) {
+        const settings = data?.settings || data?.config || data;
+        const sym = settings?.tokenSymbol || settings?.token_symbol;
+        const ic = settings?.tokenIcon || settings?.token_icon;
+
+        if (sym && sym !== '🪙') {
           setActiveSymbol(sym);
           try { localStorage.setItem('zecratary_token_symbol', sym); } catch (_) {}
+        } else if (sym && !activeSymbol) {
+          setActiveSymbol(sym);
         }
-        if (ic !== undefined && !propIcon) {
-          setActiveIcon(ic || undefined);
+
+        if (ic && ic.trim() !== '') {
+          setActiveIcon(ic);
           try { localStorage.setItem('zecratary_token_icon', ic); } catch (_) {}
         }
       }
     } catch (_) {}
-  }, [propSymbol, propIcon]);
+  }, [activeSymbol]);
 
   useEffect(() => {
-    if (propSymbol) {
+    if (propSymbol && propSymbol !== '🪙') {
       setActiveSymbol(propSymbol);
+      try { localStorage.setItem('zecratary_token_symbol', propSymbol); } catch (_) {}
     } else if (typeof window !== 'undefined') {
       try {
         const storedSym = localStorage.getItem('zecratary_token_symbol');
@@ -77,14 +84,21 @@ export default function DynamicTokenIcon({
       }
     }
 
-    if (propIcon !== undefined) {
+    if (propIcon && propIcon.trim() !== '') {
       setActiveIcon(propIcon);
+      try { localStorage.setItem('zecratary_token_icon', propIcon); } catch (_) {}
     }
 
     const handleUpdate = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
-      if (detail?.tokenSymbol && !propSymbol) setActiveSymbol(detail.tokenSymbol);
-      if (detail?.tokenIcon !== undefined && !propIcon) setActiveIcon(detail.tokenIcon);
+      if (detail?.tokenSymbol && detail.tokenSymbol !== '🪙') {
+        setActiveSymbol(detail.tokenSymbol);
+        try { localStorage.setItem('zecratary_token_symbol', detail.tokenSymbol); } catch (_) {}
+      }
+      if (detail?.tokenIcon !== undefined && detail.tokenIcon !== '') {
+        setActiveIcon(detail.tokenIcon);
+        try { localStorage.setItem('zecratary_token_icon', detail.tokenIcon); } catch (_) {}
+      }
       if (!detail) fetchAuthoritativeSettings();
     };
 
@@ -97,8 +111,12 @@ export default function DynamicTokenIcon({
       try {
         bc = new BroadcastChannel('zecratary_balance_channel');
         bc.onmessage = (event) => {
-          if (event.data?.tokenSymbol && !propSymbol) setActiveSymbol(event.data.tokenSymbol);
-          if (event.data?.tokenIcon !== undefined && !propIcon) setActiveIcon(event.data.tokenIcon);
+          if (event.data?.tokenSymbol && event.data.tokenSymbol !== '🪙') {
+            setActiveSymbol(event.data.tokenSymbol);
+          }
+          if (event.data?.tokenIcon !== undefined && event.data.tokenIcon !== '') {
+            setActiveIcon(event.data.tokenIcon);
+          }
         };
       } catch (_) {}
     }
@@ -112,14 +130,21 @@ export default function DynamicTokenIcon({
   }, [propSymbol, propIcon, fetchAuthoritativeSettings]);
 
   useEffect(() => {
-    if (propSymbol !== undefined) setActiveSymbol(propSymbol);
+    if (propSymbol !== undefined && propSymbol !== '🪙') {
+      setActiveSymbol(propSymbol);
+    }
   }, [propSymbol]);
 
   useEffect(() => {
-    if (propIcon !== undefined) setActiveIcon(propIcon);
+    if (propIcon !== undefined && propIcon.trim() !== '') {
+      setActiveIcon(propIcon);
+    }
   }, [propIcon]);
 
-  const rawCandidate = activeIcon || activeSymbol || '🪙';
+  const rawCandidate = (activeIcon && activeIcon.trim() !== '') 
+    ? activeIcon 
+    : (activeSymbol || '🪙');
+
   const isImage = typeof rawCandidate === 'string' && (
     rawCandidate.startsWith('http://') ||
     rawCandidate.startsWith('https://') ||
@@ -157,8 +182,7 @@ export default function DynamicTokenIcon({
     return <Coins className={`inline-block shrink-0 ${className} ${fallbackClassName}`} style={styleOverride} />;
   }
 
-  // Unicode emoji or custom text glyph
-  if (trimmed.length > 0) {
+  if (trimmed.length > 0 && trimmed !== '🪙') {
     return (
       <span
         aria-hidden="true"

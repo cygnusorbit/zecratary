@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.31",
+  "version": "8.1.32",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.31",
+  "version": "8.1.32",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -414,6 +414,62 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
+      <head>
+        {/* Synchronous Pre-Hydration Theme Script: Eliminates Color Flash on Refresh */}
+        <script
+          id="zecratary-theme-prehydrate"
+          dangerouslySetInnerHTML={{
+            __html: `(function() {
+              try {
+                var doc = document.documentElement;
+                doc.classList.add('theme-preloading');
+                var mode = localStorage.getItem('zecratary_theme_mode');
+                var isDay = mode === 'light' || mode === 'day';
+                if (isDay) {
+                  doc.classList.remove('dark');
+                  doc.classList.add('light');
+                } else {
+                  doc.classList.remove('light');
+                  doc.classList.add('dark');
+                }
+                var stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+                var c = stored ? JSON.parse(stored) : null;
+                if (c) {
+                  var p = c.primary || c.primaryColor || (isDay ? '#10b981' : '#10b981');
+                  var ph = c.primaryHover || '#059669';
+                  var ac = c.accentEmerald || c.accentColor || c.accent || '#10b981';
+                  var bg = c.backgroundColor || c.backgroundDark || '#070b13';
+                  var card = c.cardBackground || c.cardDark || '#0f172a';
+                  var border = c.cardBorder || c.borderColor || '#1e293b';
+                  var textSec = c.textSecondary || '#94a3b8';
+                  var txt = c.textColor || '#ffffff';
+
+                  doc.style.setProperty('--color-primary', p);
+                  doc.style.setProperty('--color-primary-hover', ph);
+                  doc.style.setProperty('--color-accent', ac);
+                  doc.style.setProperty('--color-emerald', ac);
+
+                  if (isDay) {
+                    doc.style.setProperty('--color-bg', '#f8fafc');
+                    doc.style.setProperty('--color-card', '#ffffff');
+                    doc.style.setProperty('--color-inner-dark', '#f1f5f9');
+                    doc.style.setProperty('--color-border', '#e2e8f0');
+                    doc.style.setProperty('--color-text', '#0f172a');
+                    doc.style.setProperty('--color-text-secondary', '#64748b');
+                  } else {
+                    doc.style.setProperty('--color-bg', bg);
+                    doc.style.setProperty('--color-card', card);
+                    doc.style.setProperty('--color-inner-dark', '#111726');
+                    doc.style.setProperty('--color-border', border);
+                    doc.style.setProperty('--color-text', txt);
+                    doc.style.setProperty('--color-text-secondary', textSec);
+                  }
+                }
+              } catch (e) {}
+            })();`,
+          }}
+        />
+      </head>
       <body className="min-h-screen flex flex-col bg-[var(--color-bg)] text-slate-100 font-sans antialiased overflow-x-hidden">
         <GlobalThemeSync />
         <LanguageProvider>
@@ -1698,6 +1754,23 @@ html.dark {
   color-scheme: dark;
 }
 
+
+/* Suppress animations and color transitions while initial theme hydrates */
+html.theme-preloading,
+html.theme-preloading *,
+html.theme-preloading body {
+  -webkit-transition: none !important;
+  -moz-transition: none !important;
+  -o-transition: none !important;
+  transition: none !important;
+}
+
+html:not(.theme-preloading) body {
+  transition: background-color 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              color 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 ```
 
 ## File: `apps/web/src/app/ClientLayout.tsx`
@@ -2867,6 +2940,7 @@ export default function SavedRecipesPage() {
 
 ## File: `apps/web/src/app/token/page.tsx`
 ```typescript
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 // @ts-nocheck
 'use client';
 
@@ -6561,6 +6635,7 @@ export default function PlannerPage() {
 
 ## File: `apps/web/src/app/chef/page.tsx`
 ```typescript
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 // @ts-nocheck
 'use client';
 import AiQuotaBar from '@/components/AiQuotaBar';
@@ -7500,7 +7575,7 @@ export default function ChefChatPage() {
               className="flex items-center gap-2 px-3 py-1.5 rounded-xl border shadow-xs"
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
             >
-              <Coins className="h-4 w-4 text-amber-500" />
+              <DynamicTokenIcon size={15} className="w-3.5 h-3.5 inline-block" />
               <div className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
                 {tokenBalance} <span className="text-amber-500">{tokenSymbol}</span>
               </div>
@@ -23778,6 +23853,7 @@ export default function AdminPaymentPage() {
 
 ## File: `apps/web/src/app/admin/token-setting/page.tsx`
 ```typescript
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 // @ts-nocheck
 'use client';
 
@@ -32638,6 +32714,7 @@ export default function BooksPage() {
 
 ## File: `apps/web/src/app/subscriptions/page.tsx`
 ```typescript
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 // @ts-nocheck
 'use client';
 
@@ -33181,7 +33258,7 @@ export default function SubscriptionsPage() {
             className="px-4 py-2.5 rounded-xl text-xs font-bold border transition shadow-xs flex items-center gap-1.5 hover:opacity-80"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
-            <Coins className="h-4 w-4 text-amber-500" />
+            <DynamicTokenIcon className="w-4 h-4 inline-block" />
             <span>{tokenBalance} 🪙</span>
           </Link>
         </div>
@@ -33751,6 +33828,7 @@ export default function SubscriptionsPage() {
 
 ## File: `apps/web/src/app/dashboard/page.tsx`
 ```typescript
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 // @ts-nocheck
 'use client';
 
@@ -33922,7 +34000,7 @@ export default function DashboardPage() {
                 {t('statsTokensRemaining', 'Tokens Remaining')}
               </span>
               <div className="text-base font-black font-mono">
-                {stats.tokenBalance.toLocaleString()} <span className="text-amber-500 text-xs">🪙</span>
+                {stats.tokenBalance.toLocaleString()} <span className="text-amber-500 text-xs"><DynamicTokenIcon size={16} className="w-4 h-4 inline-block" /></span>
               </div>
             </div>
             <Link 
@@ -34201,6 +34279,7 @@ export default function DashboardPage() {
 
 ## File: `apps/web/src/app/transactions/page.tsx`
 ```typescript
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 'use client';
 
 // Generated / Updated by AI Collaborator
@@ -35046,7 +35125,7 @@ function TransactionsContent() {
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
             title={t('userTokenBalance', 'User Token Balance')}
           >
-            <Coins className="h-4 w-4 text-amber-500" />
+            <DynamicTokenIcon size={16} className="w-4 h-4 inline-block" />
             <span suppressHydrationWarning className="font-mono font-black text-emerald-400">
               {ownerTokenBalance.toLocaleString()}
             </span>
@@ -35113,7 +35192,7 @@ function TransactionsContent() {
             color: 'var(--color-text-secondary, #94a3b8)'
           }}
         >
-          <Coins className="h-4 w-4 text-amber-500" />
+          <DynamicTokenIcon size={16} className="w-4 h-4 inline-block" />
           <span>{t('tokenTransactionsTab', 'Token Transactions')}</span>
           {tokenSummaryStats.totalEvents > 0 && (
             <span className="ml-1 text-[10px] font-mono px-2 py-0.5 rounded-full border bg-primary/10 border-[var(--color-border)]">
@@ -35191,7 +35270,7 @@ function TransactionsContent() {
             <div className="border rounded-2xl p-4 shadow-md space-y-1 bg-[var(--color-card)] border-[var(--color-border)]">
               <div className="flex items-center justify-between text-xs font-bold opacity-70">
                 <span>{t('userTokenBalance', 'User Token Balance')}</span>
-                <Coins className="h-4 w-4 text-amber-500" />
+                <DynamicTokenIcon size={16} className="w-4 h-4 inline-block" />
               </div>
               <div className="text-2xl font-black font-mono text-emerald-400 flex items-baseline gap-1.5">
                 <span suppressHydrationWarning>{ownerTokenBalance.toLocaleString()}</span>
@@ -35340,7 +35419,7 @@ function TransactionsContent() {
                           </td>
                           <td className="p-3.5 font-mono text-xs font-bold">
                             <div className="flex items-center gap-1">
-                              <Coins className="h-3.5 w-3.5 text-amber-500" />
+                              <DynamicTokenIcon size={16} className="w-4 h-4 inline-block" />
                               <span>{numBalanceAfter.toLocaleString()}</span>
                               <span className="text-amber-500 text-[11px]">{tokenIdentity.tokenSymbol}</span>
                             </div>
@@ -37401,6 +37480,7 @@ export default function ManualRecipePage() {
 
 ## File: `apps/web/src/app/profile/page.tsx`
 ```typescript
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 // @ts-nocheck
 'use client';
 
@@ -37953,7 +38033,7 @@ function ProfileContent() {
             </Link>
           </div>
           <div className="text-2xl font-black font-mono">
-            {tokenBalance.toLocaleString()} <span className="text-amber-500 text-xs">🪙</span>
+            {tokenBalance.toLocaleString()} <span className="text-amber-500 text-xs"><DynamicTokenIcon size={16} className="w-4 h-4 inline-block" /></span>
           </div>
         </div>
 
@@ -67334,6 +67414,194 @@ export default function ThemeSync() {
 
 ```
 
+## File: `apps/web/src/components/DynamicTokenIcon.tsx`
+```typescript
+// @ts-nocheck
+'use client';
+
+import React, { useState, useEffect, useCallback } from 'react';
+import { Coins, Sparkles, Zap } from 'lucide-react';
+
+export interface DynamicTokenIconProps {
+  symbol?: string;
+  icon?: string;
+  className?: string;
+  size?: number | string;
+  style?: React.CSSProperties;
+  fallbackClassName?: string;
+}
+
+export default function DynamicTokenIcon({
+  symbol: propSymbol,
+  icon: propIcon,
+  className = 'w-4 h-4',
+  size,
+  style = {},
+  fallbackClassName = 'text-amber-500'
+}: DynamicTokenIconProps) {
+  const [activeSymbol, setActiveSymbol] = useState<string>(() => {
+    if (propSymbol) return propSymbol;
+    if (typeof window !== 'undefined') {
+      try {
+        return localStorage.getItem('zecratary_token_symbol') || '🪙';
+      } catch (_) {}
+    }
+    return '🪙';
+  });
+
+  const [activeIcon, setActiveIcon] = useState<string | undefined>(() => {
+    if (propIcon) return propIcon;
+    if (typeof window !== 'undefined') {
+      try {
+        return localStorage.getItem('zecratary_token_icon') || undefined;
+      } catch (_) {}
+    }
+    return undefined;
+  });
+
+  // Self-hydrating query from PostgreSQL if cache is missing or on initial load
+  const fetchAuthoritativeSettings = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/tokens?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const sym = data?.tokenSymbol || data?.token_symbol;
+        const ic = data?.tokenIcon || data?.token_icon;
+        if (sym && !propSymbol) {
+          setActiveSymbol(sym);
+          try { localStorage.setItem('zecratary_token_symbol', sym); } catch (_) {}
+        }
+        if (ic !== undefined && !propIcon) {
+          setActiveIcon(ic || undefined);
+          try { localStorage.setItem('zecratary_token_icon', ic); } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }, [propSymbol, propIcon]);
+
+  useEffect(() => {
+    if (propSymbol) {
+      setActiveSymbol(propSymbol);
+    } else if (typeof window !== 'undefined') {
+      try {
+        const storedSym = localStorage.getItem('zecratary_token_symbol');
+        if (storedSym) setActiveSymbol(storedSym);
+        else fetchAuthoritativeSettings();
+
+        const storedIc = localStorage.getItem('zecratary_token_icon');
+        if (storedIc) setActiveIcon(storedIc);
+      } catch (_) {
+        fetchAuthoritativeSettings();
+      }
+    }
+
+    if (propIcon !== undefined) {
+      setActiveIcon(propIcon);
+    }
+
+    const handleUpdate = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.tokenSymbol && !propSymbol) setActiveSymbol(detail.tokenSymbol);
+      if (detail?.tokenIcon !== undefined && !propIcon) setActiveIcon(detail.tokenIcon);
+      if (!detail) fetchAuthoritativeSettings();
+    };
+
+    window.addEventListener('zecratary_token_settings_updated', handleUpdate);
+    window.addEventListener('zecratary_tokens_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+
+    let bc: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        bc = new BroadcastChannel('zecratary_balance_channel');
+        bc.onmessage = (event) => {
+          if (event.data?.tokenSymbol && !propSymbol) setActiveSymbol(event.data.tokenSymbol);
+          if (event.data?.tokenIcon !== undefined && !propIcon) setActiveIcon(event.data.tokenIcon);
+        };
+      } catch (_) {}
+    }
+
+    return () => {
+      window.removeEventListener('zecratary_token_settings_updated', handleUpdate);
+      window.removeEventListener('zecratary_tokens_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+      if (bc) bc.close();
+    };
+  }, [propSymbol, propIcon, fetchAuthoritativeSettings]);
+
+  useEffect(() => {
+    if (propSymbol !== undefined) setActiveSymbol(propSymbol);
+  }, [propSymbol]);
+
+  useEffect(() => {
+    if (propIcon !== undefined) setActiveIcon(propIcon);
+  }, [propIcon]);
+
+  const rawCandidate = activeIcon || activeSymbol || '🪙';
+  const isImage = typeof rawCandidate === 'string' && (
+    rawCandidate.startsWith('http://') ||
+    rawCandidate.startsWith('https://') ||
+    rawCandidate.startsWith('/') ||
+    rawCandidate.startsWith('data:image/')
+  );
+
+  const styleOverride: React.CSSProperties = {
+    ...style,
+    ...(size ? { width: size, height: size, minWidth: size, minHeight: size } : {})
+  };
+
+  if (isImage) {
+    return (
+      <img
+        src={rawCandidate}
+        alt="Token"
+        className={`inline-block object-contain align-middle select-none shrink-0 ${className}`}
+        style={styleOverride}
+        loading="lazy"
+      />
+    );
+  }
+
+  const trimmed = typeof rawCandidate === 'string' ? rawCandidate.trim() : '';
+  const lower = trimmed.toLowerCase();
+
+  if (lower === 'sparkles' || lower === 'sparkle') {
+    return <Sparkles className={`inline-block shrink-0 ${className} ${fallbackClassName}`} style={styleOverride} />;
+  }
+  if (lower === 'zap' || lower === 'lightning' || lower === 'flash') {
+    return <Zap className={`inline-block shrink-0 ${className} ${fallbackClassName}`} style={styleOverride} />;
+  }
+  if (lower === 'coins' || lower === 'coin') {
+    return <Coins className={`inline-block shrink-0 ${className} ${fallbackClassName}`} style={styleOverride} />;
+  }
+
+  // Unicode emoji or custom text glyph
+  if (trimmed.length > 0) {
+    return (
+      <span
+        aria-hidden="true"
+        className={`inline-flex items-center justify-center font-normal leading-none select-none shrink-0 ${className}`}
+        style={{
+          fontSize: typeof size === 'number' ? `${size}px` : (size || '1.05em'),
+          display: 'inline-flex',
+          ...styleOverride
+        }}
+      >
+        {trimmed}
+      </span>
+    );
+  }
+
+  return (
+    <Coins
+      className={`inline-block shrink-0 ${className} ${fallbackClassName}`}
+      style={styleOverride}
+    />
+  );
+}
+
+```
+
 ## File: `apps/web/src/components/TokenPurchaseModal.tsx`
 ```typescript
 'use client';
@@ -67514,33 +67782,48 @@ import { applyThemeToDocument, fetchAndApplyServerTheme, applyGlobalFont } from 
 
 export default function GlobalThemeSync() {
   useEffect(() => {
-    // Initial fetch from PostgreSQL-backed API
+    if (typeof document !== 'undefined') {
+      document.documentElement.classList.remove('theme-preloading');
+    }
+
     fetchAndApplyServerTheme();
 
     const handleThemeUpdate = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
-      if (detail && typeof detail === 'object') {
+      if (detail && typeof detail === 'object' && !('mode' in detail)) {
         applyThemeToDocument(detail);
-        if (detail.fontFamily) {
-          (applyGlobalFont as any)(detail.fontFamily, detail.fontSize, detail.fontLetterSpacing);
-        }
       } else {
         fetchAndApplyServerTheme();
       }
     };
 
+    const handleFontUpdate = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail) {
+        applyGlobalFont(detail.fontFamily, detail.fontSize, detail.fontLetterSpacing);
+      } else {
+        applyGlobalFont();
+      }
+    };
+
+    const handleModeUpdate = () => {
+      applyThemeToDocument();
+    };
+
     window.addEventListener('zecratary_theme_updated', handleThemeUpdate);
-    window.addEventListener('zecratary_theme_mode_changed', handleThemeUpdate);
+    window.addEventListener('zecratary_theme_changed', handleThemeUpdate);
     window.addEventListener('zecratary_admin_settings_updated', handleThemeUpdate);
+    window.addEventListener('zecratary_theme_mode_changed', handleModeUpdate);
+    window.addEventListener('zecratary_font_updated', handleFontUpdate);
     window.addEventListener('storage', handleThemeUpdate);
-    window.addEventListener('focus', handleThemeUpdate);
 
     return () => {
       window.removeEventListener('zecratary_theme_updated', handleThemeUpdate);
-      window.removeEventListener('zecratary_theme_mode_changed', handleThemeUpdate);
+      window.removeEventListener('zecratary_theme_changed', handleThemeUpdate);
       window.removeEventListener('zecratary_admin_settings_updated', handleThemeUpdate);
+      window.removeEventListener('zecratary_theme_mode_changed', handleModeUpdate);
+      window.removeEventListener('zecratary_font_updated', handleFontUpdate);
       window.removeEventListener('storage', handleThemeUpdate);
-      window.removeEventListener('focus', handleThemeUpdate);
     };
   }, []);
 
@@ -67732,8 +68015,8 @@ export async function syncUserToPostgres(user: any): Promise<any> {
 
 ## File: `apps/web/src/lib/themeConfig.ts`
 ```typescript
-// Global Server-Backed Theme Engine (Constraint 5 & 6)
-// GitHub: cygnusorbit/zecratary
+// Global Server-Backed Theme Engine & Typography Manager
+// Repository: cygnusorbit/zecratary (GitHub)
 
 export interface ThemeColors {
   primary?: string;
@@ -67759,6 +68042,15 @@ export interface ThemeColors {
   [key: string]: any;
 }
 
+export const AVAILABLE_FONTS = [
+  { id: 'Inter', name: 'Inter', family: "'Inter', system-ui, -apple-system, sans-serif" },
+  { id: 'Plus Jakarta Sans', name: 'Plus Jakarta Sans', family: "'Plus Jakarta Sans', system-ui, sans-serif" },
+  { id: 'Outfit', name: 'Outfit', family: "'Outfit', system-ui, sans-serif" },
+  { id: 'Poppins', name: 'Poppins', family: "'Poppins', system-ui, sans-serif" },
+  { id: 'Roboto', name: 'Roboto', family: "'Roboto', system-ui, sans-serif" },
+  { id: 'System Default', name: 'System Default', family: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }
+];
+
 let memoryThemeColors: ThemeColors = {
   primary: '#10b981',
   primaryColor: '#10b981',
@@ -67771,12 +68063,16 @@ let memoryThemeColors: ThemeColors = {
   textSecondary: '#94a3b8',
 };
 
+let memoryGlobalFont: string | null = null;
+
 export function getMemoryThemeColors(): ThemeColors {
   return memoryThemeColors;
 }
 
-export function setMemoryThemeColors(colors: Partial<ThemeColors>): void {
-  memoryThemeColors = { ...memoryThemeColors, ...colors };
+export function setMemoryThemeColors(colors: Partial<ThemeColors> | null | undefined): void {
+  if (colors && Object.keys(colors).length > 0) {
+    memoryThemeColors = { ...memoryThemeColors, ...colors };
+  }
 }
 
 export function getEffectiveThemeMode(fallback: 'light' | 'dark' = 'dark'): 'light' | 'dark' {
@@ -67803,77 +68099,212 @@ export function isDarkMode(): boolean {
   return getEffectiveThemeMode('dark') === 'dark';
 }
 
+/**
+ * Applies typography font family, size scaling, and tracking dynamically
+ */
 export function applyGlobalFont(fontFamily?: string, fontSize?: string, letterSpacing?: string): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  if (fontFamily) root.style.setProperty('--font-custom', fontFamily);
-  if (fontSize) root.style.setProperty('--font-size-base', fontSize);
-  if (letterSpacing) root.style.setProperty('--font-letter-spacing', letterSpacing);
+
+  const targetFont = fontFamily || memoryGlobalFont || (typeof window !== 'undefined' ? localStorage.getItem('zecratary_font_family') || localStorage.getItem('zecratary_global_font') : null) || 'Inter';
+  const targetSize = fontSize || (typeof window !== 'undefined' ? localStorage.getItem('zecratary_font_size') : null) || '16px';
+  const targetSpacing = letterSpacing || (typeof window !== 'undefined' ? localStorage.getItem('zecratary_font_spacing') : null) || '0em';
+
+  if (targetFont && targetFont !== 'inherit') {
+    memoryGlobalFont = targetFont;
+    const matched = AVAILABLE_FONTS.find(f => f.id.toLowerCase() === targetFont.toLowerCase() || f.name.toLowerCase() === targetFont.toLowerCase());
+    const familyValue = matched ? matched.family : targetFont;
+
+    root.style.setProperty('--font-primary', familyValue);
+    root.style.setProperty('--font-family', familyValue);
+    root.style.setProperty('--font-family-base', familyValue);
+    root.style.setProperty('--font-body', familyValue);
+    root.style.setProperty('--font-custom', familyValue);
+    root.style.fontFamily = familyValue;
+
+    if (document.body) {
+      document.body.style.fontFamily = familyValue;
+    }
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('zecratary_font_family', targetFont);
+        localStorage.setItem('zecratary_global_font', targetFont);
+      } catch (_) {}
+    }
+  }
+
+  if (targetSize) {
+    root.style.setProperty('--font-size-base', targetSize);
+    root.style.setProperty('--font-size-global', targetSize);
+    root.style.setProperty('--font-size', targetSize);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('zecratary_font_size', targetSize);
+      } catch (_) {}
+    }
+  }
+
+  if (targetSpacing) {
+    root.style.setProperty('--font-letter-spacing', targetSpacing);
+    root.style.setProperty('--letter-spacing-global', targetSpacing);
+    root.style.setProperty('--letter-spacing', targetSpacing);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('zecratary_font_spacing', targetSpacing);
+      } catch (_) {}
+    }
+  }
 }
 
-// Optional parameter arity: allows applyThemeToDocument() with zero arguments
-export function applyThemeToDocument(colors: ThemeColors | null | undefined = null): void {
+export function getGlobalFont(): string | null {
+  if (memoryGlobalFont) return memoryGlobalFont;
+  if (typeof window !== 'undefined') {
+    try {
+      return localStorage.getItem('zecratary_font_family') || localStorage.getItem('zecratary_global_font');
+    } catch (_) {}
+  }
+  return null;
+}
+
+export async function saveGlobalFont(fontName: string): Promise<void> {
+  memoryGlobalFont = fontName;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('zecratary_font_family', fontName);
+      localStorage.setItem('zecratary_global_font', fontName);
+    } catch (_) {}
+    applyGlobalFont(fontName);
+    window.dispatchEvent(new CustomEvent('zecratary_font_updated', { detail: { fontFamily: fontName } }));
+  }
+
+  try {
+    await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fontFamily: fontName })
+    });
+  } catch (_) {}
+}
+
+export function applyThemeToDocument(colors?: ThemeColors | null): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  const activeColors = colors || memoryThemeColors;
+  const isDay = getEffectiveThemeMode('dark') === 'light';
 
-  if (colors) {
-    memoryThemeColors = { ...memoryThemeColors, ...colors };
+  let activeColors = (colors && Object.keys(colors).length > 0) ? colors : memoryThemeColors;
+  if (!activeColors && typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+      if (stored) activeColors = JSON.parse(stored);
+    } catch (_) {}
   }
 
-  const effectiveMode = getEffectiveThemeMode('dark');
-  const isDay = effectiveMode === 'light';
+  if (activeColors) {
+    setMemoryThemeColors(activeColors);
+    const p = activeColors.primary || activeColors.primaryColor || '#10b981';
+    const ph = activeColors.primaryHover || '#059669';
+    const ac = activeColors.accentEmerald || activeColors.accentColor || activeColors.accent || '#10b981';
+    const sbi = activeColors.sidebarIconColor || activeColors.sidebarIcon || ac;
+    const bg = activeColors.backgroundColor || activeColors.backgroundDark || '#070b13';
+    const card = activeColors.cardBackground || activeColors.cardDark || '#0f172a';
+    const border = activeColors.cardBorder || activeColors.borderColor || '#1e293b';
+    const textSec = activeColors.textSecondary || '#94a3b8';
+    const txt = activeColors.textColor || '#ffffff';
 
-  const p = activeColors.primary || activeColors.primaryColor || '#10b981';
-  const ph = activeColors.primaryHover || '#059669';
-  const ac = activeColors.accentEmerald || activeColors.accentColor || activeColors.accent || '#10b981';
-  const bg = activeColors.backgroundColor || activeColors.backgroundDark || '#070b13';
-  const card = activeColors.cardBackground || activeColors.cardDark || '#0f172a';
-  const border = activeColors.cardBorder || activeColors.borderColor || '#1e293b';
-  const textSec = activeColors.textSecondary || '#94a3b8';
+    root.style.setProperty('--color-primary', p);
+    root.style.setProperty('--color-primary-hover', ph);
+    root.style.setProperty('--color-accent', ac);
+    root.style.setProperty('--color-emerald', ac);
+    root.style.setProperty('--color-sidebar-icon', sbi);
 
-  root.style.setProperty('--color-primary', p);
-  root.style.setProperty('--color-primary-hover', ph);
-  root.style.setProperty('--color-accent', ac);
-  root.style.setProperty('--color-emerald', ac);
-
-  if (isDay) {
-    root.classList.remove('dark');
-    root.classList.add('light');
-    root.style.setProperty('--color-bg', '#f8fafc');
-    root.style.setProperty('--color-bg-dark', '#f8fafc');
-    root.style.setProperty('--color-card', '#ffffff');
-    root.style.setProperty('--color-card-dark', '#ffffff');
-    root.style.setProperty('--color-border', '#e2e8f0');
-    root.style.setProperty('--color-border-dark', '#e2e8f0');
-    root.style.setProperty('--color-inner-dark', '#f1f5f9');
-    root.style.setProperty('--color-text', '#0f172a');
-    root.style.setProperty('--color-text-secondary', '#64748b');
-    if (document.body) {
-      document.body.style.backgroundColor = '#f8fafc';
-      document.body.style.color = '#0f172a';
+    if (isDay) {
+      root.classList.remove('dark');
+      root.classList.add('light');
+      root.style.setProperty('--color-bg', '#f8fafc');
+      root.style.setProperty('--color-background', '#f8fafc');
+      root.style.setProperty('--color-bg-dark', '#f8fafc');
+      root.style.setProperty('--color-card', '#ffffff');
+      root.style.setProperty('--color-card-dark', '#ffffff');
+      root.style.setProperty('--color-inner-dark', '#f1f5f9');
+      root.style.setProperty('--color-border', '#e2e8f0');
+      root.style.setProperty('--color-border-dark', '#e2e8f0');
+      root.style.setProperty('--color-text', '#0f172a');
+      root.style.setProperty('--color-text-secondary', '#64748b');
+      if (document.body) {
+        document.body.style.backgroundColor = '#f8fafc';
+        document.body.style.color = '#0f172a';
+      }
+    } else {
+      root.classList.remove('light');
+      root.classList.add('dark');
+      root.style.setProperty('--color-bg', bg);
+      root.style.setProperty('--color-background', bg);
+      root.style.setProperty('--color-bg-dark', bg);
+      root.style.setProperty('--color-card', card);
+      root.style.setProperty('--color-card-dark', card);
+      root.style.setProperty('--color-inner-dark', '#111726');
+      root.style.setProperty('--color-border', border);
+      root.style.setProperty('--color-border-dark', border);
+      root.style.setProperty('--color-text', txt);
+      root.style.setProperty('--color-text-secondary', textSec);
+      if (document.body) {
+        document.body.style.backgroundColor = bg;
+        document.body.style.color = txt;
+      }
     }
-  } else {
-    root.classList.remove('light');
-    root.classList.add('dark');
-    root.style.setProperty('--color-bg', bg);
-    root.style.setProperty('--color-bg-dark', bg);
-    root.style.setProperty('--color-card', card);
-    root.style.setProperty('--color-card-dark', card);
-    root.style.setProperty('--color-border', border);
-    root.style.setProperty('--color-border-dark', border);
-    root.style.setProperty('--color-inner-dark', '#111726');
-    root.style.setProperty('--color-text', '#ffffff');
-    root.style.setProperty('--color-text-secondary', textSec);
-    if (document.body) {
-      document.body.style.backgroundColor = bg;
-      document.body.style.color = '#ffffff';
-    }
   }
 
-  if (document.body) {
-    document.body.style.transition = 'background-color 200ms cubic-bezier(0.4, 0, 0.2, 1), color 200ms cubic-bezier(0.4, 0, 0.2, 1), border-color 200ms cubic-bezier(0.4, 0, 0.2, 1)';
+  if (memoryGlobalFont) {
+    applyGlobalFont(memoryGlobalFont);
   }
+}
+
+export function setThemeMode(mode: 'light' | 'dark'): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem('zecratary_theme_mode', mode);
+  } catch (_) {}
+  applyThemeToDocument();
+  window.dispatchEvent(new CustomEvent('zecratary_theme_mode_changed', { detail: { mode } }));
+  window.dispatchEvent(new Event('zecratary_theme_changed'));
+  window.dispatchEvent(new Event('storage'));
+}
+
+export function toggleThemeMode(): 'light' | 'dark' {
+  const current = getEffectiveThemeMode('dark');
+  const next = current === 'light' ? 'dark' : 'light';
+  setThemeMode(next);
+  return next;
+}
+
+export async function saveThemeColors(colors: ThemeColors): Promise<void> {
+  setMemoryThemeColors(colors);
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem('zecratary_theme_colors', JSON.stringify(colors));
+    } catch (_) {}
+    applyThemeToDocument(colors);
+    window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: colors }));
+    window.dispatchEvent(new Event('zecratary_theme_changed'));
+    window.dispatchEvent(new Event('storage'));
+  }
+
+  try {
+    await fetch('/api/admin/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ themeColors: colors })
+    });
+  } catch (_) {}
+
+  try {
+    await fetch('/api/user/theme', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ themeColors: colors })
+    });
+  } catch (_) {}
 }
 
 export async function fetchAndApplyServerTheme(): Promise<void> {
@@ -67882,30 +68313,34 @@ export async function fetchAndApplyServerTheme(): Promise<void> {
     const res = await fetch('/api/admin/settings', { cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
-      const settings = data.settings || data;
-      if (settings?.themeColors || settings?.theme_colors) {
-        const colors = settings.themeColors || settings.theme_colors;
-        applyThemeToDocument(colors);
+      const settings = data?.settings || data;
+      const theme = settings?.themeColors || settings?.theme_colors;
+      if (theme && Object.keys(theme).length > 0) {
+        setMemoryThemeColors(theme);
+        applyThemeToDocument(theme);
+      }
+      const font = settings?.fontFamily || settings?.font_family;
+      if (font) {
+        applyGlobalFont(font, settings?.fontSize || settings?.font_size, settings?.fontLetterSpacing || settings?.letter_spacing);
+      }
+      return;
+    }
+  } catch (_) {}
+
+  try {
+    const uRes = await fetch('/api/user/theme', { cache: 'no-store' });
+    if (uRes.ok) {
+      const uData = await uRes.json();
+      const uTheme = uData?.themeColors || uData?.theme_colors;
+      if (uTheme && Object.keys(uTheme).length > 0) {
+        setMemoryThemeColors(uTheme);
+        applyThemeToDocument(uTheme);
+      }
+      if (uData?.fontFamily || uData?.font_family) {
+        applyGlobalFont(uData.fontFamily || uData.font_family);
       }
     }
   } catch (_) {}
-}
-
-export async function saveThemeColors(newColors: ThemeColors): Promise<void> {
-  memoryThemeColors = { ...memoryThemeColors, ...newColors };
-  applyThemeToDocument(memoryThemeColors);
-
-  if (typeof window !== 'undefined') {
-    try {
-      localStorage.setItem('zecratary_theme_colors', JSON.stringify(memoryThemeColors));
-      window.dispatchEvent(new CustomEvent('zecratary_theme_updated', { detail: memoryThemeColors }));
-      await fetch('/api/user/theme', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(memoryThemeColors),
-      }).catch(() => {});
-    } catch (_) {}
-  }
 }
 
 export default {
@@ -67917,8 +68352,13 @@ export default {
   fetchAndApplyServerTheme,
   saveThemeColors,
   applyGlobalFont,
+  getGlobalFont,
+  saveGlobalFont,
   getMemoryThemeColors,
   setMemoryThemeColors,
+  setThemeMode,
+  toggleThemeMode,
+  AVAILABLE_FONTS
 };
 
 ```

@@ -17,7 +17,6 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <head>
-        {/* Synchronous Pre-Hydration Theme Script: Eliminates Color Flash on Refresh */}
         <script
           id="zecratary-theme-prehydrate"
           dangerouslySetInnerHTML={{

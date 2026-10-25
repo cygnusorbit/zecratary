@@ -4,12 +4,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { 
-  ChefHat, Sparkles, BookOpen, Package, Calendar, Coins, Wallet, 
-  ArrowRight, Clock, Users, Flame, Plus, UploadCloud, Utensils, 
-  AlertTriangle, CheckCircle2, ChevronRight, Layers, ShieldCheck,
-  RefreshCw, TrendingUp
-} from 'lucide-react';
+import { ChefHat, Sparkles, BookOpen, Package, Calendar, Coins, Wallet, ArrowRight, Clock, Users, Flame, Plus, UploadCloud, Utensils, AlertTriangle, CheckCircle2, ChevronRight, Layers, ShieldCheck, RefreshCw, TrendingUp } from 'lucide-react';
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -33,19 +29,53 @@ export default function DashboardPage() {
     recentRecipes: [] as any[]
   });
 
+  const [tokenSymbol, setTokenSymbol] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try { return localStorage.getItem('zecratary_token_symbol') || '🪙'; } catch (_) {}
+    }
+    return '🪙';
+  });
+  const [tokenIcon, setTokenIcon] = useState<string>('');
+  const [walletCurrency, setWalletCurrency] = useState<string>('USD');
+  const [walletSymbol, setWalletSymbol] = useState<string>('$');
+
   const loadDashboardData = useCallback(async (user: User | null) => {
     const targetUserId = user?.id || 'usr_admin_1';
     const targetEmail = user?.email || 'admin@zecratary.com';
     setLoading(true);
 
     try {
-      const res = await fetch(`/api/dashboard/stats?userId=${encodeURIComponent(targetUserId)}&email=${encodeURIComponent(targetEmail)}&t=${Date.now()}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
+      const [res, tokRes, walRes] = await Promise.allSettled([
+        fetch(`/api/dashboard/stats?userId=${encodeURIComponent(targetUserId)}&email=${encodeURIComponent(targetEmail)}&t=${Date.now()}`, { cache: 'no-store' }),
+        fetch(`/api/tokens?userId=${encodeURIComponent(targetUserId)}&email=${encodeURIComponent(targetEmail)}&t=${Date.now()}`, { cache: 'no-store' }),
+        fetch(`/api/wallet?userId=${encodeURIComponent(targetUserId)}&email=${encodeURIComponent(targetEmail)}&t=${Date.now()}`, { cache: 'no-store' })
+      ]);
+
+      if (res.status === 'fulfilled' && res.value.ok) {
+        const data = await res.value.json();
         if (data.success && data.stats) {
           setStats(data.stats);
-          return;
         }
+      }
+
+      if (tokRes.status === 'fulfilled' && tokRes.value.ok) {
+        const tData = await tokRes.value.json();
+        if (tData.tokenSymbol) setTokenSymbol(tData.tokenSymbol);
+        if (tData.tokenIcon) setTokenIcon(tData.tokenIcon);
+        const tb = Number(tData.balance ?? tData.tokenBalance ?? tData.token_balance);
+        if (!isNaN(tb)) {
+          setStats(prev => ({ ...prev, tokenBalance: tb }));
+        }
+      }
+
+      if (walRes.status === 'fulfilled' && walRes.value.ok) {
+        const wData = await walRes.value.json();
+        const wb = parseFloat(String(wData.wallet_balance ?? wData.walletBalance ?? wData.balance ?? 0));
+        if (!isNaN(wb)) {
+          setStats(prev => ({ ...prev, walletBalance: wb }));
+        }
+        if (wData.currency) setWalletCurrency(wData.currency);
+        if (wData.walletSymbol) setWalletSymbol(wData.walletSymbol);
       }
     } catch (e) {
       console.warn('[DashboardPage] API load notice:', e);
@@ -63,9 +93,9 @@ export default function DashboardPage() {
 
         setStats(prev => ({
           ...prev,
-          savedRecipes: Array.isArray(recList) ? recList.length : 0,
-          pantryItems: Array.isArray(panList) ? panList.length : 0,
-          recentRecipes: Array.isArray(recList) ? recList.slice(0, 3) : []
+          savedRecipes: Array.isArray(recList) ? recList.length : prev.savedRecipes,
+          pantryItems: Array.isArray(panList) ? panList.length : prev.pantryItems,
+          recentRecipes: Array.isArray(recList) ? recList.slice(0, 3) : prev.recentRecipes
         }));
       } catch (_) {}
     }
@@ -95,10 +125,19 @@ export default function DashboardPage() {
     window.addEventListener('zecratary_pantry_updated', handleSync);
     window.addEventListener('zecratary_planner_updated', handleSync);
     window.addEventListener('zecratary_tokens_updated', handleSync);
+    window.addEventListener('zecratary_token_settings_updated', handleSync);
     window.addEventListener('zecratary_wallet_updated', handleSync);
     window.addEventListener('zecratary_languages_updated', handleSync);
     window.addEventListener('zecratary_dictionary_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
+
+    let bc: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        bc = new BroadcastChannel('zecratary_balance_channel');
+        bc.onmessage = () => { handleSync(); };
+      } catch (_) {}
+    }
 
     return () => {
       window.removeEventListener('storage', handleSync);
@@ -107,14 +146,16 @@ export default function DashboardPage() {
       window.removeEventListener('zecratary_pantry_updated', handleSync);
       window.removeEventListener('zecratary_planner_updated', handleSync);
       window.removeEventListener('zecratary_tokens_updated', handleSync);
+      window.removeEventListener('zecratary_token_settings_updated', handleSync);
       window.removeEventListener('zecratary_wallet_updated', handleSync);
       window.removeEventListener('zecratary_languages_updated', handleSync);
       window.removeEventListener('zecratary_dictionary_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
+      if (bc) bc.close();
     };
   }, [loadDashboardData, router]);
 
-  // Safe localized user welcome interpolation (Overload-Safe String Fallback)
+  // Safe localized user welcome interpolation
   const welcomeText = useMemo(() => {
     const rawTemplate = t('dashboardWelcomePrefix', 'Welcome back, {name}!');
     const displayName = currentUser?.name || currentUser?.email?.split('@')[0] || 'Chef';
@@ -126,9 +167,9 @@ export default function DashboardPage() {
       className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
-      {/* 1. Welcome Hero & Membership Telemetry Strip */}
+      {/* 1. Original Welcome Hero & Membership Telemetry Strip */}
       <div 
-        className="p-6 sm:p-8 rounded-3xl border shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6 transition-colors duration-200 relative overflow-hidden"
+        className="p-6 sm:p-8 rounded-3xl border shadow-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 transition-colors duration-200 relative overflow-hidden"
         style={{
           backgroundColor: 'var(--color-card)',
           borderColor: 'var(--color-border)'
@@ -155,50 +196,63 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* Spendable Asset Badges & Management Buttons */}
-        <div className="flex flex-wrap items-center gap-3 z-10">
+        {/* Fixed Spendable Asset Badges & Management Buttons (Balanced Layout - No Awkward Right Drift) */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 z-10 w-full lg:w-auto shrink-0">
+          {/* Tokens Box */}
           <div 
-            className="p-3.5 rounded-2xl border shadow-xs flex items-center gap-3"
+            className="p-3.5 rounded-2xl border shadow-xs flex items-center justify-between sm:justify-start gap-3 transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
           >
-            <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
-              <Coins className="h-5 w-5" />
-            </div>
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70">
-                {t('statsTokensRemaining', 'Tokens Remaining')}
-              </span>
-              <div className="text-base font-black font-mono">
-                {stats.tokenBalance.toLocaleString()} <span className="text-amber-500 text-xs">🪙</span>
+            <div className="flex items-center gap-3 min-w-0">
+              <div 
+                className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+              >
+                <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={20} className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70 truncate">
+                  {t('statsTokensRemaining', 'Tokens Remaining')}
+                </span>
+                <div className="text-base font-black font-mono flex items-center gap-1.5 leading-none mt-1">
+                  <span suppressHydrationWarning>{stats.tokenBalance.toLocaleString()}</span>
+                  <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="inline-block" />
+                </div>
               </div>
             </div>
             <Link 
               href="/token"
-              className="ml-2 text-[10px] font-bold px-2.5 py-1.5 rounded-xl text-white transition hover:opacity-90 shadow-xs"
+              className="ml-2 text-[10px] font-bold px-2.5 py-1.5 rounded-xl text-white transition hover:opacity-90 shadow-xs shrink-0"
               style={{ backgroundColor: 'var(--color-primary)' }}
             >
               {t('topUpTokens', 'Top Up')}
             </Link>
           </div>
 
+          {/* Wallet Box */}
           <div 
-            className="p-3.5 rounded-2xl border shadow-xs flex items-center gap-3"
+            className="p-3.5 rounded-2xl border shadow-xs flex items-center justify-between sm:justify-start gap-3 transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
           >
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-              <Wallet className="h-5 w-5" />
-            </div>
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70">
-                {t('walletCredits', 'Wallet Balance')}
-              </span>
-              <div className="text-base font-black font-mono text-emerald-400">
-                ${stats.walletBalance.toFixed(2)}
+            <div className="flex items-center gap-3 min-w-0">
+              <div 
+                className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+              >
+                <Wallet className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+              </div>
+              <div className="min-w-0">
+                <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70 truncate">
+                  {t('walletCredits', 'Wallet Balance')}
+                </span>
+                <div className="text-base font-black font-mono leading-none mt-1" style={{ color: 'var(--color-emerald)' }}>
+                  <span suppressHydrationWarning>{walletSymbol}{Number(stats.walletBalance || 0).toFixed(2)}</span>
+                </div>
               </div>
             </div>
             <Link 
               href="/wallet"
-              className="ml-2 text-[10px] font-bold px-2.5 py-1.5 rounded-xl border transition shadow-xs hover:opacity-80"
+              className="ml-2 text-[10px] font-bold px-2.5 py-1.5 rounded-xl border transition shadow-xs hover:opacity-80 shrink-0"
               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
             >
               {t('addFunds', 'Add Funds')}
@@ -243,13 +297,18 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* 3. Primary Metrics Grid (4-Way Live Counter) */}
+      {/* 3. Primary Metrics Grid (4-Way Live Counter with Dynamic Token Icon) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: t('statsRecipes', 'Saved Recipes'), value: stats.savedRecipes, icon: BookOpen, href: '/saved', color: 'var(--color-primary)' },
           { label: t('statsMealPlans', 'Scheduled Meals'), value: stats.scheduledMeals, icon: Calendar, href: '/planner', color: '#0ea5e9' },
           { label: t('statsPantryItems', 'Pantry in Stock'), value: stats.pantryItems, icon: Package, href: '/pantry', color: 'var(--color-emerald)' },
-          { label: t('statsTokensRemaining', 'Tokens Remaining'), value: stats.tokenBalance, icon: Coins, href: '/token', color: '#f59e0b' }
+          { 
+            label: t('statsTokensRemaining', 'Tokens Remaining'), 
+            value: stats.tokenBalance, 
+            href: '/token',
+            isToken: true
+          }
         ].map((stat, idx) => (
           <Link
             key={idx}
@@ -260,7 +319,11 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold opacity-75">{stat.label}</span>
               <div className="p-2 rounded-xl transition group-hover:scale-110" style={{ backgroundColor: 'var(--color-inner-dark)' }}>
-                <stat.icon className="h-4 w-4" style={{ color: stat.color }} />
+                {stat.isToken ? (
+                  <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4" />
+                ) : (
+                  <stat.icon className="h-4 w-4" style={{ color: stat.color }} />
+                )}
               </div>
             </div>
             <div className="text-2xl font-black font-mono">

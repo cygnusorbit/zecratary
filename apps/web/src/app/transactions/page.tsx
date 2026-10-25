@@ -1,6 +1,6 @@
-import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 'use client';
 
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 // Generated / Updated by AI Collaborator
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';

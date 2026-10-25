@@ -1,5 +1,5 @@
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
@@ -21,16 +21,17 @@ interface PaymentTransaction {
   planSlug?: string;
   amount: number;
   currency: string;
-  gateway: 'stripe' | 'paypal' | 'manual' | 'wallet';
-  status: 'succeeded' | 'failed' | 'refunded' | 'pending' | 'canceled';
+  gateway: 'stripe' | 'paypal' | 'manual' | 'wallet' | string;
+  status: 'succeeded' | 'failed' | 'refunded' | 'pending' | 'canceled' | string;
   failureReason?: string;
   testMode?: boolean;
   createdAt: string;
   expiryDate?: string;
   isRecurring?: boolean;
-  recurringInterval?: 'MONTH' | 'YEAR';
+  recurringInterval?: 'MONTH' | 'YEAR' | string;
   autoRenew?: boolean;
   notes?: string;
+  [key: string]: any;
 }
 
 interface GatewayConfig {
@@ -268,7 +269,7 @@ export default function AdminPaymentPage() {
       if (txRes.ok) {
         const tData = await txRes.json();
         const rawTxs: any[] = Array.isArray(tData.transactions) ? tData.transactions : [];
-        const normalized = rawTxs.map(tx => normalizeTransaction(tx, loadedCurrency));
+        const normalized = rawTxs.map((tx: any) => normalizeTransaction(tx, loadedCurrency));
         setTransactions(normalized);
       }
     } catch (err) {
@@ -316,7 +317,7 @@ export default function AdminPaymentPage() {
     const nextAutoRenew = !tx.autoRenew;
     const updatedTx = { ...tx, autoRenew: nextAutoRenew };
 
-    setTransactions(prev => prev.map(t => t.id === tx.id ? updatedTx : t));
+    setTransactions(prev => prev.map((t: any) => t.id === tx.id ? updatedTx : t));
 
     try {
       const res = await fetch('/api/admin/payment', {
@@ -333,7 +334,7 @@ export default function AdminPaymentPage() {
       window.dispatchEvent(new Event('zecratary_payment_updated'));
       showToast('success', `Auto-renew for ${tx.customerEmail} set to ${nextAutoRenew ? 'Active' : 'Off'}.`);
     } catch (err: any) {
-      setTransactions(prev => prev.map(t => t.id === tx.id ? tx : t));
+      setTransactions(prev => prev.map((t: any) => t.id === tx.id ? tx : t));
       showToast('error', err.message || 'Error updating renewal.');
     } finally {
       setTogglingTxId(null);
@@ -362,7 +363,7 @@ export default function AdminPaymentPage() {
 
       if (!res.ok) throw new Error('Failed to refund transaction.');
 
-      setTransactions(prev => prev.map(t => t.id === tx.id ? refundedTx : t));
+      setTransactions(prev => prev.map((t: any) => t.id === tx.id ? refundedTx : t));
       window.dispatchEvent(new Event('zecratary_payment_updated'));
       showToast('success', tr('adminPaySuccessRefunded', 'Transaction marked as refunded and customer notified.'));
     } catch (err: any) {
@@ -381,7 +382,7 @@ export default function AdminPaymentPage() {
 
       if (!res.ok) throw new Error('Failed to delete transaction.');
 
-      setTransactions(prev => prev.filter(t => t.id !== txId));
+      setTransactions(prev => prev.filter((t: any) => t.id !== txId));
       setSelectedTxIds(prev => prev.filter(id => id !== txId));
       window.dispatchEvent(new Event('zecratary_payment_updated'));
       showToast('success', tr('adminPaySuccessDeleted', 'Transaction record deleted successfully.'));
@@ -423,7 +424,7 @@ export default function AdminPaymentPage() {
       amount: parsedAmt,
       currency: gatewayConfig.currency || 'USD',
       gateway: gatewayInput,
-      status: statusInput,
+      status: statusInput as any as any,
       testMode: gatewayConfig.testMode,
       createdAt: new Date().toISOString(),
       expiryDate: isSub ? expiry.toISOString() : undefined,
@@ -488,7 +489,7 @@ export default function AdminPaymentPage() {
 
   // Filtered and Search-Matched Transactions
   const filteredTransactions = useMemo(() => {
-    return transactions.filter(t => {
+    return transactions.filter((t: any) => {
       // 1. Text Search
       if (search.trim()) {
         const query = search.toLowerCase().trim();
@@ -547,7 +548,7 @@ export default function AdminPaymentPage() {
 
   const isAllOnPageSelected = paginatedTxs.length > 0 && paginatedTxs.every(t => selectedTxIds.includes(t.id));
   const handleToggleSelectAll = () => {
-    const pageIds = paginatedTxs.map(t => t.id);
+    const pageIds = paginatedTxs.map((t: any) => t.id);
     if (isAllOnPageSelected) {
       setSelectedTxIds(prev => prev.filter(id => !pageIds.includes(id)));
     } else {
@@ -558,7 +559,7 @@ export default function AdminPaymentPage() {
   // Export handlers
   const handleExport = (format: 'csv' | 'json') => {
     const targets = selectedTxIds.length > 0 
-      ? transactions.filter(t => selectedTxIds.includes(t.id)) 
+      ? transactions.filter((t: any) => selectedTxIds.includes(t.id)) 
       : filteredTransactions;
 
     if (targets.length === 0) {
@@ -577,7 +578,7 @@ export default function AdminPaymentPage() {
       URL.revokeObjectURL(a.href);
     } else {
       const headers = ['Transaction ID', 'Customer Name', 'Customer Email', 'Item / Plan', 'Amount', 'Currency', 'Gateway', 'Status', 'Created At', 'Expiry Date', 'Auto Renew'];
-      const rows = targets.map(t => [
+      const rows = targets.map((t: any) => [
         `"${t.id}"`,
         `"${t.customerName}"`,
         `"${t.customerEmail}"`,
@@ -601,7 +602,7 @@ export default function AdminPaymentPage() {
     }
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: any) => {
     switch (status) {
       case 'succeeded':
         return { label: tr('adminPayStatusSucceeded', 'Succeeded'), bg: 'rgba(16, 185, 129, 0.1)', border: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)' };
@@ -906,7 +907,7 @@ export default function AdminPaymentPage() {
                       </td>
                     </tr>
                   ) : (
-                    paginatedTxs.map((tx) => {
+                    paginatedTxs.map((tx: any) => {
                       const isSelected = selectedTxIds.includes(tx.id);
                       const isWallet = (tx.planSlug || '').includes('wallet') || (tx.planName || '').toLowerCase().includes('wallet');
                       const statusBadge = getStatusBadge(tx.status);
@@ -1367,7 +1368,7 @@ export default function AdminPaymentPage() {
                     className="w-full px-3 py-2 rounded-xl border font-bold outline-none cursor-pointer"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   >
-                    {availablePlans.map(p => (
+                    {availablePlans.map((p: any) => (
                       <option key={p.id} value={p.slug}>{p.name} - {p.priceFormatted}</option>
                     ))}
                   </select>

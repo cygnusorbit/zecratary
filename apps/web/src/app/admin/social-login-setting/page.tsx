@@ -1,5 +1,5 @@
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
@@ -317,7 +317,6 @@ export default function SocialLoginSettingPage() {
                     unicode="f1a0"
                     size={20}
                     className="shrink-0 text-[#EA4335]"
-                    title="Google (f1a0)"
                   />
                 </div>
                 <div>
@@ -482,7 +481,6 @@ export default function SocialLoginSettingPage() {
                     unicode="f09a"
                     size={20}
                     className="shrink-0 text-[#1877F2]"
-                    title="Facebook (f09a)"
                   />
                 </div>
                 <div>
@@ -648,7 +646,6 @@ export default function SocialLoginSettingPage() {
                     size={20}
                     className="shrink-0"
                     style={{ color: 'var(--color-text)' }}
-                    title="Apple (f179)"
                   />
                 </div>
                 <div>

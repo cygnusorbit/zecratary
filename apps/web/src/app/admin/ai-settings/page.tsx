@@ -1,5 +1,6 @@
-// Generated & Localized by AI Collaborator
 'use client';
+
+// Generated & Localized by AI Collaborator
 
 import { useState, useEffect, useCallback, KeyboardEvent } from 'react';
 import { 

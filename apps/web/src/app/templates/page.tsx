@@ -1,5 +1,5 @@
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -14,6 +14,8 @@ import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
 interface TemplateMeal {
+  title?: string;
+
   id: string;
   dayIndex: number; // 0 to 6 (Monday to Sunday)
   mealType: string; // Breakfast | Lunch | Dinner | Snack
@@ -26,6 +28,7 @@ interface TemplateMeal {
   prepMinutes?: number;
   cookMinutes?: number;
   notes?: string;
+  [key: string]: any;
 }
 
 interface MealTemplate {

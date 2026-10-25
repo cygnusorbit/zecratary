@@ -1,7 +1,7 @@
-import DynamicTokenIcon from '@/components/DynamicTokenIcon';
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';

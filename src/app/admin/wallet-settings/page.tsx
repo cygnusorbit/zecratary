@@ -1,5 +1,5 @@
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
@@ -1138,7 +1138,7 @@ export default function AdminWalletSettingsPage() {
                   ) : (
                     paginatedTxs.map((tx) => {
                       const isSelected = selectedTxIds.includes(tx.id);
-                      const amt = parseFloat(tx.amount || 0);
+                      const amt = Number(tx.amount || 0);
                       const isNegative = amt < 0;
 
                       return (

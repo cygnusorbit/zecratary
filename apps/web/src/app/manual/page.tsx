@@ -1,5 +1,5 @@
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -811,7 +811,7 @@ export default function ManualRecipePage() {
                         color: 'var(--color-text)'
                       }}
                     >
-                      {ingredientCategories.map((cat) => (
+                      {ingredientCategories.map((cat: any) => (
                         <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
                       ))}
                     </select>

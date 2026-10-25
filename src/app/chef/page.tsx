@@ -1,5 +1,6 @@
-// @ts-nocheck
 'use client';
+// @ts-nocheck
+
 import AiQuotaBar from '@/components/AiQuotaBar';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 

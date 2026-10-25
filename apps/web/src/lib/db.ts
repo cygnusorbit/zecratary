@@ -1,3 +1,19 @@
+
+function resolveDatabaseSSL(url: string) {
+  if (!url) return false;
+  if (
+    url.includes('sslmode=disable') ||
+    url.includes('localhost') ||
+    url.includes('127.0.0.1') ||
+    url.includes('@postgres:') ||
+    process.env.PGSSLMODE === 'disable' ||
+    process.env.NODE_ENV !== 'production'
+  ) {
+    return false;
+  }
+  return { rejectUnauthorized: false };
+}
+
 // Universal Multi-Dialect Database Client (PostgreSQL & MySQL)
 // GitHub: cygnusorbit/zecratary
 // Satisfies Constraint 8: Direct persistence to PostgreSQL & MySQL with driver-scoped SSL
