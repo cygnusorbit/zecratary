@@ -27,9 +27,9 @@ interface Recipe {
   recipeType?: string;
   mealType?: string;
   cuisine?: string;
-  ingredients: string[];
-  instructions: string[];
-  directions?: string[];
+  ingredients: (string | any)[];
+  instructions: (string | any)[];
+  directions?: (string | any)[];
   image?: string;
   imageUrl?: string;
   image_url?: string;
@@ -56,8 +56,48 @@ interface Cookbook {
   recipe_count?: number;
 }
 
+// Universal normalizer for ingredient elements (handles string, JSON, object schemas)
+const getIngredientString = (ing: any): string => {
+  if (!ing) return '';
+  if (typeof ing === 'string') {
+    const trimmed = ing.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return getIngredientString(parsed);
+      } catch (_) {}
+    }
+    return trimmed;
+  }
+  if (typeof ing === 'object') {
+    const parts: string[] = [];
+    if (ing.amount !== undefined && ing.amount !== null && String(ing.amount).trim()) {
+      parts.push(String(ing.amount).trim());
+    }
+    if (ing.unit !== undefined && ing.unit !== null && String(ing.unit).trim()) {
+      parts.push(String(ing.unit).trim());
+    }
+    const name = ing.name || ing.item || ing.ingredient || ing.title || '';
+    if (name) parts.push(String(name).trim());
+    if (parts.length > 0) return parts.join(' ').trim();
+    return String(ing.name || ing.item || ing.ingredient || Object.values(ing)[0] || '').trim();
+  }
+  return String(ing).trim();
+};
+
+// Universal normalizer for instructions (handles string, step object, text)
+const getInstructionString = (inst: any): string => {
+  if (!inst) return '';
+  if (typeof inst === 'string') return inst.trim();
+  if (typeof inst === 'object') {
+    return String(inst.text || inst.step || inst.instruction || inst.description || Object.values(inst)[0] || '').trim();
+  }
+  return String(inst).trim();
+};
+
 // Helper: Safely scale fractional strings like "1/2", "3/4", "1 1/2" or numeric quantities
-const scaleIngredientQuantity = (ingredientStr: string, originalServings: number, currentServings: number): string => {
+const scaleIngredientQuantity = (rawIng: any, originalServings: number, currentServings: number): string => {
+  const ingredientStr = getIngredientString(rawIng);
   if (!ingredientStr || originalServings <= 0 || currentServings <= 0 || originalServings === currentServings) {
     return ingredientStr;
   }
@@ -139,10 +179,6 @@ export default function SavedRecipesPage() {
   const [shoppingRecipe, setShoppingRecipe] = useState<Recipe | null>(null);
   const [selectedShoppingItems, setSelectedShoppingItems] = useState<string[]>([]);
 
-  // Edit Recipe Modal state
-  const [showEditModal, setShowEditModal] = useState<boolean>(false);
-  const [editingRecipe, setEditingRecipe] = useState<any>(null);
-
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -217,7 +253,6 @@ export default function SavedRecipesPage() {
         const list = Array.isArray(data.recipes) ? data.recipes : Array.isArray(data) ? data : [];
         setRecipes(list);
       } else {
-        // Fallback to /api/saved-recipes
         const alt = await fetch(`/api/saved-recipes?userId=${encodeURIComponent(userId)}&t=${Date.now()}`, { cache: 'no-store' }).catch(() => null);
         if (alt && alt.ok) {
           const altData = await alt.json();
@@ -320,11 +355,13 @@ export default function SavedRecipesPage() {
     }
   };
 
-  // All distinct ingredient names across recipes
+  // All distinct ingredient names across recipes (Defensively typed with getIngredientString)
   const allAvailableIngredients = useMemo(() => {
     const set = new Set<string>();
     recipes.forEach(r => {
-      (r.ingredients || []).forEach(ing => {
+      (r.ingredients || []).forEach(rawIng => {
+        const ing = getIngredientString(rawIng);
+        if (!ing) return;
         const cleaned = ing.replace(/^[\d\s\/\.\,\-\–\—\(\)]+(cups?|tbsp|tsp|g|kg|oz|lbs?|cloves?|pinch|slices?|pieces?)?\s*(of)?\s*/i, '').trim();
         if (cleaned.length > 2 && cleaned.length < 30) {
           set.add(cleaned.toLowerCase());
@@ -334,7 +371,7 @@ export default function SavedRecipesPage() {
     return Array.from(set).sort();
   }, [recipes]);
 
-  // Filter & Search Logic
+  // Filter & Search Logic (Defensively unwraps ingredient objects)
   const filteredRecipes = useMemo(() => {
     return recipes.filter(r => {
       // Tab filter
@@ -346,7 +383,7 @@ export default function SavedRecipesPage() {
         const q = searchQuery.toLowerCase().trim();
         const matchTitle = (r.title || '').toLowerCase().includes(q);
         const matchDesc = (r.description || '').toLowerCase().includes(q);
-        const matchIng = (r.ingredients || []).some(i => i.toLowerCase().includes(q));
+        const matchIng = (r.ingredients || []).some(i => getIngredientString(i).toLowerCase().includes(q));
         if (!matchTitle && !matchDesc && !matchIng) return false;
       }
 
@@ -381,7 +418,7 @@ export default function SavedRecipesPage() {
       // Ingredient popover filter
       if (selectedIngredients.length > 0) {
         const hasAllSelected = selectedIngredients.every(sel =>
-          (r.ingredients || []).some(i => i.toLowerCase().includes(sel))
+          (r.ingredients || []).some(i => getIngredientString(i).toLowerCase().includes(sel))
         );
         if (!hasAllSelected) return false;
       }
@@ -396,7 +433,7 @@ export default function SavedRecipesPage() {
     });
   }, [recipes, activeTab, searchQuery, selectedType, selectedRating, selectedTimeFilter, selectedCookbookFilter, selectedIngredients, sortBy]);
 
-  // Density & Pagination calculations (v8.1.15)
+  // Density & Pagination calculations (v8.1.15 authentic)
   const itemsPerPage = useMemo(() => {
     if (gridDensity === '3x3') return 9;
     if (gridDensity === '4x4') return 16;
@@ -1004,7 +1041,7 @@ export default function SavedRecipesPage() {
                         type="button"
                         onClick={() => {
                           setShoppingRecipe(recipe);
-                          setSelectedShoppingItems(recipe.ingredients || []);
+                          setSelectedShoppingItems((recipe.ingredients || []).map(getIngredientString).filter(Boolean));
                           setShowShoppingModal(true);
                         }}
                         className="p-1.5 rounded-lg border hover:opacity-80 transition cursor-pointer"
@@ -1279,7 +1316,7 @@ export default function SavedRecipesPage() {
                 </div>
               </div>
 
-              {/* Ingredients with fractional scaling */}
+              {/* Ingredients with safe string unwrap and fractional scaling */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <h4 className="font-black text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
@@ -1289,7 +1326,7 @@ export default function SavedRecipesPage() {
                     type="button"
                     onClick={() => {
                       setShoppingRecipe(selectedRecipe);
-                      setSelectedShoppingItems(selectedRecipe.ingredients || []);
+                      setSelectedShoppingItems((selectedRecipe.ingredients || []).map(getIngredientString).filter(Boolean));
                       setShowShoppingModal(true);
                     }}
                     className="text-[11px] font-bold text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
@@ -1299,22 +1336,25 @@ export default function SavedRecipesPage() {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {(selectedRecipe.ingredients || []).map((ing, idx) => (
-                    <div 
-                      key={idx}
-                      className="p-2.5 rounded-xl border flex items-center gap-2 shadow-2xs"
-                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: 'var(--color-primary)' }} />
-                      <span className="leading-snug">
-                        {scaleIngredientQuantity(ing, selectedRecipe.servings || 2, modalServings)}
-                      </span>
-                    </div>
-                  ))}
+                  {(selectedRecipe.ingredients || []).map((rawIng, idx) => {
+                    const displayStr = scaleIngredientQuantity(rawIng, selectedRecipe.servings || 2, modalServings);
+                    return (
+                      <div 
+                        key={idx}
+                        className="p-2.5 rounded-xl border flex items-center gap-2 shadow-2xs"
+                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: 'var(--color-primary)' }} />
+                        <span className="leading-snug">
+                          {displayStr}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Instructions */}
+              {/* Instructions with safe string unwrap */}
               <div className="space-y-2 pt-2">
                 <h4 className="font-black text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
                   Instructions
@@ -1336,7 +1376,7 @@ export default function SavedRecipesPage() {
                       >
                         {idx + 1}
                       </span>
-                      <p className="flex-1">{step}</p>
+                      <p className="flex-1">{getInstructionString(step)}</p>
                     </div>
                   ))}
                 </div>
@@ -1630,7 +1670,8 @@ export default function SavedRecipesPage() {
             </div>
 
             <div className="space-y-2 text-xs max-h-56 overflow-y-auto pr-1 custom-scrollbar">
-              {(shoppingRecipe.ingredients || []).map((ing, i) => {
+              {(shoppingRecipe.ingredients || []).map((rawIng, i) => {
+                const ing = getIngredientString(rawIng);
                 const isSel = selectedShoppingItems.includes(ing);
                 return (
                   <div
