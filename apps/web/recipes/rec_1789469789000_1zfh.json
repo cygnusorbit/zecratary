@@ -1,0 +1,176 @@
+{
+  "id": "rec_1789469789000_1zfh",
+  "owner": {
+    "id": "usr_admin_1",
+    "name": "Creator",
+    "email": "usr_admin_1"
+  },
+  "ownerId": "usr_admin_1",
+  "ownerName": "Creator",
+  "ownerEmail": "usr_admin_1",
+  "userId": "usr_admin_1",
+  "userEmail": "usr_admin_1",
+  "createdBy": "usr_admin_1",
+  "creatorName": "Creator",
+  "isPublic": false,
+  "visibility": "private",
+  "title": "Beef Rice Noodles",
+  "description": "",
+  "prepMinutes": 15,
+  "cookMinutes": 25,
+  "servings": 2,
+  "recipeType": "Main Dish",
+  "mealType": "Main Dish",
+  "cuisine": "",
+  "ingredients": [
+    {
+      "id": "ing_1789469788989_0",
+      "item": "/ 7oz   rump steak / top sirloin (, cut into 3 - 4mm / 1/8\" slices, or other steak - see Note 1)",
+      "name": "/ 7oz   rump steak / top sirloin (, cut into 3 - 4mm / 1/8\" slices, or other steak - see Note 1)",
+      "unit": "g",
+      "amount": "200",
+      "category": "Meat and Seafood",
+      "quantity": "200"
+    },
+    {
+      "id": "ing_1789469788989_1",
+      "item": "baking soda ((bi-carbonate) - NOT baking powder, won't work)",
+      "name": "baking soda ((bi-carbonate) - NOT baking powder, won't work)",
+      "unit": "tsp",
+      "amount": "1/2",
+      "category": "Beverages",
+      "quantity": "1/2"
+    },
+    {
+      "id": "ing_1789469788989_2",
+      "item": "light soy sauce ((Note 2))",
+      "name": "light soy sauce ((Note 2))",
+      "unit": "tsp",
+      "amount": "2",
+      "category": "Condiments and Sauces",
+      "quantity": "2"
+    },
+    {
+      "id": "ing_1789469788989_3",
+      "item": "peanut oil (, canola or other neutral flavoured oil)",
+      "name": "peanut oil (, canola or other neutral flavoured oil)",
+      "unit": "tbsp",
+      "amount": "2",
+      "category": "Condiments and Sauces",
+      "quantity": "2"
+    },
+    {
+      "id": "ing_1789469788989_4",
+      "item": "/ 7 oz   Pad Thai-thickness flat rice noodles (~3-4mm (1/8\" wide), or any other - see Note 3 for quantities)",
+      "name": "/ 7 oz   Pad Thai-thickness flat rice noodles (~3-4mm (1/8\" wide), or any other - see Note 3 for quantities)",
+      "unit": "g",
+      "amount": "200",
+      "category": "Grains and Pasta",
+      "quantity": "200"
+    },
+    {
+      "id": "ing_1789469788989_5",
+      "item": "garlic cloves (, finely minced with a knife)",
+      "name": "garlic cloves (, finely minced with a knife)",
+      "unit": "unit",
+      "amount": "3",
+      "category": "Produce",
+      "quantity": "3"
+    },
+    {
+      "id": "ing_1789469788989_6",
+      "item": "onion (, sliced)",
+      "name": "onion (, sliced)",
+      "unit": "unit",
+      "amount": "1/2",
+      "category": "Produce",
+      "quantity": "1/2"
+    },
+    {
+      "id": "ing_1789469788989_7",
+      "item": "baby bok choy, choi sum stems, Chinese broccoli",
+      "name": "baby bok choy, choi sum stems, Chinese broccoli",
+      "unit": "unit",
+      "amount": "6 - 8",
+      "category": "Produce",
+      "quantity": "6 - 8"
+    },
+    {
+      "id": "ing_1789469788989_8",
+      "item": "light soy sauce (, or all-purpose soy or tamari for gluten-free (Note 2))",
+      "name": "light soy sauce (, or all-purpose soy or tamari for gluten-free (Note 2))",
+      "unit": "tbsp",
+      "amount": "1",
+      "category": "Condiments and Sauces",
+      "quantity": "1"
+    },
+    {
+      "id": "ing_1789469788989_9",
+      "item": "dark soy sauce ((Note 2))",
+      "name": "dark soy sauce ((Note 2))",
+      "unit": "tbsp",
+      "amount": "1 1/2",
+      "category": "Condiments and Sauces",
+      "quantity": "1 1/2"
+    },
+    {
+      "id": "ing_1789469788989_10",
+      "item": "oyster sauce ((can substitute with vegetarian oyster sauce))",
+      "name": "oyster sauce ((can substitute with vegetarian oyster sauce))",
+      "unit": "tbsp",
+      "amount": "3",
+      "category": "Condiments and Sauces",
+      "quantity": "3"
+    },
+    {
+      "id": "ing_1789469788989_11",
+      "item": "white sugar ((or honey, maple))",
+      "name": "white sugar ((or honey, maple))",
+      "unit": "tsp",
+      "amount": "2",
+      "category": "Pantry Staples",
+      "quantity": "2"
+    },
+    {
+      "id": "ing_1789469788989_12",
+      "item": "water",
+      "name": "water",
+      "unit": "tbsp",
+      "amount": "1",
+      "category": "Beverages",
+      "quantity": "1"
+    },
+    {
+      "id": "ing_1789469788989_13",
+      "item": "Pinch white pepper ((or black pepper, or chilli flakes))",
+      "name": "Pinch white pepper ((or black pepper, or chilli flakes))",
+      "unit": "unit",
+      "amount": "1",
+      "category": "Produce",
+      "quantity": "1"
+    }
+  ],
+  "instructions": [
+    "Tenderise beef - toss with baking soda, leave 20 min, rinse, season with soy sauce.",
+    "Stir fry - Sauté onion first, then beef, then garlic, then stems. Add leafy greens, prepared noodles, and sauce. Toss well then serve.",
+    "Tenderise - Sprinkle the beef with baking soda in a small bowl. Toss with your fingertips to coat, separating the beef slices. Leave for 20 minutes to tenderise.",
+    "Rinse, dry, season - Rinse in a colander, shake and pat off excess water with a paper towel (no need to be thorough). Place in a bowl and toss with the soy sauce. Set aside. (It doesn't need marinating time).",
+    "Sauce - Mix ingredients in a small bowl.",
+    "Soak and rinse noodles - Prepare the noodles according to packet directions (usually soaking in boiling water for 5 - 10 minutes). Drain, then rinse under tap water to remove excess starch so it doesn't go gluey when cooked.",
+    "Cook onion, beef then garlic - Heat the oil over high heat in a large wok or large deep fry pan / skillet (~30cm/12\"). Add the onion for 30 seconds. Add beef and cook until the red is almost gone (~1 minute), then add the garlic and cook for 30 seconds.",
+    "Stems then everything else - Add the stem part of the Asian greens, toss for 1 minute. Add the leafy part, noodles then sauce (in that order). Toss for 1 1/2 to 2 minutes until the sauce has stained all the noodles and there is no sauce left in the base of the pan.  Serve immediately!"
+  ],
+  "nutrition": {},
+  "tags": [
+    "Main Dish"
+  ],
+  "image": "/uploads/recipes/import-1789469788962-pfxtvk.jpg",
+  "imageUrl": "/uploads/recipes/import-1789469788962-pfxtvk.jpg",
+  "sourceUrl": "https://www.recipetineats.com/beef-rice-noodles/",
+  "isFavorite": false,
+  "isCooked": false,
+  "rating": 0,
+  "bookId": null,
+  "createdAt": "2026-10-23T19:41:20.917Z",
+  "updatedAt": "2026-10-25T17:11:30.930Z"
+}

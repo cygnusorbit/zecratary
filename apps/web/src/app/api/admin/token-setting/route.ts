@@ -41,7 +41,7 @@ export async function GET() {
     if (sRow) {
       settings = {
         tokenName: sRow.token_name || sRow.tokenName,
-        tokenSymbol: sRow.token_symbol || sRow.tokenSymbol,
+        tokenSymbol: sRow.token_symbol, tokenEmoji: sRow.token_symbol, tokenIcon: sRow.token_symbol || sRow.tokenSymbol,
         startingBalance: sRow.starting_balance !== undefined ? sRow.starting_balance : sRow.startingBalance,
         isEnabled: sRow.is_enabled !== undefined ? sRow.is_enabled : sRow.isEnabled,
         importUrlCost: sRow.import_url_cost !== undefined ? sRow.import_url_cost : sRow.importUrlCost,
@@ -94,7 +94,7 @@ export async function GET() {
     success: true,
     tokenSettings: finalConfig,
     settings: finalConfig,
-    tokenSymbol: finalConfig.tokenSymbol,
+    tokenSymbol: finalConfig.tokenSymbol, tokenEmoji: finalConfig.tokenSymbol, tokenIcon: finalConfig.tokenSymbol,
     tokenName: finalConfig.tokenName,
     transactions
   }, {

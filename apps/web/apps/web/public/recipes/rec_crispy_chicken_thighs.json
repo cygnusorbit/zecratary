@@ -1,0 +1,53 @@
+{
+  "id": "rec_crispy_chicken_thighs",
+  "owner": {
+    "id": "usr_admin_1",
+    "name": "Creator",
+    "email": "usr_admin_1"
+  },
+  "ownerId": "usr_admin_1",
+  "ownerName": "Creator",
+  "ownerEmail": "usr_admin_1",
+  "userId": "usr_admin_1",
+  "userEmail": "usr_admin_1",
+  "createdBy": "usr_admin_1",
+  "creatorName": "Creator",
+  "isPublic": false,
+  "visibility": "private",
+  "title": "Crispy Garlic Herb Chicken Thighs",
+  "description": "Pan-roasted bone-in chicken thighs with crispy golden skin, rosemary, garlic cloves, and a rich pan-jus reduction.",
+  "prepMinutes": 15,
+  "cookMinutes": 25,
+  "servings": 4,
+  "recipeType": "Main Dish",
+  "mealType": "Main Dish",
+  "cuisine": "",
+  "ingredients": [
+    "4 Bone-in chicken thighs",
+    "4 cloves Garlic, smashed",
+    "2 sprigs Fresh rosemary",
+    "1 tbsp Olive oil",
+    "1/2 cup Chicken stock"
+  ],
+  "instructions": [
+    "Pat chicken thighs completely dry and season with salt.",
+    "Sear skin-side down over medium heat for 12 minutes until deeply crisp.",
+    "Flip, add garlic and rosemary, and roast until internal temp reaches 165°F."
+  ],
+  "nutrition": {},
+  "tags": [
+    "Main Dish",
+    "Poultry",
+    "High Protein",
+    "Gluten-Free"
+  ],
+  "image": "https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=800&q=80",
+  "imageUrl": "https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=800&q=80",
+  "sourceUrl": "https://recipetineats.com",
+  "isFavorite": true,
+  "isCooked": false,
+  "rating": 0,
+  "bookId": null,
+  "createdAt": "2026-10-23T19:41:20.421Z",
+  "updatedAt": "2026-10-25T17:11:30.944Z"
+}

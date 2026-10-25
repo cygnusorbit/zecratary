@@ -1,0 +1,231 @@
+{
+  "id": "rec_1789633786595_0oyy",
+  "owner": {
+    "id": "usr_admin_1",
+    "name": "Admin User",
+    "email": "admin@zecratary.com"
+  },
+  "ownerId": "usr_admin_1",
+  "ownerName": "Admin User",
+  "ownerEmail": "admin@zecratary.com",
+  "userId": "usr_admin_1",
+  "userEmail": "admin@zecratary.com",
+  "createdBy": "admin@zecratary.com",
+  "creatorName": "Admin User",
+  "isPublic": false,
+  "visibility": "private",
+  "title": "Chinese Orange Chicken",
+  "description": "",
+  "prepMinutes": 20,
+  "cookMinutes": 25,
+  "servings": 4,
+  "recipeType": "Main Dish",
+  "mealType": "Main Dish",
+  "cuisine": "",
+  "ingredients": [
+    {
+      "id": "ing_1789633786588_0",
+      "amount": "600",
+      "quantity": "600",
+      "unit": "g",
+      "item": "/1.2 lb  boneless skinless chicken thighs or breast (, cut into 2.5cm / 1\" pieces)",
+      "name": "/1.2 lb  boneless skinless chicken thighs or breast (, cut into 2.5cm / 1\" pieces)",
+      "category": "Meat and Seafood"
+    },
+    {
+      "id": "ing_1789633786589_1",
+      "amount": "2",
+      "quantity": "2",
+      "unit": "tbsp",
+      "item": "light soy sauce (, or all-purpose soy (not dark soy - Note 1))",
+      "name": "light soy sauce (, or all-purpose soy (not dark soy - Note 1))",
+      "category": "Condiments and Sauces"
+    },
+    {
+      "id": "ing_1789633786589_2",
+      "amount": "1/2",
+      "quantity": "1/2",
+      "unit": "tsp",
+      "item": "finely grated ginger (, optional)",
+      "name": "finely grated ginger (, optional)",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789633786589_3",
+      "amount": "1/8",
+      "quantity": "1/8",
+      "unit": "tsp",
+      "item": "white pepper ((substitute black pepper))",
+      "name": "white pepper ((substitute black pepper))",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789633786590_4",
+      "amount": "2",
+      "quantity": "2",
+      "unit": "tbsp",
+      "item": "cornflour / cornstarch (- for mixing)",
+      "name": "cornflour / cornstarch (- for mixing)",
+      "category": "Grains and Pasta"
+    },
+    {
+      "id": "ing_1789633786590_5",
+      "amount": "3/4",
+      "quantity": "3/4",
+      "unit": "cup",
+      "item": "cornflour / cornstarch (- for crispy coating)",
+      "name": "cornflour / cornstarch (- for crispy coating)",
+      "category": "Grains and Pasta"
+    },
+    {
+      "id": "ing_1789633786590_6",
+      "amount": "3/4",
+      "quantity": "3/4",
+      "unit": "unit",
+      "item": "- 1 cup vegetable oil (, or other plain oil (1/2 cm / 0.2\" depth))",
+      "name": "- 1 cup vegetable oil (, or other plain oil (1/2 cm / 0.2\" depth))",
+      "category": "Condiments and Sauces"
+    },
+    {
+      "id": "ing_1789633786590_7",
+      "amount": "2",
+      "quantity": "2",
+      "unit": "tsp",
+      "item": "orange zest (, from 1 orange)",
+      "name": "orange zest (, from 1 orange)",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789633786590_8",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "cup",
+      "item": "orange juice (, either squeeze oranges or use fresh bottled OJ (or use the orange then top up with bottle))",
+      "name": "orange juice (, either squeeze oranges or use fresh bottled OJ (or use the orange then top up with bottle))",
+      "category": "Beverages"
+    },
+    {
+      "id": "ing_1789633786590_9",
+      "amount": "1 1/2",
+      "quantity": "1 1/2",
+      "unit": "tbsp",
+      "item": "cornflour / cornstarch",
+      "name": "cornflour / cornstarch",
+      "category": "Grains and Pasta"
+    },
+    {
+      "id": "ing_1789633786590_10",
+      "amount": "2",
+      "quantity": "2",
+      "unit": "tbsp",
+      "item": "Chinese cooking wine (/Shaoxing wine (Note 2))",
+      "name": "Chinese cooking wine (/Shaoxing wine (Note 2))",
+      "category": "Beverages"
+    },
+    {
+      "id": "ing_1789633786590_11",
+      "amount": "2",
+      "quantity": "2",
+      "unit": "tbsp",
+      "item": "rice vinegar ((substitute white vinegar))",
+      "name": "rice vinegar ((substitute white vinegar))",
+      "category": "Grains and Pasta"
+    },
+    {
+      "id": "ing_1789633786590_12",
+      "amount": "1/3",
+      "quantity": "1/3",
+      "unit": "cup",
+      "item": "+ 2 tbsp  white sugar",
+      "name": "+ 2 tbsp  white sugar",
+      "category": "Pantry Staples"
+    },
+    {
+      "id": "ing_1789633786590_13",
+      "amount": "2",
+      "quantity": "2",
+      "unit": "tbsp",
+      "item": "light soy sauce ( or all-purpose soy sauce (not dark soy - Note 1))",
+      "name": "light soy sauce ( or all-purpose soy sauce (not dark soy - Note 1))",
+      "category": "Condiments and Sauces"
+    },
+    {
+      "id": "ing_1789633786590_14",
+      "amount": "1/4",
+      "quantity": "1/4",
+      "unit": "tsp",
+      "item": "cooking salt / kosher salt ((halve for table salt, double for flakes))",
+      "name": "cooking salt / kosher salt ((halve for table salt, double for flakes))",
+      "category": "Pantry Staples"
+    },
+    {
+      "id": "ing_1789633786590_15",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "tsp",
+      "item": "ginger (, finely grated)",
+      "name": "ginger (, finely grated)",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789633786590_16",
+      "amount": "2",
+      "quantity": "2",
+      "unit": "unit",
+      "item": "garlic cloves (, finely minced with a knife)",
+      "name": "garlic cloves (, finely minced with a knife)",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789633786590_17",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "unit",
+      "item": "White rice (, or other plain rice of choice)",
+      "name": "White rice (, or other plain rice of choice)",
+      "category": "Grains and Pasta"
+    },
+    {
+      "id": "ing_1789633786590_18",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "unit",
+      "item": "green onion (, finely sliced - optional garnish)",
+      "name": "green onion (, finely sliced - optional garnish)",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789633786590_19",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "unit",
+      "item": "White sesame seeds - optional garnish",
+      "name": "White sesame seeds - optional garnish",
+      "category": "Pantry Staples"
+    }
+  ],
+  "instructions": [
+    "Mix chicken with soy, ginger, pepper and 2 tbsp cornflour, then coat in remaining cornflour. Clench few pieces in fist, shake off excess cornflour in colander. Shallow-fry until deep golden. Remove oil, sauté garlic, simmer sauce 2 min until thickened. Add zest, toss chicken, serve!",
+    "Orange sauce - Whisk the cornflour and soy sauce in a large jug or medium bowl until lump free. Then whisk in everything else except garlic and orange zest. Set aside.",
+    "Coat chicken - Mix the chicken pieces with the soy sauce, ginger, pepper and the 2 tablespoons of cornflour in a large bowl.",
+    "Mix well - the coating becomes a bit sticky and acts as a glue. Add the 3/4 cup cornflour and toss to coat each piece, separating as needed (they stick together a bit).",
+    "Press and shake off - Pick up a few pieces and enclose in your fist, to really press the cornflour on. Place in a colander, then repeat with remaining chicken. Shake colander so excess cornflour falls through the holes. This press-and-shake method is highly effective crispy no-fry technique! (Note 3)",
+    "Shallow-fry until crispy - Heat the oil on high heat in a large deep non-stick pan (mine is 30cm/12\"). The chicken should sizzle straight away when you dip it. Spread half the chicken out (or as much as you can, without crowding), and cook for 1 1/2 minutes on each side, using tongs to turn, until deep golden and crispy. Remove onto a paper towel lined tray and repeat with remaining chicken.",
+    "Sauté - Pour out all but 2 tablespoons of the oil, and scrape out any loose crispy bits. Return the pan to medium high heat. Sauté garlic until light golden, about 20 - 30 seconds.",
+    "Thicken sauce - Give the sauce a whisk (to mix cornflour settled on the base) then pour it in the pan. Simmer for 1 to 2 minutes until it thickens into a thick, glossy syrup (honey consistency). Stir in zest.",
+    "Toss - Put the chicken back into the pan and toss quickly to coat in the sauce. Serve over rice, garnished with green onion."
+  ],
+  "nutrition": {},
+  "tags": [
+    "Main Dish"
+  ],
+  "image": "/uploads/recipes/import-1789633786569-5vetcs.jpg",
+  "imageUrl": "/uploads/recipes/import-1789633786569-5vetcs.jpg",
+  "sourceUrl": "https://www.recipetineats.com/orange-chicken/",
+  "isFavorite": false,
+  "isCooked": false,
+  "rating": 0,
+  "bookId": null,
+  "createdAt": "2026-09-17T08:29:46.595Z",
+  "updatedAt": "2026-10-25T17:11:30.967Z"
+}

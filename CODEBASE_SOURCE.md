@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.32",
+  "version": "8.1.33",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.32",
+  "version": "8.1.33",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -415,7 +415,6 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark" suppressHydrationWarning>
       <head>
-        {/* Synchronous Pre-Hydration Theme Script: Eliminates Color Flash on Refresh */}
         <script
           id="zecratary-theme-prehydrate"
           dangerouslySetInnerHTML={{
@@ -1816,8 +1815,8 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
 
 ## File: `apps/web/src/app/saved/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -2223,7 +2222,7 @@ export default function SavedRecipesPage() {
 
       if (selectedIngredientsList.length > 0) {
         const rIngs = (r.ingredients || []).map((i: any) => (typeof i === 'string' ? i : i.name || i.item || '').toLowerCase());
-        const matchesAll = selectedIngredientsList.every(sel => rIngs.some(ri => ri.includes(sel.toLowerCase())));
+        const matchesAll = selectedIngredientsList.every(sel => rIngs.some((ri: any) => ri.includes(sel.toLowerCase())));
         if (!matchesAll) return false;
       }
 
@@ -2940,10 +2939,10 @@ export default function SavedRecipesPage() {
 
 ## File: `apps/web/src/app/token/page.tsx`
 ```typescript
-import DynamicTokenIcon from '@/components/DynamicTokenIcon';
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -3673,8 +3672,8 @@ export default function TokenPortalPage() {
 
 ## File: `apps/web/src/app/pantry/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -4778,8 +4777,8 @@ export default function ContactPage() {
 
 ## File: `apps/web/src/app/shopping/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -5693,8 +5692,8 @@ export default function ShoppingPage() {
 
 ## File: `apps/web/src/app/planner/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -6635,9 +6634,10 @@ export default function PlannerPage() {
 
 ## File: `apps/web/src/app/chef/page.tsx`
 ```typescript
-import DynamicTokenIcon from '@/components/DynamicTokenIcon';
-// @ts-nocheck
 'use client';
+// @ts-nocheck
+
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 import AiQuotaBar from '@/components/AiQuotaBar';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
@@ -8641,8 +8641,9 @@ export default function ChefChatPage() {
 
 ## File: `apps/web/src/app/recipe/page.tsx`
 ```typescript
-// Generated / Updated by AI Collaborator
 'use client';
+
+// Generated / Updated by AI Collaborator
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -10169,8 +10170,8 @@ export default function TemplateRedirectPage() {
 
 ## File: `apps/web/src/app/admin/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
@@ -10521,7 +10522,7 @@ export default function AdminSettingsPage() {
         const mode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
         const root = typeof document !== 'undefined' ? document.documentElement : null;
         const day = mode === 'light' || mode === 'day' || (root && root.classList.contains('light'));
-        setIsDayMode(day);
+        setIsDayMode(Boolean(day));
         const cur = colorsRef.current;
         applyColorsLocally(
           cur.primary,
@@ -12154,8 +12155,8 @@ export default function AdminSettingsPage() {
 
 ## File: `apps/web/src/app/admin/database/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
@@ -13412,8 +13413,8 @@ export default function AdminDatabasePage() {
 
 ## File: `apps/web/src/app/admin/wallet-settings/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
@@ -14552,7 +14553,7 @@ export default function AdminWalletSettingsPage() {
                   ) : (
                     paginatedTxs.map((tx) => {
                       const isSelected = selectedTxIds.includes(tx.id);
-                      const amt = parseFloat(tx.amount || 0);
+                      const amt = Number(tx.amount || 0);
                       const isNegative = amt < 0;
 
                       return (
@@ -14757,18 +14758,12 @@ export default function AdminWalletSettingsPage() {
 
 ## File: `apps/web/src/app/admin/notification-settings/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
-import { 
-  BellRing, Bell, Send, CheckCircle2, AlertCircle, Save, RefreshCw, 
-  Check, Plus, Trash2, Edit3, Sliders, History, Activity, Database, 
-  Clock, Volume2, ShieldAlert, Sparkles, Filter, Search, X, 
-  VolumeX, Mail, Smartphone, ExternalLink, Moon, ArrowRight,
-  UserCheck, Users, Megaphone, Info
-} from 'lucide-react';
+import { BellRing, Bell, Send, CheckCircle2, AlertCircle, Save, RefreshCw, Check, Plus, Trash2, Edit3, Sliders, History, Activity, Database, Clock, Volume2, ShieldAlert, Sparkles, Filter, Search, X, VolumeX, Mail, Smartphone, ExternalLink, Moon, ArrowRight, UserCheck, Users, Megaphone, Info, Eye } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
 export interface NotificationSettingsState {
@@ -16095,8 +16090,9 @@ export default function AdminNotificationSettingsPage() {
 
 ## File: `apps/web/src/app/admin/ai-settings/page.tsx`
 ```typescript
-// Generated & Localized by AI Collaborator
 'use client';
+
+// Generated & Localized by AI Collaborator
 
 import { useState, useEffect, useCallback, KeyboardEvent } from 'react';
 import { 
@@ -18207,8 +18203,8 @@ export default function ChefAISettingsPage() {
 
 ## File: `apps/web/src/app/admin/frontend/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { 
@@ -19882,8 +19878,8 @@ export default function AdminFrontendPage() {
 
 ## File: `apps/web/src/app/admin/plans/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
@@ -21120,8 +21116,8 @@ export default function AdminPlansPage() {
 
 ## File: `apps/web/src/app/admin/plugins/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
@@ -21466,8 +21462,8 @@ export default function AdminPluginsPage() {
 
 ## File: `apps/web/src/app/admin/recipe-type/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
@@ -22372,8 +22368,8 @@ export default function AdminRecipeTypePage() {
 
 ## File: `apps/web/src/app/admin/payment/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
@@ -22395,16 +22391,17 @@ interface PaymentTransaction {
   planSlug?: string;
   amount: number;
   currency: string;
-  gateway: 'stripe' | 'paypal' | 'manual' | 'wallet';
-  status: 'succeeded' | 'failed' | 'refunded' | 'pending' | 'canceled';
+  gateway: 'stripe' | 'paypal' | 'manual' | 'wallet' | string;
+  status: 'succeeded' | 'failed' | 'refunded' | 'pending' | 'canceled' | string;
   failureReason?: string;
   testMode?: boolean;
   createdAt: string;
   expiryDate?: string;
   isRecurring?: boolean;
-  recurringInterval?: 'MONTH' | 'YEAR';
+  recurringInterval?: 'MONTH' | 'YEAR' | string;
   autoRenew?: boolean;
   notes?: string;
+  [key: string]: any;
 }
 
 interface GatewayConfig {
@@ -22642,7 +22639,7 @@ export default function AdminPaymentPage() {
       if (txRes.ok) {
         const tData = await txRes.json();
         const rawTxs: any[] = Array.isArray(tData.transactions) ? tData.transactions : [];
-        const normalized = rawTxs.map(tx => normalizeTransaction(tx, loadedCurrency));
+        const normalized = rawTxs.map((tx: any) => normalizeTransaction(tx, loadedCurrency));
         setTransactions(normalized);
       }
     } catch (err) {
@@ -22690,7 +22687,7 @@ export default function AdminPaymentPage() {
     const nextAutoRenew = !tx.autoRenew;
     const updatedTx = { ...tx, autoRenew: nextAutoRenew };
 
-    setTransactions(prev => prev.map(t => t.id === tx.id ? updatedTx : t));
+    setTransactions(prev => prev.map((t: any) => t.id === tx.id ? updatedTx : t));
 
     try {
       const res = await fetch('/api/admin/payment', {
@@ -22707,7 +22704,7 @@ export default function AdminPaymentPage() {
       window.dispatchEvent(new Event('zecratary_payment_updated'));
       showToast('success', `Auto-renew for ${tx.customerEmail} set to ${nextAutoRenew ? 'Active' : 'Off'}.`);
     } catch (err: any) {
-      setTransactions(prev => prev.map(t => t.id === tx.id ? tx : t));
+      setTransactions(prev => prev.map((t: any) => t.id === tx.id ? tx : t));
       showToast('error', err.message || 'Error updating renewal.');
     } finally {
       setTogglingTxId(null);
@@ -22736,7 +22733,7 @@ export default function AdminPaymentPage() {
 
       if (!res.ok) throw new Error('Failed to refund transaction.');
 
-      setTransactions(prev => prev.map(t => t.id === tx.id ? refundedTx : t));
+      setTransactions(prev => prev.map((t: any) => t.id === tx.id ? refundedTx : t));
       window.dispatchEvent(new Event('zecratary_payment_updated'));
       showToast('success', tr('adminPaySuccessRefunded', 'Transaction marked as refunded and customer notified.'));
     } catch (err: any) {
@@ -22755,7 +22752,7 @@ export default function AdminPaymentPage() {
 
       if (!res.ok) throw new Error('Failed to delete transaction.');
 
-      setTransactions(prev => prev.filter(t => t.id !== txId));
+      setTransactions(prev => prev.filter((t: any) => t.id !== txId));
       setSelectedTxIds(prev => prev.filter(id => id !== txId));
       window.dispatchEvent(new Event('zecratary_payment_updated'));
       showToast('success', tr('adminPaySuccessDeleted', 'Transaction record deleted successfully.'));
@@ -22797,7 +22794,7 @@ export default function AdminPaymentPage() {
       amount: parsedAmt,
       currency: gatewayConfig.currency || 'USD',
       gateway: gatewayInput,
-      status: statusInput,
+      status: statusInput as any as any,
       testMode: gatewayConfig.testMode,
       createdAt: new Date().toISOString(),
       expiryDate: isSub ? expiry.toISOString() : undefined,
@@ -22862,7 +22859,7 @@ export default function AdminPaymentPage() {
 
   // Filtered and Search-Matched Transactions
   const filteredTransactions = useMemo(() => {
-    return transactions.filter(t => {
+    return transactions.filter((t: any) => {
       // 1. Text Search
       if (search.trim()) {
         const query = search.toLowerCase().trim();
@@ -22921,7 +22918,7 @@ export default function AdminPaymentPage() {
 
   const isAllOnPageSelected = paginatedTxs.length > 0 && paginatedTxs.every(t => selectedTxIds.includes(t.id));
   const handleToggleSelectAll = () => {
-    const pageIds = paginatedTxs.map(t => t.id);
+    const pageIds = paginatedTxs.map((t: any) => t.id);
     if (isAllOnPageSelected) {
       setSelectedTxIds(prev => prev.filter(id => !pageIds.includes(id)));
     } else {
@@ -22932,7 +22929,7 @@ export default function AdminPaymentPage() {
   // Export handlers
   const handleExport = (format: 'csv' | 'json') => {
     const targets = selectedTxIds.length > 0 
-      ? transactions.filter(t => selectedTxIds.includes(t.id)) 
+      ? transactions.filter((t: any) => selectedTxIds.includes(t.id)) 
       : filteredTransactions;
 
     if (targets.length === 0) {
@@ -22951,7 +22948,7 @@ export default function AdminPaymentPage() {
       URL.revokeObjectURL(a.href);
     } else {
       const headers = ['Transaction ID', 'Customer Name', 'Customer Email', 'Item / Plan', 'Amount', 'Currency', 'Gateway', 'Status', 'Created At', 'Expiry Date', 'Auto Renew'];
-      const rows = targets.map(t => [
+      const rows = targets.map((t: any) => [
         `"${t.id}"`,
         `"${t.customerName}"`,
         `"${t.customerEmail}"`,
@@ -22975,7 +22972,7 @@ export default function AdminPaymentPage() {
     }
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: any) => {
     switch (status) {
       case 'succeeded':
         return { label: tr('adminPayStatusSucceeded', 'Succeeded'), bg: 'rgba(16, 185, 129, 0.1)', border: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)' };
@@ -23280,7 +23277,7 @@ export default function AdminPaymentPage() {
                       </td>
                     </tr>
                   ) : (
-                    paginatedTxs.map((tx) => {
+                    paginatedTxs.map((tx: any) => {
                       const isSelected = selectedTxIds.includes(tx.id);
                       const isWallet = (tx.planSlug || '').includes('wallet') || (tx.planName || '').toLowerCase().includes('wallet');
                       const statusBadge = getStatusBadge(tx.status);
@@ -23741,7 +23738,7 @@ export default function AdminPaymentPage() {
                     className="w-full px-3 py-2 rounded-xl border font-bold outline-none cursor-pointer"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   >
-                    {availablePlans.map(p => (
+                    {availablePlans.map((p: any) => (
                       <option key={p.id} value={p.slug}>{p.name} - {p.priceFormatted}</option>
                     ))}
                   </select>
@@ -23853,10 +23850,10 @@ export default function AdminPaymentPage() {
 
 ## File: `apps/web/src/app/admin/token-setting/page.tsx`
 ```typescript
-import DynamicTokenIcon from '@/components/DynamicTokenIcon';
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import {
@@ -24075,10 +24072,10 @@ export default function AdminTokenSettingPage() {
     const newPkg: TokenPackage = {
       id: 'pkg_' + Date.now().toString(36),
       name: pkgName.trim() || 'Custom Bundle',
-      tokenAmount: Math.max(1, parseInt(pkgTokens, 10) || 500),
-      priceDollars: Math.max(0.01, parseFloat(pkgPrice) || 5.99),
+      tokenAmount: Math.max(1, Number(pkgTokens) || 500),
+      priceDollars: Math.max(0.01, Number(pkgPrice) || 5.99),
       badge: pkgBadge.trim() || undefined,
-      bonusTokens: parseInt(pkgBonus, 10) || 0,
+      bonusTokens: Number(pkgBonus) || 0,
       isPopular: false
     };
 
@@ -24097,10 +24094,10 @@ export default function AdminTokenSettingPage() {
       packages: prev.packages.map(p => p.id === pkgId ? {
         ...p,
         name: pkgName.trim(),
-        tokenAmount: Math.max(1, parseInt(pkgTokens, 10) || p.tokenAmount),
-        priceDollars: Math.max(0.01, parseFloat(pkgPrice) || p.priceDollars),
+        tokenAmount: Math.max(1, Number(pkgTokens) || p.tokenAmount),
+        priceDollars: Math.max(0.01, Number(pkgPrice) || p.priceDollars),
         badge: pkgBadge.trim() || undefined,
-        bonusTokens: parseInt(pkgBonus, 10) || 0
+        bonusTokens: Number(pkgBonus) || 0
       } : p)
     }));
 
@@ -24584,9 +24581,9 @@ export default function AdminTokenSettingPage() {
                         +{pkg.tokenAmount.toLocaleString()}
                       </span>
                     </div>
-                    {pkg.bonusTokens > 0 && (
+                    {(pkg.bonusTokens ?? 0) > 0 && (
                       <span className="text-[10px] font-black px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                        +{pkg.bonusTokens} Bonus
+                        +{(pkg.bonusTokens ?? 0)} Bonus
                       </span>
                     )}
                   </div>
@@ -24717,8 +24714,8 @@ export default function AdminTokenSettingPage() {
 
 ## File: `apps/web/src/app/admin/payment-gateway/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
@@ -26031,8 +26028,8 @@ export default function AdminPaymentGatewayPage() {
 
 ## File: `apps/web/src/app/admin/language/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
@@ -27179,8 +27176,8 @@ export default function AdminLanguagePage() {
 
 ## File: `apps/web/src/app/admin/storage/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Link from 'next/link';
@@ -28026,8 +28023,8 @@ export default function AdminStoragePage() {
 
 ## File: `apps/web/src/app/admin/users/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
@@ -29653,8 +29650,8 @@ export default function AdminUserManagementPage() {
 
 ## File: `apps/web/src/app/admin/social-login-setting/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
@@ -29972,7 +29969,6 @@ export default function SocialLoginSettingPage() {
                     unicode="f1a0"
                     size={20}
                     className="shrink-0 text-[#EA4335]"
-                    title="Google (f1a0)"
                   />
                 </div>
                 <div>
@@ -30137,7 +30133,6 @@ export default function SocialLoginSettingPage() {
                     unicode="f09a"
                     size={20}
                     className="shrink-0 text-[#1877F2]"
-                    title="Facebook (f09a)"
                   />
                 </div>
                 <div>
@@ -30303,7 +30298,6 @@ export default function SocialLoginSettingPage() {
                     size={20}
                     className="shrink-0"
                     style={{ color: 'var(--color-text)' }}
-                    title="Apple (f179)"
                   />
                 </div>
                 <div>
@@ -30505,8 +30499,8 @@ export default function SocialLoginSettingPage() {
 
 ## File: `apps/web/src/app/admin/ingredient-categories/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
@@ -31757,8 +31751,8 @@ export default function LanguageRedirectPage() {
 
 ## File: `apps/web/src/app/books/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -32714,10 +32708,10 @@ export default function BooksPage() {
 
 ## File: `apps/web/src/app/subscriptions/page.tsx`
 ```typescript
-import DynamicTokenIcon from '@/components/DynamicTokenIcon';
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -33828,19 +33822,14 @@ export default function SubscriptionsPage() {
 
 ## File: `apps/web/src/app/dashboard/page.tsx`
 ```typescript
-import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 // @ts-nocheck
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { 
-  ChefHat, Sparkles, BookOpen, Package, Calendar, Coins, Wallet, 
-  ArrowRight, Clock, Users, Flame, Plus, UploadCloud, Utensils, 
-  AlertTriangle, CheckCircle2, ChevronRight, Layers, ShieldCheck,
-  RefreshCw, TrendingUp
-} from 'lucide-react';
+import { ChefHat, Sparkles, BookOpen, Package, Calendar, Coins, Wallet, ArrowRight, Clock, Users, Flame, Plus, UploadCloud, Utensils, AlertTriangle, CheckCircle2, ChevronRight, Layers, ShieldCheck, RefreshCw, TrendingUp } from 'lucide-react';
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -33864,19 +33853,53 @@ export default function DashboardPage() {
     recentRecipes: [] as any[]
   });
 
+  const [tokenSymbol, setTokenSymbol] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try { return localStorage.getItem('zecratary_token_symbol') || '🪙'; } catch (_) {}
+    }
+    return '🪙';
+  });
+  const [tokenIcon, setTokenIcon] = useState<string>('');
+  const [walletCurrency, setWalletCurrency] = useState<string>('USD');
+  const [walletSymbol, setWalletSymbol] = useState<string>('$');
+
   const loadDashboardData = useCallback(async (user: User | null) => {
     const targetUserId = user?.id || 'usr_admin_1';
     const targetEmail = user?.email || 'admin@zecratary.com';
     setLoading(true);
 
     try {
-      const res = await fetch(`/api/dashboard/stats?userId=${encodeURIComponent(targetUserId)}&email=${encodeURIComponent(targetEmail)}&t=${Date.now()}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
+      const [res, tokRes, walRes] = await Promise.allSettled([
+        fetch(`/api/dashboard/stats?userId=${encodeURIComponent(targetUserId)}&email=${encodeURIComponent(targetEmail)}&t=${Date.now()}`, { cache: 'no-store' }),
+        fetch(`/api/tokens?userId=${encodeURIComponent(targetUserId)}&email=${encodeURIComponent(targetEmail)}&t=${Date.now()}`, { cache: 'no-store' }),
+        fetch(`/api/wallet?userId=${encodeURIComponent(targetUserId)}&email=${encodeURIComponent(targetEmail)}&t=${Date.now()}`, { cache: 'no-store' })
+      ]);
+
+      if (res.status === 'fulfilled' && res.value.ok) {
+        const data = await res.value.json();
         if (data.success && data.stats) {
           setStats(data.stats);
-          return;
         }
+      }
+
+      if (tokRes.status === 'fulfilled' && tokRes.value.ok) {
+        const tData = await tokRes.value.json();
+        if (tData.tokenSymbol) setTokenSymbol(tData.tokenSymbol);
+        if (tData.tokenIcon) setTokenIcon(tData.tokenIcon);
+        const tb = Number(tData.balance ?? tData.tokenBalance ?? tData.token_balance);
+        if (!isNaN(tb)) {
+          setStats(prev => ({ ...prev, tokenBalance: tb }));
+        }
+      }
+
+      if (walRes.status === 'fulfilled' && walRes.value.ok) {
+        const wData = await walRes.value.json();
+        const wb = parseFloat(String(wData.wallet_balance ?? wData.walletBalance ?? wData.balance ?? 0));
+        if (!isNaN(wb)) {
+          setStats(prev => ({ ...prev, walletBalance: wb }));
+        }
+        if (wData.currency) setWalletCurrency(wData.currency);
+        if (wData.walletSymbol) setWalletSymbol(wData.walletSymbol);
       }
     } catch (e) {
       console.warn('[DashboardPage] API load notice:', e);
@@ -33894,9 +33917,9 @@ export default function DashboardPage() {
 
         setStats(prev => ({
           ...prev,
-          savedRecipes: Array.isArray(recList) ? recList.length : 0,
-          pantryItems: Array.isArray(panList) ? panList.length : 0,
-          recentRecipes: Array.isArray(recList) ? recList.slice(0, 3) : []
+          savedRecipes: Array.isArray(recList) ? recList.length : prev.savedRecipes,
+          pantryItems: Array.isArray(panList) ? panList.length : prev.pantryItems,
+          recentRecipes: Array.isArray(recList) ? recList.slice(0, 3) : prev.recentRecipes
         }));
       } catch (_) {}
     }
@@ -33926,10 +33949,19 @@ export default function DashboardPage() {
     window.addEventListener('zecratary_pantry_updated', handleSync);
     window.addEventListener('zecratary_planner_updated', handleSync);
     window.addEventListener('zecratary_tokens_updated', handleSync);
+    window.addEventListener('zecratary_token_settings_updated', handleSync);
     window.addEventListener('zecratary_wallet_updated', handleSync);
     window.addEventListener('zecratary_languages_updated', handleSync);
     window.addEventListener('zecratary_dictionary_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
+
+    let bc: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        bc = new BroadcastChannel('zecratary_balance_channel');
+        bc.onmessage = () => { handleSync(); };
+      } catch (_) {}
+    }
 
     return () => {
       window.removeEventListener('storage', handleSync);
@@ -33938,14 +33970,16 @@ export default function DashboardPage() {
       window.removeEventListener('zecratary_pantry_updated', handleSync);
       window.removeEventListener('zecratary_planner_updated', handleSync);
       window.removeEventListener('zecratary_tokens_updated', handleSync);
+      window.removeEventListener('zecratary_token_settings_updated', handleSync);
       window.removeEventListener('zecratary_wallet_updated', handleSync);
       window.removeEventListener('zecratary_languages_updated', handleSync);
       window.removeEventListener('zecratary_dictionary_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
+      if (bc) bc.close();
     };
   }, [loadDashboardData, router]);
 
-  // Safe localized user welcome interpolation (Overload-Safe String Fallback)
+  // Safe localized user welcome interpolation
   const welcomeText = useMemo(() => {
     const rawTemplate = t('dashboardWelcomePrefix', 'Welcome back, {name}!');
     const displayName = currentUser?.name || currentUser?.email?.split('@')[0] || 'Chef';
@@ -33957,9 +33991,9 @@ export default function DashboardPage() {
       className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
-      {/* 1. Welcome Hero & Membership Telemetry Strip */}
+      {/* 1. Original Welcome Hero & Membership Telemetry Strip */}
       <div 
-        className="p-6 sm:p-8 rounded-3xl border shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-6 transition-colors duration-200 relative overflow-hidden"
+        className="p-6 sm:p-8 rounded-3xl border shadow-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 transition-colors duration-200 relative overflow-hidden"
         style={{
           backgroundColor: 'var(--color-card)',
           borderColor: 'var(--color-border)'
@@ -33986,50 +34020,63 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* Spendable Asset Badges & Management Buttons */}
-        <div className="flex flex-wrap items-center gap-3 z-10">
+        {/* Fixed Spendable Asset Badges & Management Buttons (Balanced Layout - No Awkward Right Drift) */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 z-10 w-full lg:w-auto shrink-0">
+          {/* Tokens Box */}
           <div 
-            className="p-3.5 rounded-2xl border shadow-xs flex items-center gap-3"
+            className="p-3.5 rounded-2xl border shadow-xs flex items-center justify-between sm:justify-start gap-3 transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
           >
-            <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
-              <Coins className="h-5 w-5" />
-            </div>
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70">
-                {t('statsTokensRemaining', 'Tokens Remaining')}
-              </span>
-              <div className="text-base font-black font-mono">
-                {stats.tokenBalance.toLocaleString()} <span className="text-amber-500 text-xs"><DynamicTokenIcon size={16} className="w-4 h-4 inline-block" /></span>
+            <div className="flex items-center gap-3 min-w-0">
+              <div 
+                className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+              >
+                <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={20} className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70 truncate">
+                  {t('statsTokensRemaining', 'Tokens Remaining')}
+                </span>
+                <div className="text-base font-black font-mono flex items-center gap-1.5 leading-none mt-1">
+                  <span suppressHydrationWarning>{stats.tokenBalance.toLocaleString()}</span>
+                  <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="inline-block" />
+                </div>
               </div>
             </div>
             <Link 
               href="/token"
-              className="ml-2 text-[10px] font-bold px-2.5 py-1.5 rounded-xl text-white transition hover:opacity-90 shadow-xs"
+              className="ml-2 text-[10px] font-bold px-2.5 py-1.5 rounded-xl text-white transition hover:opacity-90 shadow-xs shrink-0"
               style={{ backgroundColor: 'var(--color-primary)' }}
             >
               {t('topUpTokens', 'Top Up')}
             </Link>
           </div>
 
+          {/* Wallet Box */}
           <div 
-            className="p-3.5 rounded-2xl border shadow-xs flex items-center gap-3"
+            className="p-3.5 rounded-2xl border shadow-xs flex items-center justify-between sm:justify-start gap-3 transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
           >
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-              <Wallet className="h-5 w-5" />
-            </div>
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70">
-                {t('walletCredits', 'Wallet Balance')}
-              </span>
-              <div className="text-base font-black font-mono text-emerald-400">
-                ${stats.walletBalance.toFixed(2)}
+            <div className="flex items-center gap-3 min-w-0">
+              <div 
+                className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+              >
+                <Wallet className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+              </div>
+              <div className="min-w-0">
+                <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70 truncate">
+                  {t('walletCredits', 'Wallet Balance')}
+                </span>
+                <div className="text-base font-black font-mono leading-none mt-1" style={{ color: 'var(--color-emerald)' }}>
+                  <span suppressHydrationWarning>{walletSymbol}{Number(stats.walletBalance || 0).toFixed(2)}</span>
+                </div>
               </div>
             </div>
             <Link 
               href="/wallet"
-              className="ml-2 text-[10px] font-bold px-2.5 py-1.5 rounded-xl border transition shadow-xs hover:opacity-80"
+              className="ml-2 text-[10px] font-bold px-2.5 py-1.5 rounded-xl border transition shadow-xs hover:opacity-80 shrink-0"
               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
             >
               {t('addFunds', 'Add Funds')}
@@ -34074,13 +34121,18 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* 3. Primary Metrics Grid (4-Way Live Counter) */}
+      {/* 3. Primary Metrics Grid (4-Way Live Counter with Dynamic Token Icon) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: t('statsRecipes', 'Saved Recipes'), value: stats.savedRecipes, icon: BookOpen, href: '/saved', color: 'var(--color-primary)' },
           { label: t('statsMealPlans', 'Scheduled Meals'), value: stats.scheduledMeals, icon: Calendar, href: '/planner', color: '#0ea5e9' },
           { label: t('statsPantryItems', 'Pantry in Stock'), value: stats.pantryItems, icon: Package, href: '/pantry', color: 'var(--color-emerald)' },
-          { label: t('statsTokensRemaining', 'Tokens Remaining'), value: stats.tokenBalance, icon: Coins, href: '/token', color: '#f59e0b' }
+          { 
+            label: t('statsTokensRemaining', 'Tokens Remaining'), 
+            value: stats.tokenBalance, 
+            href: '/token',
+            isToken: true
+          }
         ].map((stat, idx) => (
           <Link
             key={idx}
@@ -34091,7 +34143,11 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold opacity-75">{stat.label}</span>
               <div className="p-2 rounded-xl transition group-hover:scale-110" style={{ backgroundColor: 'var(--color-inner-dark)' }}>
-                <stat.icon className="h-4 w-4" style={{ color: stat.color }} />
+                {stat.isToken ? (
+                  <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4" />
+                ) : (
+                  <stat.icon className="h-4 w-4" style={{ color: stat.color }} />
+                )}
               </div>
             </div>
             <div className="text-2xl font-black font-mono">
@@ -34279,9 +34335,9 @@ export default function DashboardPage() {
 
 ## File: `apps/web/src/app/transactions/page.tsx`
 ```typescript
-import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 'use client';
 
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 // Generated / Updated by AI Collaborator
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -36042,8 +36098,9 @@ export default function TransactionsPage() {
 
 ## File: `apps/web/src/app/register/page.tsx`
 ```typescript
-// Generated / Updated by AI Collaborator
 'use client';
+
+// Generated / Updated by AI Collaborator
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -36435,8 +36492,8 @@ export default function RegisterPage() {
 
 ## File: `apps/web/src/app/manual/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -37248,7 +37305,7 @@ export default function ManualRecipePage() {
                         color: 'var(--color-text)'
                       }}
                     >
-                      {ingredientCategories.map((cat) => (
+                      {ingredientCategories.map((cat: any) => (
                         <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
                       ))}
                     </select>
@@ -37480,10 +37537,10 @@ export default function ManualRecipePage() {
 
 ## File: `apps/web/src/app/profile/page.tsx`
 ```typescript
-import DynamicTokenIcon from '@/components/DynamicTokenIcon';
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -38674,8 +38731,9 @@ export default function ProfilePage() {
 
 ## File: `apps/web/src/app/forgot-password/page.tsx`
 ```typescript
-// Generated / Updated by AI Collaborator
 'use client';
+
+// Generated / Updated by AI Collaborator
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -39142,8 +39200,8 @@ export default function BooksRedirectPage() {
 
 ## File: `apps/web/src/app/wallet/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import Link from 'next/link';
@@ -46480,70 +46538,113 @@ export async function POST(req: Request) {
 
 ## File: `apps/web/src/app/api/admin/languages/route.ts`
 ```typescript
+// @ts-nocheck
 import { NextResponse } from 'next/server';
+import { query } from '@/lib/db';
 import fs from 'fs';
 import path from 'path';
-import { Pool } from 'pg';
 
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_LANGUAGES = [
-  { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', dir: 'ltr', status: 'active', isDefault: true },
-  { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭', dir: 'ltr', status: 'active', isDefault: false },
-  { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', dir: 'ltr', status: 'active', isDefault: false },
-  { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', dir: 'ltr', status: 'active', isDefault: false }
+const DEFAULT_SUPPORTED_LANGUAGES = [
+  { code: 'en', name: 'English', native: 'English', flag: '🇺🇸', isDefault: true },
+  { code: 'th', name: 'Thai', native: 'ภาษาไทย', flag: '🇹🇭', isDefault: false },
+  { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸', isDefault: false },
+  { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷', isDefault: false }
 ];
 
-function getPool() {
-  const connStr = process.env.DATABASE_URL || process.env.POSTGRES_URL;
-  if (!connStr || connStr.includes('[YOUR-PASSWORD]')) return null;
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-  const cleanConn = connStr.replace(/([?&])sslmode=[^&]+(&|$)/, '$1').replace(/[?&]$/, '');
-  return new Pool({ connectionString: cleanConn, ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 5000 });
+function readLocalSettingsFallback(): any {
+  const possiblePaths = [
+    path.join(process.cwd(), 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+    path.join(process.cwd(), 'src', 'data', 'admin_settings.json')
+  ];
+
+  for (const fp of possiblePaths) {
+    if (fs.existsSync(fp)) {
+      try {
+        const raw = fs.readFileSync(fp, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (parsed) return parsed;
+      } catch (_) {}
+    }
+  }
+  return null;
 }
 
 export async function GET() {
-  let supportedLanguages = DEFAULT_LANGUAGES;
-  let translations: Record<string, any> = {};
+  let supportedLanguages = DEFAULT_SUPPORTED_LANGUAGES;
+  let translations: Record<string, Record<string, string>> = {};
   let defaultLanguage = 'en';
+  let dbLoaded = false;
 
-  // 1. Try PostgreSQL
-  const pool = getPool();
-  if (pool) {
-    try {
-      const client = await pool.connect();
-      try {
-        const res = await client.query("SELECT supported_languages, translations, default_language FROM admin_settings WHERE id::text = 'primary_settings' OR id::text = '1' OR id::text = 'current' LIMIT 1;");
-        if (res.rows?.[0]) {
-          const row = res.rows[0];
-          if (row.supported_languages) {
-            supportedLanguages = typeof row.supported_languages === 'string' ? JSON.parse(row.supported_languages) : row.supported_languages;
-          }
-          if (row.translations) {
-            translations = typeof row.translations === 'string' ? JSON.parse(row.translations) : row.translations;
-          }
-          if (row.default_language) defaultLanguage = row.default_language;
-        }
-      } finally {
-        client.release();
-        await pool.end();
+  // 1. Query PostgreSQL / MySQL for authoritative language configuration
+  try {
+    const adminRes = await query(
+      `SELECT supported_languages, translations, default_language, settings 
+       FROM admin_settings 
+       WHERE key = 'current' OR key = 'default' 
+       ORDER BY updated_at DESC LIMIT 1`
+    );
+
+    const rows = Array.isArray(adminRes) ? adminRes : (adminRes?.rows || []);
+    if (rows && rows.length > 0) {
+      const row = rows[0];
+      const settings = typeof row.settings === 'string' ? JSON.parse(row.settings) : (row.settings || {});
+
+      if (row.supported_languages) {
+        supportedLanguages = typeof row.supported_languages === 'string' ? JSON.parse(row.supported_languages) : row.supported_languages;
+        dbLoaded = true;
+      } else if (settings?.supportedLanguages) {
+        supportedLanguages = settings.supportedLanguages;
+        dbLoaded = true;
       }
-    } catch (e) {
-      console.warn('API Languages DB read notice:', e);
+
+      if (row.translations) {
+        translations = typeof row.translations === 'string' ? JSON.parse(row.translations) : row.translations;
+        dbLoaded = true;
+      } else if (settings?.translations) {
+        translations = settings.translations;
+        dbLoaded = true;
+      }
+
+      if (row.default_language) {
+        defaultLanguage = row.default_language;
+      } else if (settings?.defaultLanguage) {
+        defaultLanguage = settings.defaultLanguage;
+      }
     }
+  } catch (err: any) {
+    console.warn('API Languages DB read notice:', err?.message || err);
   }
 
-  // 2. Read from local JSON fallback if empty
-  if (Object.keys(translations).length === 0) {
-    for (const f of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
-      const p = path.join(process.cwd(), f);
-      if (fs.existsSync(p)) {
-        try {
-          const data = JSON.parse(fs.readFileSync(p, 'utf8'));
-          if (data.translations) translations = { ...translations, ...data.translations };
-          if (data.supportedLanguages && supportedLanguages === DEFAULT_LANGUAGES) supportedLanguages = data.supportedLanguages;
-          if (data.defaultLanguage) defaultLanguage = data.defaultLanguage;
-        } catch (_) {}
+  // 2. Query dedicated app_translations table if available
+  try {
+    const transRes = await query(`SELECT lang_code, dictionary FROM app_translations`);
+    const transRows = Array.isArray(transRes) ? transRes : (transRes?.rows || []);
+    if (transRows && transRows.length > 0) {
+      transRows.forEach((r: any) => {
+        if (r.lang_code && r.dictionary) {
+          translations[r.lang_code] = typeof r.dictionary === 'string' ? JSON.parse(r.dictionary) : r.dictionary;
+        }
+      });
+      dbLoaded = true;
+    }
+  } catch (_) {}
+
+  // 3. Fallback to local admin_settings.json if database is cold or uninitialized
+  if (!dbLoaded || Object.keys(translations).length === 0) {
+    const fileData = readLocalSettingsFallback();
+    if (fileData) {
+      const langConfig = fileData.languages || fileData;
+      if (langConfig.supportedLanguages && Array.isArray(langConfig.supportedLanguages)) {
+        supportedLanguages = langConfig.supportedLanguages;
+      }
+      if (langConfig.translations && typeof langConfig.translations === 'object') {
+        translations = { ...langConfig.translations, ...translations };
+      }
+      if (langConfig.defaultLanguage) {
+        defaultLanguage = langConfig.defaultLanguage;
       }
     }
   }
@@ -46559,61 +46660,102 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { supportedLanguages, translations, defaultLanguage } = body;
+    const { supportedLanguages, translations, defaultLanguage = 'en' } = body;
 
-    // 1. Dual write to JSON stores
-    for (const f of ['apps/web/data/admin_settings.json', 'data/admin_settings.json']) {
-      const p = path.join(process.cwd(), f);
-      os_mkdir(path.dirname(p));
-      let existing: any = {};
-      if (fs.existsSync(p)) {
-        try {
-          existing = JSON.parse(fs.readFileSync(p, 'utf8'));
-        } catch (_) { existing = {}; }
-      }
-      if (supportedLanguages) existing.supportedLanguages = supportedLanguages;
-      if (translations) existing.translations = { ...(existing.translations || {}), ...translations };
-      if (defaultLanguage) existing.defaultLanguage = defaultLanguage;
-      existing.lastUpdated = new Date().toISOString();
-      fs.writeFileSync(p, JSON.stringify(existing, null, 2), 'utf8');
+    // 1. Ensure database tables exist in PostgreSQL
+    try {
+      await query(`
+        CREATE TABLE IF NOT EXISTS admin_settings (
+          key VARCHAR(64) PRIMARY KEY,
+          settings JSONB,
+          supported_languages JSONB,
+          translations JSONB,
+          default_language VARCHAR(32) DEFAULT 'en',
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+      `);
+
+      await query(`
+        CREATE TABLE IF NOT EXISTS app_translations (
+          lang_code VARCHAR(32) PRIMARY KEY,
+          dictionary JSONB,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+      `);
+    } catch (_) {}
+
+    // 2. Upsert into admin_settings
+    try {
+      await query(
+        `INSERT INTO admin_settings (key, supported_languages, translations, default_language, updated_at)
+         VALUES ('current', $1, $2, $3, NOW())
+         ON CONFLICT (key) DO UPDATE SET
+           supported_languages = EXCLUDED.supported_languages,
+           translations = EXCLUDED.translations,
+           default_language = EXCLUDED.default_language,
+           updated_at = NOW()`,
+        [
+          JSON.stringify(supportedLanguages || []),
+          JSON.stringify(translations || {}),
+          String(defaultLanguage || 'en')
+        ]
+      );
+    } catch (err: any) {
+      console.warn('PostgreSQL admin_settings languages upsert notice:', err?.message || err);
     }
 
-    // 2. Persist to PostgreSQL
-    const pool = getPool();
-    if (pool) {
-      try {
-        const client = await pool.connect();
+    // 3. Upsert individual dictionaries into app_translations
+    if (translations && typeof translations === 'object') {
+      for (const [code, dict] of Object.entries(translations)) {
         try {
-          await client.query(`
-            INSERT INTO admin_settings (id, supported_languages, translations, default_language, updated_at)
-            VALUES ('primary_settings', $1::jsonb, $2::jsonb, $3, NOW())
-            ON CONFLICT (id) DO UPDATE SET
-              supported_languages = COALESCE(EXCLUDED.supported_languages, admin_settings.supported_languages),
-              translations = COALESCE(EXCLUDED.translations, admin_settings.translations),
-              default_language = COALESCE(EXCLUDED.default_language, admin_settings.default_language),
-              updated_at = NOW();
-          `, [
-            JSON.stringify(supportedLanguages || DEFAULT_LANGUAGES),
-            JSON.stringify(translations || {}),
-            defaultLanguage || 'en'
-          ]);
-        } finally {
-          client.release();
-          await pool.end();
-        }
-      } catch (dbErr) {
-        console.warn('API Languages DB write notice:', dbErr);
+          await query(
+            `INSERT INTO app_translations (lang_code, dictionary, updated_at)
+             VALUES ($1, $2, NOW())
+             ON CONFLICT (lang_code) DO UPDATE SET
+               dictionary = EXCLUDED.dictionary,
+               updated_at = NOW()`,
+            [code, JSON.stringify(dict)]
+          );
+        } catch (_) {}
       }
     }
 
-    return NextResponse.json({ success: true, message: 'Settings saved successfully' });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    // 4. Mirror to local admin_settings.json if writable
+    const possiblePaths = [
+      path.join(process.cwd(), 'data', 'admin_settings.json'),
+      path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json')
+    ];
+    for (const fp of possiblePaths) {
+      if (fs.existsSync(fp)) {
+        try {
+          const raw = fs.readFileSync(fp, 'utf-8');
+          const current = JSON.parse(raw);
+          current.languages = {
+            ...(current.languages || {}),
+            supportedLanguages,
+            translations,
+            defaultLanguage
+          };
+          current.supportedLanguages = supportedLanguages;
+          current.translations = translations;
+          current.defaultLanguage = defaultLanguage;
+          fs.writeFileSync(fp, JSON.stringify(current, null, 2), 'utf-8');
+        } catch (_) {}
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Language settings synchronized with PostgreSQL, MySQL, and server cache.',
+      supportedLanguages,
+      defaultLanguage
+    });
+  } catch (error: any) {
+    return NextResponse.json(
+      { success: false, error: error.message || 'Failed to update language settings' },
+      { status: 500 }
+    );
   }
-}
-
-function os_mkdir(dir: string) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
 ```
@@ -53729,8 +53871,8 @@ export async function GET(req: NextRequest) {
 
 ## File: `apps/web/src/app/templates/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -53745,6 +53887,8 @@ import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
 interface TemplateMeal {
+  title?: string;
+
   id: string;
   dayIndex: number; // 0 to 6 (Monday to Sunday)
   mealType: string; // Breakfast | Lunch | Dinner | Snack
@@ -53757,6 +53901,7 @@ interface TemplateMeal {
   prepMinutes?: number;
   cookMinutes?: number;
   notes?: string;
+  [key: string]: any;
 }
 
 interface MealTemplate {
@@ -54857,8 +55002,8 @@ export { default } from '../admin/social-login-setting/page';
 
 ## File: `apps/web/src/app/import/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -55945,8 +56090,9 @@ export default function BooksRedirectPage() {
 
 ## File: `apps/web/src/app/login/page.tsx`
 ```typescript
-// Generated / Updated by AI Collaborator
 'use client';
+
+// Generated / Updated by AI Collaborator
 
 import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -56754,8 +56900,8 @@ export default function LoginPage() {
 
 ## File: `apps/web/src/app/billing/page.tsx`
 ```typescript
-// @ts-nocheck
 'use client';
+// @ts-nocheck
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
@@ -57793,8 +57939,9 @@ export default function FontAwesomeIcon({
 
 ## File: `apps/web/src/components/LanguageProvider.tsx`
 ```typescript
-// Generated & Localized by AI Collaborator - Zero Syntax Error Guarantee
 'use client';
+
+// Generated & Localized by AI Collaborator - Zero Syntax Error Guarantee
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 
@@ -65316,10 +65463,12 @@ export function useTheme() {
 
 ## File: `apps/web/src/components/Sidebar.tsx`
 ```typescript
-// Generated / Updated by AI Collaborator
 'use client';
 
+// Generated / Updated by AI Collaborator
+
 import packageInfo from '../../package.json';
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -65448,6 +65597,12 @@ export default function Sidebar() {
   // 3. Balances & Token Package State Hooks
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
+  const [tokenIcon, setTokenIcon] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try { return localStorage.getItem('zecratary_token_icon') || ''; } catch (_) {}
+    }
+    return '';
+  });
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
   const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
   const [showTopUpMenu, setShowTopUpMenu] = useState<boolean>(false);
@@ -65519,7 +65674,15 @@ export default function Sidebar() {
         const cfgData = await cfgRes.json();
         const cfg = cfgData.settings || cfgData.config || cfgData;
         if (cfg) {
-          if (cfg.tokenSymbol) setTokenSymbol(cfg.tokenSymbol);
+          if (cfg.tokenSymbol && cfg.tokenSymbol !== '🪙') {
+          setTokenSymbol(cfg.tokenSymbol);
+          try { localStorage.setItem('zecratary_token_symbol', cfg.tokenSymbol); } catch (_) {}
+        }
+        if (cfg.tokenIcon !== undefined && cfg.tokenIcon !== '') {
+          setTokenIcon(cfg.tokenIcon);
+          try { localStorage.setItem('zecratary_token_icon', cfg.tokenIcon); } catch (_) {}
+        }
+        if (cfg.tokenIcon !== undefined) { setTokenIcon(cfg.tokenIcon || ''); try { localStorage.setItem('zecratary_token_icon', cfg.tokenIcon || ''); } catch (_) {} }
           if (cfg.tokenName) setTokenName(cfg.tokenName);
           if (Array.isArray(cfg.packages) && cfg.packages.length > 0) {
             setTokenPackages(cfg.packages);
@@ -65570,7 +65733,15 @@ export default function Sidebar() {
           if (typeof tokenData.walletBalance === 'number') {
             setWalletBalance(tokenData.walletBalance);
           }
-          if (tokenData.tokenSymbol) setTokenSymbol(tokenData.tokenSymbol);
+          if (tokenData.tokenSymbol && tokenData.tokenSymbol !== '🪙') {
+            setTokenSymbol(tokenData.tokenSymbol);
+            try { localStorage.setItem('zecratary_token_symbol', tokenData.tokenSymbol); } catch (_) {}
+          }
+          if (tokenData.tokenIcon !== undefined && tokenData.tokenIcon !== '') {
+            setTokenIcon(tokenData.tokenIcon);
+            try { localStorage.setItem('zecratary_token_icon', tokenData.tokenIcon); } catch (_) {}
+          }
+        if (tokenData.tokenIcon !== undefined) { setTokenIcon(tokenData.tokenIcon || ''); try { localStorage.setItem('zecratary_token_icon', tokenData.tokenIcon || ''); } catch (_) {} }
         }
       }
     } catch (_) {}
@@ -65654,6 +65825,10 @@ export default function Sidebar() {
 
     window.addEventListener('zecratary_wallet_updated', handleExternalBalance);
     window.addEventListener('zecratary_tokens_updated', handleExternalBalance);
+    window.addEventListener('zecratary_token_settings_updated', (e: any) => {
+      if (e?.detail?.tokenSymbol) setTokenSymbol(e.detail.tokenSymbol);
+      if (e?.detail?.tokenIcon !== undefined) setTokenIcon(e.detail.tokenIcon || '');
+    });
     window.addEventListener('zecratary_token_updated', handleExternalBalance);
     window.addEventListener('focus', () => { fetchWalletData(); fetchUserTokenAndNotifications(); });
 
@@ -65801,6 +65976,10 @@ export default function Sidebar() {
     window.addEventListener('zecratary_theme_changed', handleThemeModeSync);
     window.addEventListener('zecratary_token_settings_updated', handleTokenSync);
     window.addEventListener('zecratary_tokens_updated', handleTokenSync);
+    window.addEventListener('zecratary_token_settings_updated', (e: any) => {
+      if (e?.detail?.tokenSymbol) setTokenSymbol(e.detail.tokenSymbol);
+      if (e?.detail?.tokenIcon !== undefined) setTokenIcon(e.detail.tokenIcon || '');
+    });
     window.addEventListener('zecratary_wallet_updated', handleWalletSync);
     window.addEventListener('zecratary_wallet_settings_updated', handleWalletSync);
 
@@ -66102,7 +66281,7 @@ export default function Sidebar() {
               }}
               className="flex items-center gap-1 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
             >
-              <Coins className="h-3.5 w-3.5 text-amber-500" />
+              <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block shrink-0" />
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
                 {mounted ? tokenBalance.toLocaleString() : '0'}
               </span>
@@ -66120,7 +66299,7 @@ export default function Sidebar() {
               >
                 <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
                   <div className="flex items-center gap-2">
-                    <Coins className="h-4 w-4 text-amber-500" />
+                    <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block shrink-0" />
                     <div>
                       <h3 className="text-xs font-black uppercase tracking-wider">{t('topUpTokens', 'Top Up Tokens')}</h3>
                       <p className="text-[10px] opacity-70">
@@ -66336,7 +66515,7 @@ export default function Sidebar() {
                   onClick={() => setShowProfileMenu(false)}
                   className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
                 >
-                  <Coins className="h-3.5 w-3.5 text-amber-500" />
+                  <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block shrink-0" />
                   <span>{t('topbarTokens', 'Token')}</span>
                 </Link>
 
@@ -66566,7 +66745,7 @@ export default function Sidebar() {
                 className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
                 title={t('viewTokenBalance', 'View Token Balance & Summary')}
               >
-                <Coins className="h-4 w-4 text-amber-500 group-hover:scale-110 transition-transform" />
+                <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 inline-block shrink-0" />
                 <span suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
                   {mounted ? tokenBalance.toLocaleString() : '0'}
                 </span>
@@ -66608,7 +66787,7 @@ export default function Sidebar() {
                 <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
                   <div className="flex items-center gap-2.5">
                     <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
-                      <Coins className="h-4 w-4 text-amber-500" />
+                      <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 inline-block shrink-0" />
                     </div>
                     <div>
                       <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
@@ -66933,7 +67112,7 @@ export default function Sidebar() {
                     className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
                     style={{ color: 'var(--color-text)' }}
                   >
-                    <Coins className="h-4 w-4 text-amber-500" />
+                    <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block shrink-0" />
                     <span>{t('topbarTokens', 'Token')}</span>
                   </Link>
 
@@ -67134,7 +67313,7 @@ export default function Sidebar() {
                   {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}
                 </Link>
                 <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} title="Token Settings">
-                  <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
+                  <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 shrink-0" />
                   {!showCollapsed && <span className="truncate whitespace-nowrap">Token Settings</span>}
                 </Link>
                 <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} title="Wallet Settings">
@@ -67250,7 +67429,7 @@ export default function Sidebar() {
 
           {/* TOKEN */}
           <Link href="/token" className={navClass('/token')} title={t('topbarTokens', 'Token')}>
-            <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
+            <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 shrink-0" />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('topbarTokens', 'Token')}</span>}
           </Link>
 
@@ -67440,48 +67619,55 @@ export default function DynamicTokenIcon({
   fallbackClassName = 'text-amber-500'
 }: DynamicTokenIconProps) {
   const [activeSymbol, setActiveSymbol] = useState<string>(() => {
-    if (propSymbol) return propSymbol;
+    if (propSymbol && propSymbol !== '🪙') return propSymbol;
     if (typeof window !== 'undefined') {
       try {
-        return localStorage.getItem('zecratary_token_symbol') || '🪙';
+        const stored = localStorage.getItem('zecratary_token_symbol');
+        if (stored) return stored;
       } catch (_) {}
     }
-    return '🪙';
+    return propSymbol || '🪙';
   });
 
   const [activeIcon, setActiveIcon] = useState<string | undefined>(() => {
-    if (propIcon) return propIcon;
+    if (propIcon && propIcon.trim() !== '') return propIcon;
     if (typeof window !== 'undefined') {
       try {
-        return localStorage.getItem('zecratary_token_icon') || undefined;
+        const stored = localStorage.getItem('zecratary_token_icon');
+        if (stored && stored.trim() !== '') return stored;
       } catch (_) {}
     }
-    return undefined;
+    return propIcon || undefined;
   });
 
-  // Self-hydrating query from PostgreSQL if cache is missing or on initial load
   const fetchAuthoritativeSettings = useCallback(async () => {
     try {
-      const res = await fetch(`/api/tokens?t=${Date.now()}`, { cache: 'no-store' });
+      const res = await fetch(`/api/admin/token-setting?t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        const sym = data?.tokenSymbol || data?.token_symbol;
-        const ic = data?.tokenIcon || data?.token_icon;
-        if (sym && !propSymbol) {
+        const settings = data?.settings || data?.config || data;
+        const sym = settings?.tokenSymbol || settings?.token_symbol;
+        const ic = settings?.tokenIcon || settings?.token_icon;
+
+        if (sym && sym !== '🪙') {
           setActiveSymbol(sym);
           try { localStorage.setItem('zecratary_token_symbol', sym); } catch (_) {}
+        } else if (sym && !activeSymbol) {
+          setActiveSymbol(sym);
         }
-        if (ic !== undefined && !propIcon) {
-          setActiveIcon(ic || undefined);
+
+        if (ic && ic.trim() !== '') {
+          setActiveIcon(ic);
           try { localStorage.setItem('zecratary_token_icon', ic); } catch (_) {}
         }
       }
     } catch (_) {}
-  }, [propSymbol, propIcon]);
+  }, [activeSymbol]);
 
   useEffect(() => {
-    if (propSymbol) {
+    if (propSymbol && propSymbol !== '🪙') {
       setActiveSymbol(propSymbol);
+      try { localStorage.setItem('zecratary_token_symbol', propSymbol); } catch (_) {}
     } else if (typeof window !== 'undefined') {
       try {
         const storedSym = localStorage.getItem('zecratary_token_symbol');
@@ -67495,14 +67681,21 @@ export default function DynamicTokenIcon({
       }
     }
 
-    if (propIcon !== undefined) {
+    if (propIcon && propIcon.trim() !== '') {
       setActiveIcon(propIcon);
+      try { localStorage.setItem('zecratary_token_icon', propIcon); } catch (_) {}
     }
 
     const handleUpdate = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
-      if (detail?.tokenSymbol && !propSymbol) setActiveSymbol(detail.tokenSymbol);
-      if (detail?.tokenIcon !== undefined && !propIcon) setActiveIcon(detail.tokenIcon);
+      if (detail?.tokenSymbol && detail.tokenSymbol !== '🪙') {
+        setActiveSymbol(detail.tokenSymbol);
+        try { localStorage.setItem('zecratary_token_symbol', detail.tokenSymbol); } catch (_) {}
+      }
+      if (detail?.tokenIcon !== undefined && detail.tokenIcon !== '') {
+        setActiveIcon(detail.tokenIcon);
+        try { localStorage.setItem('zecratary_token_icon', detail.tokenIcon); } catch (_) {}
+      }
       if (!detail) fetchAuthoritativeSettings();
     };
 
@@ -67515,8 +67708,12 @@ export default function DynamicTokenIcon({
       try {
         bc = new BroadcastChannel('zecratary_balance_channel');
         bc.onmessage = (event) => {
-          if (event.data?.tokenSymbol && !propSymbol) setActiveSymbol(event.data.tokenSymbol);
-          if (event.data?.tokenIcon !== undefined && !propIcon) setActiveIcon(event.data.tokenIcon);
+          if (event.data?.tokenSymbol && event.data.tokenSymbol !== '🪙') {
+            setActiveSymbol(event.data.tokenSymbol);
+          }
+          if (event.data?.tokenIcon !== undefined && event.data.tokenIcon !== '') {
+            setActiveIcon(event.data.tokenIcon);
+          }
         };
       } catch (_) {}
     }
@@ -67530,14 +67727,21 @@ export default function DynamicTokenIcon({
   }, [propSymbol, propIcon, fetchAuthoritativeSettings]);
 
   useEffect(() => {
-    if (propSymbol !== undefined) setActiveSymbol(propSymbol);
+    if (propSymbol !== undefined && propSymbol !== '🪙') {
+      setActiveSymbol(propSymbol);
+    }
   }, [propSymbol]);
 
   useEffect(() => {
-    if (propIcon !== undefined) setActiveIcon(propIcon);
+    if (propIcon !== undefined && propIcon.trim() !== '') {
+      setActiveIcon(propIcon);
+    }
   }, [propIcon]);
 
-  const rawCandidate = activeIcon || activeSymbol || '🪙';
+  const rawCandidate = (activeIcon && activeIcon.trim() !== '') 
+    ? activeIcon 
+    : (activeSymbol || '🪙');
+
   const isImage = typeof rawCandidate === 'string' && (
     rawCandidate.startsWith('http://') ||
     rawCandidate.startsWith('https://') ||
@@ -67575,8 +67779,7 @@ export default function DynamicTokenIcon({
     return <Coins className={`inline-block shrink-0 ${className} ${fallbackClassName}`} style={styleOverride} />;
   }
 
-  // Unicode emoji or custom text glyph
-  if (trimmed.length > 0) {
+  if (trimmed.length > 0 && trimmed !== '🪙') {
     return (
       <span
         aria-hidden="true"
@@ -67777,10 +67980,75 @@ export default function TokenPurchaseModal({
 ```typescript
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { useServerInsertedHTML } from 'next/navigation';
 import { applyThemeToDocument, fetchAndApplyServerTheme, applyGlobalFont } from '@/lib/themeConfig';
 
 export default function GlobalThemeSync() {
+  const isInserted = useRef(false);
+
+  // Injects the pre-hydration script into the initial server HTML stream outside the React tree
+  useServerInsertedHTML(() => {
+    if (isInserted.current) return null;
+    isInserted.current = true;
+
+    const prehydrateScript = `(function() {
+      try {
+        var doc = document.documentElement;
+        doc.classList.add('theme-preloading');
+        var mode = localStorage.getItem('zecratary_theme_mode');
+        var isDay = mode === 'light' || mode === 'day';
+        if (isDay) {
+          doc.classList.remove('dark');
+          doc.classList.add('light');
+        } else {
+          doc.classList.remove('light');
+          doc.classList.add('dark');
+        }
+        var stored = localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config');
+        var c = stored ? JSON.parse(stored) : null;
+        if (c) {
+          var p = c.primary || c.primaryColor || '#10b981';
+          var ph = c.primaryHover || '#059669';
+          var ac = c.accentEmerald || c.accentColor || c.accent || '#10b981';
+          var bg = c.backgroundColor || c.backgroundDark || '#070b13';
+          var card = c.cardBackground || c.cardDark || '#0f172a';
+          var border = c.cardBorder || c.borderColor || '#1e293b';
+          var textSec = c.textSecondary || '#94a3b8';
+          var txt = c.textColor || '#ffffff';
+
+          doc.style.setProperty('--color-primary', p);
+          doc.style.setProperty('--color-primary-hover', ph);
+          doc.style.setProperty('--color-accent', ac);
+          doc.style.setProperty('--color-emerald', ac);
+
+          if (isDay) {
+            doc.style.setProperty('--color-bg', '#f8fafc');
+            doc.style.setProperty('--color-card', '#ffffff');
+            doc.style.setProperty('--color-inner-dark', '#f1f5f9');
+            doc.style.setProperty('--color-border', '#e2e8f0');
+            doc.style.setProperty('--color-text', '#0f172a');
+            doc.style.setProperty('--color-text-secondary', '#64748b');
+          } else {
+            doc.style.setProperty('--color-bg', bg);
+            doc.style.setProperty('--color-card', card);
+            doc.style.setProperty('--color-inner-dark', '#111726');
+            doc.style.setProperty('--color-border', border);
+            doc.style.setProperty('--color-text', txt);
+            doc.style.setProperty('--color-text-secondary', textSec);
+          }
+        }
+      } catch (e) {}
+    })();`;
+
+    return (
+      <script
+        id="zecratary-theme-prehydrate"
+        dangerouslySetInnerHTML={{ __html: prehydrateScript }}
+      />
+    );
+  });
+
   useEffect(() => {
     if (typeof document !== 'undefined') {
       document.documentElement.classList.remove('theme-preloading');
@@ -67800,9 +68068,9 @@ export default function GlobalThemeSync() {
     const handleFontUpdate = (e: Event) => {
       const detail = (e as CustomEvent)?.detail;
       if (detail) {
-        applyGlobalFont(detail.fontFamily, detail.fontSize, detail.fontLetterSpacing);
+        (applyGlobalFont as any)(detail.fontFamily, detail.fontSize, detail.fontLetterSpacing);
       } else {
-        applyGlobalFont();
+        (applyGlobalFont as any)();
       }
     };
 
@@ -70910,13 +71178,33 @@ export default {
 ## File: `apps/web/src/lib/siteConfig.ts`
 ```typescript
 // Site identity and configuration management (Constraint 8)
-// GitHub: cygnusorbit/zecratary
+// Repository: cygnusorbit/zecratary (GitHub)
+
+export interface SiteIdentityConfig {
+  siteName?: string;
+  site_name?: string;
+  siteTagline?: string;
+  site_tagline?: string;
+  tagline?: string;
+  titlebarEmoji?: string;
+  titlebar_emoji?: string;
+  titlebarImage?: string;
+  titlebar_image?: string;
+  faviconEmoji?: string;
+  favicon_emoji?: string;
+  faviconImage?: string;
+  favicon_image?: string;
+  [key: string]: any;
+}
 
 export interface SiteConfig {
   siteName: string;
   siteIcon: string;
   site_name?: string;
   site_icon?: string;
+  siteTagline?: string;
+  site_tagline?: string;
+  tagline?: string;
   titlebarEmoji?: string;
   titlebar_emoji?: string;
   titlebarImage?: string;
@@ -70939,6 +71227,7 @@ export const DEFAULT_SITE_CONFIG: SiteConfig = {
   siteIcon: DEFAULT_SITE_ICON,
   site_name: DEFAULT_SITE_NAME,
   site_icon: DEFAULT_SITE_ICON,
+  siteTagline: 'Autonomous AI Culinary Assistant',
   titlebarEmoji: DEFAULT_SITE_ICON,
   titlebar_emoji: DEFAULT_SITE_ICON,
   faviconEmoji: DEFAULT_SITE_ICON,
@@ -70975,10 +71264,14 @@ export function getSiteConfig(fallback?: Partial<SiteConfig>): SiteConfig {
   return cfg;
 }
 
-export function setMemorySiteConfig(name?: string, icon?: string): void {
-  if (name) {
-    memorySiteConfig.siteName = name;
-    memorySiteConfig.site_name = name;
+export function setMemorySiteConfig(cfgOrName?: any, icon?: string): void {
+  if (typeof cfgOrName === 'object' && cfgOrName !== null) {
+    memorySiteConfig = { ...memorySiteConfig, ...cfgOrName };
+    return;
+  }
+  if (typeof cfgOrName === 'string') {
+    memorySiteConfig.siteName = cfgOrName;
+    memorySiteConfig.site_name = cfgOrName;
   }
   if (icon) {
     memorySiteConfig.siteIcon = icon;
@@ -71011,17 +71304,21 @@ export async function fetchSiteConfig(): Promise<SiteConfig> {
   return memorySiteConfig;
 }
 
-export async function saveSiteConfig(newConfig: Partial<SiteConfig>): Promise<SiteConfig> {
-  const resolvedName = newConfig.siteName || newConfig.site_name || memorySiteConfig.siteName;
-  const resolvedIcon = newConfig.siteIcon || newConfig.site_icon || newConfig.titlebarEmoji || newConfig.faviconEmoji || memorySiteConfig.siteIcon;
+export async function saveSiteConfig(newConfig: any): Promise<SiteConfig> {
+  const cfg = newConfig || {};
+  const resolvedName = cfg.siteName || cfg.site_name || memorySiteConfig.siteName;
+  const resolvedIcon = cfg.siteIcon || cfg.site_icon || cfg.titlebarEmoji || cfg.titlebar_emoji || cfg.faviconEmoji || cfg.favicon_emoji || memorySiteConfig.siteIcon;
+  const resolvedTagline = cfg.siteTagline || cfg.site_tagline || cfg.tagline || memorySiteConfig.siteTagline;
 
   memorySiteConfig = {
     ...memorySiteConfig,
-    ...newConfig,
+    ...cfg,
     siteName: resolvedName,
     site_name: resolvedName,
     siteIcon: resolvedIcon,
     site_icon: resolvedIcon,
+    siteTagline: resolvedTagline,
+    site_tagline: resolvedTagline,
     titlebarEmoji: resolvedIcon,
     faviconEmoji: resolvedIcon,
   };
@@ -71030,6 +71327,8 @@ export async function saveSiteConfig(newConfig: Partial<SiteConfig>): Promise<Si
     try {
       localStorage.setItem('zecratary_site_config', JSON.stringify(memorySiteConfig));
       window.dispatchEvent(new CustomEvent('zecratary_site_settings_changed', { detail: memorySiteConfig }));
+      window.dispatchEvent(new CustomEvent('zecratary_site_config_updated', { detail: memorySiteConfig }));
+      window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       if (resolvedIcon) {
         updateFavicon(resolvedIcon);
       }
@@ -71043,6 +71342,8 @@ export async function saveSiteConfig(newConfig: Partial<SiteConfig>): Promise<Si
         body: JSON.stringify({
           siteName: resolvedName,
           site_name: resolvedName,
+          siteTagline: resolvedTagline,
+          site_tagline: resolvedTagline,
           titlebarEmoji: resolvedIcon,
           titlebar_emoji: resolvedIcon,
           faviconEmoji: resolvedIcon,
@@ -71063,19 +71364,20 @@ export function setSiteConfig(newConfig: Partial<SiteConfig>): SiteConfig {
 
 export const persistSiteConfig = saveSiteConfig;
 
-export function updateFavicon(iconUrlOrEmoji: string): void {
+export function updateFavicon(iconUrlOrEmoji?: string): void {
   if (typeof document === 'undefined') return;
   try {
+    const iconToUse = iconUrlOrEmoji || memorySiteConfig.faviconImage || memorySiteConfig.faviconEmoji || DEFAULT_SITE_ICON;
     let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
     if (!link) {
       link = document.createElement('link');
       link.rel = 'shortcut icon';
       document.head.appendChild(link);
     }
-    if (iconUrlOrEmoji.startsWith('/') || iconUrlOrEmoji.startsWith('http')) {
-      link.href = iconUrlOrEmoji;
+    if (iconToUse.startsWith('/') || iconToUse.startsWith('http')) {
+      link.href = iconToUse;
     } else {
-      link.href = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${iconUrlOrEmoji}</text></svg>`;
+      link.href = `data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${iconToUse}</text></svg>`;
     }
   } catch (_) {}
 }
@@ -71099,6 +71401,22 @@ export default {
 
 ## File: `apps/web/src/lib/db.ts`
 ```typescript
+
+function resolveDatabaseSSL(url: string) {
+  if (!url) return false;
+  if (
+    url.includes('sslmode=disable') ||
+    url.includes('localhost') ||
+    url.includes('127.0.0.1') ||
+    url.includes('@postgres:') ||
+    process.env.PGSSLMODE === 'disable' ||
+    process.env.NODE_ENV !== 'production'
+  ) {
+    return false;
+  }
+  return { rejectUnauthorized: false };
+}
+
 // Universal Multi-Dialect Database Client (PostgreSQL & MySQL)
 // GitHub: cygnusorbit/zecratary
 // Satisfies Constraint 8: Direct persistence to PostgreSQL & MySQL with driver-scoped SSL

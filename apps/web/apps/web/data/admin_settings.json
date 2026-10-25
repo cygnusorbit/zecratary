@@ -89,18 +89,18 @@
   "faviconImage": "",
   "themeColors": {
     "accent": "#10b981",
-    "primary": "#f59e0b",
-    "cardBorder": "#36270a",
+    "primary": "#E05638",
+    "cardBorder": "#1e293b",
     "accentColor": "#10b981",
-    "sidebarIcon": "#fbbf24",
-    "primaryColor": "#f59e0b",
-    "primaryHover": "#d97706",
+    "sidebarIcon": "#10b981",
+    "primaryColor": "#E05638",
+    "primaryHover": "#c94529",
     "accentEmerald": "#10b981",
-    "textSecondary": "#fcd34d",
-    "backgroundDark": "#120d04",
-    "cardBackground": "#1c1507",
-    "backgroundColor": "#120d04",
-    "sidebarIconColor": "#fbbf24"
+    "textSecondary": "#94a3b8",
+    "backgroundDark": "#070b13",
+    "cardBackground": "#0b0f17",
+    "backgroundColor": "#070b13",
+    "sidebarIconColor": "#10b981"
   },
   "supportedLanguages": [
     {

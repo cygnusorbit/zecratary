@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       success: true,
       balance,
-      tokenSymbol: settings.tokenSymbol || '🪙',
+      tokenSymbol: settings.tokenSymbol, tokenEmoji: settings.tokenSymbol, tokenIcon: settings.tokenSymbol || '🪙',
       tokenName: settings.tokenName || 'Foodie Token',
       costs: settings.costs || { chef: 1, import_url: 1, import_text: 1, import_photo: 1 },
       packages: settings.packages || [],

@@ -1,0 +1,112 @@
+{
+  "id": "rec_1789791432507_746g",
+  "owner": {
+    "id": "usr_admin_1",
+    "name": "System Administrator",
+    "email": "admin@zecratary.com"
+  },
+  "ownerId": "usr_admin_1",
+  "ownerName": "System Administrator",
+  "ownerEmail": "admin@zecratary.com",
+  "userId": "usr_admin_1",
+  "userEmail": "admin@zecratary.com",
+  "createdBy": "admin@zecratary.com",
+  "creatorName": "System Administrator",
+  "isPublic": false,
+  "visibility": "private",
+  "title": "Spinach French Onion Cob Dip",
+  "description": "",
+  "prepMinutes": 20,
+  "cookMinutes": 25,
+  "servings": 12,
+  "recipeType": "Main Dish",
+  "mealType": "Main Dish",
+  "cuisine": "",
+  "ingredients": [
+    {
+      "id": "ing_1789791432501_0",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "unit",
+      "item": "packet (40g/1.4oz)   French onion soup mix powder, ( full salt (not low salt))",
+      "name": "packet (40g/1.4oz)   French onion soup mix powder, ( full salt (not low salt))",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789791432502_1",
+      "amount": "250",
+      "quantity": "250",
+      "unit": "g",
+      "item": "/8 oz  cream cheese (, full fat)",
+      "name": "/8 oz  cream cheese (, full fat)",
+      "category": "Dairy"
+    },
+    {
+      "id": "ing_1789791432502_2",
+      "amount": "300",
+      "quantity": "300",
+      "unit": "g",
+      "item": "/ 10oz   sour cream (, full fat (or 250g/8oz tub + top up with yogurt or extra mayo))",
+      "name": "/ 10oz   sour cream (, full fat (or 250g/8oz tub + top up with yogurt or extra mayo))",
+      "category": "Dairy"
+    },
+    {
+      "id": "ing_1789791432502_3",
+      "amount": "1/2",
+      "quantity": "1/2",
+      "unit": "cup",
+      "item": "mayonnaise",
+      "name": "mayonnaise",
+      "category": "Condiments and Sauces"
+    },
+    {
+      "id": "ing_1789791432502_4",
+      "amount": "250",
+      "quantity": "250",
+      "unit": "g",
+      "item": "/8 oz  frozen chopped spinach (, thawed (I microwave), excess water squeezed out with hands (Note 1))",
+      "name": "/8 oz  frozen chopped spinach (, thawed (I microwave), excess water squeezed out with hands (Note 1))",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789791432502_5",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "unit",
+      "item": "cob loaf ((crusty round bread), preferably sourdough, or other shape loaf, about 25cm/10oz wide (Note 2))",
+      "name": "cob loaf ((crusty round bread), preferably sourdough, or other shape loaf, about 25cm/10oz wide (Note 2))",
+      "category": "Grains and Pasta"
+    },
+    {
+      "id": "ing_1789791432502_6",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "unit",
+      "item": "Artichokes, chopped water chestnuts, green onion, bacon, garlic, shredded cheese, jalapeño (for zing!)",
+      "name": "Artichokes, chopped water chestnuts, green onion, bacon, garlic, shredded cheese, jalapeño (for zing!)",
+      "category": "Produce"
+    }
+  ],
+  "instructions": [
+    "Warm cream cheese then mix well to soften. Mix in mayo, sour cream and soup, then spinach. Fridge 3 hours, serve in bread bowl!",
+    "Soften cream cheese - Put the cream cheese in a microwave-proof bowl and use a wooden spoon to roughly break it up into 8 or so chunks. Microwave on high for ~30 seconds then mix well until it is soft and loose, like sour cream.",
+    "Mix - Add the sour cream, mayonnaise and soup powder, mix well. Then stir in spinach.",
+    "Fridge 3 hours - Refrigerate, covered, for 3 hours (or overnight) to let the flavours meld.",
+    "Bread bowl - Using a bread knife, cut a lid off the bread (about 2.5cm/1\" thick). Cut around the inside of the loaf, leaving a 2cm/0.8\" border and base. Score the bread inside the ring into 2.5cm/1\" squares, then pull the pieces out with your fingers to create a bread bowl.",
+    "Serve - Take it out of the fridge 1 hour prior to serving to take the chill out and loosen (if needed, warm slightly in microwave). Give it a good mix, pour into the bowl and serve with the bread pieces on the side for dipping. I recommend providing extra dippers (crackers, chips - my favourite is crinkle cut plain potato chips) as there is more dip than bread!",
+    "Loosely wrap the dip filled bread with foil and bake for 30 minutes at 180°C/350°F (160°C fan-forced). Olive oil spray bread pieces and season with pinch of salt. Scatter around the unwrapped cob dip and bake for a further 15 minutes or until the bread pieces are lightly browned. Serve warm!"
+  ],
+  "nutrition": {},
+  "tags": [
+    "Main Dish"
+  ],
+  "image": "/uploads/recipes/import-1789791432479-gdcen7.jpg",
+  "imageUrl": "/uploads/recipes/import-1789791432479-gdcen7.jpg",
+  "sourceUrl": "https://www.recipetineats.com/spinach-french-onion-cob-dip/",
+  "isFavorite": false,
+  "isCooked": false,
+  "rating": 0,
+  "bookId": null,
+  "createdAt": "2026-09-19T04:17:12.507Z",
+  "updatedAt": "2026-10-25T17:11:30.969Z"
+}

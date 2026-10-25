@@ -1,0 +1,54 @@
+{
+  "id": "rec_med_quinoa_bowl",
+  "owner": {
+    "id": "usr_admin_1",
+    "name": "Creator",
+    "email": "usr_admin_1"
+  },
+  "ownerId": "usr_admin_1",
+  "ownerName": "Creator",
+  "ownerEmail": "usr_admin_1",
+  "userId": "usr_admin_1",
+  "userEmail": "usr_admin_1",
+  "createdBy": "usr_admin_1",
+  "creatorName": "Creator",
+  "isPublic": false,
+  "visibility": "private",
+  "title": "Mediterranean Quinoa Bowl",
+  "description": "Organic rainbow quinoa tossed with English cucumbers, Kalamata olives, cherry tomatoes, and crumbled feta with lemon vinaigrette.",
+  "prepMinutes": 15,
+  "cookMinutes": 25,
+  "servings": 3,
+  "recipeType": "Main Dish",
+  "mealType": "Main Dish",
+  "cuisine": "",
+  "ingredients": [
+    "2 cups Cooked quinoa",
+    "1 cup Cherry tomatoes",
+    "1/2 cup Kalamata olives",
+    "100g Feta cheese",
+    "2 tbsp Lemon vinaigrette",
+    "1 Cucumber, diced"
+  ],
+  "instructions": [
+    "Combine cooked quinoa with diced cucumber, tomatoes, and olives.",
+    "Toss thoroughly with vinaigrette dressing.",
+    "Top with crumbled feta cheese."
+  ],
+  "nutrition": {},
+  "tags": [
+    "Main Dish",
+    "Mediterranean",
+    "Healthy",
+    "Gluten-Free"
+  ],
+  "image": "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=800&q=80",
+  "imageUrl": "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=800&q=80",
+  "sourceUrl": "https://bbcgoodfood.com",
+  "isFavorite": false,
+  "isCooked": false,
+  "rating": 0,
+  "bookId": "book_healthy_prep",
+  "createdAt": "2026-10-23T19:41:20.181Z",
+  "updatedAt": "2026-10-25T17:11:30.947Z"
+}

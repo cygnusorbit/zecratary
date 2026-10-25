@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
 
     const updated = await saveTokenSettings({
       tokenName: tokenName?.trim() || 'Foodie Token',
-      tokenSymbol: tokenSymbol?.trim() || '🪙',
+      tokenSymbol: tokenSymbol, tokenEmoji: tokenSymbol, tokenIcon: tokenSymbol?.trim() || '🪙',
       chefCost: Math.max(0, parseInt(chefCost ?? 1, 10)),
       importUrlCost: Math.max(0, parseInt(importUrlCost ?? 2, 10)),
       importTextCost: Math.max(0, parseInt(importTextCost ?? 1, 10)),

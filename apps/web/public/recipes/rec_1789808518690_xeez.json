@@ -1,0 +1,305 @@
+{
+  "id": "rec_1789808518690_xeez",
+  "owner": {
+    "id": "usr_admin_1",
+    "name": "System Administrator",
+    "email": "admin@zecratary.com"
+  },
+  "ownerId": "usr_admin_1",
+  "ownerName": "System Administrator",
+  "ownerEmail": "admin@zecratary.com",
+  "userId": "usr_admin_1",
+  "userEmail": "admin@zecratary.com",
+  "createdBy": "admin@zecratary.com",
+  "creatorName": "System Administrator",
+  "isPublic": false,
+  "visibility": "private",
+  "title": "Slow-roast Easter stuffed lamb",
+  "description": "",
+  "prepMinutes": 20,
+  "cookMinutes": 25,
+  "servings": 5,
+  "recipeType": "Main Dish",
+  "mealType": "Main Dish",
+  "cuisine": "",
+  "ingredients": [
+    {
+      "id": "ing_1789808518679_0",
+      "amount": "35 - 1.5",
+      "quantity": "35 - 1.5",
+      "unit": "kg",
+      "item": "/ 2.7 - 3 lb  deboned lamb shoulder ((Note 1))",
+      "name": "/ 2.7 - 3 lb  deboned lamb shoulder ((Note 1))",
+      "category": "Meat and Seafood"
+    },
+    {
+      "id": "ing_1789808518681_1",
+      "amount": "1 1/2",
+      "quantity": "1 1/2",
+      "unit": "tsp",
+      "item": "cooking salt / kosher salt (, divided)",
+      "name": "cooking salt / kosher salt (, divided)",
+      "category": "Pantry Staples"
+    },
+    {
+      "id": "ing_1789808518681_2",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "tsp",
+      "item": "black pepper (, divided)",
+      "name": "black pepper (, divided)",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808518682_3",
+      "amount": "2",
+      "quantity": "2",
+      "unit": "tsp",
+      "item": "extra virgin olive oil",
+      "name": "extra virgin olive oil",
+      "category": "Condiments and Sauces"
+    },
+    {
+      "id": "ing_1789808518682_4",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "tbsp",
+      "item": "/ 20g  unsalted butter",
+      "name": "/ 20g  unsalted butter",
+      "category": "Dairy"
+    },
+    {
+      "id": "ing_1789808518682_5",
+      "amount": "2",
+      "quantity": "2",
+      "unit": "unit",
+      "item": "eschalots (, finely diced (US: shallots, sub 1 small onion) (Note 2))",
+      "name": "eschalots (, finely diced (US: shallots, sub 1 small onion) (Note 2))",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808518682_6",
+      "amount": "3",
+      "quantity": "3",
+      "unit": "unit",
+      "item": "garlic cloves (, finely minced)",
+      "name": "garlic cloves (, finely minced)",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808518682_7",
+      "amount": "300",
+      "quantity": "300",
+      "unit": "g",
+      "item": "/ 10 oz  mushrooms (, button/white (Note 3))",
+      "name": "/ 10 oz  mushrooms (, button/white (Note 3))",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808518682_8",
+      "amount": "2",
+      "quantity": "2",
+      "unit": "unit",
+      "item": "tightly packed cups baby spinach (, roughly chopped 100g)",
+      "name": "tightly packed cups baby spinach (, roughly chopped 100g)",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808518682_9",
+      "amount": "3",
+      "quantity": "3",
+      "unit": "tbsp",
+      "item": "skinless hazelnuts ((Note 4))",
+      "name": "skinless hazelnuts ((Note 4))",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808518682_10",
+      "amount": "3",
+      "quantity": "3",
+      "unit": "tbsp",
+      "item": "pistachios (, roughly chopped (Note 4))",
+      "name": "pistachios (, roughly chopped (Note 4))",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808518682_11",
+      "amount": "1 1/2",
+      "quantity": "1 1/2",
+      "unit": "tbsp",
+      "item": "parsley (, finely chopped (ok to omit))",
+      "name": "parsley (, finely chopped (ok to omit))",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808518682_12",
+      "amount": "1 1/2",
+      "quantity": "1 1/2",
+      "unit": "tsp",
+      "item": "rosemary (, fresh, finely chopped (sub fresh thyme, or 1 tsp dried))",
+      "name": "rosemary (, fresh, finely chopped (sub fresh thyme, or 1 tsp dried))",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808518682_13",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "tbsp",
+      "item": "lemon zest ((divine touch, don't skip this!))",
+      "name": "lemon zest ((divine touch, don't skip this!))",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808518682_14",
+      "amount": "1/2",
+      "quantity": "1/2",
+      "unit": "tsp",
+      "item": "cooking salt / kosher salt",
+      "name": "cooking salt / kosher salt",
+      "category": "Pantry Staples"
+    },
+    {
+      "id": "ing_1789808518682_15",
+      "amount": "1/4",
+      "quantity": "1/4",
+      "unit": "tsp",
+      "item": "black pepper",
+      "name": "black pepper",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808518682_16",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "kg",
+      "item": "/ 2 lb  baby potatoes (, cut in half (4 if large) (Note 5))",
+      "name": "/ 2 lb  baby potatoes (, cut in half (4 if large) (Note 5))",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808518682_17",
+      "amount": "1/2",
+      "quantity": "1/2",
+      "unit": "tsp",
+      "item": "cooking salt / kosher salt",
+      "name": "cooking salt / kosher salt",
+      "category": "Pantry Staples"
+    },
+    {
+      "id": "ing_1789808518682_18",
+      "amount": "1/4",
+      "quantity": "1/4",
+      "unit": "tsp",
+      "item": "black pepper",
+      "name": "black pepper",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808518682_19",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "tbsp",
+      "item": "extra virgin olive oil",
+      "name": "extra virgin olive oil",
+      "category": "Condiments and Sauces"
+    },
+    {
+      "id": "ing_1789808518682_20",
+      "amount": "2",
+      "quantity": "2",
+      "unit": "tbsp",
+      "item": "flour (plain / all-purpose)",
+      "name": "flour (plain / all-purpose)",
+      "category": "Grains and Pasta"
+    },
+    {
+      "id": "ing_1789808518683_21",
+      "amount": "1 1/4",
+      "quantity": "1 1/4",
+      "unit": "cups",
+      "item": "beef stock/broth (, low sodium)",
+      "name": "beef stock/broth (, low sodium)",
+      "category": "Meat and Seafood"
+    },
+    {
+      "id": "ing_1789808518683_22",
+      "amount": "1/4",
+      "quantity": "1/4",
+      "unit": "tsp",
+      "item": "dark soy sauce ((optional, for deeper colour) (Note 6))",
+      "name": "dark soy sauce ((optional, for deeper colour) (Note 6))",
+      "category": "Condiments and Sauces"
+    },
+    {
+      "id": "ing_1789808518683_23",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "unit",
+      "item": "Salt and pepper (, if needed (I don't add any more))",
+      "name": "Salt and pepper (, if needed (I don't add any more))",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808518683_24",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "tbsp",
+      "item": "pistachios (, roughly chopped (optional garnish))",
+      "name": "pistachios (, roughly chopped (optional garnish))",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808518683_25",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "unit",
+      "item": "Rosemary sprigs (, optional garnish)",
+      "name": "Rosemary sprigs (, optional garnish)",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808518683_26",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "unit",
+      "item": "Sautéed green beans ((pictured - vegetable side, splash of colour))",
+      "name": "Sautéed green beans ((pictured - vegetable side, splash of colour))",
+      "category": "Produce"
+    }
+  ],
+  "instructions": [
+    "Roast hazelnuts - Preheat oven to 180°C/350°F (160°C fan-forced). Roast the hazelnuts for 8 minutes. Cool, then roughly chop.",
+    "Blitz the mushrooms in a food processor, scraping down the sides as needed, until the mushrooms are chopped into little 3mm/0.1\" pieces.",
+    "Duxelle - Melt the butter in a non-stick pan over high heat. Add eschalots, garlic and mushrooms. Cook, stirring regularly, for 5 minutes or until the liquid that comes out of the mushrooms mostly evaporates. Add spinach and cook until wilted.",
+    "Cool - Transfer the filling into a bowl. Cool for 20 minutes then stir in remaining ingredients.",
+    "Stuffing log - Pile the stuffing on a piece of cling wrap. Use your hands to roughly shape it into a 35cm / 13.5\" long log. Tightly roll up with cling wrap. Place in the freezer for 3 hours (up to 3 days) until it is firm. (Note 7)",
+    "Pound - Place the lamb shoulder fat-side down. Cover with plastic wrap (I use go between) or baking paper. Then use a rolling pin or meat mallet to pound the meat (hard!) into a 40 x 22cm rectangle (15.5 x 8.5\"). Aim for even thickness ~1.75cm (2/3\"). Trim and patch as needed to make your rectangle - see video, I cut & rearrange 2 large flappy bits that stick out.",
+    "Roll - Sprinkle the surface of the lamb with half the salt and pepper. Unwrap the frozen stuffing log then roll it up tightly, finishing with the seam side down.",
+    "Tie - Secure with kitchen twine tied every 2cm / 0.8\". (See video for tips)",
+    "Preheat oven to 220°C/425°F (200°C fan-forced).",
+    "Season - Rub the lamb roll all over with the olive oil, then sprinkle with the remaining salt and pepper.",
+    "Potatoes - Toss the potatoes with the salt, pepper and olive oil in a large roasting pan (not a baking tray). Put the lamb on top of the potato, on the diagonal if needed to fit.",
+    "Short high temp roast - Roast for 30 minutes (renders some fat and gives the colour a head start).",
+    "Slow roast - Turn the oven down to 160°C/320°F (140°C fan). Cook for 2 1/2 hours, or until the internal temperature is 98°C/208°F or the meat can be fairly easily teased apart using two fork (check in a discreet spot).",
+    "Rest - Remove lamb and potato to a tray and loosely cover with foil while you make the gravy.",
+    "Drippings - The roasting pan will have meat juices and fat. Tilt the pan so you can scoop off and discard all but 3 tablespoons of fat (the clear liquid that rises to the surface). Make sure you keep the dark brown juices in the pan. If you're short of fat, add butter.",
+    "Heat fat - Put the pan directly on the stove over medium heat. Once the fat is hot, sprinkle the flour over and stir for 1 minute.",
+    "Thicken - While stirring, slowly pour in the stock. Add soy sauce, then keep stirring as it bubbles gently until it thickens into a maple syrup consistency.",
+    "Taste and add more salt and pepper if desired (I don't need more). Pour into a jug (strain, if needed).",
+    "Cut the string off the lamb then slice into 2cm / 0.8\" thick slices.",
+    "Plate on a platter, surround with the potatoes. Serve with gravy, sprinkled with extra chopped pistachios if desired! (Shown in the video with sautéed green beans)."
+  ],
+  "nutrition": {},
+  "tags": [
+    "Main Dish"
+  ],
+  "image": "/uploads/recipes/import-1789808518140-3qnb86.jpg",
+  "imageUrl": "/uploads/recipes/import-1789808518140-3qnb86.jpg",
+  "sourceUrl": "https://www.recipetineats.com/slow-roast-easter-stuffed-lamb/",
+  "isFavorite": false,
+  "isCooked": false,
+  "rating": 0,
+  "bookId": null,
+  "createdAt": "2026-09-19T09:01:58.690Z",
+  "updatedAt": "2026-10-25T17:11:30.974Z"
+}

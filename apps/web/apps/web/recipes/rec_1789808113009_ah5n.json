@@ -1,0 +1,170 @@
+{
+  "id": "rec_1789808113009_ah5n",
+  "owner": {
+    "id": "usr_admin_1",
+    "name": "System Administrator",
+    "email": "admin@zecratary.com"
+  },
+  "ownerId": "usr_admin_1",
+  "ownerName": "System Administrator",
+  "ownerEmail": "admin@zecratary.com",
+  "userId": "usr_admin_1",
+  "userEmail": "admin@zecratary.com",
+  "createdBy": "admin@zecratary.com",
+  "creatorName": "System Administrator",
+  "isPublic": false,
+  "visibility": "private",
+  "title": "Monster Cookies",
+  "description": "",
+  "prepMinutes": 20,
+  "cookMinutes": 25,
+  "servings": 18,
+  "recipeType": "Main Dish",
+  "mealType": "Main Dish",
+  "cuisine": "",
+  "ingredients": [
+    {
+      "id": "ing_1789808113003_0",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "cup",
+      "item": "plain flour / all-purpose flour ((Note 1 for gluten-free))",
+      "name": "plain flour / all-purpose flour ((Note 1 for gluten-free))",
+      "category": "Grains and Pasta"
+    },
+    {
+      "id": "ing_1789808113003_1",
+      "amount": "1 1/2",
+      "quantity": "1 1/2",
+      "unit": "cups",
+      "item": "rolled oats ((not steel-cut, quick cook or porridge oats))",
+      "name": "rolled oats ((not steel-cut, quick cook or porridge oats))",
+      "category": "Grains and Pasta"
+    },
+    {
+      "id": "ing_1789808113004_2",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "tsp",
+      "item": "baking soda ((bi-carbonate soda), sifted if lumpy (Note 2))",
+      "name": "baking soda ((bi-carbonate soda), sifted if lumpy (Note 2))",
+      "category": "Beverages"
+    },
+    {
+      "id": "ing_1789808113004_3",
+      "amount": "1/4",
+      "quantity": "1/4",
+      "unit": "tsp",
+      "item": "cooking salt / kosher salt ((halve for table salt, +50% for flakes))",
+      "name": "cooking salt / kosher salt ((halve for table salt, +50% for flakes))",
+      "category": "Pantry Staples"
+    },
+    {
+      "id": "ing_1789808113004_4",
+      "amount": "125",
+      "quantity": "125",
+      "unit": "g",
+      "item": "/ 8 tbsp   unsalted butter (, cut into chunks (for even melting))",
+      "name": "/ 8 tbsp   unsalted butter (, cut into chunks (for even melting))",
+      "category": "Dairy"
+    },
+    {
+      "id": "ing_1789808113004_5",
+      "amount": "3/4",
+      "quantity": "3/4",
+      "unit": "cup",
+      "item": "creamy peanut butter ((not the runny natural, no added salt or sugar kind, also see FAQ for peanut allergy alternatives))",
+      "name": "creamy peanut butter ((not the runny natural, no added salt or sugar kind, also see FAQ for peanut allergy alternatives))",
+      "category": "Dairy"
+    },
+    {
+      "id": "ing_1789808113004_6",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "large",
+      "item": "egg ((~50-55g/2oz in shell), fridge cold is fine)",
+      "name": "egg ((~50-55g/2oz in shell), fridge cold is fine)",
+      "category": "Meat and Seafood"
+    },
+    {
+      "id": "ing_1789808113004_7",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "tsp",
+      "item": "vanilla extract",
+      "name": "vanilla extract",
+      "category": "Pantry Staples"
+    },
+    {
+      "id": "ing_1789808113004_8",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "cup",
+      "item": "(tightly packed) brown sugar",
+      "name": "(tightly packed) brown sugar",
+      "category": "Pantry Staples"
+    },
+    {
+      "id": "ing_1789808113004_9",
+      "amount": "1",
+      "quantity": "1",
+      "unit": "cup",
+      "item": "(200g)  M&Ms (, plain chocolate ones, not peanut or crispy rice)",
+      "name": "(200g)  M&Ms (, plain chocolate ones, not peanut or crispy rice)",
+      "category": "Grains and Pasta"
+    },
+    {
+      "id": "ing_1789808113004_10",
+      "amount": "1/2",
+      "quantity": "1/2",
+      "unit": "cup",
+      "item": "(90g)  dark chocolate chips / semi-sweet chips",
+      "name": "(90g)  dark chocolate chips / semi-sweet chips",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808113004_11",
+      "amount": "3",
+      "quantity": "3",
+      "unit": "tbsp",
+      "item": "(35g)  M&Ms",
+      "name": "(35g)  M&Ms",
+      "category": "Produce"
+    },
+    {
+      "id": "ing_1789808113004_12",
+      "amount": "2",
+      "quantity": "2",
+      "unit": "tbsp",
+      "item": "(20g)  dark chocolate chips / semi-sweet chips",
+      "name": "(20g)  dark chocolate chips / semi-sweet chips",
+      "category": "Produce"
+    }
+  ],
+  "instructions": [
+    "Mix Dry ingredients in a bowl (with wooden spoon). Barely melt butter, finish melting by hand. Add remaining Wet, mix. Mix in Dry, adding choc chips and M&M's towards the end. Roll 18 x 3 tbsp balls (size 20 cookie scoop), bake 15 min @ 180°C/350°F (160°C fan), cool 10 min on tray then 10 min on rack before attacking!",
+    "Preheat the oven to 180°C/350°F (160°C fan-forced). Line 3 trays with baking paper (parchment paper).",
+    "Dry ingredients - Put the Dry ingredients in a medium bowl and mix with a wooden spoon, just to combine.",
+    "Barely melt butter – Put the butter in a microwave proof bowl and microwave in 20 second increments on high until almost melted. Then mix with a wooden spoon to finish melting using residual heat. (Note 3)",
+    "Wet ingredients - To the butter bowl, add the rest of the Wet ingredients. Then mix vigorously with the wooden spoon until it's smooth.",
+    "Make cookie dough - Add the Dry ingredients in, then mix until most of the flour is mixed in. Then add the chocolate chips and M&M's, then mix until they are dispersed through the batter and you can no longer see flour.",
+    "Roll cookie balls - Roll* into 18 balls, 3 tablespoons each (4.5cm / 1.8\" diameter).",
+    "My method - portion all dough using size 20 cookie scoop, then roll. Place balls on three paper lined trays at least 7.5cm / 3\" apart.* If dough is a bit too sticky to roll, pop in fridge for 5 min, firms up quickly.",
+    "Bake 2 trays for 15 minutes, switching the tray shelves at the 8 minute mark.",
+    "Decorate (optional) - While the cookies are still hot, press chocolate chips onto the surface (the heat will melt them enough to stick) and lightly press M&M’s halfway in, they’ll set firmly in place once the cookies cool. (Note 4).",
+    "Cool for 10 minutes on the tray (to finish cooking and set) then transfer to a rack and cool for another 10 minutes before attacking, these cookies are fragile when hot. (Meanwhile, bake the third tray). Fully cool before storing in an airtight container for 5 days, in a cool pantry."
+  ],
+  "nutrition": {},
+  "tags": [
+    "Main Dish"
+  ],
+  "image": "/uploads/recipes/import-1789808112976-n26l7x.jpg",
+  "imageUrl": "/uploads/recipes/import-1789808112976-n26l7x.jpg",
+  "sourceUrl": "https://www.recipetineats.com/monster-cookies-recipe/",
+  "isFavorite": false,
+  "isCooked": false,
+  "rating": 0,
+  "bookId": null,
+  "createdAt": "2026-09-19T08:55:13.010Z",
+  "updatedAt": "2026-10-25T17:11:30.971Z"
+}

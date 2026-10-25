@@ -1,0 +1,161 @@
+{
+  "id": "rec_1789470047708_puf3",
+  "owner": {
+    "id": "usr_admin_1",
+    "name": "Creator",
+    "email": "usr_admin_1"
+  },
+  "ownerId": "usr_admin_1",
+  "ownerName": "Creator",
+  "ownerEmail": "usr_admin_1",
+  "userId": "usr_admin_1",
+  "userEmail": "usr_admin_1",
+  "createdBy": "usr_admin_1",
+  "creatorName": "Creator",
+  "isPublic": false,
+  "visibility": "private",
+  "title": "Cheesy Zucchini Muffins",
+  "description": "",
+  "prepMinutes": 15,
+  "cookMinutes": 25,
+  "servings": 12,
+  "recipeType": "Main Dish",
+  "mealType": "Main Dish",
+  "cuisine": "",
+  "ingredients": [
+    {
+      "id": "ing_1789470047704_0",
+      "item": "Olive oil spray (, for greasing the muffin tins well)",
+      "name": "Olive oil spray (, for greasing the muffin tins well)",
+      "unit": "unit",
+      "amount": "1",
+      "category": "Condiments and Sauces",
+      "quantity": "1"
+    },
+    {
+      "id": "ing_1789470047704_1",
+      "item": "zucchini (, larg-ish, about 180g / 6 oz each, shredded using a box grater, excess liquid squeezed out using hands (Note 1))",
+      "name": "zucchini (, larg-ish, about 180g / 6 oz each, shredded using a box grater, excess liquid squeezed out using hands (Note 1))",
+      "unit": "unit",
+      "amount": "1",
+      "category": "Produce",
+      "quantity": "1"
+    },
+    {
+      "id": "ing_1789470047705_2",
+      "item": "cheddar cheese (, shredded (or tasty, Colby  or other melting cheese except mozzarella - Note 2))",
+      "name": "cheddar cheese (, shredded (or tasty, Colby  or other melting cheese except mozzarella - Note 2))",
+      "unit": "cups",
+      "amount": "2",
+      "category": "Dairy",
+      "quantity": "2"
+    },
+    {
+      "id": "ing_1789470047705_3",
+      "item": "plain flour / all-purpose flour",
+      "name": "plain flour / all-purpose flour",
+      "unit": "cups",
+      "amount": "2",
+      "category": "Grains and Pasta",
+      "quantity": "2"
+    },
+    {
+      "id": "ing_1789470047705_4",
+      "item": "baking powder",
+      "name": "baking powder",
+      "unit": "tsp",
+      "amount": "1 1/2",
+      "category": "Pantry Staples",
+      "quantity": "1 1/2"
+    },
+    {
+      "id": "ing_1789470047705_5",
+      "item": "baking soda  (/ bi-carb soda (sub 1 1/2 tsp baking powder))",
+      "name": "baking soda  (/ bi-carb soda (sub 1 1/2 tsp baking powder))",
+      "unit": "tsp",
+      "amount": "1/2",
+      "category": "Beverages",
+      "quantity": "1/2"
+    },
+    {
+      "id": "ing_1789470047705_6",
+      "item": "cooking salt / kosher salt",
+      "name": "cooking salt / kosher salt",
+      "unit": "tsp",
+      "amount": "1/2",
+      "category": "Pantry Staples",
+      "quantity": "1/2"
+    },
+    {
+      "id": "ing_1789470047705_7",
+      "item": "egg ((~50 - 55g/2 oz each))",
+      "name": "egg ((~50 - 55g/2 oz each))",
+      "unit": "large",
+      "amount": "1",
+      "category": "Meat and Seafood",
+      "quantity": "1"
+    },
+    {
+      "id": "ing_1789470047705_8",
+      "item": "milk ((full or low fat))",
+      "name": "milk ((full or low fat))",
+      "unit": "cup",
+      "amount": "3/4",
+      "category": "Dairy",
+      "quantity": "3/4"
+    },
+    {
+      "id": "ing_1789470047705_9",
+      "item": "plain yoghurt (or sour cream, full fat best but low-fat works as well)",
+      "name": "plain yoghurt (or sour cream, full fat best but low-fat works as well)",
+      "unit": "cup",
+      "amount": "1/4",
+      "category": "Dairy",
+      "quantity": "1/4"
+    },
+    {
+      "id": "ing_1789470047705_10",
+      "item": "olive oil ( (or any plain flavoured oil))",
+      "name": "olive oil ( (or any plain flavoured oil))",
+      "unit": "cup",
+      "amount": "1/4",
+      "category": "Condiments and Sauces",
+      "quantity": "1/4"
+    },
+    {
+      "id": "ing_1789470047705_11",
+      "item": "garlic clove (, grated or crushed using a garlic press)",
+      "name": "garlic clove (, grated or crushed using a garlic press)",
+      "unit": "unit",
+      "amount": "1",
+      "category": "Produce",
+      "quantity": "1"
+    }
+  ],
+  "instructions": [
+    "Whisk wet and dry in separate bowls, combine, stir in cheese and grated zucchini (excess water squeezed out). Bake 25 min in flour dusted or paper lined muffin tin (cheese gets stuck!) at 200°C/390°F (180°C fan).",
+    "Preheat oven to 200°C/390°F (180°C fan-forced).",
+    "Prepare muffin tin - Spray a 12 hole standard muffin tin generously with oil. If your non-stick coating isn't in great shape (like mine), either use liners instead or lightly dust with flour - I prefer this, for golden muffin sides and base. (Note 3 for how to flour dust pans). Cheese is a strong glue!!",
+    "Grate the zucchini with a standard box grater. Grab handfuls and squeeze out excess water (no need to go to extremes with a tea towel).",
+    "Dry ingredients - Whisk Dry ingredients in a large bowl.",
+    "Wet ingredients - Whisk Wet ingredients in a separate bowl.",
+    "Combine wet and dry - Pour Wet into the Dry ingredients bowl. Mix 8 times or until flour is almost mixed in but you can still see some.",
+    "Add zucchini and cheese then mix as few times as possible just to incorporate remaining bits of flour - no more than 7 big stirs (secret to soft muffs).",
+    "The batter will be quite thick - don't worry, the zucchini releases moisture as it bakes.",
+    "Bake 25 min - Divide between 12 holes in muffin in (I use an ice cream scooper). Bake for 25 minutes or until the muffins are golden and crusty, and a toothpick inserted into the centre comes out clean.",
+    "Cool for 10 minutes, then transfer to cooling rack. If they are a bit stuck (cheese!), run a knife around the rim then invert and bang the pan on the counter so they tumble out. Serve warm for optimum experience!"
+  ],
+  "nutrition": {},
+  "tags": [
+    "Main Dish"
+  ],
+  "image": "/uploads/recipes/import-1789470047686-v4uf2v.jpg",
+  "imageUrl": "/uploads/recipes/import-1789470047686-v4uf2v.jpg",
+  "sourceUrl": "https://www.recipetineats.com/cheesy-zucchini-muffins/",
+  "isFavorite": false,
+  "isCooked": false,
+  "rating": 0,
+  "bookId": null,
+  "createdAt": "2026-10-23T19:41:21.601Z",
+  "updatedAt": "2026-10-25T17:11:30.922Z"
+}
