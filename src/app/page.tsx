@@ -647,7 +647,7 @@ export default function DynamicHomePage() {
                       )}
                     </div>
                     <Link
-                      href="/saved"
+                      href="/recipes"
                       className="text-xs font-bold flex items-center gap-1 hover:underline"
                       style={{ color: 'var(--color-primary)' }}
                     >

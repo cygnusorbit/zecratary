@@ -9,7 +9,7 @@ import {
   Trash2, Save, Plus, ImagePlus, Users, Calendar,
   GripVertical, CheckSquare, CheckCircle2, Type, ExternalLink,
   Carrot, Hourglass, ChevronLeft, ChevronRight, LayoutGrid,
-  Grid3X3, Rows3, FileJson, Sparkles
+  Grid3X3, Rows3
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { syncUserSavedRecipes, persistSavedRecipe, deleteSavedRecipe } from '@/lib/recipeSync';
@@ -58,7 +58,7 @@ const isRecipeInBook = (rec: any, bookId: string): boolean => {
   return rec.bookId === bookId || rec.book_id === bookId;
 };
 
-export default function SavedRecipesPage() {
+export default function RecipesPage() {
   const router = useRouter();
   const { t } = useTranslation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -90,7 +90,7 @@ export default function SavedRecipesPage() {
   const [showAddToPlanModal, setShowAddToPlanModal] = useState(false);
   const [planDate, setPlanDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [planMealType, setPlanMealType] = useState('Dinner');
-  const [planTime, setPlanTime] = useState('');
+  const [planTime, setPlanTime] = useState('19:00');
   const [planNotes, setPlanNotes] = useState('');
 
   // Edit Mode & Form State
@@ -120,7 +120,6 @@ export default function SavedRecipesPage() {
   const [noteText, setNoteText] = useState('');
   const [isNoteOpen, setIsNoteOpen] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Grid Density & Pagination States
   const [gridMode, setGridMode] = useState<GridMode>('3x3');
@@ -129,11 +128,6 @@ export default function SavedRecipesPage() {
   // Shopping List Modal State
   const [isShoppingModalOpen, setIsShoppingModalOpen] = useState(false);
   const [shoppingModalIngredients, setShoppingModalIngredients] = useState<any[]>([]);
-
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
-  };
 
   const defaultBooks = [
     { id: 'book_1', title: 'Family Favorites & Weeknight Dinners', description: 'Quick and easy meals.' },
@@ -148,7 +142,7 @@ export default function SavedRecipesPage() {
   }, []);
 
   const getCleanRecipeType = (rec: any): string => {
-    const raw = rec?.recipeType || rec?.category || (Array.isArray(rec?.tags) ? rec?.tags[0] : 'Main Dish');
+    const raw = rec.recipeType || rec.category || (Array.isArray(rec.tags) ? rec.tags[0] : 'Main Dish');
     if (raw === 'Appetizer' || raw === 'Appetiser') return 'Appetiser';
     if (RECIPE_TYPES.includes(raw)) return raw;
     return 'Main Dish';
@@ -231,7 +225,7 @@ export default function SavedRecipesPage() {
         recipeCount: userRecipes.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
       })));
     } catch (e) {
-      console.error('[SavedRecipesPage] Load error:', e);
+      console.error('[RecipesPage] Load error:', e);
     } finally {
       setLoading(false);
     }
@@ -315,7 +309,7 @@ export default function SavedRecipesPage() {
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
       }
     }).catch((err) => {
-      console.error('[SavedRecipesPage] Error saving recipes:', err);
+      console.error('[RecipesPage] Error saving recipes:', err);
     });
 
     const updatedBooks = books.map((b: any) => ({
@@ -323,159 +317,6 @@ export default function SavedRecipesPage() {
       recipeCount: updatedWithId.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
     }));
     setBooks(updatedBooks);
-  };
-
-  // EXPORT JSON HANDLER (Full recipe details with ownership)
-  const handleExportJson = (recipeToExport: any, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (!recipeToExport) return;
-
-    const targetOwnerId = recipeToExport.ownerId || recipeToExport.userId || recipeToExport.user_id || currentUser?.id || 'usr_admin_1';
-    const targetOwnerName = recipeToExport.ownerName || recipeToExport.creatorName || recipeToExport.creator_name || currentUser?.name || 'Chef';
-    const targetOwnerEmail = recipeToExport.ownerEmail || recipeToExport.createdBy || recipeToExport.created_by || currentUser?.email || `${targetOwnerId}@zecratary.local`;
-
-    let cleanIngredients = recipeToExport.ingredients;
-    if (typeof cleanIngredients === 'string') {
-      try { cleanIngredients = JSON.parse(cleanIngredients); } catch (_) { cleanIngredients = [cleanIngredients]; }
-    }
-    if (!Array.isArray(cleanIngredients)) cleanIngredients = [];
-
-    let cleanInstructions = recipeToExport.instructions || recipeToExport.directions || recipeToExport.steps;
-    if (typeof cleanInstructions === 'string') {
-      try { cleanInstructions = JSON.parse(cleanInstructions); } catch (_) { cleanInstructions = [cleanInstructions]; }
-    }
-    if (!Array.isArray(cleanInstructions)) cleanInstructions = [];
-
-    const exportPayload = {
-      schemaVersion: '1.0.0',
-      exportedAt: new Date().toISOString(),
-      id: recipeToExport.id || 'rec_' + Date.now().toString(36),
-      owner: {
-        id: targetOwnerId,
-        name: targetOwnerName,
-        email: targetOwnerEmail
-      },
-      ownerId: targetOwnerId,
-      ownerName: targetOwnerName,
-      ownerEmail: targetOwnerEmail,
-      userId: targetOwnerId,
-      user_id: targetOwnerId,
-      createdBy: targetOwnerEmail,
-      created_by: targetOwnerEmail,
-      creatorName: targetOwnerName,
-      creator_name: targetOwnerName,
-      isPublic: Boolean(recipeToExport.isPublic ?? recipeToExport.is_public ?? false),
-      title: recipeToExport.title || recipeToExport.name || 'Untitled Recipe',
-      name: recipeToExport.title || recipeToExport.name || 'Untitled Recipe',
-      description: recipeToExport.description || '',
-      recipeType: getCleanRecipeType(recipeToExport),
-      category: getCleanRecipeType(recipeToExport),
-      cuisine: recipeToExport.cuisine || '',
-      prepMinutes: Number(recipeToExport.prepMinutes || recipeToExport.prepTimeMinutes || recipeToExport.prep_time) || 15,
-      cookMinutes: Number(recipeToExport.cookMinutes || recipeToExport.cookTimeMinutes || recipeToExport.cook_time) || 25,
-      prepTimeMinutes: Number(recipeToExport.prepMinutes || recipeToExport.prepTimeMinutes || recipeToExport.prep_time) || 15,
-      cookTimeMinutes: Number(recipeToExport.cookMinutes || recipeToExport.cookTimeMinutes || recipeToExport.cook_time) || 25,
-      servings: Number(recipeToExport.servings) || 4,
-      calories: recipeToExport.calories ? Number(recipeToExport.calories) : undefined,
-      difficulty: recipeToExport.difficulty || 'Medium',
-      ingredients: cleanIngredients,
-      instructions: cleanInstructions,
-      directions: cleanInstructions,
-      nutrition: recipeToExport.nutrition || {},
-      tags: Array.isArray(recipeToExport.tags) ? recipeToExport.tags : [getCleanRecipeType(recipeToExport)],
-      image: recipeToExport.imageUrl || recipeToExport.image || recipeToExport.image_url || '',
-      imageUrl: recipeToExport.imageUrl || recipeToExport.image || recipeToExport.image_url || '',
-      sourceUrl: recipeToExport.sourceUrl || recipeToExport.source_url || '',
-      isFavorite: Boolean(recipeToExport.isFavorite ?? recipeToExport.is_favorite),
-      isCooked: Boolean(recipeToExport.isCooked ?? recipeToExport.is_cooked),
-      rating: Number(recipeToExport.rating) || 0,
-      note: recipeToExport.note || ''
-    };
-
-    const jsonStr = JSON.stringify(exportPayload, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const safeTitle = (exportPayload.title || 'recipe')
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]/g, '_')
-      .replace(/_+/g, '_');
-
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${safeTitle}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    showToast((t('recipeExportedSuccess') || 'Exported "{title}" as JSON!').replace('{title}', exportPayload.title));
-  };
-
-  // DIRECT JSON FILE IMPORT
-  const handleDirectJsonUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      const text = await file.text();
-      const parsed = JSON.parse(text);
-      const items = Array.isArray(parsed) ? parsed : (parsed.recipes || [parsed.recipe || parsed]);
-
-      const targetUserId = currentUser?.id || 'usr_admin_1';
-      const newItems: any[] = [];
-
-      for (const item of items) {
-        if (!item || (!item.title && !item.name)) continue;
-        const cleanType = getCleanRecipeType(item);
-
-        let ings = item.ingredients;
-        if (typeof ings === 'string') {
-          try { ings = JSON.parse(ings); } catch (_) { ings = [ings]; }
-        }
-        if (!Array.isArray(ings)) ings = [];
-
-        let insts = item.instructions || item.directions || item.steps;
-        if (typeof insts === 'string') {
-          try { insts = JSON.parse(insts); } catch (_) { insts = [insts]; }
-        }
-        if (!Array.isArray(insts)) insts = [];
-
-        const cleanItem = {
-          ...item,
-          id: item.id || ('rec_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)),
-          userId: targetUserId,
-          user_id: targetUserId,
-          title: item.title || item.name || 'Imported Recipe',
-          name: item.title || item.name || 'Imported Recipe',
-          recipeType: cleanType,
-          category: cleanType,
-          ingredients: ings,
-          instructions: insts,
-          directions: insts,
-          servings: Number(item.servings) || 4,
-          prepTimeMinutes: Number(item.prepMinutes || item.prepTimeMinutes || item.prep_time) || 15,
-          cookTimeMinutes: Number(item.cookMinutes || item.cookTimeMinutes || item.cook_time) || 25,
-          imageUrl: item.imageUrl || item.image || item.image_url || '',
-          sourceUrl: item.sourceUrl || item.source_url || '',
-          isFavorite: Boolean(item.isFavorite ?? item.is_favorite),
-          isCooked: Boolean(item.isCooked ?? item.is_cooked),
-          rating: Number(item.rating) || 0
-        };
-        newItems.push(cleanItem);
-      }
-
-      if (newItems.length > 0) {
-        const merged = [...newItems, ...recipes.filter(r => !newItems.some(ni => ni.id === r.id))];
-        saveAllRecipes(merged);
-        showToast((t('importedRecipesSuccess') || 'Imported {count} recipe(s) from JSON!').replace('{count}', String(newItems.length)));
-      } else {
-        alert(t('invalidRecipeJsonAlert') || 'Invalid recipe JSON file format.');
-      }
-    } catch (err: any) {
-      alert(t('errorImportingJson') || 'Failed to import JSON: ' + (err.message || 'Invalid format'));
-    } finally {
-      e.target.value = '';
-    }
   };
 
   const toggleFavorite = async (e: React.MouseEvent, id: string) => {
@@ -567,8 +408,7 @@ export default function SavedRecipesPage() {
     setShowAddToPlanModal(true);
   };
 
-  const handleSaveToCalendar = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveToCalendar = async () => {
     if (!selectedRecipe || !currentUser) return;
 
     const recName = selectedRecipe.title || selectedRecipe.name || 'Untitled Recipe';
@@ -638,7 +478,9 @@ export default function SavedRecipesPage() {
     }
 
     setShowAddToPlanModal(false);
-    showToast((t('scheduledMealAlert') || 'Successfully scheduled "{title}" in meal plan!').replace('{title}', recName));
+    const alertMsg = (t('scheduledMealAlert') || 'Successfully scheduled "{title}" in your meal plan!')
+      .replace('{title}', recName);
+    alert(alertMsg);
   };
 
   const updateSelectedRecipeState = async (key: string, val: any) => {
@@ -717,9 +559,8 @@ export default function SavedRecipesPage() {
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
         window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
       }
-      showToast(t('recipeDeletedToast') || 'Recipe deleted successfully.');
     } catch (err) {
-      console.error('[SavedRecipesPage] Error deleting recipe:', err);
+      console.error('[RecipesPage] Error deleting recipe:', err);
       alert(t('errorDeletingRecipe') || 'Failed to delete recipe. Please try again.');
     }
   };
@@ -824,7 +665,6 @@ export default function SavedRecipesPage() {
     const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
     saveAllRecipes(updatedList);
     setIsEditing(false);
-    showToast(t('recipeUpdatedSuccess') || 'Recipe updated successfully!');
   };
 
   const calculateScaledAmount = (rawAmt: any, baseServings: number, currentServings: number) => {
@@ -987,11 +827,12 @@ export default function SavedRecipesPage() {
     }
 
     setIsShoppingModalOpen(false);
-    showToast((t('addedItemsShoppingAlert') || 'Added {count} items to Shopping List!').replace('{count}', String(selectedItems.length)));
+    const alertMsg = (t('addedItemsShoppingAlert') || 'Added {count} items to your Shopping List!')
+      .replace('{count}', String(selectedItems.length));
+    alert(alertMsg);
   };
 
-  const handleAddIngredientFilter = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  const handleAddIngredientFilter = () => {
     const clean = ingredientQuery.trim();
     if (!clean) return;
     if (!selectedIngredientsList.includes(clean.toLowerCase())) {
@@ -1077,25 +918,10 @@ export default function SavedRecipesPage() {
       style={{ color: 'var(--color-text)' }}
       onClick={() => setOpenDropdown(null)}
     >
-      {/* Toast Alert */}
-      {toastMessage && (
-        <div 
-          className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-emerald)',
-            color: 'var(--color-text)'
-          }}
-        >
-          <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
-          <span>{toastMessage}</span>
-        </div>
-      )}
-
       {/* Top Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
         <div>
-          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
+          <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
             {t('savedRecipesTitle') || 'Saved Recipes'}
           </h1>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
@@ -1103,8 +929,7 @@ export default function SavedRecipesPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 flex-wrap">
-          {/* Density Switcher */}
+        <div className="flex items-center gap-3">
           <div 
             className="flex items-center p-1 rounded-xl border shadow-sm"
             style={{
@@ -1139,44 +964,8 @@ export default function SavedRecipesPage() {
             })}
           </div>
 
-          {/* Direct JSON Import Button */}
-          <label 
-            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-xs cursor-pointer hover:opacity-85"
-            style={{ 
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-emerald)',
-              color: 'var(--color-emerald)'
-            }}
-            title={t('uploadJsonFileTitle') || "Upload & Import Recipe from JSON file"}
-          >
-            <FileJson className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
-            <span className="hidden sm:inline">{t('importJson') || 'Import JSON'}</span>
-            <input 
-              type="file" 
-              accept=".json,application/json" 
-              className="hidden" 
-              onChange={handleDirectJsonUpload} 
-            />
-          </label>
-
-          {/* Import Recipe Button (Next to Create Recipe) */}
           <Link 
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-xs cursor-pointer hover:opacity-85"
-            href="/import"
-            style={{ 
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-            title={t('importRecipeTooltip') || 'Import or scrape recipe from web URLs or text'}
-          >
-            <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/>
-            <span>{t('importRecipe') || 'Import Recipe'}</span>
-          </Link>
-
-          {/* Create Recipe Button */}
-          <Link 
-            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer"
+            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg"
             href="/manual"
             style={{ backgroundColor: 'var(--color-primary)' }}
             onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -1194,10 +983,11 @@ export default function SavedRecipesPage() {
             <Search className="h-4 w-4 absolute left-3.5 top-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
             <input
               type="text"
+              data-lpignore="true"
               placeholder={t('searchByNamePlaceholder') || 'Search by name'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none"
+              className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none transition-colors"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-border)',
@@ -1275,7 +1065,12 @@ export default function SavedRecipesPage() {
                     borderColor: 'var(--color-primary)'
                   }}
                 >
-                  <form onSubmit={handleAddIngredientFilter} className="flex items-center gap-2">
+                  <div 
+                    role="region"
+                    aria-label="Filter by ingredient"
+                    data-lpignore="true"
+                    className="flex items-center gap-2"
+                  >
                     <div 
                       className="flex-1 border-2 rounded-xl overflow-hidden"
                       style={{
@@ -1286,21 +1081,29 @@ export default function SavedRecipesPage() {
                       <input
                         type="text"
                         autoFocus
+                        data-lpignore="true"
                         placeholder={t('searchIngredientsPlaceholder') || 'Search ingredients'}
                         value={ingredientQuery}
                         onChange={(e) => setIngredientQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddIngredientFilter();
+                          }
+                        }}
                         className="w-full bg-transparent px-3 py-2 text-xs outline-none"
                         style={{ color: 'var(--color-text)' }}
                       />
                     </div>
                     <button
-                      type="submit"
+                      type="button"
+                      onClick={handleAddIngredientFilter}
                       className="text-white p-2 rounded-xl transition flex items-center justify-center font-bold text-sm shadow-md cursor-pointer shrink-0"
                       style={{ backgroundColor: 'var(--color-primary)' }}
                     >
                       <Plus className="h-4 w-4 stroke-[3]"/>
                     </button>
-                  </form>
+                  </div>
 
                   {selectedIngredientsList.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
@@ -1318,7 +1121,7 @@ export default function SavedRecipesPage() {
                           <button
                             type="button"
                             onClick={() => handleRemoveIngredientFilter(ing)}
-                            className="text-slate-400 hover:text-red-500"
+                            className="text-slate-400 hover:text-red-500 cursor-pointer"
                           >
                             <X className="h-3 w-3"/>
                           </button>
@@ -1593,7 +1396,7 @@ export default function SavedRecipesPage() {
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                     />
                     
-                    {/* Card Action Buttons (Harmonized Day/Dark Mode Colors) */}
+                    {/* Card Action Buttons */}
                     <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
@@ -1652,62 +1455,25 @@ export default function SavedRecipesPage() {
                   </div>
                 </div>
 
-                {/* CARD FOOTER: Actions including Green Export JSON & Delete Button */}
-                <div className="px-3.5 pb-3 pt-0 flex flex-col gap-2">
-                  <div className="flex items-center justify-between gap-1">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <span 
-                        className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0"
-                        style={{ backgroundColor: 'var(--color-primary)' }}
-                      >
-                        {cardTypeBadge}
-                      </span>
-
-                      {(r.rating || 0) > 0 && gridMode !== '5x5' ? (
-                        <span className="flex items-center gap-0.5 text-amber-500 text-[11px] font-bold bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/20 shadow-xs">
-                          <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-500"/> {r.rating}
-                        </span>
-                      ) : null}
-                    </div>
-
-                    <span className="text-[11px] flex items-center gap-1 shrink-0 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-                      <Clock className="h-3 w-3"/> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
+                <div className="px-3.5 pb-3 pt-0 flex items-center justify-between gap-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span 
+                      className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                    >
+                      {cardTypeBadge}
                     </span>
+
+                    {(r.rating || 0) > 0 && gridMode !== '5x5' ? (
+                      <span className="flex items-center gap-0.5 text-amber-500 text-[11px] font-bold bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/20 shadow-xs">
+                        <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-500"/> {r.rating}
+                      </span>
+                    ) : null}
                   </div>
 
-                  {/* Export JSON (Green) next to Delete Recipe Button */}
-                  <div className="flex items-center justify-end gap-1.5 pt-1.5 border-t" style={{ borderColor: 'var(--color-border)' }} onClick={(e) => e.stopPropagation()}>
-                    <button
-                      type="button"
-                      onClick={(e) => handleExportJson(r, e)}
-                      className="px-2.5 py-1.5 rounded-xl border font-bold text-[11px] transition cursor-pointer shadow-xs flex items-center gap-1 hover:opacity-85"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-emerald)',
-                        color: 'var(--color-emerald)'
-                      }}
-                      title={t('exportJsonTitle') || "Export recipe as JSON with complete ownership details"}
-                    >
-                      <FileJson className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
-                      <span>{t('exportJson') || 'Export JSON'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteRecipe(r.id);
-                      }}
-                      className="p-1.5 rounded-xl border text-red-500 hover:bg-red-500/10 transition cursor-pointer shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'rgba(239, 68, 68, 0.4)'
-                      }}
-                      title={t('deleteRecipeBtn') || 'Delete Recipe'}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+                  <span className="text-[11px] flex items-center gap-1 shrink-0 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+                    <Clock className="h-3 w-3"/> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
+                  </span>
                 </div>
               </div>
             );
@@ -1808,6 +1574,7 @@ export default function SavedRecipesPage() {
             }}
           >
             <button
+              type="button"
               onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
               className="absolute top-4 right-4 z-30 p-2 rounded-xl border transition cursor-pointer shadow-md"
               style={{
@@ -1986,6 +1753,7 @@ export default function SavedRecipesPage() {
                         }}
                       >
                         <button
+                          type="button"
                           onClick={() => setServingsMultiplier(Math.max(1, servingsMultiplier - 1))}
                           className="px-2.5 py-1 font-bold cursor-pointer transition"
                           style={{ color: 'var(--color-text-secondary)' }}
@@ -1996,6 +1764,7 @@ export default function SavedRecipesPage() {
                           {currentTotalServings}
                         </span>
                         <button
+                          type="button"
                           onClick={() => setServingsMultiplier(servingsMultiplier + 1)}
                           className="px-2.5 py-1 font-bold cursor-pointer transition"
                           style={{ color: 'var(--color-text-secondary)' }}
@@ -2007,6 +1776,7 @@ export default function SavedRecipesPage() {
 
                     <div className="flex items-center gap-2">
                       <button
+                        type="button"
                         onClick={() => alert(t('timerSetAlert') || 'Kitchen Timer set for 15 minutes!')}
                         className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
                         style={{
@@ -2018,6 +1788,7 @@ export default function SavedRecipesPage() {
                         <Timer className="h-3.5 w-3.5"/> {t('timerBtn') || 'Timer'}
                       </button>
                       <button
+                        type="button"
                         onClick={handleOpenEdit}
                         className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
                         style={{
@@ -2029,6 +1800,7 @@ export default function SavedRecipesPage() {
                         <Edit3 className="h-3.5 w-3.5"/> {t('editBtn') || 'Edit'}
                       </button>
                       <button
+                        type="button"
                         onClick={() => {
                           navigator.clipboard.writeText(window.location.href);
                           alert(t('recipeLinkCopiedAlert') || 'Recipe link copied!');
@@ -2108,12 +1880,19 @@ export default function SavedRecipesPage() {
                       </button>
 
                       {isNoteOpen && (
-                        <div className="flex gap-2 animate-in fade-in">
+                        <div className="flex gap-2 animate-in fade-in" data-lpignore="true">
                           <input
                             type="text"
+                            data-lpignore="true"
                             placeholder={t('addNotesPlaceholder') || 'Add notes...'}
                             value={noteText}
                             onChange={(e) => setNoteText(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                updateSelectedRecipeState('note', noteText);
+                                setIsNoteOpen(false);
+                              }
+                            }}
                             className="flex-1 border rounded-xl px-3 py-2 text-xs outline-none"
                             style={{
                               backgroundColor: 'var(--color-inner-dark)',
@@ -2165,6 +1944,7 @@ export default function SavedRecipesPage() {
                           <Type className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/>
                         </div>
                         <button
+                          type="button"
                           onClick={() => setFontSizeScale(Math.max(60, fontSizeScale - 10))}
                           className="px-2.5 py-1 font-bold cursor-pointer"
                           style={{ color: 'var(--color-text-secondary)' }}
@@ -2175,6 +1955,7 @@ export default function SavedRecipesPage() {
                           {fontSizeScale}%
                         </span>
                         <button
+                          type="button"
                           onClick={() => setFontSizeScale(Math.min(140, fontSizeScale + 10))}
                           className="px-2.5 py-1 font-bold cursor-pointer"
                           style={{ color: 'var(--color-text-secondary)' }}
@@ -2272,36 +2053,20 @@ export default function SavedRecipesPage() {
 
                   <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
-                  {/* MODAL FOOTER: Delete (Left) & Export JSON (Green, next to Delete) & Source (Bottom Right) */}
+                  {/* MODAL FOOTER */}
                   <div className="px-5 flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleDeleteRecipe(selectedRecipe.id)}
-                        className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'rgba(239, 68, 68, 0.4)',
-                          color: '#ef4444'
-                        }}
-                      >
-                        <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipeBtn') || 'Delete Recipe'}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleExportJson(selectedRecipe)}
-                        className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs hover:opacity-85"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-emerald)',
-                          color: 'var(--color-emerald)'
-                        }}
-                        title={t('exportJsonTitle') || "Export recipe as JSON with complete ownership details"}
-                      >
-                        <FileJson className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }} />
-                        <span>{t('exportJson') || 'Export JSON'}</span>
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteRecipe(selectedRecipe.id)}
+                      className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'rgba(239, 68, 68, 0.4)',
+                        color: '#ef4444'
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipeBtn') || 'Delete Recipe'}
+                    </button>
 
                     <div className="flex items-center gap-2 ml-auto text-xs">
                       <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
@@ -2347,6 +2112,7 @@ export default function SavedRecipesPage() {
                       <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('editRecipeTitle') || 'Edit Recipe'}
                     </h3>
                     <button
+                      type="button"
                       onClick={() => setIsEditing(false)}
                       className="p-1 rounded-lg transition cursor-pointer"
                       style={{ color: 'var(--color-text-secondary)' }}
@@ -2388,7 +2154,7 @@ export default function SavedRecipesPage() {
 
                   {/* TAB 1: BASIC INFO */}
                   {editTab === 'info' && (
-                    <div className="space-y-5 animate-in fade-in text-xs">
+                    <div className="space-y-5 animate-in fade-in text-xs" data-lpignore="true">
                       <div className="space-y-1.5">
                         <label 
                           className="block font-bold uppercase tracking-wider text-[11px]"
@@ -2453,6 +2219,7 @@ export default function SavedRecipesPage() {
                         <input
                           type="text"
                           required
+                          data-lpignore="true"
                           value={editForm.title}
                           onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
                           className="w-full border rounded-xl p-3 text-sm outline-none"
@@ -2475,6 +2242,7 @@ export default function SavedRecipesPage() {
                         </label>
                         <textarea
                           rows={3}
+                          data-lpignore="true"
                           value={editForm.description}
                           onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
                           className="w-full border rounded-xl p-3 text-xs outline-none resize-y leading-relaxed"
@@ -2521,6 +2289,7 @@ export default function SavedRecipesPage() {
                           </label>
                           <input
                             type="number"
+                            data-lpignore="true"
                             value={editForm.servings}
                             onChange={(e) => setEditForm({ ...editForm, servings: parseInt(e.target.value) || 1 })}
                             className="w-full border rounded-xl p-3 text-xs outline-none"
@@ -2548,7 +2317,7 @@ export default function SavedRecipesPage() {
                           {t('cancel') || 'Cancel'}
                         </button>
                         <button
-                          type="submit"
+                          type="button"
                           onClick={handleSaveEdit}
                           className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg flex items-center gap-2 text-xs cursor-pointer"
                           style={{ backgroundColor: 'var(--color-primary)' }}
@@ -2628,6 +2397,7 @@ export default function SavedRecipesPage() {
                           >
                             <input
                               type="text"
+                              data-lpignore="true"
                               placeholder={t('amt') || 'Amt'}
                               value={ing.amount}
                               onChange={(e) => {
@@ -2644,6 +2414,7 @@ export default function SavedRecipesPage() {
                             />
                             <input
                               type="text"
+                              data-lpignore="true"
                               placeholder={t('unit') || 'Unit'}
                               value={ing.unit}
                               onChange={(e) => {
@@ -2660,6 +2431,7 @@ export default function SavedRecipesPage() {
                             />
                             <input
                               type="text"
+                              data-lpignore="true"
                               placeholder={t('ingredientNamePlaceholder') || 'Ingredient name...'}
                               value={ing.item}
                               onChange={(e) => {
@@ -2813,6 +2585,7 @@ export default function SavedRecipesPage() {
                             </span>
                             <textarea
                               rows={2}
+                              data-lpignore="true"
                               placeholder={(t('describeStepPlaceholder') || 'Describe step {n}...').replace('{n}', String(idx + 1))}
                               value={step}
                               onChange={(e) => {
@@ -2857,7 +2630,7 @@ export default function SavedRecipesPage() {
                           {t('backBtn') || '← Back'}
                         </button>
                         <button
-                          type="submit"
+                          type="button"
                           onClick={handleSaveEdit}
                           className="text-white font-bold px-8 py-2.5 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer"
                           style={{ backgroundColor: 'var(--color-primary)' }}
@@ -2892,6 +2665,7 @@ export default function SavedRecipesPage() {
             }}
           >
             <button 
+              type="button"
               onClick={() => setShowAddToPlanModal(false)} 
               className="absolute top-4 right-4 p-2 rounded-lg transition cursor-pointer"
               style={{
@@ -2914,7 +2688,12 @@ export default function SavedRecipesPage() {
               </p>
             </div>
 
-            <form onSubmit={handleSaveToCalendar} className="space-y-4 pt-1">
+            <div 
+              role="region" 
+              aria-label="Add to plan" 
+              data-lpignore="true" 
+              className="space-y-4 pt-1"
+            >
               <div>
                 <label 
                   className="block text-xs font-bold mb-1.5"
@@ -2926,6 +2705,7 @@ export default function SavedRecipesPage() {
                   <Calendar className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-primary)' }}/>
                   <input
                     type="date"
+                    data-lpignore="true"
                     required
                     value={planDate}
                     onChange={(e) => setPlanDate(e.target.value)}
@@ -2981,6 +2761,7 @@ export default function SavedRecipesPage() {
                   <Clock className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
                   <input
                     type="time"
+                    data-lpignore="true"
                     value={planTime}
                     onChange={(e) => setPlanTime(e.target.value)}
                     className="w-full border rounded-xl px-10 py-2.5 text-xs outline-none"
@@ -3004,6 +2785,7 @@ export default function SavedRecipesPage() {
                   {t('notes') || 'Notes'}
                 </label>
                 <textarea
+                  data-lpignore="true"
                   value={planNotes}
                   onChange={(e) => setPlanNotes(e.target.value)}
                   placeholder={t('addNotesRemindersPlaceholder') || 'Add any notes or reminders...'}
@@ -3033,7 +2815,8 @@ export default function SavedRecipesPage() {
                   {t('cancel') || 'Cancel'}
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={handleSaveToCalendar}
                   className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
@@ -3042,7 +2825,7 @@ export default function SavedRecipesPage() {
                   {t('addToCalendarBtn') || 'Add to Calendar'}
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -3070,6 +2853,7 @@ export default function SavedRecipesPage() {
                 <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t('selectOrEditItemsShopping') || 'Select or edit items to add directly to your list'}</p>
               </div>
               <button 
+                type="button"
                 onClick={() => setIsShoppingModalOpen(false)} 
                 className="cursor-pointer transition"
                 style={{ color: 'var(--color-text-secondary)' }}
@@ -3109,6 +2893,7 @@ export default function SavedRecipesPage() {
 
                   <input
                     type="text"
+                    data-lpignore="true"
                     value={ing.amount}
                     onChange={(e) => {
                       const updated = [...shoppingModalIngredients];
@@ -3125,6 +2910,7 @@ export default function SavedRecipesPage() {
                   />
                   <input
                     type="text"
+                    data-lpignore="true"
                     value={ing.unit}
                     onChange={(e) => {
                       const updated = [...shoppingModalIngredients];
@@ -3141,6 +2927,7 @@ export default function SavedRecipesPage() {
                   />
                   <input
                     type="text"
+                    data-lpignore="true"
                     value={ing.name}
                     onChange={(e) => {
                       const updated = [...shoppingModalIngredients];

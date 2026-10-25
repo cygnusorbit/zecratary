@@ -1801,7 +1801,7 @@ export default function Sidebar() {
                 {t('manage')}
               </div>
             )}
-            <Link href="/saved" className={navClass('/saved')} title={t('savedRecipes')}>
+            <Link href="/recipes" className={navClass('/saved')} title={t('savedRecipes')}>
               <BookOpen className="h-4 w-4 shrink-0" style={iconStyle} />
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('savedRecipes')}</span>}
             </Link>

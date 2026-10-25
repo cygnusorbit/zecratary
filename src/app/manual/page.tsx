@@ -317,7 +317,7 @@ export default function ManualRecipePage() {
 
       showToast(t('recipeCreatedSuccessToast', 'Recipe saved successfully to your culinary library!'), 'success');
       setTimeout(() => {
-        router.push('/saved');
+        router.push('/recipes');
       }, 700);
 
     } catch (err: any) {
@@ -359,7 +359,7 @@ export default function ManualRecipePage() {
         >
           <div className="flex items-center gap-3">
             <Link 
-              href="/saved" 
+              href="/recipes" 
               className="p-2.5 rounded-xl transition shadow-xs border cursor-pointer hover:opacity-80"
               style={{
                 backgroundColor: 'var(--color-card)',

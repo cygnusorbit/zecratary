@@ -944,7 +944,7 @@ export default function Sidebar() {
 
             {(openSections.manage || isCollapsed) && (
               <div className="space-y-0.5">
-                <Link href="/saved" className={navClass('/saved')} style={navStyle('/saved')} title={t('savedRecipes', 'Saved Recipes')}>
+                <Link href="/recipes" className={navClass('/saved')} style={navStyle('/saved')} title={t('savedRecipes', 'Saved Recipes')}>
                   <BookOpen className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('savedRecipes', 'Saved Recipes')}</span>}
                 </Link>
@@ -1144,7 +1144,7 @@ export default function Sidebar() {
               <Link href="/chef" onClick={() => setMobileMenuOpen(false)} className={navClass('/chef')} style={navStyle('/chef')}>
                 <MessageSquare className="h-4 w-4" /> <span>{t('aiChef', 'AI Assistant')}</span>
               </Link>
-              <Link href="/saved" onClick={() => setMobileMenuOpen(false)} className={navClass('/saved')} style={navStyle('/saved')}>
+              <Link href="/recipes" onClick={() => setMobileMenuOpen(false)} className={navClass('/saved')} style={navStyle('/saved')}>
                 <BookOpen className="h-4 w-4" /> <span>{t('savedRecipes', 'Saved Recipes')}</span>
               </Link>
               <Link href="/books" onClick={() => setMobileMenuOpen(false)} className={navClass('/books')} style={navStyle('/books')}>
