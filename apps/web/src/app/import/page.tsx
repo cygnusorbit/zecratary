@@ -378,7 +378,7 @@ export default function ImportPage() {
     });
 
     setTimeout(() => {
-      router.push('/saved');
+      router.push('/recipes');
     }, 850);
   };
 

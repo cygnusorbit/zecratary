@@ -300,7 +300,7 @@ export default function DashboardPage() {
       {/* 3. Primary Metrics Grid (4-Way Live Counter with Dynamic Token Icon) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { label: t('statsRecipes', 'Saved Recipes'), value: stats.savedRecipes, icon: BookOpen, href: '/saved', color: 'var(--color-primary)' },
+          { label: t('statsRecipes', 'Saved Recipes'), value: stats.savedRecipes, icon: BookOpen, href: '/recipes', color: 'var(--color-primary)' },
           { label: t('statsMealPlans', 'Scheduled Meals'), value: stats.scheduledMeals, icon: Calendar, href: '/planner', color: '#0ea5e9' },
           { label: t('statsPantryItems', 'Pantry in Stock'), value: stats.pantryItems, icon: Package, href: '/pantry', color: 'var(--color-emerald)' },
           { 
@@ -452,7 +452,7 @@ export default function DashboardPage() {
             </h3>
           </div>
           <Link
-            href="/saved"
+            href="/recipes"
             className="text-xs font-bold flex items-center gap-1 text-[var(--color-primary)] hover:underline"
           >
             <span>{t('viewAllRecipes', 'View All')}</span>
@@ -469,7 +469,7 @@ export default function DashboardPage() {
             {stats.recentRecipes.map((rec) => (
               <Link
                 key={rec.id}
-                href="/saved"
+                href="/recipes"
                 className="border rounded-2xl overflow-hidden shadow-xs hover:shadow-md transition flex flex-col justify-between group"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
               >
