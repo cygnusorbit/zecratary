@@ -31,6 +31,31 @@ const DEFAULT_CATEGORIES = [
   'Spices & Seasonings', 'Canned Goods', 'Grains & Pasta', 'Condiments & Sauces', 'Other'
 ];
 
+
+const getCategoryName = (cat: any): string => {
+  if (!cat) return 'Pantry Staples';
+  if (typeof cat === 'string') {
+    const trimmed = cat.trim();
+    return trimmed === '[object Object]' || !trimmed ? 'Pantry Staples' : trimmed;
+  }
+  if (typeof cat === 'object') {
+    return (cat.name || cat.label || cat.title || cat.slug || cat.id || 'Pantry Staples').trim();
+  }
+  return String(cat).trim();
+};
+
+const getRecipeTypeName = (type: any): string => {
+  if (!type) return 'Main Dish';
+  if (typeof type === 'string') {
+    const trimmed = type.trim();
+    return trimmed === '[object Object]' || !trimmed ? 'Main Dish' : trimmed;
+  }
+  if (typeof type === 'object') {
+    return (type.name || type.label || type.title || type.slug || type.id || 'Main Dish').trim();
+  }
+  return String(type).trim();
+};
+
 export default function ManualRecipePage() {
   const router = useRouter();
   const { t } = useTranslation();
@@ -107,8 +132,8 @@ export default function ManualRecipePage() {
   }, [router, t]);
 
   useEffect(() => {
-    if (recipeTypes && recipeTypes.length > 0 && !recipeTypes.includes(form.recipeType)) {
-      setForm(prev => ({ ...prev, recipeType: recipeTypes[0] }));
+    if (recipeTypes && recipeTypes.length > 0 && !recipeTypes.map(getRecipeTypeName).includes(form.recipeType)) {
+      setForm(prev => ({ ...prev, recipeType: getRecipeTypeName(recipeTypes[0]) }));
     }
   }, [recipeTypes, form.recipeType]);
 
@@ -521,9 +546,14 @@ export default function ManualRecipePage() {
                         color: 'var(--color-text)'
                       }}
                     >
-                      {recipeTypes.map((type) => (
-                        <option key={type} value={type} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{type}</option>
-                      ))}
+                      {recipeTypes.map((type: any, idx: number) => {
+                        const typeName = getRecipeTypeName(type);
+                        return (
+                          <option key={`manual_type_${typeName}_${idx}`} value={typeName} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                            {typeName}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
 
@@ -718,7 +748,7 @@ export default function ManualRecipePage() {
                     type="button"
                     onClick={() => setForm({ 
                       ...form, 
-                      ingredients: [...form.ingredients, { amount: '1', unit: 'unit', item: '', category: ingredientCategories[0] || 'Pantry Staples' }] 
+                      ingredients: [...form.ingredients, { amount: '1', unit: 'unit', item: '', category: getCategoryName(ingredientCategories[0]) || 'Pantry Staples' }] 
                     })}
                     className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-primary)' }}
@@ -811,9 +841,14 @@ export default function ManualRecipePage() {
                         color: 'var(--color-text)'
                       }}
                     >
-                      {ingredientCategories.map((cat) => (
-                        <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
-                      ))}
+                      {ingredientCategories.map((cat: any, idx: number) => {
+                        const catName = getCategoryName(cat);
+                        return (
+                          <option key={`manual_cat_${catName}_${idx}`} value={catName} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
+                            {catName}
+                          </option>
+                        );
+                      })}
                     </select>
 
                     {/* Touch Reorder Controls & Drag Handle */}
