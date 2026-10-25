@@ -1,1242 +1,1980 @@
-// @ts-nocheck
 'use client';
-
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import {
-  Heart, Check, BookOpen, Clock, Users, Flame, Plus, Search,
-  SlidersHorizontal, Trash2, Edit3, Calendar, CalendarPlus, ShoppingCart,
-  FolderPlus, Volume2, Play, Pause, RotateCcw, X, ChevronLeft, ChevronRight,
-  Grid3X3, Grid2X2, LayoutGrid, ExternalLink, Share2, CheckCircle2, Sparkles,
-  Filter, GripVertical, Loader2, Tag, ArrowUpDown, Globe, Lock, User as UserIcon,
-  Download, FileJson
+  Search, SlidersHorizontal, Heart, Clock, Utensils,
+  X, UploadCloud, BookmarkPlus, CalendarPlus, ShoppingCart,
+  Timer, Edit3, Share2, Star, Check, Book, ChevronDown,
+  Trash2, Save, Plus, ImagePlus, Users, Calendar,
+  GripVertical, CheckSquare, CheckCircle2, Type, ExternalLink,
+  Carrot, Hourglass, ChevronLeft, ChevronRight, LayoutGrid,
+  Grid3X3, Rows3, Play, Pause, Bell
 } from 'lucide-react';
+import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
+import { syncUserSavedRecipes, persistSavedRecipe, deleteSavedRecipe } from '@/lib/recipeSync';
+import { getStoredCategories } from '@/lib/categories';
 import { useTranslation } from '@/components/LanguageProvider';
-import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 
-interface Recipe {
-  id: string;
-  ownerId?: string;
-  ownerName?: string;
-  ownerEmail?: string;
-  userId?: string;
-  user_id?: string;
-  createdBy?: string;
-  created_by?: string;
-  creatorName?: string;
-  creator_name?: string;
-  isPublic?: boolean;
-  is_public?: boolean;
-  title: string;
-  description?: string;
-  prepMinutes?: number;
-  cookMinutes?: number;
-  prepTimeMinutes?: number;
-  cookTimeMinutes?: number;
-  servings?: number;
-  calories?: number;
-  recipeType?: string;
-  mealType?: string;
-  cuisine?: string;
-  ingredients: (string | any)[];
-  instructions: (string | any)[];
-  directions?: (string | any)[];
-  image?: string;
-  imageUrl?: string;
-  image_url?: string;
-  sourceUrl?: string;
-  sourceName?: string;
-  chefTip?: string;
-  isFavorite?: boolean;
-  is_favorite?: boolean;
-  isCooked?: boolean;
-  is_cooked?: boolean;
-  bookId?: string | null;
-  book_id?: string | null;
-  rating?: number;
-  created_at?: string;
-  updated_at?: string;
-}
+const RECIPE_TYPES = [
+  'All Types',
+  'Appetiser',
+  'Main Dish',
+  'Side Dish',
+  'Dessert',
+  'Snack',
+  'Breakfast',
+  'Lunch'
+];
 
-interface Cookbook {
-  id: string;
-  title: string;
-  description?: string;
-  recipe_count?: number;
-}
+type GridMode = '3x3' | '4x4' | '5x5';
 
-const getIngredientString = (ing: any): string => {
-  if (!ing) return '';
-  if (typeof ing === 'string') {
-    const trimmed = ing.trim();
-    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        return getIngredientString(parsed);
-      } catch (_) {}
-    }
-    return trimmed;
+const GRID_CONFIG: Record<GridMode, { colsClass: string; perPage: number; label: string; imgHeight: string; titleSize: string }> = {
+  '3x3': {
+    colsClass: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3',
+    perPage: 9,
+    label: '3×3',
+    imgHeight: 'h-44',
+    titleSize: 'text-base'
+  },
+  '4x4': {
+    colsClass: 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4',
+    perPage: 16,
+    label: '4×4',
+    imgHeight: 'h-36',
+    titleSize: 'text-sm'
+  },
+  '5x5': {
+    colsClass: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5',
+    perPage: 25,
+    label: '5×5',
+    imgHeight: 'h-28',
+    titleSize: 'text-xs'
   }
-  if (typeof ing === 'object') {
-    const parts: string[] = [];
-    if (ing.amount !== undefined && ing.amount !== null && String(ing.amount).trim()) {
-      parts.push(String(ing.amount).trim());
-    }
-    if (ing.unit !== undefined && ing.unit !== null && String(ing.unit).trim()) {
-      parts.push(String(ing.unit).trim());
-    }
-    const name = ing.name || ing.item || ing.ingredient || ing.title || '';
-    if (name) parts.push(String(name).trim());
-    if (parts.length > 0) return parts.join(' ').trim();
-    return String(ing.name || ing.item || Object.values(ing)[0] || '').trim();
-  }
-  return String(ing).trim();
 };
 
-const getInstructionString = (inst: any): string => {
-  if (!inst) return '';
-  if (typeof inst === 'string') return inst.trim();
-  if (typeof inst === 'object') {
-    return String(inst.text || inst.step || inst.instruction || inst.description || Object.values(inst)[0] || '').trim();
-  }
-  return String(inst).trim();
+const DEFAULT_RECIPE_IMAGE = 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80';
+
+const isRecipeInBook = (rec: any, bookId: string): boolean => {
+  if (!rec || !bookId) return false;
+  return rec.bookId === bookId || rec.book_id === bookId;
 };
 
-const scaleIngredientQuantity = (rawIng: any, originalServings: number, currentServings: number): string => {
-  const ingredientStr = getIngredientString(rawIng);
-  if (!ingredientStr || originalServings <= 0 || currentServings <= 0 || originalServings === currentServings) {
-    return ingredientStr;
+// Culinary Fraction & Number Scaling Helpers
+const formatScaledNumber = (val: number): string => {
+  if (isNaN(val) || val <= 0) return '';
+  const intPart = Math.floor(val);
+  const fracPart = val - intPart;
+
+  if (Math.abs(val - Math.round(val)) < 0.02) {
+    return String(Math.round(val));
   }
-  const ratio = currentServings / originalServings;
-  return ingredientStr.replace(/^(\d+\s+\d+\/\d+|\d+\/\d+|\d+(?:\.\d+)?)/, (match) => {
-    let val = 0;
-    if (match.includes(' ') && match.includes('/')) {
-      const parts = match.split(' ');
-      const whole = parseFloat(parts[0]);
+
+  const fractions: [number, string][] = [
+    [0.25, '1/4'],
+    [0.333, '1/3'],
+    [0.5, '1/2'],
+    [0.667, '2/3'],
+    [0.75, '3/4']
+  ];
+
+  for (const [fVal, fStr] of fractions) {
+    if (Math.abs(fracPart - fVal) < 0.04) {
+      return intPart > 0 ? `${intPart} ${fStr}` : fStr;
+    }
+  }
+
+  return Number(val.toFixed(2)).toString();
+};
+
+const parseAmountToNumber = (rawAmt: any): number | null => {
+  if (rawAmt === null || rawAmt === undefined) return null;
+  const str = String(rawAmt).trim();
+  if (!str) return null;
+
+  if (str.includes('/')) {
+    const parts = str.split(/\s+/);
+    if (parts.length === 2) {
       const [num, den] = parts[1].split('/').map(Number);
-      val = whole + (num / den);
-    } else if (match.includes('/')) {
-      const [num, den] = match.split('/').map(Number);
-      val = num / den;
-    } else {
-      val = parseFloat(match);
+      if (!isNaN(num) && !isNaN(den) && den !== 0) {
+        return (Number(parts[0]) || 0) + (num / den);
+      }
+    } else if (parts.length === 1) {
+      const [num, den] = parts[0].split('/').map(Number);
+      if (!isNaN(num) && !isNaN(den) && den !== 0) {
+        return num / den;
+      }
     }
-    if (isNaN(val)) return match;
-    const scaled = val * ratio;
-    if (Math.abs(scaled - Math.round(scaled)) < 0.05) return String(Math.round(scaled));
-    return scaled.toFixed(1).replace(/\.0$/, '');
-  });
+  }
+
+  const numMatch = str.match(/^(\d+(?:\.\d+)?)/);
+  if (numMatch) {
+    const parsed = Number(numMatch[1]);
+    if (!isNaN(parsed)) return parsed;
+  }
+
+  const directNum = Number(str);
+  if (!isNaN(directNum)) return directNum;
+
+  return null;
 };
 
-export default function RecipesPage() {
+const calculateScaledAmount = (rawAmt: any, baseServings: number, currentServings: number): string => {
+  if (!rawAmt && rawAmt !== 0) return '';
+  const safeBase = Math.max(1, Number(baseServings) || 4);
+  const safeCurrent = Math.max(1, Number(currentServings) || safeBase);
+  const scaleRatio = safeCurrent / safeBase;
+
+  const str = String(rawAmt).trim();
+  if (!str) return '';
+
+  const rangeMatch = str.match(/^((?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?)\s*(-|to)\s*((?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?)$/i);
+  if (rangeMatch) {
+    const num1 = parseAmountToNumber(rangeMatch[1]);
+    const num2 = parseAmountToNumber(rangeMatch[3]);
+    const sep = rangeMatch[2];
+    if (num1 !== null && num2 !== null) {
+      const s1 = formatScaledNumber(num1 * scaleRatio);
+      const s2 = formatScaledNumber(num2 * scaleRatio);
+      return `${s1} ${sep} ${s2}`;
+    }
+  }
+
+  const num = parseAmountToNumber(str);
+  if (num !== null) {
+    return formatScaledNumber(num * scaleRatio);
+  }
+
+  return str;
+};
+
+const parseIngredientString = (rawStr: string, defaultCat: string) => {
+  const trimmed = String(rawStr || '').trim();
+  if (!trimmed) return { amount: '', unit: '', item: '', category: defaultCat };
+
+  const regex = /^((?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?(?:\s*(?:-|to)\s*(?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?)?)\s*([a-zA-Z]+)?\s*(?:of\s+)?(.*)$/i;
+  const match = trimmed.match(regex);
+
+  if (match) {
+    const amount = match[1].trim();
+    const possibleUnit = (match[2] || '').trim().toLowerCase();
+    const rest = (match[3] || '').trim();
+
+    const knownUnits = [
+      'cup', 'cups', 'tbsp', 'tbs', 'tablespoon', 'tablespoons', 'tsp', 'teaspoon', 'teaspoons',
+      'oz', 'ounce', 'ounces', 'lb', 'lbs', 'pound', 'pounds', 'g', 'gram', 'grams', 'kg',
+      'ml', 'l', 'liter', 'liters', 'clove', 'cloves', 'can', 'cans', 'slice', 'slices',
+      'pinch', 'pinches', 'bunch', 'bunches', 'stalk', 'stalks', 'piece', 'pieces', 'dash',
+      'pkg', 'package', 'packages', 'handful', 'handfuls', 'sprig', 'sprigs'
+    ];
+
+    if (knownUnits.includes(possibleUnit)) {
+      return { amount, unit: possibleUnit, item: rest || trimmed, category: defaultCat };
+    } else if (possibleUnit) {
+      return { amount, unit: '', item: `${possibleUnit} ${rest}`.trim(), category: defaultCat };
+    }
+    return { amount, unit: '', item: rest || trimmed, category: defaultCat };
+  }
+
+  return { amount: '', unit: '', item: trimmed, category: defaultCat };
+};
+
+const getNormalizedIngredient = (ing: any, defaultCat: string) => {
+  if (!ing) return { amount: '', unit: '', name: '', category: defaultCat };
+
+  if (typeof ing === 'string') {
+    const parsed = parseIngredientString(ing, defaultCat);
+    return {
+      amount: parsed.amount,
+      unit: parsed.unit,
+      name: parsed.item,
+      category: parsed.category
+    };
+  }
+
+  if (typeof ing === 'object') {
+    const rawItem = String(ing.item || ing.name || '').trim();
+    const rawAmt = String(ing.amount || ing.quantity || '').trim();
+    const rawUnit = String(ing.unit || '').trim();
+
+    if (!rawAmt && rawItem) {
+      const parsed = parseIngredientString(rawItem, ing.category || defaultCat);
+      if (parsed.amount) {
+        return {
+          amount: parsed.amount,
+          unit: rawUnit || parsed.unit,
+          name: parsed.item,
+          category: ing.category || defaultCat
+        };
+      }
+    }
+
+    return {
+      amount: rawAmt,
+      unit: rawUnit,
+      name: rawItem,
+      category: ing.category || defaultCat
+    };
+  }
+
+  return { amount: '', unit: '', name: String(ing), category: defaultCat };
+};
+
+export default function SavedRecipesPage() {
   const router = useRouter();
   const { t } = useTranslation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [cookbooks, setCookbooks] = useState<Cookbook[]>([]);
+  const [recipes, setRecipes] = useState<any[]>([]);
+  const [books, setBooks] = useState<any[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [selectedRecipe, setSelectedRecipe] = useState<any | null>(null);
 
-  // Search & Filter state
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedType, setSelectedType] = useState<string>('all');
-  const [selectedRating, setSelectedRating] = useState<string>('all');
-  const [selectedTimeFilter, setSelectedTimeFilter] = useState<string>('all');
-  const [selectedCookbookFilter, setSelectedCookbookFilter] = useState<string>('all');
+  // Search & Filters
+  const [search, setSearch] = useState('');
+  const [showFilters, setShowFilters] = useState(true);
+  const [filterFavorites, setFilterFavorites] = useState(false);
+  const [filterCooked, setFilterCooked] = useState(false);
   
-  // TABS: 'my_recipes' (personal) | 'marketplace' (public from all users) | 'favorites' | 'cooked'
-  const [activeTab, setActiveTab] = useState<'my_recipes' | 'marketplace' | 'favorites' | 'cooked'>('my_recipes');
-  const [sortBy, setSortBy] = useState<'newest' | 'oldest' | 'alpha' | 'time'>('newest');
+  // Ingredients Filter State
+  const [ingredientQuery, setIngredientQuery] = useState('');
+  const [selectedIngredientsList, setSelectedIngredientsList] = useState<string[]>([]);
 
-  // Ingredient popover filter
-  const [showIngredientFilter, setShowIngredientFilter] = useState<boolean>(false);
-  const [selectedIngredients, setSelectedIngredients] = useState<string[]>([]);
-  const [ingredientSearchInput, setIngredientSearchInput] = useState<string>('');
+  // Dropdown Filters
+  const [selectedType, setSelectedType] = useState('All Types');
+  const [selectedRating, setSelectedRating] = useState('All Ratings');
+  const [selectedPrepTime, setSelectedPrepTime] = useState('All Prep Times');
+  const [selectedCookTime, setSelectedCookTime] = useState('All Cook Times');
 
-  // Density & Pagination
-  const [gridDensity, setGridDensity] = useState<'3x3' | '4x4' | '5x5'>('3x3');
-  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
 
-  // Modals state
-  const [selectedRecipe, setSelectedRecipe] = useState<Recipe | null>(null);
-  const [showDetailModal, setShowDetailModal] = useState<boolean>(false);
-  const [modalServings, setModalServings] = useState<number>(2);
+  // Add to Plan / Calendar Modal State
+  const [showAddToPlanModal, setShowAddToPlanModal] = useState(false);
+  const [planDate, setPlanDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [planMealType, setPlanMealType] = useState('Dinner');
+  const [planTime, setPlanTime] = useState('');
+  const [planNotes, setPlanNotes] = useState('');
 
-  // Kitchen Timer state
-  const [timerOpen, setTimerOpen] = useState<boolean>(false);
-  const [timerTotalSeconds, setTimerTotalSeconds] = useState<number>(600);
-  const [timerRemaining, setTimerRemaining] = useState<number>(600);
-  const [timerRunning, setTimerRunning] = useState<boolean>(false);
-  const [timerLabel, setTimerLabel] = useState<string>('Kitchen Timer');
-  const audioContextRef = useRef<any>(null);
+  // Edit Mode & Form State
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTab, setEditTab] = useState<'info' | 'ingredients' | 'steps'>('info');
+  const [editForm, setEditForm] = useState<any>({
+    title: '',
+    description: '',
+    recipeType: 'Main Dish',
+    sourceUrl: '',
+    servings: 4,
+    prepTimeMinutes: 30,
+    cookTimeMinutes: 10,
+    imageUrl: '',
+    ingredients: [],
+    instructions: []
+  });
 
-  // Modals
-  const [showPlanModal, setShowPlanModal] = useState<boolean>(false);
-  const [planRecipe, setPlanRecipe] = useState<Recipe | null>(null);
-  const [planDate, setPlanDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
-  const [planMealType, setPlanMealType] = useState<string>('Dinner');
-  const [planServings, setPlanServings] = useState<number>(2);
+  const [isReorderingIngredients, setIsReorderingIngredients] = useState(false);
+  const [isReorderingSteps, setIsReorderingSteps] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  const [showBookModal, setShowBookModal] = useState<boolean>(false);
-  const [bookTargetRecipe, setBookTargetRecipe] = useState<Recipe | null>(null);
-  const [selectedBookId, setSelectedBookId] = useState<string>('');
+  // Servings Scaling & View States
+  const [currentServings, setCurrentServings] = useState<number>(4);
+  const [fontSizeScale, setFontSizeScale] = useState(80);
+  const [completedSteps, setCompletedSteps] = useState<number[]>([]);
+  const [noteText, setNoteText] = useState('');
+  const [isNoteOpen, setIsNoteOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const [showShoppingModal, setShowShoppingModal] = useState<boolean>(false);
-  const [shoppingRecipe, setShoppingRecipe] = useState<Recipe | null>(null);
-  const [selectedShoppingItems, setSelectedShoppingItems] = useState<string[]>([]);
+  // Grid Density & Pagination States
+  const [gridMode, setGridMode] = useState<GridMode>('3x3');
+  const [currentPage, setCurrentPage] = useState(1);
 
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3200);
-  };
+  // Shopping List Modal State
+  const [isShoppingModalOpen, setIsShoppingModalOpen] = useState(false);
+  const [shoppingModalIngredients, setShoppingModalIngredients] = useState<any[]>([]);
 
-  const getSafeImage = (r: Recipe): string => {
-    return r.imageUrl || r.image || r.image_url || '/recipes/images/default.jpg';
-  };
+  // Kitchen Timer States
+  const [isTimerModalOpen, setIsTimerModalOpen] = useState(false);
+  const [timerInputMinutes, setTimerInputMinutes] = useState(15);
+  const [activeTimer, setActiveTimer] = useState<{
+    recipeId: string;
+    recipeTitle: string;
+    totalSeconds: number;
+    remainingSeconds: number;
+    isRunning: boolean;
+    endTime: number;
+  } | null>(null);
 
-  const getEffectiveMinutes = (r: Recipe): number => {
-    const prep = r.prepMinutes ?? r.prepTimeMinutes ?? 0;
-    const cook = r.cookMinutes ?? r.cookTimeMinutes ?? 0;
-    return prep + cook || 25;
-  };
+  const audioCtxRef = useRef<any>(null);
+  const isSyncingRef = useRef<boolean>(false);
 
-  const isOwner = (recipe: Recipe): boolean => {
-    if (!currentUser) return true;
-    const uid = currentUser.id;
-    const email = currentUser.email;
-    return (
-      recipe.ownerId === uid ||
-      recipe.userId === uid ||
-      recipe.user_id === uid ||
-      recipe.createdBy === email ||
-      recipe.created_by === email ||
-      recipe.ownerEmail === email
-    );
-  };
+  const defaultBooks = [
+    { id: 'book_1', title: 'Family Favorites & Weeknight Dinners', description: 'Quick and easy meals.' },
+    { id: 'book_2', title: 'Authentic Asian Cuisine', description: 'Traditional recipes & stir-fries.' },
+    { id: 'book_3', title: 'Baking & Desserts', description: 'Sweet treats & pastries.' }
+  ];
 
-  // Sound chime synthesizer
-  const playTimerChime = () => {
+  useEffect(() => {
+    try {
+      const savedMode = localStorage.getItem('zecratary_saved_grid_mode') as GridMode;
+      if (savedMode && (savedMode === '3x3' || savedMode === '4x4' || savedMode === '5x5')) {
+        setGridMode(savedMode);
+      }
+    } catch (_) {}
+  }, []);
+
+  const playTimerEndSound = useCallback(() => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioCtx) return;
-      const ctx = audioContextRef.current || new AudioCtx();
-      audioContextRef.current = ctx;
+      const ctx = audioCtxRef.current || new AudioCtx();
+      audioCtxRef.current = ctx;
 
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.3);
+      const notes = [587.33, 880, 1174.66, 1760];
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.16);
+        gain.gain.setValueAtTime(0, ctx.currentTime + idx * 0.16);
+        gain.gain.linearRampToValueAtTime(0.28, ctx.currentTime + idx * 0.16 + 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + idx * 0.16 + 0.45);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime + idx * 0.16);
+        osc.stop(ctx.currentTime + idx * 0.16 + 0.5);
+      });
+    } catch (e) {
+      console.warn('Could not trigger Web Audio chime:', e);
+    }
+  }, []);
 
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.8);
+  useEffect(() => {
+    try {
+      const savedTimerRaw = localStorage.getItem('zecratary_active_timer');
+      if (savedTimerRaw) {
+        const parsed = JSON.parse(savedTimerRaw);
+        if (parsed && typeof parsed.endTime === 'number') {
+          const now = Date.now();
+          const rem = Math.max(0, Math.ceil((parsed.endTime - now) / 1000));
+          if (rem > 0) {
+            setActiveTimer({
+              ...parsed,
+              remainingSeconds: rem,
+              isRunning: parsed.isRunning ?? true
+            });
+          }
+        }
+      }
     } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    if (!activeTimer || !activeTimer.isRunning) return;
+
+    if (activeTimer.remainingSeconds <= 0) {
+      playTimerEndSound();
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setActiveTimer((prev) => {
+        if (!prev || !prev.isRunning) return prev;
+        const now = Date.now();
+        const calculatedRemaining = Math.max(0, Math.ceil((prev.endTime - now) / 1000));
+
+        if (calculatedRemaining <= 0) {
+          clearInterval(interval);
+          playTimerEndSound();
+          try {
+            localStorage.removeItem('zecratary_active_timer');
+          } catch (_) {}
+          return {
+            ...prev,
+            remainingSeconds: 0,
+            isRunning: false
+          };
+        }
+
+        const updated = {
+          ...prev,
+          remainingSeconds: calculatedRemaining
+        };
+
+        try {
+          localStorage.setItem('zecratary_active_timer', JSON.stringify(updated));
+        } catch (_) {}
+
+        return updated;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [activeTimer?.isRunning, activeTimer?.endTime, playTimerEndSound]);
+
+  const applyGlobalTheme = useCallback(() => {
+    try {
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
+    } catch (_) {}
+  }, []);
+
+  const getCleanRecipeType = (rec: any): string => {
+    const raw = rec.recipeType || rec.category || rec.recipe_type || (Array.isArray(rec.tags) ? rec.tags[0] : 'Main Dish');
+    if (raw === 'Appetizer' || raw === 'Appetiser') return 'Appetiser';
+    if (RECIPE_TYPES.includes(raw)) return raw;
+    return 'Main Dish';
   };
 
-  useEffect(() => {
-    let interval: any = null;
-    if (timerRunning && timerRemaining > 0) {
-      interval = setInterval(() => {
-        setTimerRemaining(prev => {
-          if (prev <= 1) {
-            setTimerRunning(false);
-            playTimerChime();
-            showToast('⏰ Kitchen Timer Finished!');
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
+  const getSafeHostname = (urlStr: string) => {
+    if (!urlStr || typeof urlStr !== 'string') return 'source website';
+    try {
+      const normalized = urlStr.startsWith('http://') || urlStr.startsWith('https://') 
+        ? urlStr 
+        : `https://${urlStr}`;
+      return new URL(normalized).hostname.replace('www.', '');
+    } catch {
+      return urlStr.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0] || 'source website';
     }
-    return () => clearInterval(interval);
-  }, [timerRunning, timerRemaining]);
+  };
 
-  // Load recipes across JSON files, PostgreSQL & MySQL
-  const loadData = useCallback(async (user: User | null, tab: string = activeTab) => {
-    setLoading(true);
-    const userId = user?.id || '';
-    const userEmail = user?.email || '';
-    const queryParams = new URLSearchParams();
-    if (userId) queryParams.set('userId', userId);
-    if (userEmail) queryParams.set('email', userEmail);
-    if (tab === 'marketplace') queryParams.set('marketplace', 'true');
-    queryParams.set('t', String(Date.now()));
+  const getSafeHref = (urlStr: string) => {
+    if (!urlStr) return '#';
+    if (urlStr.startsWith('http://') || urlStr.startsWith('https://')) return urlStr;
+    return `https://${urlStr}`;
+  };
+
+  const normalizeRecipeFields = useCallback((r: any, targetUserId: string, userName: string) => {
+    const cleanType = getCleanRecipeType(r);
+    const resolvedImg = r.imageUrl || r.image || r.image_url || DEFAULT_RECIPE_IMAGE;
+
+    let ingredients = r.ingredients;
+    if (typeof ingredients === 'string') {
+      try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = []; }
+    }
+    if (!Array.isArray(ingredients)) ingredients = [];
+
+    let instructions = r.instructions || r.directions || r.steps;
+    if (typeof instructions === 'string') {
+      try { instructions = JSON.parse(instructions); } catch (_) { instructions = [instructions]; }
+    }
+    if (!Array.isArray(instructions)) instructions = [];
+
+    const prepMins = Number(r.prepTimeMinutes || r.prep_time || r.prepTime) || 15;
+    const cookMins = Number(r.cookTimeMinutes || r.cook_time || r.cookTime) || 25;
+
+    return {
+      ...r,
+      id: r.id || 'rcp_' + Math.random().toString(36).substring(2, 9),
+      userId: r.user_id || r.userId || targetUserId,
+      user_id: r.user_id || r.userId || targetUserId,
+      createdBy: r.created_by || r.createdBy || targetUserId,
+      created_by: r.created_by || r.createdBy || targetUserId,
+      creatorName: r.creator_name || r.creatorName || userName,
+      creator_name: r.creator_name || r.creatorName || userName,
+      title: r.title || r.name || 'Untitled Recipe',
+      name: r.title || r.name || 'Untitled Recipe',
+      description: r.description || '',
+      recipeType: cleanType,
+      category: cleanType,
+      recipe_type: cleanType,
+      imageUrl: resolvedImg,
+      image: resolvedImg,
+      image_url: resolvedImg,
+      servings: Number(r.servings || r.servingsCount) || 4,
+      prepTimeMinutes: prepMins,
+      cookTimeMinutes: cookMins,
+      prepTime: String(prepMins),
+      cookTime: String(cookMins),
+      prep_time: String(prepMins),
+      cook_time: String(cookMins),
+      ingredients,
+      directions: instructions,
+      instructions,
+      steps: instructions,
+      bookId: r.book_id || r.bookId || null,
+      book_id: r.book_id || r.bookId || null,
+      isFavorite: Boolean(r.is_favorite || r.isFavorite),
+      is_favorite: Boolean(r.is_favorite || r.isFavorite),
+      isCooked: Boolean(r.is_cooked || r.isCooked),
+      is_cooked: Boolean(r.is_cooked || r.isCooked),
+      rating: Number(r.rating) || 0,
+      note: r.note || '',
+      sourceUrl: r.source_url || r.sourceUrl || '',
+      source_url: r.source_url || r.sourceUrl || '',
+      tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
+    };
+  }, []);
+
+  const loadData = useCallback(async (user: User | null, showSpinner = true) => {
+    if (!user) return;
+    setCategories(getStoredCategories());
+    const targetUserId = (user.id || user.email || 'usr_admin_1').trim();
+    const userName = user.name || 'You';
 
     try {
-      const [recRes, bookRes] = await Promise.allSettled([
-        fetch(`/api/recipes/saved?${queryParams.toString()}`, { cache: 'no-store' }),
-        fetch(`/api/books?userId=${encodeURIComponent(userId || 'guest')}&t=${Date.now()}`, { cache: 'no-store' })
-      ]);
+      if (showSpinner) setLoading(true);
 
-      if (recRes.status === 'fulfilled' && recRes.value.ok) {
-        const data = await recRes.value.json();
-        const list = Array.isArray(data.recipes) ? data.recipes : [];
-        setRecipes(list);
+      const candidateLists: any[][] = [];
+
+      // 1. Direct API call to PostgreSQL /api/recipes/saved
+      try {
+        const res = await fetch(`/api/recipes/saved?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.recipes)) {
+            candidateLists.push(data.recipes);
+          } else if (Array.isArray(data)) {
+            candidateLists.push(data);
+          }
+        }
+      } catch (_) {}
+
+      // 2. Fallback check to syncUserSavedRecipes helper
+      try {
+        const syncRes = await syncUserSavedRecipes(targetUserId);
+        if (Array.isArray(syncRes)) {
+          candidateLists.push(syncRes);
+        } else if (syncRes && Array.isArray((syncRes as any).recipes)) {
+          candidateLists.push((syncRes as any).recipes);
+        }
+      } catch (_) {}
+
+      // 3. Fallback check to general /api/recipes
+      try {
+        const genRes = await fetch(`/api/recipes?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+        if (genRes.ok) {
+          const gData = await genRes.json();
+          if (Array.isArray(gData.recipes)) candidateLists.push(gData.recipes);
+          else if (Array.isArray(gData)) candidateLists.push(gData);
+        }
+      } catch (_) {}
+
+      // 4. Fallback check to local storage stores
+      const localKeys = [
+        'zecratary_saved_recipes',
+        'saved_recipes',
+        'zecratary_recipes',
+        'zecratary_user_recipes',
+        'zecratary_imported_recipes'
+      ];
+      for (const k of localKeys) {
+        try {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              candidateLists.push(parsed);
+            }
+          }
+        } catch (_) {}
       }
 
-      if (bookRes.status === 'fulfilled' && bookRes.value.ok) {
-        const bData = await bookRes.value.json();
-        setCookbooks(Array.isArray(bData.books) ? bData.books : []);
+      // Merge and deduplicate by recipe id or normalized title
+      const recipeMap = new Map<string, any>();
+      for (const list of candidateLists) {
+        for (const item of list) {
+          if (!item) continue;
+          const rUser = String(item.user_id || item.userId || '').trim();
+          const rCreator = String(item.created_by || item.createdBy || '').trim();
+
+          const belongsToUser = !rUser ||
+            rUser === targetUserId ||
+            rUser === 'usr_admin_1' ||
+            rUser === 'undefined' ||
+            item.is_public ||
+            item.isPublic ||
+            (user.email && (rUser === user.email || rCreator === user.email));
+
+          if (belongsToUser) {
+            const normalized = normalizeRecipeFields(item, targetUserId, userName);
+            const key = normalized.id || normalized.title.toLowerCase();
+            if (!recipeMap.has(key)) {
+              recipeMap.set(key, normalized);
+            } else {
+              // Merge non-empty fields
+              const existing = recipeMap.get(key);
+              recipeMap.set(key, { ...existing, ...normalized, isFavorite: existing.isFavorite || normalized.isFavorite });
+            }
+          }
+        }
       }
+
+      const mergedRecipes = Array.from(recipeMap.values());
+      setRecipes(mergedRecipes);
+
+      // Books loading
+      let parsedBooks = defaultBooks;
+      try {
+        const bRes = await fetch(`/api/books?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
+        if (bRes.ok) {
+          const bData = await bRes.json();
+          if (Array.isArray(bData.books) && bData.books.length > 0) parsedBooks = bData.books;
+        }
+      } catch (_) {}
+
+      const localBooks = localStorage.getItem('zecratary_recipe_books') || localStorage.getItem('zecratary_cookbooks');
+      if (localBooks) {
+        try {
+          const parsed = JSON.parse(localBooks);
+          if (Array.isArray(parsed) && parsed.length > 0) parsedBooks = parsed;
+        } catch (_) {}
+      }
+
+      const userBooks = parsedBooks.filter((b: any) => {
+        if (!b.userId && !b.createdBy) return true;
+        if (b.userId) return b.userId === targetUserId;
+        return b.createdBy === user.email || b.createdBy === targetUserId;
+      });
+
+      setBooks(userBooks.map((b: any) => ({
+        ...b,
+        recipeCount: mergedRecipes.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
+      })));
     } catch (e) {
-      console.warn('Failed to load recipes:', e);
+      console.error('[SavedRecipesPage] Load error:', e);
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
-  }, [activeTab]);
+  }, [normalizeRecipeFields]);
 
   useEffect(() => {
-    initAuthStorage();
-    const user = getCurrentUser();
-    setCurrentUser(user);
-    loadData(user, activeTab);
-
-    const handleSync = () => {
-      const u = getCurrentUser();
-      setCurrentUser(u);
-      loadData(u, activeTab);
-    };
-
-    window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_recipes_updated', handleSync);
-    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
+    applyGlobalTheme();
+    window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
+    window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
+    window.addEventListener('zecratary_theme_updated', applyGlobalTheme);
+    window.addEventListener('storage', applyGlobalTheme);
 
     return () => {
-      window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
+      window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
+      window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
+      window.removeEventListener('storage', applyGlobalTheme);
     };
-  }, [loadData, activeTab]);
+  }, [applyGlobalTheme]);
 
-  // Toggle Public / Private (Marketplace Sharing)
-  const handleTogglePublic = async (recipe: Recipe, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    const newStatus = !(recipe.isPublic || recipe.is_public);
-    setRecipes(prev => prev.map(r => r.id === recipe.id ? { ...r, isPublic: newStatus, is_public: newStatus } : r));
-
-    if (selectedRecipe?.id === recipe.id) {
-      setSelectedRecipe(prev => prev ? { ...prev, isPublic: newStatus, is_public: newStatus } : null);
+  useEffect(() => {
+    document.title = `${t('savedRecipesTitle') || 'Saved Recipes'} - FoodiePrep`;
+    initAuthStorage();
+    const user = getCurrentUser();
+    if (!user) {
+      router.replace('/login');
+      return;
     }
+    setCurrentUser(user);
+    loadData(user, true);
 
+    const handleSync = () => {
+      if (isSyncingRef.current) return;
+      const activeUser = getCurrentUser();
+      if (activeUser) {
+        setCurrentUser(activeUser);
+        loadData(activeUser, false);
+      }
+    };
+
+    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
+    window.addEventListener('zecratary_recipes_updated', handleSync);
+    window.addEventListener('zecratary_recipe_books_updated', handleSync);
+    window.addEventListener('zecratary_categories_changed', handleSync);
+    window.addEventListener('zecratary_auth_changed', handleSync);
+    window.addEventListener('storage', handleSync);
+
+    return () => {
+      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_recipe_books_updated', handleSync);
+      window.removeEventListener('zecratary_categories_changed', handleSync);
+      window.removeEventListener('zecratary_auth_changed', handleSync);
+      window.removeEventListener('storage', handleSync);
+    };
+  }, [loadData, router, t]);
+
+  const saveAllRecipes = (updatedUserList: any[]) => {
+    if (!currentUser) return;
+    const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
+
+    const updatedWithId = updatedUserList.map(r => normalizeRecipeFields(r, targetUserId, currentUser.name || 'You'));
+
+    setRecipes(updatedWithId);
+
+    // Save to localStorage immediately
     try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: recipe.id, isPublic: newStatus })
-      });
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-      showToast(newStatus ? '🌐 Shared to Marketplace (Public)!' : '🔒 Made Private (Only You)');
-    } catch (_) {
-      showToast('Visibility updated.');
-    }
-  };
+      localStorage.setItem('zecratary_saved_recipes', JSON.stringify(updatedWithId));
+      localStorage.setItem('saved_recipes', JSON.stringify(updatedWithId));
+    } catch (_) {}
 
-  // Clone Marketplace Recipe to My Recipes
-  const handleSaveToMyRecipes = async (recipe: Recipe, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    try {
-      const activeUser = currentUser || getCurrentUser();
-      const payload = {
-        ...recipe,
-        id: 'rec_' + Date.now().toString(36),
-        userId: activeUser?.id || 'guest',
-        user_id: activeUser?.id || 'guest',
-        createdBy: activeUser?.email || 'guest',
-        created_by: activeUser?.email || 'guest',
-        creatorName: activeUser?.name || 'Chef',
-        creator_name: activeUser?.name || 'Chef',
-        isPublic: false,
-        is_public: false
-      };
+    isSyncingRef.current = true;
 
-      await fetch('/api/recipes/saved', {
+    // Persist via PostgreSQL POST API
+    Promise.allSettled([
+      fetch('/api/recipes/saved', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-      showToast(`Saved "${recipe.title}" to My Recipes!`);
-    } catch (_) {
-      showToast('Saved to your collection.');
+        body: JSON.stringify(updatedWithId)
+      }),
+      persistSavedRecipe(targetUserId, updatedWithId, {
+        createdBy: currentUser.email || targetUserId,
+        creatorName: currentUser.name || 'You'
+      })
+    ]).then(() => {
+      setTimeout(() => {
+        isSyncingRef.current = false;
+      }, 400);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_recipes_updated'));
+      }
+    }).catch((err) => {
+      isSyncingRef.current = false;
+      console.error('[SavedRecipesPage] Error saving recipes via POST:', err);
+    });
+
+    const updatedBooks = books.map((b: any) => ({
+      ...b,
+      recipeCount: updatedWithId.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
+    }));
+    setBooks(updatedBooks);
+  };
+
+  const toggleFavorite = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const target = recipes.find(r => r.id === id);
+    if (!target) return;
+    const newFav = !target.isFavorite;
+
+    const updated = recipes.map(r => r.id === id ? { ...r, isFavorite: newFav, is_favorite: newFav } : r);
+    setRecipes(updated);
+
+    if (selectedRecipe?.id === id) {
+      setSelectedRecipe((prev: any) => prev ? { ...prev, isFavorite: newFav, is_favorite: newFav } : null);
+    }
+
+    saveAllRecipes(updated);
+
+    // Direct atomic PATCH
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, isFavorite: newFav, is_favorite: newFav })
+    }).catch(() => {});
+  };
+
+  const toggleCooked = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const target = recipes.find(r => r.id === id);
+    if (!target) return;
+    const newCooked = !target.isCooked;
+
+    const updated = recipes.map(r => r.id === id ? { ...r, isCooked: newCooked, is_cooked: newCooked } : r);
+    setRecipes(updated);
+
+    if (selectedRecipe?.id === id) {
+      setSelectedRecipe((prev: any) => prev ? { ...prev, isCooked: newCooked, is_cooked: newCooked } : null);
+    }
+
+    saveAllRecipes(updated);
+
+    // Direct atomic PATCH
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, isCooked: newCooked, is_cooked: newCooked })
+    }).catch(() => {});
+  };
+
+  const handleAssignToBook = (bookId: string) => {
+    if (!selectedRecipe) return;
+    const isRemoving = isRecipeInBook(selectedRecipe, bookId);
+    const targetBookId = isRemoving ? null : bookId;
+    
+    const updatedRecipe = {
+      ...selectedRecipe,
+      bookId: targetBookId,
+      book_id: targetBookId
+    };
+    setSelectedRecipe(updatedRecipe);
+
+    const updatedRecipes = recipes.map(r => r.id === selectedRecipe.id ? updatedRecipe : r);
+    setRecipes(updatedRecipes);
+    saveAllRecipes(updatedRecipes);
+
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: selectedRecipe.id, bookId: targetBookId, book_id: targetBookId })
+    }).catch(() => {});
+  };
+
+  const openAddToPlanModal = () => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    setPlanDate(todayStr);
+    setPlanMealType('Dinner');
+    setPlanTime('19:00');
+    setPlanNotes('');
+    setShowAddToPlanModal(true);
+  };
+
+  const handleSaveToCalendar = async () => {
+    if (!selectedRecipe || !currentUser) return;
+
+    const recName = selectedRecipe.title || selectedRecipe.name || 'Untitled Recipe';
+    const recImage = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || DEFAULT_RECIPE_IMAGE;
+    const targetUserId = currentUser.id || currentUser.email || 'usr_admin_1';
+
+    const newPlanItem = {
+      id: 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy: currentUser.email || targetUserId,
+      creatorName: currentUser.name || 'User',
+      date: planDate,
+      recipeId: selectedRecipe.id,
+      recipe_id: selectedRecipe.id,
+      recipeName: recName,
+      title: recName,
+      image: recImage,
+      imageUrl: recImage,
+      image_url: recImage,
+      mealType: planMealType,
+      time: planTime || '',
+      notes: planNotes || '',
+      servings: currentServings || selectedRecipe.servings || 4,
+      prepTimeMinutes: selectedRecipe.prepTimeMinutes || 15,
+      cookTimeMinutes: selectedRecipe.cookTimeMinutes || 25,
+      recipe: selectedRecipe,
+      isLeftover: false,
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      const planKeys = ['zecratary_meal_plan', 'zecratary_meal_plans'];
+      for (const k of planKeys) {
+        const raw = localStorage.getItem(k);
+        const currentPlan = raw ? JSON.parse(raw) : [];
+        const updated = Array.isArray(currentPlan) ? [...currentPlan, newPlanItem] : [newPlanItem];
+        localStorage.setItem(k, JSON.stringify(updated));
+      }
+    } catch (_) {}
+
+    try {
+      await Promise.allSettled([
+        fetch('/api/planner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newPlanItem)
+        }),
+        fetch('/api/meal-plans', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newPlanItem)
+        })
+      ]);
+    } catch (_) {}
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_planner_updated'));
+      window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
+      window.dispatchEvent(new Event('zecratary_meal_plans_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }
+
+    setShowAddToPlanModal(false);
+    const alertMsg = (t('scheduledMealAlert') || 'Successfully scheduled "{title}" in your meal plan!')
+      .replace('{title}', recName);
+    alert(alertMsg);
+  };
+
+  const updateSelectedRecipeState = (key: string, val: any) => {
+    if (!selectedRecipe) return;
+    const updatedRec = { ...selectedRecipe, [key]: val };
+    if (key === 'isFavorite') updatedRec.is_favorite = val;
+    if (key === 'isCooked') updatedRec.is_cooked = val;
+    if (key === 'bookId') updatedRec.book_id = val;
+
+    setSelectedRecipe(updatedRec);
+    const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
+    saveAllRecipes(updatedList);
+
+    fetch('/api/recipes/saved', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: selectedRecipe.id, [key]: val })
+    }).catch(() => {});
+  };
+
+  const handleDeleteRecipe = async (id: string) => {
+    if (!confirm(t('confirmDeleteRecipe') || 'Are you sure you want to delete this recipe?')) return;
+    
+    try {
+      await Promise.allSettled([
+        fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        }),
+        fetch(`/api/recipes?id=${encodeURIComponent(id)}`, { 
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        })
+      ]);
+
+      if (typeof deleteSavedRecipe === 'function') {
+        await deleteSavedRecipe(currentUser?.id || currentUser?.email || 'usr_admin_1', id).catch(() => {});
+      }
+
+      const updated = recipes.filter(r => r.id !== id);
+      setRecipes(updated);
+      setSelectedRecipe(null);
+      setIsEditing(false);
+
+      const updatedBooks = books.map((b: any) => ({
+        ...b,
+        recipeCount: updated.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
+      }));
+      setBooks(updatedBooks);
+
+      try {
+        const localKeys = ['zecratary_saved_recipes', 'zecratary_recipes', 'zecratary_user_recipes', 'saved_recipes', 'zecratary_imported_recipes'];
+        for (const k of localKeys) {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const arr = JSON.parse(raw);
+            if (Array.isArray(arr)) {
+              const cleaned = arr.filter((x: any) => x.id !== id);
+              localStorage.setItem(k, JSON.stringify(cleaned));
+            }
+          }
+        }
+      } catch (_) {}
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('zecratary_recipes_updated'));
+        window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+      }
+    } catch (err) {
+      console.error('[SavedRecipesPage] Error deleting recipe:', err);
+      alert(t('errorDeletingRecipe') || 'Failed to delete recipe. Please try again.');
     }
   };
 
-  // Favorite toggle
-  const handleToggleFavorite = async (recipe: Recipe, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    const newStatus = !(recipe.isFavorite || recipe.is_favorite);
-    setRecipes(prev => prev.map(r => r.id === recipe.id ? { ...r, isFavorite: newStatus, is_favorite: newStatus } : r));
-
-    try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: recipe.id, isFavorite: newStatus })
-      });
-      showToast(newStatus ? 'Added to Favorites!' : 'Removed from Favorites');
-    } catch (_) {}
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setEditForm((prev: any) => ({ ...prev, imageUrl: reader.result as string }));
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
-  // Cooked status toggle
-  const handleToggleCooked = async (recipe: Recipe, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    const newStatus = !(recipe.isCooked || recipe.is_cooked);
-    setRecipes(prev => prev.map(r => r.id === recipe.id ? { ...r, isCooked: newStatus, is_cooked: newStatus } : r));
-
-    try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: recipe.id, isCooked: newStatus })
-      });
-      showToast(newStatus ? 'Marked as Cooked!' : 'Unmarked as Cooked');
-    } catch (_) {}
+  const handleDragStart = (index: number) => {
+    setDraggedIndex(index);
   };
 
-  // Delete recipe
-  const handleDeleteRecipe = async (id: string, title: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (!confirm(`Delete recipe "${title}"?`)) return;
+  const handleDragOver = (e: React.DragEvent, index: number, type: 'ingredients' | 'steps') => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === index) return;
 
-    setRecipes(prev => prev.filter(r => r.id !== id));
-    try {
-      await fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-      if (selectedRecipe?.id === id) setShowDetailModal(false);
-      showToast(`"${title}" deleted.`);
-    } catch (_) {}
+    if (type === 'ingredients') {
+      const list = [...editForm.ingredients];
+      const item = list[draggedIndex];
+      list.splice(draggedIndex, 1);
+      list.splice(index, 0, item);
+      setEditForm({ ...editForm, ingredients: list });
+      setDraggedIndex(index);
+    } else {
+      const list = [...editForm.instructions];
+      const item = list[draggedIndex];
+      list.splice(draggedIndex, 1);
+      list.splice(index, 0, item);
+      setEditForm({ ...editForm, instructions: list });
+      setDraggedIndex(index);
+    }
   };
 
-  // Ingredients set
-  const allAvailableIngredients = useMemo(() => {
-    const set = new Set<string>();
-    recipes.forEach(r => {
-      (r.ingredients || []).forEach(rawIng => {
-        const ing = getIngredientString(rawIng);
-        if (!ing) return;
-        const cleaned = ing.replace(/^[\d\s\/\.\,\-\–\—\(\)]+(cups?|tbsp|tsp|g|kg|oz|lbs?|cloves?|pinch|slices?|pieces?)?\s*(of)?\s*/i, '').trim();
-        if (cleaned.length > 2 && cleaned.length < 30) set.add(cleaned.toLowerCase());
-      });
+  const handleDrop = () => {
+    setDraggedIndex(null);
+  };
+
+  const handleOpenEdit = () => {
+    if (!selectedRecipe) return;
+    const defaultCat = categories[0] || 'Produce';
+    const cleanType = getCleanRecipeType(selectedRecipe);
+
+    let rawIngredients = selectedRecipe.ingredients;
+    if (typeof rawIngredients === 'string') {
+      try { rawIngredients = JSON.parse(rawIngredients); } catch (_) { rawIngredients = [rawIngredients]; }
+    }
+    if (!Array.isArray(rawIngredients)) rawIngredients = [];
+
+    let rawSteps = selectedRecipe.instructions || selectedRecipe.directions || selectedRecipe.steps;
+    if (typeof rawSteps === 'string') {
+      try { rawSteps = JSON.parse(rawSteps); } catch (_) { rawSteps = [rawSteps]; }
+    }
+    if (!Array.isArray(rawSteps) || rawSteps.length === 0) {
+      rawSteps = [''];
+    }
+
+    const currentImg = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || '';
+
+    setEditForm({
+      title: selectedRecipe.title || selectedRecipe.name || '',
+      description: selectedRecipe.description || '',
+      recipeType: cleanType,
+      sourceUrl: selectedRecipe.sourceUrl || selectedRecipe.source_url || '',
+      servings: selectedRecipe.servings || 4,
+      prepTimeMinutes: selectedRecipe.prepTimeMinutes || 30,
+      cookTimeMinutes: selectedRecipe.cookTimeMinutes || 10,
+      imageUrl: currentImg,
+      ingredients: rawIngredients.length > 0
+        ? rawIngredients.map((ing: any) => {
+            const norm = getNormalizedIngredient(ing, defaultCat);
+            return {
+              amount: norm.amount,
+              unit: norm.unit,
+              item: norm.name,
+              category: norm.category
+            };
+          })
+        : [{ amount: '', unit: '', item: '', category: defaultCat }],
+      instructions: [...rawSteps]
     });
-    return Array.from(set).sort();
-  }, [recipes]);
+    setEditTab('info');
+    setIsReorderingIngredients(false);
+    setIsReorderingSteps(false);
+    setIsEditing(true);
+  };
 
-  // Filter & Search Logic
-  const filteredRecipes = useMemo(() => {
+  const handleSaveEdit = () => {
+    if (!editForm.title.trim()) {
+      alert(t('enterRecipeTitleAlert') || 'Please enter a recipe title.');
+      setEditTab('info');
+      return;
+    }
+
+    const cleanType = getCleanRecipeType(editForm);
+    const targetUserId = currentUser?.id || currentUser?.email || 'usr_admin_1';
+    const resolvedImg = editForm.imageUrl || editForm.image || editForm.image_url || selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || '';
+    const newServings = Math.max(1, Number(editForm.servings) || 4);
+
+    const updatedRec = {
+      ...selectedRecipe,
+      ...editForm,
+      servings: newServings,
+      imageUrl: resolvedImg,
+      image: resolvedImg,
+      image_url: resolvedImg,
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy: selectedRecipe.createdBy || currentUser?.email || targetUserId,
+      created_by: selectedRecipe.created_by || currentUser?.email || targetUserId,
+      creatorName: selectedRecipe.creatorName || currentUser?.name || 'You',
+      creator_name: selectedRecipe.creator_name || currentUser?.name || 'You',
+      recipeType: cleanType,
+      category: cleanType,
+      recipe_type: cleanType,
+      tags: [cleanType],
+      instructions: editForm.instructions,
+      directions: editForm.instructions,
+      steps: editForm.instructions
+    };
+
+    setSelectedRecipe(updatedRec);
+    setCurrentServings(newServings);
+    const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
+    saveAllRecipes(updatedList);
+    setIsEditing(false);
+  };
+
+  const handleOpenShoppingModal = () => {
+    if (!selectedRecipe) return;
+    const defaultCat = categories[0] || 'Produce';
+    const base = Math.max(1, Number(selectedRecipe.servings) || 4);
+    const totalServings = currentServings || base;
+
+    let rawIngredients = selectedRecipe.ingredients;
+    if (typeof rawIngredients === 'string') {
+      try { rawIngredients = JSON.parse(rawIngredients); } catch (_) { rawIngredients = [rawIngredients]; }
+    }
+    if (!Array.isArray(rawIngredients)) rawIngredients = [];
+
+    const items = rawIngredients.map((ing: any, idx: number) => {
+      const norm = getNormalizedIngredient(ing, defaultCat);
+      const scaledAmt = calculateScaledAmount(norm.amount, base, totalServings);
+
+      return {
+        id: 'shop_item_' + idx + '_' + Math.random().toString(36).substring(2, 6),
+        selected: true,
+        amount: scaledAmt !== '' ? scaledAmt : (norm.amount || '1'),
+        unit: norm.unit || '',
+        name: norm.name || 'Ingredient',
+        category: norm.category || defaultCat
+      };
+    });
+
+    setShoppingModalIngredients(items);
+    setIsShoppingModalOpen(true);
+  };
+
+  const handleConfirmAddToShoppingList = async () => {
+    const selectedItems = shoppingModalIngredients.filter(i => i.selected);
+    if (selectedItems.length === 0) {
+      alert(t('noIngredientsSelectedAlert') || 'No ingredients selected.');
+      return;
+    }
+
+    const recTitle = selectedRecipe?.title || selectedRecipe?.name || 'Recipe';
+    const recId = selectedRecipe?.id;
+    const targetUserId = currentUser?.id || currentUser?.email || 'usr_admin_1';
+
+    const formatted = selectedItems.map(i => ({
+      id: 'shop_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy: currentUser?.email || targetUserId,
+      creatorName: currentUser?.name || 'User',
+      name: i.name,
+      item: i.name,
+      amount: String(i.amount || '1'),
+      quantity: String(i.amount || '1'),
+      unit: i.unit || 'unit',
+      category: i.category || (categories[0] || 'Produce'),
+      checked: false,
+      completed: false,
+      recipeId: recId,
+      recipeTitle: recTitle,
+      createdAt: new Date().toISOString()
+    }));
+
+    try {
+      const keys = ['zecratary_shopping_list', 'zecratary_shopping'];
+      for (const k of keys) {
+        const raw = localStorage.getItem(k);
+        const currentList = raw ? JSON.parse(raw) : [];
+        const updated = Array.isArray(currentList) ? [...formatted, ...currentList] : formatted;
+        localStorage.setItem(k, JSON.stringify(updated));
+      }
+    } catch (_) {}
+
+    try {
+      await Promise.allSettled([
+        fetch('/api/shopping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formatted)
+        }),
+        fetch('/api/shopping-list', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formatted)
+        })
+      ]);
+    } catch (_) {}
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('zecratary_shopping_updated'));
+      window.dispatchEvent(new Event('zecratary_shopping_list_updated'));
+      window.dispatchEvent(new Event('storage'));
+    }
+
+    setIsShoppingModalOpen(false);
+    const alertMsg = (t('addedItemsShoppingAlert') || 'Added {count} items to your Shopping List!')
+      .replace('{count}', String(selectedItems.length));
+    alert(alertMsg);
+  };
+
+  const handleOpenTimerModal = () => {
+    const defaultMins = Math.min(60, Math.max(1, selectedRecipe?.cookTimeMinutes || 15));
+    setTimerInputMinutes(defaultMins);
+    setIsTimerModalOpen(true);
+  };
+
+  const handleStartTimer = () => {
+    const safeMinutes = Math.min(60, Math.max(1, Number(timerInputMinutes) || 15));
+    const totalSecs = safeMinutes * 60;
+    const targetEndTime = Date.now() + totalSecs * 1000;
+    const recTitle = selectedRecipe?.title || selectedRecipe?.name || 'Kitchen Timer';
+
+    const newTimerState = {
+      recipeId: selectedRecipe?.id || 'manual_timer',
+      recipeTitle: recTitle,
+      totalSeconds: totalSecs,
+      remainingSeconds: totalSecs,
+      isRunning: true,
+      endTime: targetEndTime
+    };
+
+    setActiveTimer(newTimerState);
+    setIsTimerModalOpen(false);
+
+    try {
+      localStorage.setItem('zecratary_active_timer', JSON.stringify(newTimerState));
+      fetch('/api/timer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser?.id || currentUser?.email || 'usr_admin_1',
+          recipeId: selectedRecipe?.id,
+          durationMinutes: safeMinutes,
+          startedAt: new Date().toISOString()
+        })
+      }).catch(() => {});
+    } catch (_) {}
+  };
+
+  const handleTogglePauseTimer = () => {
+    if (!activeTimer) return;
+    if (activeTimer.remainingSeconds <= 0) return;
+
+    const nextRunning = !activeTimer.isRunning;
+    const updated = {
+      ...activeTimer,
+      isRunning: nextRunning,
+      endTime: nextRunning ? Date.now() + activeTimer.remainingSeconds * 1000 : activeTimer.endTime
+    };
+    setActiveTimer(updated);
+    try {
+      localStorage.setItem('zecratary_active_timer', JSON.stringify(updated));
+    } catch (_) {}
+  };
+
+  const handleResetOrDismissTimer = () => {
+    setActiveTimer(null);
+    try {
+      localStorage.removeItem('zecratary_active_timer');
+    } catch (_) {}
+  };
+
+  const handleAddIngredientFilter = () => {
+    const clean = ingredientQuery.trim();
+    if (!clean) return;
+    if (!selectedIngredientsList.includes(clean.toLowerCase())) {
+      setSelectedIngredientsList([...selectedIngredientsList, clean.toLowerCase()]);
+    }
+    setIngredientQuery('');
+  };
+
+  const handleRemoveIngredientFilter = (ing: string) => {
+    setSelectedIngredientsList(selectedIngredientsList.filter(i => i !== ing));
+  };
+
+  const filtered = useMemo(() => {
     return recipes.filter(r => {
-      if (activeTab === 'marketplace') {
-        if (!(r.isPublic || r.is_public)) return false;
-      } else if (activeTab === 'favorites') {
-        if (!(r.isFavorite || r.is_favorite)) return false;
-      } else if (activeTab === 'cooked') {
-        if (!(r.isCooked || r.is_cooked)) return false;
+      const q = search.toLowerCase().trim();
+      const title = (r.title || r.name || '').toLowerCase();
+      if (q && !title.includes(q)) return false;
+
+      if (filterFavorites && !r.isFavorite) return false;
+      if (filterCooked && !r.isCooked) return false;
+
+      if (selectedType !== 'All Types') {
+        const type = getCleanRecipeType(r);
+        if (type !== selectedType) return false;
       }
 
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        const matchTitle = (r.title || '').toLowerCase().includes(q);
-        const matchDesc = (r.description || '').toLowerCase().includes(q);
-        const matchCreator = (r.creatorName || r.ownerName || '').toLowerCase().includes(q);
-        const matchIng = (r.ingredients || []).some(i => getIngredientString(i).toLowerCase().includes(q));
-        if (!matchTitle && !matchDesc && !matchIng && !matchCreator) return false;
-      }
-
-      if (selectedType !== 'all') {
-        const type = (r.recipeType || r.mealType || '').toLowerCase();
-        if (type !== selectedType.toLowerCase()) return false;
-      }
-
-      if (selectedRating !== 'all') {
-        const rating = r.rating || 5;
-        if (selectedRating === '5' && rating < 5) return false;
-        if (selectedRating === '4' && rating < 4) return false;
-      }
-
-      if (selectedTimeFilter !== 'all') {
-        const totalMin = getEffectiveMinutes(r);
-        if (selectedTimeFilter === 'under15' && totalMin > 15) return false;
-        if (selectedTimeFilter === 'under30' && totalMin > 30) return false;
-        if (selectedTimeFilter === 'under60' && totalMin > 60) return false;
-        if (selectedTimeFilter === 'over60' && totalMin <= 60) return false;
-      }
-
-      if (selectedCookbookFilter !== 'all') {
-        const bId = r.bookId || r.book_id;
-        if (bId !== selectedCookbookFilter) return false;
-      }
-
-      if (selectedIngredients.length > 0) {
-        const hasAllSelected = selectedIngredients.every(sel =>
-          (r.ingredients || []).some(i => getIngredientString(i).toLowerCase().includes(sel))
+      if (selectedIngredientsList.length > 0) {
+        let rIng = r.ingredients;
+        if (typeof rIng === 'string') {
+          try { rIng = JSON.parse(rIng); } catch (_) { rIng = []; }
+        }
+        const recipeIngNames = Array.isArray(rIng) 
+          ? rIng.map((ing: any) => (typeof ing === 'string' ? ing : ing.item || ing.name || '').toLowerCase())
+          : [];
+        
+        const hasAll = selectedIngredientsList.every(targetIng => 
+          recipeIngNames.some(item => item.includes(targetIng))
         );
-        if (!hasAllSelected) return false;
+        if (!hasAll) return false;
+      }
+
+      if (selectedRating !== 'All Ratings') {
+        const minRating = parseInt(selectedRating);
+        if ((r.rating || 0) < minRating) return false;
+      }
+
+      if (selectedPrepTime !== 'All Prep Times') {
+        const prep = r.prepTimeMinutes || 0;
+        if (selectedPrepTime === 'Under 15m' && prep > 15) return false;
+        if (selectedPrepTime === '15-30m' && (prep < 15 || prep > 30)) return false;
+        if (selectedPrepTime === 'Over 30m' && prep < 30) return false;
+      }
+
+      if (selectedCookTime !== 'All Cook Times') {
+        const cook = r.cookTimeMinutes || 0;
+        if (selectedCookTime === 'Under 15m' && cook > 15) return false;
+        if (selectedCookTime === '15-30m' && (cook < 15 || cook > 30)) return false;
+        if (selectedCookTime === 'Over 30m' && cook < 30) return false;
       }
 
       return true;
-    }).sort((a, b) => {
-      if (sortBy === 'newest') return (b.created_at || '').localeCompare(a.created_at || '') || b.id.localeCompare(a.id);
-      if (sortBy === 'oldest') return (a.created_at || '').localeCompare(b.created_at || '') || a.id.localeCompare(b.id);
-      if (sortBy === 'alpha') return (a.title || '').localeCompare(b.title || '');
-      if (sortBy === 'time') return getEffectiveMinutes(a) - getEffectiveMinutes(b);
-      return 0;
     });
-  }, [recipes, activeTab, searchQuery, selectedType, selectedRating, selectedTimeFilter, selectedCookbookFilter, selectedIngredients, sortBy]);
-
-  const itemsPerPage = useMemo(() => {
-    if (gridDensity === '3x3') return 9;
-    if (gridDensity === '4x4') return 16;
-    return 25;
-  }, [gridDensity]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredRecipes.length / itemsPerPage));
-  const paginatedRecipes = useMemo(() => {
-    const start = (currentPage - 1) * itemsPerPage;
-    return filteredRecipes.slice(start, start + itemsPerPage);
-  }, [filteredRecipes, currentPage, itemsPerPage]);
+  }, [recipes, search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, selectedType, selectedRating, selectedTimeFilter, selectedCookbookFilter, selectedIngredients, activeTab, gridDensity]);
+  }, [search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime, gridMode]);
 
-  // Add to Plan submit
-  const handleConfirmAddToPlan = async () => {
-    if (!planRecipe) return;
-    try {
-      const userId = currentUser?.id || 'guest';
-      await fetch('/api/planner', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          date: planDate,
-          mealType: planMealType,
-          title: planRecipe.title,
-          servings: planServings,
-          recipeId: planRecipe.id,
-          image: getSafeImage(planRecipe),
-          recipe: planRecipe
-        })
-      });
-      showToast(`Scheduled "${planRecipe.title}" for ${planDate} (${planMealType})!`);
-      setShowPlanModal(false);
-    } catch (_) {
-      setShowPlanModal(false);
-    }
-  };
+  const itemsPerPage = GRID_CONFIG[gridMode].perPage;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
+  const paginatedRecipes = filtered.slice(startIndex, startIndex + itemsPerPage);
 
-  // Add to Cookbook submit
-  const handleConfirmAddToBook = async () => {
-    if (!bookTargetRecipe || !selectedBookId) return;
-    try {
-      const userId = currentUser?.id || 'guest';
-      await fetch('/api/books', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'add_recipe',
-          userId,
-          bookId: selectedBookId,
-          recipeId: bookTargetRecipe.id
-        })
-      });
-      setRecipes(prev => prev.map(r => r.id === bookTargetRecipe.id ? { ...r, bookId: selectedBookId } : r));
-      showToast('Added to Cookbook!');
-      setShowBookModal(false);
-    } catch (_) {
-      setShowBookModal(false);
-    }
-  };
+  const assignedBook = books.find(b => b.id === (selectedRecipe?.bookId || selectedRecipe?.book_id));
+  const baseServings = Math.max(1, Number(selectedRecipe?.servings) || 4);
+  const recipeCategoryBadge = selectedRecipe ? getCleanRecipeType(selectedRecipe) : 'Main Dish';
 
-  // Add to Shopping List submit
-  const handleConfirmShoppingList = async () => {
-    if (selectedShoppingItems.length === 0) return;
-    try {
-      const userId = currentUser?.id || 'guest';
-      await fetch('/api/grocery', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          items: selectedShoppingItems.map(name => ({ name, checked: false }))
-        })
-      });
-      showToast(`Added ${selectedShoppingItems.length} ingredients to Shopping List!`);
-      setShowShoppingModal(false);
-    } catch (_) {
-      setShowShoppingModal(false);
-    }
-  };
+  const scaleFactor = useMemo(() => {
+    return currentServings / baseServings;
+  }, [currentServings, baseServings]);
 
-  // Start Kitchen Timer
-  const handleStartTimerForRecipe = (minutes: number, label: string) => {
-    const sec = Math.max(60, minutes * 60);
-    setTimerTotalSeconds(sec);
-    setTimerRemaining(sec);
-    setTimerLabel(label);
-    setTimerRunning(true);
-    setTimerOpen(true);
-    showToast(`⏱️ Timer set for ${minutes} mins`);
-  };
+  const percentChange = useMemo(() => {
+    return Math.round(((currentServings - baseServings) / baseServings) * 100);
+  }, [currentServings, baseServings]);
+
+  const formattedCountdown = useMemo(() => {
+    if (!activeTimer) return '00:00';
+    const mins = Math.floor(activeTimer.remainingSeconds / 60);
+    const secs = activeTimer.remainingSeconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }, [activeTimer?.remainingSeconds]);
 
   return (
     <div 
-      className="max-w-7xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
+      className="max-w-6xl mx-auto space-y-6 pb-16 px-4 font-sans transition-colors duration-200" 
       style={{ color: 'var(--color-text)' }}
+      onClick={() => setOpenDropdown(null)}
     >
-      {toastMessage && (
-        <div 
-          className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-primary)',
-            color: 'var(--color-text)'
-          }}
-        >
-          <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
-          <span>{toastMessage}</span>
+      {/* Top Header */}
+      <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
+        <div>
+          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
+            {t('savedRecipesTitle') || 'Saved Recipes'}
+          </h1>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            {(t('savedRecipesSubtitle') || 'Your collection of favorite recipes ({count})').replace('{count}', String(recipes.length))}
+          </p>
         </div>
-      )}
 
-      {/* 1. Header Toolbar (Title, Metrics, and Primary Actions) */}
-      <div 
-        className="p-6 rounded-3xl border shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-colors duration-200"
-        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-      >
-        <div className="space-y-1">
-          <div className="flex items-center gap-3">
-            <div 
-              className="w-10 h-10 rounded-2xl flex items-center justify-center border shadow-xs"
+        <div className="flex items-center gap-3">
+          {/* 3x3, 4x4, 5x5 Grid Switcher */}
+          <div 
+            className="flex items-center p-1 rounded-xl border shadow-xs"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            {(['3x3', '4x4', '5x5'] as GridMode[]).map((mode) => {
+              const isActive = gridMode === mode;
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => {
+                    setGridMode(mode);
+                    try { localStorage.setItem('zecratary_saved_grid_mode', mode); } catch (_) {}
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                  style={isActive ? {
+                    backgroundColor: 'var(--color-primary)',
+                    color: '#ffffff',
+                    boxShadow: '0 2px 8px rgba(224, 86, 56, 0.3)'
+                  } : {
+                    color: 'var(--color-text-secondary)',
+                    backgroundColor: 'transparent'
+                  }}
+                  title={`Show ${GRID_CONFIG[mode].label} layout (${GRID_CONFIG[mode].perPage} per page)`}
+                >
+                  {mode === '3x3' && <Grid3X3 className="h-3.5 w-3.5" />}
+                  {mode === '4x4' && <LayoutGrid className="h-3.5 w-3.5" />}
+                  {mode === '5x5' && <Rows3 className="h-3.5 w-3.5" />}
+                  <span>{GRID_CONFIG[mode].label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <Link 
+            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg"
+            href="/manual"
+            style={{ backgroundColor: 'var(--color-primary)' }}
+            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+          >
+            <UploadCloud className="h-4 w-4"/> {t('createRecipe') || 'Create Recipe'}
+          </Link>
+        </div>
+      </div>
+
+      {/* Filter Row */}
+      <div className="space-y-3">
+        <div className="flex gap-3">
+          <div className="relative flex-1">
+            <Search className="h-4 w-4 absolute left-3.5 top-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
+            <input
+              type="text"
+              autoComplete="off"
+              data-lpignore="true"
+              placeholder={t('searchByNamePlaceholder') || 'Search by name or ingredient...'}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none"
               style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+              onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+              onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+            />
+          </div>
+          <button 
+            type="button"
+            onClick={() => setShowFilters(!showFilters)}
+            className="border font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition cursor-pointer"
+            style={showFilters ? {
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-emerald)',
+              color: 'var(--color-emerald)'
+            } : {
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text-secondary)'
+            }}
+          >
+            <SlidersHorizontal className="h-4 w-4" style={{ color: 'var(--color-emerald)' }}/> {t('filter') || 'Filter'}
+          </button>
+        </div>
+
+        {/* Filter Pills */}
+        {showFilters && (
+          <div className="flex flex-wrap items-center gap-2 pt-1 animate-in fade-in text-xs font-semibold select-none">
+            <button
+              type="button"
+              onClick={() => setFilterFavorites(!filterFavorites)}
+              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              style={filterFavorites ? {
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-primary)',
                 color: 'var(--color-primary)'
-              }}
-            >
-              <BookOpen className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl sm:text-2xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                  {t('recipesTitle', 'Recipes')}
-                </h1>
-                <span 
-                  className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border flex items-center gap-1"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text-secondary)'
-                  }}
-                  title="All recipes saved as individual JSON files in /recipes & PostgreSQL"
-                >
-                  <FileJson className="h-3 w-3 text-emerald-400" />
-                  <span>JSON Files & DB Synced</span>
-                </span>
-              </div>
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('recipesSubtitle', 'Discover community dishes on Marketplace or manage your personal recipes')}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Counter Pills & Primary Actions */}
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-          <div 
-            className="flex items-center gap-2 px-3 py-1.5 rounded-2xl border text-xs font-bold shadow-xs"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-          >
-            <span>{recipes.length} {t('totalRecipes', 'Recipes')}</span>
-            <span className="opacity-30">•</span>
-            <span className="text-sky-400 flex items-center gap-1" title="Public in Marketplace">
-              <Globe className="h-3 w-3" /> {recipes.filter(r => r.isPublic || r.is_public).length}
-            </span>
-            <span className="opacity-30">•</span>
-            <span className="text-red-500 flex items-center gap-1">
-              <Heart className="h-3 w-3 fill-current" /> {recipes.filter(r => r.isFavorite || r.is_favorite).length}
-            </span>
-          </div>
-
-          <Link
-            href="/manual"
-            className="px-4 py-2 rounded-xl text-white text-xs font-bold transition flex items-center gap-1.5 shadow-md hover:opacity-90"
-            style={{ backgroundColor: 'var(--color-primary)' }}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span>{t('addRecipe', 'Add Recipe')}</span>
-          </Link>
-
-          <Link
-            href="/import"
-            className="px-3.5 py-2 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shadow-xs hover:opacity-80"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <Sparkles className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-            <span>{t('importRecipe', 'Import')}</span>
-          </Link>
-        </div>
-      </div>
-
-      {/* 2. Filters, Marketplace Tabs & Density Control Bar */}
-      <div 
-        className="p-4 rounded-3xl border shadow-sm space-y-3 transition-colors duration-200"
-        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-      >
-        <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
-          {/* Search Box */}
-          <div 
-            className="flex-1 flex items-center gap-2 px-3.5 py-2 rounded-2xl border transition shadow-inner"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-          >
-            <Search className="h-4 w-4 shrink-0" style={{ color: 'var(--color-text-secondary)' }} />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={t('searchRecipesPlaceholder', 'Search recipes, ingredients, creator...')}
-              className="bg-transparent border-none text-xs w-full outline-none"
-              style={{ color: 'var(--color-text)' }}
-            />
-            {searchQuery && (
-              <button 
-                type="button" 
-                onClick={() => setSearchQuery('')}
-                className="hover:opacity-75 cursor-pointer text-xs"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* Quick Tabs (Including Marketplace Tab) */}
-          <div 
-            className="p-1 rounded-2xl border flex items-center gap-1 self-start sm:self-auto shrink-0"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-          >
-            <button
-              type="button"
-              onClick={() => setActiveTab('my_recipes')}
-              className="px-3.5 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
-              style={activeTab === 'my_recipes' ? {
-                backgroundColor: 'var(--color-primary)',
-                color: '#ffffff'
               } : {
-                color: 'var(--color-text-secondary)'
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
               }}
             >
-              <UserIcon className="h-3.5 w-3.5" />
-              <span>{t('myRecipes', 'My Recipes')}</span>
+              <Heart className={`h-3.5 w-3.5 ${filterFavorites ? 'fill-current' : ''}`} style={{ color: filterFavorites ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}/>
+              <span>{t('favorites') || 'Favorites'}</span>
             </button>
 
-            {/* TAB: Marketplace (Public Recipes from All Users) */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('marketplace')}
-              className="px-3.5 py-1.5 rounded-xl text-xs font-black transition cursor-pointer flex items-center gap-1.5"
-              style={activeTab === 'marketplace' ? {
-                backgroundColor: 'var(--color-emerald)',
-                color: '#ffffff'
-              } : {
-                color: 'var(--color-emerald)'
-              }}
-            >
-              <Globe className="h-3.5 w-3.5" />
-              <span>{t('marketplaceTab', 'Marketplace')}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('favorites')}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1"
-              style={activeTab === 'favorites' ? {
-                backgroundColor: 'var(--color-primary)',
-                color: '#ffffff'
-              } : {
-                color: 'var(--color-text-secondary)'
-              }}
-            >
-              <Heart className="h-3 w-3" />
-              <span>{t('favorites', 'Favorites')}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('cooked')}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1"
-              style={activeTab === 'cooked' ? {
-                backgroundColor: 'var(--color-primary)',
-                color: '#ffffff'
-              } : {
-                color: 'var(--color-text-secondary)'
-              }}
-            >
-              <Check className="h-3 w-3" />
-              <span>{t('cooked', 'Cooked')}</span>
-            </button>
-          </div>
-
-          {/* Density Switcher */}
-          <div 
-            className="flex items-center gap-1 p-1 rounded-2xl border self-end lg:self-auto shrink-0 shadow-2xs"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-          >
-            {[
-              { id: '3x3', icon: LayoutGrid, label: '3×3' },
-              { id: '4x4', icon: Grid3X3, label: '4×4' },
-              { id: '5x5', icon: Grid2X2, label: '5×5' }
-            ].map(d => (
+            {/* Ingredients Popover Filter */}
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
               <button
-                key={d.id}
                 type="button"
-                onClick={() => setGridDensity(d.id as any)}
-                className="px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer"
-                style={gridDensity === d.id ? {
-                  backgroundColor: 'var(--color-primary)',
-                  color: '#ffffff'
+                onClick={() => setOpenDropdown(openDropdown === 'ingredients' ? null : 'ingredients')}
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                style={selectedIngredientsList.length > 0 || openDropdown === 'ingredients' ? {
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
                 } : {
-                  color: 'var(--color-text-secondary)'
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
                 }}
               >
-                <d.icon className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">{d.label}</span>
+                <Carrot className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }}/>
+                <span>{t('ingredientsFilter') || 'Ingredients'} {selectedIngredientsList.length > 0 ? `(${selectedIngredientsList.length})` : ''}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
               </button>
-            ))}
-          </div>
-        </div>
 
-        {/* Filter Dropdowns row */}
-        <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
-          <select
-            value={selectedType}
-            onChange={(e) => setSelectedType(e.target.value)}
-            className="px-3 py-1.5 rounded-xl border font-bold text-xs outline-none cursor-pointer"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <option value="all">All Types</option>
-            <option value="Breakfast">Breakfast</option>
-            <option value="Lunch">Lunch</option>
-            <option value="Dinner">Dinner</option>
-            <option value="Snack">Snack</option>
-            <option value="Dessert">Dessert</option>
-          </select>
-
-          <select
-            value={selectedTimeFilter}
-            onChange={(e) => setSelectedTimeFilter(e.target.value)}
-            className="px-3 py-1.5 rounded-xl border font-bold text-xs outline-none cursor-pointer"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <option value="all">All Durations</option>
-            <option value="under15">&lt; 15 mins</option>
-            <option value="under30">&lt; 30 mins</option>
-            <option value="under60">&lt; 60 mins</option>
-            <option value="over60">60+ mins</option>
-          </select>
-
-          <select
-            value={selectedRating}
-            onChange={(e) => setSelectedRating(e.target.value)}
-            className="px-3 py-1.5 rounded-xl border font-bold text-xs outline-none cursor-pointer"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <option value="all">All Ratings</option>
-            <option value="5">5 Stars only</option>
-            <option value="4">4+ Stars</option>
-          </select>
-
-          {cookbooks.length > 0 && activeTab !== 'marketplace' && (
-            <select
-              value={selectedCookbookFilter}
-              onChange={(e) => setSelectedCookbookFilter(e.target.value)}
-              className="px-3 py-1.5 rounded-xl border font-bold text-xs outline-none cursor-pointer"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-            >
-              <option value="all">All Cookbooks</option>
-              {cookbooks.map(b => (
-                <option key={b.id} value={b.id}>{b.title}</option>
-              ))}
-            </select>
-          )}
-
-          <div className="flex items-center gap-1.5 ml-auto">
-            <ArrowUpDown className="h-3.5 w-3.5 opacity-60" />
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as any)}
-              className="px-2.5 py-1.5 rounded-xl border font-bold text-xs outline-none cursor-pointer"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-            >
-              <option value="newest">Newest First</option>
-              <option value="oldest">Oldest First</option>
-              <option value="alpha">Alphabetical (A-Z)</option>
-              <option value="time">Cook Time (Fastest)</option>
-            </select>
-          </div>
-
-          {/* Ingredient Popover */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowIngredientFilter(!showIngredientFilter)}
-              className="px-3 py-1.5 rounded-xl border font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition hover:opacity-80"
-              style={{
-                backgroundColor: selectedIngredients.length > 0 ? 'var(--color-primary)' : 'var(--color-inner-dark)',
-                borderColor: selectedIngredients.length > 0 ? 'var(--color-primary)' : 'var(--color-border)',
-                color: selectedIngredients.length > 0 ? '#ffffff' : 'var(--color-text)'
-              }}
-            >
-              <Filter className="h-3 w-3" />
-              <span>Ingredients {selectedIngredients.length > 0 ? `(${selectedIngredients.length})` : ''}</span>
-            </button>
-
-            {showIngredientFilter && (
-              <div 
-                className="absolute left-0 mt-2 w-72 p-3.5 rounded-2xl border shadow-2xl z-30 space-y-2.5 animate-in fade-in"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-              >
-                <div className="flex items-center justify-between pb-1.5 border-b" style={{ borderColor: 'var(--color-border)' }}>
-                  <span className="font-extrabold text-xs">Filter by Ingredient</span>
-                  {selectedIngredients.length > 0 && (
-                    <button 
-                      type="button"
-                      onClick={() => setSelectedIngredients([])}
-                      className="text-[10px] text-red-400 hover:underline cursor-pointer"
+              {openDropdown === 'ingredients' && (
+                <div 
+                  className="absolute left-0 top-full mt-2 w-72 border rounded-2xl shadow-2xl p-3 z-50 space-y-2.5 animate-in fade-in"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-primary)'
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <div 
+                      className="flex-1 border-2 rounded-xl overflow-hidden"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-primary)'
+                      }}
                     >
-                      Clear
+                      <input
+                        type="text"
+                        autoFocus
+                        autoComplete="off"
+                        placeholder={t('searchIngredientsPlaceholder') || 'Search ingredients'}
+                        value={ingredientQuery}
+                        onChange={(e) => setIngredientQuery(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddIngredientFilter();
+                          }
+                        }}
+                        className="w-full bg-transparent px-3 py-2 text-xs outline-none"
+                        style={{ color: 'var(--color-text)' }}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddIngredientFilter}
+                      className="text-white p-2 rounded-xl transition flex items-center justify-center font-bold text-sm shadow-md cursor-pointer shrink-0"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                    >
+                      <Plus className="h-4 w-4 stroke-[3]"/>
                     </button>
-                  )}
-                </div>
+                  </div>
 
-                <input
-                  type="text"
-                  placeholder="Type ingredient..."
-                  value={ingredientSearchInput}
-                  onChange={(e) => setIngredientSearchInput(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs rounded-xl border outline-none"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
-
-                <div className="max-h-48 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
-                  {allAvailableIngredients
-                    .filter(i => !ingredientSearchInput || i.includes(ingredientSearchInput.toLowerCase()))
-                    .map(ing => {
-                      const isSel = selectedIngredients.includes(ing);
-                      return (
-                        <div
+                  {selectedIngredientsList.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
+                      {selectedIngredientsList.map((ing) => (
+                        <span
                           key={ing}
-                          onClick={() => {
-                            setSelectedIngredients(prev =>
-                              prev.includes(ing) ? prev.filter(x => x !== ing) : [...prev, ing]
-                            );
-                          }}
-                          className="px-2.5 py-1 rounded-lg text-xs font-medium flex items-center justify-between cursor-pointer transition hover:opacity-80"
+                          className="text-[11px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 border"
                           style={{
-                            backgroundColor: isSel ? 'var(--color-inner-dark)' : 'transparent',
-                            color: isSel ? 'var(--color-primary)' : 'var(--color-text)'
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
                           }}
                         >
                           <span className="capitalize">{ing}</span>
-                          {isSel && <Check className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />}
-                        </div>
-                      );
-                    })}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveIngredientFilter(ing)}
+                            className="text-slate-400 hover:text-red-500 cursor-pointer"
+                          >
+                            <X className="h-3 w-3"/>
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="text-[11px] leading-tight pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('recipesMustContainIngredients') || 'Recipes must contain all listed ingredients.'}
+                  </p>
                 </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
+              )}
+            </div>
 
-      {/* 3. Recipes Grid */}
-      {loading ? (
-        <div className="py-24 text-center space-y-3">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto" style={{ color: 'var(--color-primary)' }} />
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Loading recipes...</p>
-        </div>
-      ) : paginatedRecipes.length === 0 ? (
-        <div 
-          className="py-20 rounded-3xl border text-center space-y-3"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <BookOpen className="h-10 w-10 mx-auto opacity-30" />
-          <h3 className="font-extrabold text-base">
-            {activeTab === 'marketplace' ? 'No public recipes found on Marketplace' : 'No recipes found in your collection'}
-          </h3>
-          <p className="text-xs max-w-sm mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
-            {activeTab === 'marketplace' 
-              ? 'Be the first to share your recipe to the community Marketplace!' 
-              : 'Try clearing search filters or import/create delicious new dishes to build your library.'}
-          </p>
-        </div>
-      ) : (
-        <div 
-          className={`grid gap-4 ${
-            gridDensity === '3x3' 
-              ? 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' 
-              : gridDensity === '4x4' 
-              ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4' 
-              : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-5'
-          }`}
-        >
-          {paginatedRecipes.map(recipe => {
-            const isFav = recipe.isFavorite || recipe.is_favorite;
-            const isDone = recipe.isCooked || recipe.is_cooked;
-            const isPub = recipe.isPublic || recipe.is_public;
-            const userOwns = isOwner(recipe);
-            const totalMins = getEffectiveMinutes(recipe);
-
-            return (
-              <div
-                key={recipe.id}
-                className="rounded-3xl border overflow-hidden shadow-xs hover:shadow-xl transition-all duration-200 flex flex-col justify-between group relative"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+            {/* Recipe Type Dropdown */}
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => setOpenDropdown(openDropdown === 'recipeType' ? null : 'recipeType')}
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                style={selectedType !== 'All Types' ? {
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
+                } : {
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
               >
-                {/* Image & Quick Action Overlay */}
+                <Utensils className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/>
+                <span className="font-bold">{selectedType === 'All Types' ? (t('recipeTypeLabel') || 'Recipe Type') : selectedType}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
+              </button>
+
+              {openDropdown === 'recipeType' && (
                 <div 
-                  className="relative aspect-video w-full overflow-hidden cursor-pointer"
-                  onClick={() => {
-                    setSelectedRecipe(recipe);
-                    setModalServings(recipe.servings || 2);
-                    setShowDetailModal(true);
+                  className="absolute left-0 top-full mt-2 w-48 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1 animate-in fade-in"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
                   }}
                 >
-                  <img
-                    src={getSafeImage(recipe)}
-                    alt={recipe.title}
-                    referrerPolicy="no-referrer"
-                    crossOrigin="anonymous"
-                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                    onError={(e: any) => {
-                      e.target.src = '/recipes/images/default.jpg';
-                    }}
-                  />
-
-                  {/* Top Badges */}
-                  <div className="absolute top-2.5 left-2.5 right-2.5 flex items-center justify-between pointer-events-none">
-                    <span 
-                      className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider backdrop-blur-md shadow-xs pointer-events-auto border"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
+                  {RECIPE_TYPES.map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => { setSelectedType(type); setOpenDropdown(null); }}
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
+                      style={selectedType === type ? {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-primary)',
+                        border: '1px solid var(--color-primary)'
+                      } : {
                         color: 'var(--color-text)'
                       }}
                     >
-                      {recipe.recipeType || recipe.mealType || 'Dish'}
-                    </span>
+                      {type}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
-                    <div className="flex items-center gap-1.5 pointer-events-auto">
-                      {/* Marketplace Public / Private Sharing Toggle */}
-                      {userOwns && (
-                        <button
-                          type="button"
-                          onClick={(e) => handleTogglePublic(recipe, e)}
-                          className="p-1.5 rounded-full border shadow-md transition hover:scale-110 cursor-pointer backdrop-blur-md"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: isPub ? 'var(--color-emerald)' : 'var(--color-border)',
-                            color: isPub ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
-                          }}
-                          title={isPub ? 'Public in Marketplace (Click to make Private)' : 'Private (Click to Share to Marketplace)'}
-                        >
-                          {isPub ? <Globe className="h-3.5 w-3.5 stroke-[2.5]" /> : <Lock className="h-3.5 w-3.5" />}
-                        </button>
-                      )}
+            {/* Cooked Pill */}
+            <button
+              type="button"
+              onClick={() => setFilterCooked(!filterCooked)}
+              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              style={filterCooked ? {
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-emerald)',
+                color: 'var(--color-emerald)'
+              } : {
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" style={{ color: filterCooked ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}/>
+              <span>{t('cooked') || 'Cooked'}</span>
+            </button>
 
-                      {/* Favorite Button */}
+            {/* Rating Dropdown */}
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => setOpenDropdown(openDropdown === 'rating' ? null : 'rating')}
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                style={selectedRating !== 'All Ratings' ? {
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-primary)'
+                } : {
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <Star className="h-3.5 w-3.5" style={{ color: selectedRating !== 'All Ratings' ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}/>
+                <span>{selectedRating === 'All Ratings' ? (t('rating') || 'Rating') : selectedRating}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
+              </button>
+
+              {openDropdown === 'rating' && (
+                <div 
+                  className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  {['All Ratings', '4+ Stars', '3+ Stars', '1+ Stars'].map((rat) => (
+                    <button
+                      key={rat}
+                      type="button"
+                      onClick={() => { setSelectedRating(rat); setOpenDropdown(null); }}
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
+                      style={selectedRating === rat ? {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-primary)',
+                        border: '1px solid var(--color-border)'
+                      } : {
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      {rat}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Prep Time Dropdown */}
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => setOpenDropdown(openDropdown === 'prepTime' ? null : 'prepTime')}
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                style={selectedPrepTime !== 'All Prep Times' ? {
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-emerald)',
+                  color: 'var(--color-emerald)'
+                } : {
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <Hourglass className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }}/>
+                <span className="font-bold">{selectedPrepTime === 'All Prep Times' ? (t('prepTime') || 'Prep Time') : selectedPrepTime}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
+              </button>
+
+              {openDropdown === 'prepTime' && (
+                <div 
+                  className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  {['All Prep Times', 'Under 15m', '15-30m', 'Over 30m'].map((time) => (
+                    <button
+                      key={time}
+                      type="button"
+                      onClick={() => { setSelectedPrepTime(time); setOpenDropdown(null); }}
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
+                      style={selectedPrepTime === time ? {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-emerald)',
+                        border: '1px solid var(--color-border)'
+                      } : {
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      {time}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Cook Time Dropdown */}
+            <div className="relative" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => setOpenDropdown(openDropdown === 'cookTime' ? null : 'cookTime')}
+                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                style={selectedCookTime !== 'All Cook Times' ? {
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-emerald)',
+                  color: 'var(--color-emerald)'
+                } : {
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }}/>
+                <span className="font-bold">{selectedCookTime === 'All Cook Times' ? (t('cookTime') || 'Cook Time') : selectedCookTime}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-80"/>
+              </button>
+
+              {openDropdown === 'cookTime' && (
+                <div 
+                  className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  {['All Cook Times', 'Under 15m', '15-30m', 'Over 30m'].map((time) => (
+                    <button
+                      key={time}
+                      type="button"
+                      onClick={() => { setSelectedCookTime(time); setOpenDropdown(null); }}
+                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition cursor-pointer"
+                      style={selectedCookTime === time ? {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        color: 'var(--color-emerald)',
+                        border: '1px solid var(--color-border)'
+                      } : {
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      {time}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Grid */}
+      {loading ? (
+        <div className="text-xs py-12 text-center" style={{ color: 'var(--color-text-secondary)' }}>
+          {t('loadingRecipes') || 'Loading recipes...'}
+        </div>
+      ) : recipes.length === 0 ? (
+        <div 
+          className="text-center py-16 px-4 border border-dashed rounded-3xl space-y-3"
+          style={{
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: 'var(--color-border)'
+          }}
+        >
+          <div 
+            className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto shadow-sm"
+            style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' }}
+          >
+            <Utensils className="h-6 w-6"/>
+          </div>
+          <h3 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>
+            {t('noSavedRecipesTitle') || 'No Recipes Yet'}
+          </h3>
+          <p className="text-xs max-w-sm mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('noSavedRecipesDesc') || 'Recipes imported or created by your account will appear exclusively here.'}
+          </p>
+          <div className="flex justify-center gap-3 pt-2">
+            <Link 
+              href="/import"
+              className="px-4 py-2 rounded-xl text-xs font-bold border transition shadow-sm"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              {t('importRecipe') || 'Import Recipe'}
+            </Link>
+            <Link 
+              href="/manual"
+              className="px-4 py-2 rounded-xl text-xs font-bold text-white transition shadow-sm"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+            >
+              {t('createRecipe') || 'Create Recipe'}
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <div className={`grid ${GRID_CONFIG[gridMode].colsClass} gap-4 sm:gap-5`}>
+          {paginatedRecipes.map((r) => {
+            const cardBook = books.find(b => b.id === (r.bookId || r.book_id));
+            const cardTypeBadge = getCleanRecipeType(r);
+            const cfg = GRID_CONFIG[gridMode];
+            const displayImg = r.imageUrl || r.image || r.image_url || DEFAULT_RECIPE_IMAGE;
+
+            return (
+              <div
+                key={r.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  setSelectedRecipe(r);
+                  setCurrentServings(Math.max(1, Number(r.servings) || 4));
+                  setCompletedSteps([]);
+                  setNoteText(r.note || '');
+                  setIsBookDropdownOpen(false);
+                  setIsEditing(false);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedRecipe(r);
+                    setCurrentServings(Math.max(1, Number(r.servings) || 4));
+                    setCompletedSteps([]);
+                    setNoteText(r.note || '');
+                    setIsBookDropdownOpen(false);
+                    setIsEditing(false);
+                  }
+                }}
+                className="border rounded-2xl overflow-hidden transition cursor-pointer group shadow-sm hover:shadow-md relative flex flex-col justify-between"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)'
+                }}
+              >
+                <div>
+                  <div className={`relative ${cfg.imgHeight} w-full overflow-hidden`} style={{ backgroundColor: 'var(--color-inner-dark)' }}>
+                    <img
+                      src={displayImg}
+                      alt={r.title || r.name}
+                      referrerPolicy="no-referrer"
+                      crossOrigin="anonymous"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (!target.dataset.failed) {
+                          target.dataset.failed = 'true';
+                          target.src = DEFAULT_RECIPE_IMAGE;
+                        }
+                      }}
+                      className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                    />
+                    
+                    {/* Card Action Buttons */}
+                    <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
-                        onClick={(e) => handleToggleFavorite(recipe, e)}
-                        className="p-1.5 rounded-full border shadow-md transition hover:scale-110 cursor-pointer backdrop-blur-md"
-                        style={{
+                        onClick={(e) => toggleCooked(e, r.id)}
+                        className="p-1.5 rounded-full backdrop-blur-md transition shadow-md cursor-pointer border"
+                        style={r.isCooked ? {
+                          backgroundColor: 'var(--color-emerald)',
+                          borderColor: 'var(--color-emerald)',
+                          color: '#ffffff'
+                        } : {
                           backgroundColor: 'var(--color-card)',
-                          borderColor: isFav ? '#ef4444' : 'var(--color-border)',
-                          color: isFav ? '#ef4444' : 'var(--color-text)'
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
                         }}
+                        title={r.isCooked ? (t('cooked') || 'Cooked') : (t('markAsCooked') || 'Mark as Cooked')}
                       >
-                        <Heart className={`h-3.5 w-3.5 ${isFav ? 'fill-current text-red-500' : ''}`} />
+                        <CheckCircle2 className="h-3.5 w-3.5"/>
                       </button>
 
-                      {/* Cooked Checkmark */}
                       <button
                         type="button"
-                        onClick={(e) => handleToggleCooked(recipe, e)}
-                        className="p-1.5 rounded-full border shadow-md transition hover:scale-110 cursor-pointer backdrop-blur-md"
-                        style={{
+                        onClick={(e) => toggleFavorite(e, r.id)}
+                        className="p-1.5 rounded-full backdrop-blur-md transition shadow-md cursor-pointer border"
+                        style={r.isFavorite ? {
                           backgroundColor: 'var(--color-card)',
-                          borderColor: isDone ? 'var(--color-emerald)' : 'var(--color-border)',
-                          color: isDone ? 'var(--color-emerald)' : 'var(--color-text)'
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        } : {
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-border)',
+                          color: 'var(--color-text-secondary)'
                         }}
+                        title={r.isFavorite ? (t('favorites') || 'Favorite') : (t('addToFavorites') || 'Add to Favorites')}
                       >
-                        <Check className="h-3.5 w-3.5 stroke-[3]" />
+                        <Heart 
+                          className={`h-3.5 w-3.5 ${r.isFavorite ? 'fill-current' : ''}`}
+                          style={{ color: r.isFavorite ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
+                        />
                       </button>
                     </div>
+
+                    {cardBook && gridMode !== '5x5' && (
+                      <div className="absolute bottom-2.5 left-2.5 bg-black/75 backdrop-blur-md text-[10px] text-amber-300 font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border border-amber-400/30 max-w-[80%] truncate">
+                        <Book className="h-3 w-3 shrink-0"/> <span className="truncate">{cardBook.title}</span>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Creator Attribution (On Marketplace) & Stats */}
-                  <div 
-                    className="absolute bottom-2 left-2 right-2 px-2.5 py-1 rounded-xl flex items-center justify-between text-[10px] font-bold backdrop-blur-md border shadow-xs pointer-events-none"
-                    style={{
-                      backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                      borderColor: 'rgba(255, 255, 255, 0.1)',
-                      color: '#ffffff'
-                    }}
-                  >
-                    <span className="flex items-center gap-1 text-emerald-400">
-                      <Clock className="h-3 w-3" /> {totalMins}m
-                    </span>
-
-                    {/* Creator Tag */}
-                    {(recipe.creatorName || recipe.ownerName) && (
-                      <span className="truncate max-w-[120px] text-amber-300 flex items-center gap-1">
-                        <UserIcon className="h-2.5 w-2.5 shrink-0" /> {recipe.creatorName || recipe.ownerName}
-                      </span>
-                    )}
-
-                    <span className="flex items-center gap-1">
-                      <Users className="h-3 w-3" /> {recipe.servings || 4} serv
-                    </span>
+                  <div className="p-3.5 space-y-1.5">
+                    <h3 
+                      className={`font-bold ${cfg.titleSize} leading-snug line-clamp-2`}
+                      style={{ color: 'var(--color-text)' }}
+                    >
+                      {r.title || r.name}
+                    </h3>
                   </div>
                 </div>
 
-                {/* Recipe Body */}
-                <div className="p-4 space-y-2.5 flex-1 flex flex-col justify-between">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between gap-1">
-                      <h3 
-                        onClick={() => {
-                          setSelectedRecipe(recipe);
-                          setModalServings(recipe.servings || 2);
-                          setShowDetailModal(true);
-                        }}
-                        className="font-extrabold text-sm line-clamp-1 cursor-pointer hover:underline"
-                        style={{ color: 'var(--color-text)' }}
-                        title={recipe.title}
-                      >
-                        {recipe.title}
-                      </h3>
+                <div className="px-3.5 pb-3 pt-0 flex items-center justify-between gap-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span 
+                      className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 shadow-xs"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                    >
+                      {cardTypeBadge}
+                    </span>
 
-                      {isPub && (
-                        <span 
-                          className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded border flex items-center gap-0.5 shrink-0"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-emerald)',
-                            color: 'var(--color-emerald)'
-                          }}
-                          title="Visible on Marketplace"
-                        >
-                          <Globe className="h-2.5 w-2.5" /> Market
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                      {recipe.description || 'Delicious culinary creation with balanced nutrients.'}
-                    </p>
+                    <span 
+                      className="text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 border"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text-secondary)'
+                      }}
+                    >
+                      {r.creatorName ? `${t('by') || 'By'} ${r.creatorName}` : (t('ownedByYou') || 'Created by you')}
+                    </span>
+
+                    {(r.rating || 0) > 0 && gridMode !== '5x5' ? (
+                      <span className="flex items-center gap-0.5 text-amber-500 text-[11px] font-bold bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/20 shadow-xs">
+                        <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-500"/> {r.rating}
+                      </span>
+                    ) : null}
                   </div>
 
-                  {/* Card Actions Footer */}
-                  <div 
-                    className="pt-3 border-t flex items-center justify-between gap-1 text-xs"
-                    style={{ borderColor: 'var(--color-border)' }}
-                  >
-                    <div className="flex items-center gap-1">
-                      {/* If on Marketplace and not owner: Allow saving to My Recipes */}
-                      {activeTab === 'marketplace' && !userOwns ? (
-                        <button
-                          type="button"
-                          onClick={(e) => handleSaveToMyRecipes(recipe, e)}
-                          className="px-2 py-1 rounded-lg border text-[11px] font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-80"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-emerald)',
-                            color: 'var(--color-emerald)'
-                          }}
-                          title="Save this marketplace recipe to your personal collection"
-                        >
-                          <Download className="h-3 w-3" /> Save
-                        </button>
-                      ) : (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setPlanRecipe(recipe);
-                              setPlanServings(recipe.servings || 2);
-                              setShowPlanModal(true);
-                            }}
-                            className="p-1.5 rounded-lg border hover:opacity-80 transition cursor-pointer"
-                            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                            title="Add to Meal Planner"
-                          >
-                            <CalendarPlus className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setBookTargetRecipe(recipe);
-                              setSelectedBookId(recipe.bookId || (cookbooks[0]?.id || ''));
-                              setShowBookModal(true);
-                            }}
-                            className="p-1.5 rounded-lg border hover:opacity-80 transition cursor-pointer"
-                            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                            title="Add to Cookbook"
-                          >
-                            <FolderPlus className="h-3.5 w-3.5 text-sky-400" />
-                          </button>
-                        </>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShoppingRecipe(recipe);
-                          setSelectedShoppingItems((recipe.ingredients || []).map(getIngredientString).filter(Boolean));
-                          setShowShoppingModal(true);
-                        }}
-                        className="p-1.5 rounded-lg border hover:opacity-80 transition cursor-pointer"
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                        title="Export ingredients to Shopping List"
-                      >
-                        <ShoppingCart className="h-3.5 w-3.5 text-emerald-400" />
-                      </button>
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedRecipe(recipe);
-                          setModalServings(recipe.servings || 2);
-                          setShowDetailModal(true);
-                        }}
-                        className="px-2.5 py-1 rounded-lg border text-[11px] font-bold transition hover:opacity-80 cursor-pointer"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-primary)'
-                        }}
-                      >
-                        View
-                      </button>
-
-                      {userOwns && (
-                        <button
-                          type="button"
-                          onClick={(e) => handleDeleteRecipe(recipe.id, recipe.title, e)}
-                          className="p-1.5 rounded-lg border text-red-500 hover:bg-red-500/10 transition cursor-pointer"
-                          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                          title="Delete Recipe"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                  <span className="text-[11px] flex items-center gap-1 shrink-0 font-semibold" style={{ color: 'var(--color-text)' }}>
+                    <Clock className="h-3 w-3" style={{ color: 'var(--color-primary)' }}/> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
+                  </span>
                 </div>
               </div>
             );
@@ -1244,53 +1982,76 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* 4. Pagination */}
-      {totalPages > 1 && (
+      {/* Pagination Controls */}
+      {filtered.length > 0 && (
         <div 
-          className="p-4 rounded-3xl border flex flex-col sm:flex-row items-center justify-between gap-3 text-xs font-bold transition-colors duration-200"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          className="pt-4 border-t flex flex-wrap items-center justify-between gap-3 text-xs"
+          style={{ borderColor: 'var(--color-border)' }}
         >
           <span style={{ color: 'var(--color-text-secondary)' }}>
-            Showing {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(filteredRecipes.length, currentPage * itemsPerPage)} of {filteredRecipes.length} recipes
+            {(t('showingRecipesRange') || 'Showing {start} - {end} of {total} recipes')
+              .replace('{start}', String(startIndex + 1))
+              .replace('{end}', String(Math.min(startIndex + itemsPerPage, filtered.length)))
+              .replace('{total}', String(filtered.length))}
           </span>
 
           <div className="flex items-center gap-1.5">
             <button
               type="button"
-              disabled={currentPage <= 1}
-              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-              className="p-2 rounded-xl border disabled:opacity-30 cursor-pointer shadow-xs transition hover:opacity-80"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              disabled={safeCurrentPage <= 1}
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              className="p-2 rounded-xl border disabled:opacity-30 transition cursor-pointer shadow-xs"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+              title="Previous Page"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
 
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => setCurrentPage(p)}
-                className="w-8 h-8 rounded-xl font-bold text-xs flex items-center justify-center border transition shadow-xs cursor-pointer"
-                style={currentPage === p ? {
-                  backgroundColor: 'var(--color-primary)',
-                  borderColor: 'var(--color-primary)',
-                  color: '#ffffff'
-                } : {
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              >
-                {p}
-              </button>
-            ))}
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter(num => num === 1 || num === totalPages || Math.abs(num - safeCurrentPage) <= 1)
+              .map((num, i, arr) => {
+                const prev = arr[i - 1];
+                const showEllipsis = prev && num - prev > 1;
+
+                return (
+                  <div key={num} className="flex items-center gap-1">
+                    {showEllipsis && <span className="px-1 font-bold" style={{ color: 'var(--color-text-secondary)' }}>...</span>}
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage(num)}
+                      className="min-w-[32px] h-8 rounded-xl text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-xs"
+                      style={safeCurrentPage === num ? {
+                        backgroundColor: 'var(--color-primary)',
+                        borderColor: 'var(--color-primary)',
+                        color: '#ffffff',
+                        boxShadow: '0 2px 8px rgba(224, 86, 56, 0.3)'
+                      } : {
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-text)'
+                      }}
+                    >
+                      {num}
+                    </button>
+                  </div>
+                );
+              })}
 
             <button
               type="button"
-              disabled={currentPage >= totalPages}
-              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-              className="p-2 rounded-xl border disabled:opacity-30 cursor-pointer shadow-xs transition hover:opacity-80"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+              disabled={safeCurrentPage >= totalPages}
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              className="p-2 rounded-xl border disabled:opacity-30 transition cursor-pointer shadow-xs"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+              title="Next Page"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
@@ -1298,341 +2059,1627 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* 5. Kitchen Timer */}
-      {timerOpen && (
+      {/* RECIPE DETAILS & EDIT MODAL */}
+      {selectedRecipe && (
         <div 
-          className="fixed bottom-6 right-6 z-40 p-4 rounded-3xl border shadow-2xl flex items-center gap-4 animate-in slide-in-from-bottom-5"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: 'var(--color-primary)',
-            color: 'var(--color-text)'
-          }}
-        >
-          <div className="space-y-0.5">
-            <span className="text-[10px] font-black uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
-              {timerLabel}
-            </span>
-            <div className="text-xl font-mono font-black">
-              {Math.floor(timerRemaining / 60)}:{(timerRemaining % 60).toString().padStart(2, '0')}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setTimerRunning(!timerRunning)}
-              className="p-2 rounded-xl text-white shadow-xs transition hover:opacity-90 cursor-pointer"
-              style={{ backgroundColor: 'var(--color-primary)' }}
-            >
-              {timerRunning ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                setTimerRunning(false);
-                setTimerRemaining(timerTotalSeconds);
-              }}
-              className="p-2 rounded-xl border hover:opacity-80 transition cursor-pointer"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-            >
-              <RotateCcw className="h-4 w-4" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setTimerOpen(false)}
-              className="p-2 rounded-xl border hover:opacity-80 transition cursor-pointer"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 6. Recipe Details Modal */}
-      {showDetailModal && selectedRecipe && (
-        <div 
-          onClick={() => setShowDetailModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto cursor-pointer animate-in fade-in"
+          onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl relative p-6 space-y-4 cursor-default"
+            className="border rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative cursor-default transition-colors duration-200"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
               color: 'var(--color-text)'
             }}
           >
-            {/* Modal Header */}
-            <div className="flex justify-between items-start border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span 
-                    className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full border shadow-2xs"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-primary)',
-                      color: 'var(--color-primary)'
-                    }}
-                  >
-                    {selectedRecipe.recipeType || selectedRecipe.mealType || 'Recipe'}
-                  </span>
+            <button
+              type="button"
+              onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
+              className="absolute top-4 right-4 z-30 p-2 rounded-xl border transition cursor-pointer shadow-md"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <X className="h-5 w-5"/>
+            </button>
 
-                  {/* Public / Private Badge */}
-                  <span 
-                    className="text-[10px] font-bold px-2 py-0.5 rounded-full border flex items-center gap-1"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : 'var(--color-border)',
-                      color: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
-                    }}
-                  >
-                    {(selectedRecipe.isPublic || selectedRecipe.is_public) ? (
-                      <><Globe className="h-3 w-3" /> Public on Marketplace</>
-                    ) : (
-                      <><Lock className="h-3 w-3" /> Private (Only You)</>
-                    )}
-                  </span>
-                </div>
+            <div className="overflow-y-auto flex-1">
+              {!isEditing ? (
+                <div className="space-y-5 pb-6">
+                  <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
+                    <img
+                      src={selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || DEFAULT_RECIPE_IMAGE}
+                      alt={selectedRecipe.title || selectedRecipe.name}
+                      referrerPolicy="no-referrer"
+                      crossOrigin="anonymous"
+                      onError={(e) => {
+                        const target = e.currentTarget;
+                        if (!target.dataset.failed) {
+                          target.dataset.failed = 'true';
+                          target.src = DEFAULT_RECIPE_IMAGE;
+                        }
+                      }}
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent" />
 
-                <h2 className="text-xl font-black tracking-tight mt-1" style={{ color: 'var(--color-text)' }}>
-                  {selectedRecipe.title}
-                </h2>
+                    <div className="relative z-10 space-y-3">
+                      <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
+                        {selectedRecipe.title || selectedRecipe.name}
+                      </h2>
 
-                {(selectedRecipe.creatorName || selectedRecipe.ownerName) && (
-                  <p className="text-xs font-semibold mt-0.5" style={{ color: 'var(--color-emerald)' }}>
-                    Author: {selectedRecipe.creatorName || selectedRecipe.ownerName}
-                  </p>
-                )}
-              </div>
+                      {/* Modal Badges */}
+                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }}/> 
+                          <span className="font-bold">{(t('cookTimePrefix') || 'Cook: {time} minutes').replace('{time}', String(selectedRecipe.cookTimeMinutes || 10))}</span>
+                        </span>
 
-              <div className="flex items-center gap-2">
-                {isOwner(selectedRecipe) && (
-                  <button
-                    type="button"
-                    onClick={() => handleTogglePublic(selectedRecipe)}
-                    className="px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-90"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : 'var(--color-border)',
-                      color: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : 'var(--color-text)'
-                    }}
-                    title="Toggle public marketplace visibility"
-                  >
-                    {(selectedRecipe.isPublic || selectedRecipe.is_public) ? <Globe className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
-                    <span>{(selectedRecipe.isPublic || selectedRecipe.is_public) ? 'Public' : 'Make Public'}</span>
-                  </button>
-                )}
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Clock className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
+                          <span className="font-bold">{(t('prepTimePrefix') || 'Prep: {time} minutes').replace('{time}', String(selectedRecipe.prepTimeMinutes || 30))}</span>
+                        </span>
 
-                <button
-                  type="button"
-                  onClick={() => setShowDetailModal(false)}
-                  className="p-2 rounded-xl border hover:opacity-80 transition cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Utensils className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
+                          <span className="font-bold">{recipeCategoryBadge}</span>
+                        </span>
 
-            {/* Modal Body */}
-            <div className="overflow-y-auto flex-1 space-y-4 pr-1 text-xs custom-scrollbar">
-              <img
-                src={getSafeImage(selectedRecipe)}
-                alt={selectedRecipe.title}
-                referrerPolicy="no-referrer"
-                crossOrigin="anonymous"
-                className="w-full h-48 rounded-2xl object-cover border shadow-sm"
-                style={{ borderColor: 'var(--color-border)' }}
-                onError={(e: any) => { e.target.src = '/recipes/images/default.jpg'; }}
-              />
+                        <span 
+                          className="border px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-sm transition backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          <Users className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/> 
+                          <span className="font-bold">
+                            {selectedRecipe.creatorName ? `${t('creator') || 'Creator'}: ${selectedRecipe.creatorName}` : (t('ownedByYou') || 'Created by you')}
+                          </span>
+                        </span>
+                        
+                        <button
+                          type="button"
+                          onClick={(e) => toggleFavorite(e, selectedRecipe.id)}
+                          className="ml-auto w-8 h-8 rounded-full flex items-center justify-center shadow-md cursor-pointer transition border"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: selectedRecipe.isFavorite ? 'var(--color-primary)' : 'var(--color-text-secondary)'
+                          }}
+                          title={selectedRecipe.isFavorite ? "Favorite" : "Mark as Favorite"}
+                        >
+                          <Heart className={`h-4 w-4 ${selectedRecipe.isFavorite ? 'fill-current' : ''}`} style={{ color: selectedRecipe.isFavorite ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}/>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
 
-              <p className="leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                {selectedRecipe.description}
-              </p>
+                  {/* 3 Core Action Buttons */}
+                  <div className="px-5 grid grid-cols-3 gap-2.5">
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setIsBookDropdownOpen(!isBookDropdownOpen)}
+                        className="w-full border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                        style={{
+                          backgroundColor: assignedBook ? 'var(--color-inner-dark)' : 'var(--color-card)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                      >
+                        <BookmarkPlus className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }}/>
+                        <span className="truncate">
+                          {assignedBook ? assignedBook.title : (t('addToCookbook') || t('addToBook') || 'Add to Cookbook')}
+                        </span>
+                        <ChevronDown className="h-3 w-3 shrink-0 opacity-70 ml-0.5"/>
+                      </button>
 
-              {/* Servings Stepper */}
-              <div 
-                className="p-3.5 rounded-2xl border flex flex-wrap items-center justify-between gap-3 font-bold"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              >
-                <div className="flex items-center gap-3">
-                  <span style={{ color: 'var(--color-primary)' }}>Scale Servings:</span>
-                  <div className="flex items-center gap-2">
+                      {isBookDropdownOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setIsBookDropdownOpen(false)} />
+                          <div 
+                            className="absolute left-0 top-full mt-2 w-64 border rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in" 
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            <div className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
+                              <span>{t('selectCookbook') || 'Select Cookbook'}</span>
+                              <Link 
+                                className="hover:underline font-bold" 
+                                href="/books"
+                                style={{ color: 'var(--color-emerald)' }}
+                              >
+                                {t('manage') || 'Manage'}
+                              </Link>
+                            </div>
+
+                            <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
+                              {books.length === 0 ? (
+                                <div className="text-xs px-2.5 py-2" style={{ color: 'var(--color-text-secondary)' }}>{t('noCookbooksAvailable') || 'No cookbooks available'}</div>
+                              ) : (
+                                books.map((b) => {
+                                  const isAssigned = (selectedRecipe.bookId || selectedRecipe.book_id) === b.id;
+                                  return (
+                                    <button
+                                      key={b.id}
+                                      type="button"
+                                      onClick={() => {
+                                        handleAssignToBook(b.id);
+                                        setIsBookDropdownOpen(false);
+                                      }}
+                                      className="w-full text-left px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition cursor-pointer"
+                                      style={isAssigned ? {
+                                        backgroundColor: 'var(--color-inner-dark)',
+                                        color: 'var(--color-primary)',
+                                        border: '1px solid var(--color-primary)'
+                                      } : {
+                                        color: 'var(--color-text)'
+                                      }}
+                                    >
+                                      <span className="truncate flex-1 pr-2">{b.title}</span>
+                                      {isAssigned && <Check className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-primary)' }}/>}
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
                     <button
                       type="button"
-                      onClick={() => setModalServings(Math.max(1, modalServings - 1))}
-                      className="w-7 h-7 rounded-lg border flex items-center justify-center cursor-pointer hover:opacity-80"
-                      style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                      onClick={openAddToPlanModal}
+                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
                     >
-                      -
+                      <CalendarPlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('addToPlan') || 'Add to Plan'}
                     </button>
-                    <span className="font-mono text-sm">{modalServings}</span>
+
                     <button
                       type="button"
-                      onClick={() => setModalServings(modalServings + 1)}
-                      className="w-7 h-7 rounded-lg border flex items-center justify-center cursor-pointer hover:opacity-80"
-                      style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                      onClick={handleOpenShoppingModal}
+                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-primary)',
+                        color: 'var(--color-primary)'
+                      }}
                     >
-                      +
+                      <ShoppingCart className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('shoppingList') || 'Shopping List'}
                     </button>
                   </div>
-                </div>
 
-                <div className="flex items-center gap-3 text-xs">
-                  <span className="flex items-center gap-1 text-emerald-400">
-                    <Clock className="h-3.5 w-3.5" /> {getEffectiveMinutes(selectedRecipe)} mins
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleStartTimerForRecipe(getEffectiveMinutes(selectedRecipe), selectedRecipe.title)}
-                    className="px-2.5 py-1 rounded-xl text-white font-bold flex items-center gap-1 shadow-xs hover:opacity-90 cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                  >
-                    <Volume2 className="h-3.5 w-3.5" /> Timer
-                  </button>
-                </div>
-              </div>
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
-              {/* Ingredients */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-black text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-                    Ingredients ({selectedRecipe.ingredients?.length || 0})
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShoppingRecipe(selectedRecipe);
-                      setSelectedShoppingItems((selectedRecipe.ingredients || []).map(getIngredientString).filter(Boolean));
-                      setShowShoppingModal(true);
-                    }}
-                    className="text-[11px] font-bold text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
-                  >
-                    <ShoppingCart className="h-3 w-3" /> + Add to Shopping List
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {(selectedRecipe.ingredients || []).map((rawIng, idx) => {
-                    const displayStr = scaleIngredientQuantity(rawIng, selectedRecipe.servings || 4, modalServings);
-                    return (
-                      <div 
-                        key={idx}
-                        className="p-2.5 rounded-xl border flex items-center gap-2 shadow-2xs"
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: 'var(--color-primary)' }} />
-                        <span className="leading-snug">{displayStr}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Instructions */}
-              <div className="space-y-2 pt-2">
-                <h4 className="font-black text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-                  Instructions
-                </h4>
-                <div className="space-y-2">
-                  {(selectedRecipe.instructions || selectedRecipe.directions || []).map((step, idx) => (
-                    <div 
-                      key={idx}
-                      className="p-3 rounded-2xl border flex items-start gap-3 leading-relaxed"
-                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                    >
+                  {/* Servings Stepper with Live Percentage Telemetry */}
+                  <div className="px-5 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
                       <span 
-                        className="w-5 h-5 rounded-md font-black text-[10px] flex items-center justify-center shrink-0 border"
+                        className="text-xs font-bold flex items-center gap-1.5"
+                        style={{ color: 'var(--color-primary)' }}
+                      >
+                        <Users className="h-4 w-4"/> {t('servingsLabel') || 'Servings'}
+                      </span>
+                      <div 
+                        className="flex items-center border rounded-lg overflow-hidden shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setCurrentServings((prev) => Math.max(1, prev - 1))}
+                          className="px-2.5 py-1 font-bold cursor-pointer transition select-none hover:opacity-80"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                          title="Decrease servings by 1"
+                        >
+                          -
+                        </button>
+                        <span className="px-3 py-1 text-xs font-bold min-w-[36px] text-center tabular-nums" style={{ color: 'var(--color-text)' }}>
+                          {currentServings}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setCurrentServings((prev) => prev + 1)}
+                          className="px-2.5 py-1 font-bold cursor-pointer transition select-none hover:opacity-80"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                          title="Increase servings by 1"
+                        >
+                          +
+                        </button>
+                      </div>
+
+                      {/* Percentage Badge & Reset */}
+                      <div className="flex items-center gap-1.5">
+                        <span 
+                          className="text-[11px] font-bold px-2 py-0.5 rounded-full border transition-all shadow-xs tabular-nums"
+                          style={percentChange === 0 ? {
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text-secondary)'
+                          } : percentChange > 0 ? {
+                            backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                            borderColor: 'var(--color-emerald)',
+                            color: 'var(--color-emerald)'
+                          } : {
+                            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-primary)'
+                          }}
+                          title={`Scale factor: ${scaleFactor.toFixed(2)}x`}
+                        >
+                          {percentChange === 0 ? '100%' : `${percentChange > 0 ? '+' : ''}${percentChange}%`}
+                        </span>
+
+                        {percentChange !== 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setCurrentServings(baseServings)}
+                            className="text-[10px] font-bold underline cursor-pointer transition hover:opacity-90"
+                            style={{ color: 'var(--color-text-secondary)' }}
+                            title={t('resetServings') || 'Reset to original servings'}
+                          >
+                            {t('reset') || 'Reset'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleOpenTimerModal}
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90"
                         style={{
                           backgroundColor: 'var(--color-card)',
                           borderColor: 'var(--color-primary)',
                           color: 'var(--color-primary)'
                         }}
                       >
-                        {idx + 1}
-                      </span>
-                      <p className="flex-1">{getInstructionString(step)}</p>
+                        <Timer className="h-3.5 w-3.5"/> {t('timerBtn') || 'Timer'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleOpenEdit}
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        style={{
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                      >
+                        <Edit3 className="h-3.5 w-3.5"/> {t('editBtn') || 'Edit'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(window.location.href);
+                          alert(t('recipeLinkCopiedAlert') || 'Recipe link copied!');
+                        }}
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                        style={{
+                          backgroundColor: 'var(--color-card)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                      >
+                        <Share2 className="h-3.5 w-3.5"/> {t('shareRecipeBtn') || 'Share Recipe'}
+                      </button>
                     </div>
-                  ))}
+                  </div>
+
+                  {/* Description */}
+                  <div className="px-5 text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                    {selectedRecipe.description}
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* Cooked Status / Star Rating / Note */}
+                  <div className="px-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={(e) => toggleCooked(e, selectedRecipe.id)}
+                        className="flex items-center gap-2.5 text-base font-extrabold group cursor-pointer select-none transition"
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        <span className="font-extrabold tracking-tight">
+                          {selectedRecipe.isCooked ? (t('cooked') || 'Cooked') : (t('markAsCooked') || 'Mark as Cooked')}
+                        </span>
+                        
+                        <span 
+                          className="w-5 h-5 rounded-full flex items-center justify-center transition shadow-sm border"
+                          style={selectedRecipe.isCooked ? {
+                            backgroundColor: 'var(--color-emerald)',
+                            borderColor: 'var(--color-emerald)',
+                            color: '#ffffff'
+                          } : {
+                            border: '1px solid var(--color-border)',
+                            backgroundColor: 'var(--color-inner-dark)',
+                            color: 'var(--color-text-secondary)'
+                          }}
+                        >
+                          {selectedRecipe.isCooked && <Check className="h-3.5 w-3.5 stroke-[3]"/>}
+                        </span>
+                      </button>
+
+                      <div className="flex items-center gap-1">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Star
+                            key={star}
+                            onClick={() => updateSelectedRecipeState('rating', star)}
+                            className="h-5 w-5 cursor-pointer transition"
+                            style={{
+                              color: (selectedRecipe.rating || 0) >= star ? 'var(--color-primary)' : 'var(--color-border)',
+                              fill: (selectedRecipe.rating || 0) >= star ? 'var(--color-primary)' : 'transparent'
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsNoteOpen(!isNoteOpen)}
+                        className="flex items-center gap-1.5 text-xs font-medium transition cursor-pointer"
+                        style={{ color: 'var(--color-text-secondary)' }}
+                      >
+                        <Edit3 className="h-3.5 w-3.5"/>
+                        <span className="italic">{t('addANote') || 'Add a note'}</span>
+                      </button>
+
+                      {isNoteOpen && (
+                        <div className="flex gap-2 animate-in fade-in">
+                          <input
+                            type="text"
+                            autoComplete="off"
+                            data-lpignore="true"
+                            placeholder={t('addNotesPlaceholder') || 'Add notes...'}
+                            value={noteText}
+                            onChange={(e) => setNoteText(e.target.value)}
+                            className="flex-1 border rounded-xl px-3 py-2 text-xs outline-none"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateSelectedRecipeState('note', noteText);
+                              setIsNoteOpen(false);
+                            }}
+                            className="text-white font-bold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer shadow-sm"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                          >
+                            {t('save') || 'Save'}
+                          </button>
+                        </div>
+                      )}
+                      {selectedRecipe.note && !isNoteOpen && (
+                        <p 
+                          className="text-xs italic"
+                          style={{ color: 'var(--color-emerald)' }}
+                        >
+                          Note: "{selectedRecipe.note}"
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* INGREDIENTS SECTION (SCALED BY PERCENTAGE) */}
+                  <div className="px-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>
+                          {t('ingredientsHeading') || 'Ingredients'}
+                        </h3>
+                        {percentChange !== 0 && (
+                          <span 
+                            className="text-[11px] font-bold px-2 py-0.5 rounded-full border shadow-xs"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-primary)',
+                              color: 'var(--color-primary)'
+                            }}
+                          >
+                            {scaleFactor.toFixed(2)}x
+                          </span>
+                        )}
+                      </div>
+                      
+                      <div 
+                        className="flex items-center border rounded-lg overflow-hidden text-xs shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
+                        }}
+                      >
+                        <div className="px-2.5 py-1 border-r flex items-center justify-center" style={{ borderColor: 'var(--color-border)' }}>
+                          <Type className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setFontSizeScale(Math.max(60, fontSizeScale - 10))}
+                          className="px-2.5 py-1 font-bold cursor-pointer"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        >
+                          -
+                        </button>
+                        <span className="px-2.5 py-1 font-bold min-w-[42px] text-center" style={{ color: 'var(--color-text)' }}>
+                          {fontSizeScale}%
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setFontSizeScale(Math.min(140, fontSizeScale + 10))}
+                          className="px-2.5 py-1 font-bold cursor-pointer"
+                          style={{ color: 'var(--color-text-secondary)' }}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2.5" style={{ fontSize: `${fontSizeScale}%` }}>
+                      {Array.isArray(selectedRecipe.ingredients) && selectedRecipe.ingredients.map((ing: any, idx: number) => {
+                        const defaultCat = categories[0] || 'Produce';
+                        const norm = getNormalizedIngredient(ing, defaultCat);
+                        const scaledAmt = calculateScaledAmount(norm.amount, baseServings, currentServings);
+
+                        return (
+                          <div key={idx} className="flex items-start gap-2.5 leading-snug">
+                            <span 
+                              className="w-2 h-2 rounded-full inline-block shrink-0 mt-1.5"
+                              style={{ backgroundColor: 'var(--color-primary)' }}
+                            />
+                            <span style={{ color: 'var(--color-text)' }}>
+                              {(scaledAmt || norm.unit) ? (
+                                <>
+                                  <strong className="font-bold tracking-tight" style={{ color: 'var(--color-text)' }}>
+                                    {scaledAmt} {norm.unit && norm.unit.toLowerCase() !== 'unit' ? norm.unit : ''}{' '}
+                                  </strong>
+                                  <span>{norm.name}</span>
+                                </>
+                              ) : (
+                                <span>{norm.name}</span>
+                              )}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* INSTRUCTIONS SECTION */}
+                  <div className="px-5 space-y-4">
+                    <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>{t('instructionsHeading') || 'Instructions'}</h3>
+                    
+                    <div className="space-y-3.5" style={{ fontSize: `${fontSizeScale}%` }}>
+                      {Array.isArray(selectedRecipe.instructions) && selectedRecipe.instructions.map((step: string, idx: number) => {
+                        const isDone = completedSteps.includes(idx);
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => {
+                              if (completedSteps.includes(idx)) {
+                                setCompletedSteps(completedSteps.filter(i => i !== idx));
+                              } else {
+                                setCompletedSteps([...completedSteps, idx]);
+                              }
+                            }}
+                            className={`flex items-start gap-3 p-3 rounded-2xl border cursor-pointer transition select-none shadow-xs ${
+                              isDone ? 'opacity-50' : ''
+                            }`}
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            <div 
+                              className="w-4 h-4 rounded border flex items-center justify-center shrink-0 mt-0.5 transition"
+                              style={isDone ? {
+                                backgroundColor: 'var(--color-primary)',
+                                borderColor: 'var(--color-primary)',
+                                color: '#ffffff'
+                              } : {
+                                borderColor: 'var(--color-primary)',
+                                backgroundColor: 'transparent'
+                              }}
+                            >
+                              {isDone && <Check className="h-3.5 w-3.5 stroke-[3]"/>}
+                            </div>
+
+                            <span 
+                              className="font-extrabold shrink-0 text-sm"
+                              style={{ color: 'var(--color-primary)' }}
+                            >
+                              {idx + 1}.
+                            </span>
+
+                            <span 
+                              className={`leading-relaxed flex-1 ${isDone ? 'line-through opacity-50' : ''}`}
+                              style={{ color: 'var(--color-text)' }}
+                            >
+                              {step}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* MODAL FOOTER */}
+                  <div className="px-5 flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteRecipe(selectedRecipe.id)}
+                      className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'rgba(239, 68, 68, 0.4)',
+                        color: '#ef4444'
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipeBtn') || 'Delete Recipe'}
+                    </button>
+
+                    <div className="flex items-center gap-2 ml-auto text-xs">
+                      <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                        {t('source') || 'Source'}:
+                      </span>
+                      {selectedRecipe.sourceUrl || selectedRecipe.source_url ? (
+                        <a
+                          href={getSafeHref(selectedRecipe.sourceUrl || selectedRecipe.source_url)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-bold text-xs hover:underline inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          <span className="underline">
+                            {(t('visitSource') || 'Visit {domain}').replace('{domain}', getSafeHostname(selectedRecipe.sourceUrl || selectedRecipe.source_url))}
+                          </span>
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      ) : (
+                        <span 
+                          className="px-3 py-1.5 rounded-xl border text-xs font-medium"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text-secondary)'
+                          }}
+                        >
+                          {t('createdManually') || 'Created manually'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-
-            {/* Modal Footer with Actions and Source Link at Bottom Right */}
-            <div 
-              className="pt-3 border-t flex flex-wrap items-center justify-between gap-3"
-              style={{ borderColor: 'var(--color-border)' }}
-            >
-              <div className="flex items-center gap-2">
-                {!isOwner(selectedRecipe) ? (
-                  <button
-                    type="button"
-                    onClick={(e) => handleSaveToMyRecipes(selectedRecipe, e)}
-                    className="px-3.5 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 shadow-md hover:opacity-90 cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-emerald)' }}
-                  >
-                    <Download className="h-3.5 w-3.5" /> Save to My Recipes
-                  </button>
-                ) : (
-                  <>
+              ) : (
+                /* EDIT RECIPE VIEW */
+                <div className="p-6 space-y-6">
+                  <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                    <h3 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                      <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('editRecipeTitle') || 'Edit Recipe'}
+                    </h3>
                     <button
                       type="button"
-                      onClick={() => {
-                        setPlanRecipe(selectedRecipe);
-                        setPlanServings(modalServings);
-                        setShowPlanModal(true);
-                      }}
-                      className="px-3.5 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 shadow-md hover:opacity-90 cursor-pointer"
-                      style={{ backgroundColor: 'var(--color-primary)' }}
+                      onClick={() => setIsEditing(false)}
+                      className="p-1 rounded-lg transition cursor-pointer"
+                      style={{ color: 'var(--color-text-secondary)' }}
                     >
-                      <CalendarPlus className="h-3.5 w-3.5" /> Add to Plan
+                      <X className="h-5 w-5"/>
                     </button>
+                  </div>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setBookTargetRecipe(selectedRecipe);
-                        setSelectedBookId(selectedRecipe.bookId || (cookbooks[0]?.id || ''));
-                        setShowBookModal(true);
-                      }}
-                      className="px-3 py-2 rounded-xl border font-bold text-xs flex items-center gap-1.5 hover:opacity-80 cursor-pointer"
-                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                    >
-                      <FolderPlus className="h-3.5 w-3.5 text-sky-400" /> Book
-                    </button>
-                  </>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2 ml-auto">
-                {selectedRecipe.sourceUrl && (
-                  <a
-                    href={selectedRecipe.sourceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-2 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition hover:opacity-80"
+                  <div 
+                    className="flex p-1.5 rounded-2xl border"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-emerald)',
-                      color: 'var(--color-emerald)'
+                      borderColor: 'var(--color-border)'
                     }}
                   >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    <span>View Source ↗</span>
-                  </a>
+                    {[
+                      { id: 'info', label: t('basicInfoTab') || 'Basic Info' },
+                      { id: 'ingredients', label: t('ingredientsTab') || 'Ingredients' },
+                      { id: 'steps', label: t('stepsTab') || 'Steps' }
+                    ].map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setEditTab(tab.id as any)}
+                        className="flex-1 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer"
+                        style={editTab === tab.id ? {
+                          backgroundColor: 'var(--color-card)',
+                          color: 'var(--color-text)',
+                          border: '1px solid var(--color-border)',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+                        } : {
+                          color: 'var(--color-text-secondary)'
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* TAB 1: BASIC INFO */}
+                  {editTab === 'info' && (
+                    <div className="space-y-5 animate-in fade-in text-xs">
+                      <div className="space-y-1.5">
+                        <label 
+                          className="block font-bold uppercase tracking-wider text-[11px]"
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          {t('photoLabel') || 'Photo'}
+                        </label>
+                        <label 
+                          className="border-2 border-dashed rounded-2xl h-44 flex flex-col items-center justify-center cursor-pointer transition relative overflow-hidden group"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)'
+                          }}
+                        >
+                          {editForm.imageUrl ? (
+                            <>
+                              <img
+                                src={editForm.imageUrl}
+                                alt="Recipe Preview"
+                                referrerPolicy="no-referrer"
+                                crossOrigin="anonymous"
+                                onError={(e) => {
+                                  const target = e.currentTarget;
+                                  if (!target.dataset.failed) {
+                                    target.dataset.failed = 'true';
+                                    target.src = DEFAULT_RECIPE_IMAGE;
+                                  }
+                                }}
+                                className="absolute inset-0 w-full h-full object-cover"
+                              />
+                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+                                <span 
+                                  className="border text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5"
+                                  style={{
+                                    backgroundColor: 'var(--color-card)',
+                                    borderColor: 'var(--color-border)',
+                                    color: 'var(--color-text)'
+                                  }}
+                                >
+                                  <ImagePlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('changePhoto') || 'Change Photo'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setEditForm({ ...editForm, imageUrl: '' });
+                                  }}
+                                  className="bg-red-950/90 border border-red-500/50 text-red-400 text-xs font-bold px-3 py-1.5 rounded-xl hover:bg-red-900 cursor-pointer"
+                                >
+                                  {t('removePhoto') || 'Remove'}
+                                </button>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="text-center space-y-2">
+                              <ImagePlus className="h-8 w-8 mx-auto transition" style={{ color: 'var(--color-text-secondary)' }}/>
+                              <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>{t('addAPhoto') || 'Add a photo'}</span>
+                            </div>
+                          )}
+                          <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                        </label>
+                      </div>
+
+                      <div>
+                        <label 
+                          className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          {t('recipeTitle') || 'Recipe Title'}
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          autoComplete="off"
+                          data-lpignore="true"
+                          value={editForm.title}
+                          onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                          className="w-full border rounded-xl p-3 text-sm outline-none"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                        />
+                      </div>
+
+                      <div>
+                        <label 
+                          className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          {t('description') || 'Description'}
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={editForm.description}
+                          onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                          className="w-full border rounded-xl p-3 text-xs outline-none resize-y leading-relaxed"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label 
+                            className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
+                            style={{ color: 'var(--color-primary)' }}
+                          >
+                            {t('recipeTypeLabel') || 'Recipe Type'}
+                          </label>
+                          <select
+                            value={editForm.recipeType}
+                            onChange={(e) => setEditForm({ ...editForm, recipeType: e.target.value })}
+                            className="w-full border rounded-xl p-3 text-xs outline-none cursor-pointer"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                          >
+                            {RECIPE_TYPES.filter(t => t !== 'All Types').map((t) => (
+                              <option key={t} value={t} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label 
+                            className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
+                            style={{ color: 'var(--color-primary)' }}
+                          >
+                            {t('servingsLabel') || 'Servings'}
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            value={editForm.servings}
+                            onChange={(e) => setEditForm({ ...editForm, servings: Math.max(1, parseInt(e.target.value) || 1) })}
+                            className="w-full border rounded-xl p-3 text-xs outline-none"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="pt-4 border-t flex justify-end gap-3" style={{ borderColor: 'var(--color-border)' }}>
+                        <button
+                          type="button"
+                          onClick={() => setIsEditing(false)}
+                          className="px-5 py-2.5 rounded-xl font-bold transition text-xs cursor-pointer"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            color: 'var(--color-text-secondary)'
+                          }}
+                        >
+                          {t('cancel') || 'Cancel'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveEdit}
+                          className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg flex items-center gap-2 text-xs cursor-pointer"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                        >
+                          <Save className="h-4 w-4"/> {t('saveChanges') || 'Save Changes'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 2: INGREDIENTS */}
+                  {editTab === 'ingredients' && (
+                    <div 
+                      className="border rounded-2xl p-5 space-y-4 animate-in fade-in text-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)'
+                      }}
+                    >
+                      <div className="flex justify-between items-center">
+                        <h2 
+                          className="text-sm font-bold uppercase tracking-wider"
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          {t('ingredientsHeading') || 'Ingredients'}
+                        </h2>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsReorderingIngredients(!isReorderingIngredients)}
+                            className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
+                            style={isReorderingIngredients ? {
+                              backgroundColor: 'var(--color-emerald)',
+                              color: '#ffffff',
+                              borderColor: 'var(--color-emerald)'
+                            } : {
+                              backgroundColor: 'var(--color-card)',
+                              color: 'var(--color-text)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            {isReorderingIngredients ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditForm({
+                              ...editForm,
+                              ingredients: [...editForm.ingredients, { amount: '', unit: '', item: '', category: categories[0] || 'Produce' }]
+                            })}
+                            className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                          >
+                            <Plus className="h-3.5 w-3.5"/> {t('addIngredient') || 'Add Ingredient'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+                        {editForm.ingredients.map((ing: any, idx: number) => (
+                          <div
+                            key={idx}
+                            draggable={isReorderingIngredients}
+                            onDragStart={() => handleDragStart(idx)}
+                            onDragOver={(e) => handleDragOver(e, idx, 'ingredients')}
+                            onDrop={handleDrop}
+                            className={`flex items-center gap-2 p-2.5 rounded-xl border transition ${
+                              isReorderingIngredients ? 'cursor-grab' : ''
+                            }`}
+                            style={{
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: isReorderingIngredients ? 'var(--color-emerald)' : 'var(--color-border)'
+                            }}
+                          >
+                            <input
+                              type="text"
+                              autoComplete="off"
+                              placeholder={t('amt') || 'Amt'}
+                              value={ing.amount}
+                              onChange={(e) => {
+                                const list = [...editForm.ingredients];
+                                list[idx].amount = e.target.value;
+                                setEditForm({ ...editForm, ingredients: list });
+                              }}
+                              className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text)'
+                              }}
+                            />
+                            <input
+                              type="text"
+                              autoComplete="off"
+                              placeholder={t('unit') || 'Unit'}
+                              value={ing.unit}
+                              onChange={(e) => {
+                                const list = [...editForm.ingredients];
+                                list[idx].unit = e.target.value;
+                                setEditForm({ ...editForm, ingredients: list });
+                              }}
+                              className="w-20 border rounded-lg p-2 text-center outline-none"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text-secondary)'
+                              }}
+                            />
+                            <input
+                              type="text"
+                              autoComplete="off"
+                              placeholder={t('ingredientNamePlaceholder') || 'Ingredient name...'}
+                              value={ing.item}
+                              onChange={(e) => {
+                                const list = [...editForm.ingredients];
+                                list[idx].item = e.target.value;
+                                setEditForm({ ...editForm, ingredients: list });
+                              }}
+                              className="flex-1 bg-transparent border-none outline-none px-2"
+                              style={{ color: 'var(--color-text)' }}
+                            />
+                            <select
+                              value={ing.category}
+                              onChange={(e) => {
+                                const list = [...editForm.ingredients];
+                                list[idx].category = e.target.value;
+                                setEditForm({ ...editForm, ingredients: list });
+                              }}
+                              className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text-secondary)'
+                              }}
+                            >
+                              {categories.map((cat) => (
+                                <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
+                              ))}
+                            </select>
+
+                            {isReorderingIngredients ? (
+                              <div className="p-2 cursor-grab" style={{ color: 'var(--color-emerald)' }}>
+                                <GripVertical className="h-4 w-4"/>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setEditForm({
+                                  ...editForm,
+                                  ingredients: editForm.ingredients.filter((_: any, i: number) => i !== idx)
+                                })}
+                                className="p-2 text-red-500 hover:text-red-600 cursor-pointer"
+                              >
+                                <Trash2 className="h-4 w-4"/>
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex justify-between pt-3">
+                        <button
+                          type="button"
+                          onClick={() => setEditTab('info')}
+                          className="font-bold px-5 py-2 rounded-xl text-xs transition cursor-pointer"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          {t('backBtn') || '← Back'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditTab('steps')}
+                          className="text-white font-bold px-6 py-2 rounded-xl text-xs transition shadow-md cursor-pointer"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                        >
+                          {t('nextStepsBtn') || 'Next: Steps →'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 3: STEPS */}
+                  {editTab === 'steps' && (
+                    <div 
+                      className="border rounded-2xl p-5 space-y-4 animate-in fade-in text-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)'
+                      }}
+                    >
+                      <div className="flex justify-between items-center">
+                        <h2 
+                          className="text-sm font-bold uppercase tracking-wider"
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          {t('stepByStepInstructions') || 'Step-by-Step Instructions'}
+                        </h2>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsReorderingSteps(!isReorderingSteps)}
+                            className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
+                            style={isReorderingSteps ? {
+                              backgroundColor: 'var(--color-emerald)',
+                              color: '#ffffff',
+                              borderColor: 'var(--color-emerald)'
+                            } : {
+                              backgroundColor: 'var(--color-card)',
+                              color: 'var(--color-text-secondary)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            {isReorderingSteps ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditForm({
+                              ...editForm,
+                              instructions: [...editForm.instructions, '']
+                            })}
+                            className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                          >
+                            <Plus className="h-3.5 w-3.5"/> {t('addStep') || 'Add Step'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+                        {editForm.instructions.map((step: string, idx: number) => (
+                          <div
+                            key={idx}
+                            draggable={isReorderingSteps}
+                            onDragStart={() => handleDragStart(idx)}
+                            onDragOver={(e) => handleDragOver(e, idx, 'steps')}
+                            onDrop={handleDrop}
+                            className={`flex items-start gap-3 p-3 rounded-xl border transition ${
+                              isReorderingSteps ? 'cursor-grab' : ''
+                            }`}
+                            style={{
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: isReorderingSteps ? 'var(--color-emerald)' : 'var(--color-border)'
+                            }}
+                          >
+                            <span 
+                              className="w-6 h-6 rounded-full font-bold flex items-center justify-center shrink-0 mt-1"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                color: 'var(--color-primary)',
+                                borderColor: 'var(--color-primary)',
+                                borderWidth: '1px'
+                              }}
+                            >
+                              {idx + 1}
+                            </span>
+                            <textarea
+                              rows={2}
+                              placeholder={(t('describeStepPlaceholder') || 'Describe step {n}...').replace('{n}', String(idx + 1))}
+                              value={step}
+                              onChange={(e) => {
+                                const list = [...editForm.instructions];
+                                list[idx] = e.target.value;
+                                setEditForm({ ...editForm, instructions: list });
+                              }}
+                              className="flex-1 bg-transparent border-none outline-none resize-y"
+                              style={{ color: 'var(--color-text)' }}
+                            />
+
+                            {isReorderingSteps ? (
+                              <div className="p-2 cursor-grab mt-1" style={{ color: 'var(--color-emerald)' }}>
+                                <GripVertical className="h-4 w-4"/>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setEditForm({
+                                  ...editForm,
+                                  instructions: editForm.instructions.filter((_: any, i: number) => i !== idx)
+                                })}
+                                className="p-2 text-slate-400 hover:text-red-500 h-fit cursor-pointer"
+                              >
+                                <Trash2 className="h-4 w-4"/>
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex justify-between pt-3">
+                        <button
+                          type="button"
+                          onClick={() => setEditTab('ingredients')}
+                          className="font-bold px-5 py-2 rounded-xl text-xs transition cursor-pointer"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          {t('backBtn') || '← Back'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveEdit}
+                          className="text-white font-bold px-8 py-2.5 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                        >
+                          <Save className="h-4 w-4"/> {t('saveChanges') || 'Save Changes'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TIMER SETTINGS POPUP MODAL */}
+      {isTimerModalOpen && (
+        <div 
+          onClick={() => setIsTimerModalOpen(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[75] flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-sm w-full p-6 space-y-5 shadow-2xl relative animate-in fade-in cursor-default transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <button 
+              type="button"
+              onClick={() => setIsTimerModalOpen(false)} 
+              className="absolute top-4 right-4 p-2 rounded-xl border transition cursor-pointer"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <X className="h-4 w-4"/>
+            </button>
+
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <div 
+                  className="w-8 h-8 rounded-xl flex items-center justify-center shadow-xs"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-primary)' }}
+                >
+                  <Timer className="h-5 w-5"/>
+                </div>
+                <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+                  {t('timerSettingsTitle') || 'Kitchen Timer'}
+                </h2>
+              </div>
+              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {selectedRecipe?.title || selectedRecipe?.name ? (
+                  (t('timerForRecipe') || 'Timer for: {title}').replace('{title}', selectedRecipe.title || selectedRecipe.name)
+                ) : (
+                  t('setTimerUpTo60Min') || 'Set a cooking countdown up to 60 minutes.'
                 )}
+              </p>
+            </div>
+
+            <div 
+              className="p-4 rounded-2xl border flex flex-col items-center justify-center gap-3 shadow-inner"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
+              }}
+            >
+              <div className="flex items-center justify-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => setTimerInputMinutes((m) => Math.max(1, m - 1))}
+                  className="w-10 h-10 rounded-xl border font-bold text-lg flex items-center justify-center transition cursor-pointer active:scale-95 shadow-sm"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  title="Decrease 1 minute"
+                >
+                  -
+                </button>
+
+                <div className="text-center min-w-[100px]">
+                  <span className="text-4xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+                    {timerInputMinutes}
+                  </span>
+                  <span className="text-xs font-bold block" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('minutesLabel') || 'Minutes'}
+                  </span>
+                </div>
 
                 <button
                   type="button"
-                  onClick={() => setShowDetailModal(false)}
-                  className="px-4 py-2 rounded-xl border font-bold text-xs transition cursor-pointer hover:opacity-80"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                  onClick={() => setTimerInputMinutes((m) => Math.min(60, m + 1))}
+                  className="w-10 h-10 rounded-xl border font-bold text-lg flex items-center justify-center transition cursor-pointer active:scale-95 shadow-sm"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  title="Increase 1 minute"
                 >
-                  Close
+                  +
+                </button>
+              </div>
+
+              <input
+                type="range"
+                min={1}
+                max={60}
+                value={timerInputMinutes}
+                onChange={(e) => setTimerInputMinutes(parseInt(e.target.value) || 1)}
+                className="w-full accent-[var(--color-primary)] cursor-pointer"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-[11px] font-bold uppercase tracking-wider block" style={{ color: 'var(--color-text-secondary)' }}>
+                {t('quickPresets') || 'Quick Presets'}:
+              </span>
+              <div className="grid grid-cols-5 gap-1.5">
+                {[5, 10, 15, 30, 45].map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setTimerInputMinutes(preset)}
+                    className="py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer shadow-xs text-center"
+                    style={timerInputMinutes === preset ? {
+                      backgroundColor: 'var(--color-primary)',
+                      borderColor: 'var(--color-primary)',
+                      color: '#ffffff'
+                    } : {
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    {preset}m
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsTimerModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
+                style={{
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-secondary)',
+                  backgroundColor: 'var(--color-inner-dark)'
+                }}
+              >
+                {t('cancel') || 'Cancel'}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleStartTimer}
+                className="px-6 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-lg flex items-center gap-1.5 cursor-pointer"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+              >
+                <Play className="h-4 w-4 fill-current"/> {t('startTimer') || 'Start Timer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FLOATING COUNTDOWN TIMER WIDGET */}
+      {activeTimer && (
+        <div
+          className={`fixed bottom-5 right-5 z-[80] border rounded-2xl p-3.5 shadow-2xl flex items-center gap-3.5 transition-all duration-300 backdrop-blur-xl animate-in slide-in-from-bottom-5 ${
+            activeTimer.remainingSeconds === 0 ? 'animate-bounce ring-4 ring-red-500/50' : ''
+          }`}
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: activeTimer.remainingSeconds === 0 ? '#ef4444' : 'var(--color-primary)',
+            boxShadow: activeTimer.remainingSeconds === 0 
+              ? '0 10px 35px rgba(239, 68, 68, 0.45)' 
+              : '0 10px 35px rgba(0, 0, 0, 0.28)',
+            color: 'var(--color-text)'
+          }}
+        >
+          <div 
+            className="w-10 h-10 rounded-xl flex items-center justify-center shadow-md shrink-0 transition"
+            style={{
+              backgroundColor: activeTimer.remainingSeconds === 0 ? '#ef4444' : 'var(--color-inner-dark)',
+              color: activeTimer.remainingSeconds === 0 ? '#ffffff' : 'var(--color-primary)'
+            }}
+          >
+            {activeTimer.remainingSeconds === 0 ? (
+              <Bell className="h-5 w-5 animate-pulse fill-current" />
+            ) : (
+              <Timer className={`h-5 w-5 ${activeTimer.isRunning ? 'animate-spin' : ''}`} style={{ animationDuration: '4s' }}/>
+            )}
+          </div>
+
+          <div className="space-y-0.5 pr-1">
+            <div className="flex items-center gap-2">
+              <span className="text-xl font-black tracking-tight tabular-nums" style={{ color: activeTimer.remainingSeconds === 0 ? '#ef4444' : 'var(--color-text)' }}>
+                {formattedCountdown}
+              </span>
+              {activeTimer.remainingSeconds === 0 && (
+                <span className="text-[10px] uppercase font-black px-1.5 py-0.5 rounded bg-red-500 text-white animate-pulse">
+                  {t('timerDone') || 'Done!'}
+                </span>
+              )}
+            </div>
+
+            <p className="text-[11px] font-semibold max-w-[140px] truncate" style={{ color: 'var(--color-text-secondary)' }}>
+              {activeTimer.recipeTitle || (t('kitchenTimer') || 'Kitchen Timer')}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-1.5 pl-1 border-l" style={{ borderColor: 'var(--color-border)' }}>
+            {activeTimer.remainingSeconds > 0 && (
+              <button
+                type="button"
+                onClick={handleTogglePauseTimer}
+                className="p-2 rounded-xl border transition cursor-pointer shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-primary)'
+                }}
+                title={activeTimer.isRunning ? (t('pause') || 'Pause') : (t('resume') || 'Resume')}
+              >
+                {activeTimer.isRunning ? <Pause className="h-4 w-4"/> : <Play className="h-4 w-4 fill-current"/>}
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handleResetOrDismissTimer}
+              className="p-2 rounded-xl border transition cursor-pointer shadow-xs hover:text-red-500"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text-secondary)'
+              }}
+              title={t('dismissTimer') || 'Dismiss Timer'}
+            >
+              <X className="h-4 w-4"/>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ADD TO PLAN MODAL */}
+      {showAddToPlanModal && selectedRecipe && (
+        <div 
+          onClick={() => setShowAddToPlanModal(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[70] flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <button 
+              type="button"
+              onClick={() => setShowAddToPlanModal(false)} 
+              className="absolute top-4 right-4 p-2 rounded-lg transition cursor-pointer"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <X className="h-4 w-4"/>
+            </button>
+
+            <div className="pr-6 space-y-1">
+              <h2 
+                className="text-xl font-black tracking-tight"
+                style={{ color: 'var(--color-primary)' }}
+              >
+                {t('addToCalendar') || 'Add to Calendar'}
+              </h2>
+              <p className="text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+                {(t('scheduleRecipeInMealPlan') || 'Schedule {title} in your meal plan').replace('{title}', selectedRecipe.title || selectedRecipe.name)}
+              </p>
+            </div>
+
+            <div className="space-y-4 pt-1">
+              <div>
+                <label 
+                  className="block text-xs font-bold mb-1.5"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  {t('date') || 'Date'}
+                </label>
+                <div className="relative flex items-center">
+                  <Calendar className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-primary)' }}/>
+                  <input
+                    type="date"
+                    required
+                    value={planDate}
+                    onChange={(e) => setPlanDate(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveToCalendar();
+                      }
+                    }}
+                    className="w-full border rounded-xl pl-10 pr-3 py-2.5 text-xs font-semibold outline-none cursor-pointer"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-primary)'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label 
+                  className="block text-xs font-bold mb-1.5"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  {t('mealType') || 'Meal Type'}
+                </label>
+                <div className="relative flex items-center">
+                  <select
+                    value={planMealType}
+                    onChange={(e) => setPlanMealType(e.target.value)}
+                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none cursor-pointer appearance-none"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  >
+                    <option value="Breakfast" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('breakfast') || 'Breakfast'}</option>
+                    <option value="Lunch" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('lunch') || 'Lunch'}</option>
+                    <option value="Dinner" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('dinner') || 'Dinner'}</option>
+                    <option value="Snack" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('snack') || 'Snack'}</option>
+                  </select>
+                  <ChevronDown className="h-4 w-4 absolute right-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
+                </div>
+              </div>
+
+              <div>
+                <label 
+                  className="block text-xs font-bold mb-1.5"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  {t('time') || 'Time'}
+                </label>
+                <div className="relative flex items-center">
+                  <Clock className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
+                  <input
+                    type="time"
+                    value={planTime}
+                    onChange={(e) => setPlanTime(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveToCalendar();
+                      }
+                    }}
+                    className="w-full border rounded-xl px-10 py-2.5 text-xs outline-none"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                  />
+                  <Clock className="h-4 w-4 absolute right-3.5 pointer-events-none" style={{ color: 'var(--color-primary)' }}/>
+                </div>
+              </div>
+
+              <div>
+                <label 
+                  className="block text-xs font-bold mb-1.5"
+                  style={{ color: 'var(--color-primary)' }}
+                >
+                  {t('notes') || 'Notes'}
+                </label>
+                <textarea
+                  value={planNotes}
+                  onChange={(e) => setPlanNotes(e.target.value)}
+                  placeholder={t('addNotesRemindersPlaceholder') || 'Add any notes or reminders...'}
+                  rows={3}
+                  className="w-full border rounded-xl p-3 text-xs outline-none resize-none"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAddToPlanModal(false)}
+                  className="px-5 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-primary)',
+                    backgroundColor: 'var(--color-inner-dark)'
+                  }}
+                >
+                  {t('cancel') || 'Cancel'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveToCalendar}
+                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
+                >
+                  {t('addToCalendarBtn') || 'Add to Calendar'}
                 </button>
               </div>
             </div>
@@ -1640,250 +3687,157 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* 7. Add to Plan Modal (Constraint 9 Accessible <div> container) */}
-      {showPlanModal && planRecipe && (
+      {/* SHOPPING LIST MODAL */}
+      {isShoppingModalOpen && (
         <div 
-          onClick={() => setShowPlanModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto cursor-pointer animate-in fade-in"
+          onClick={() => setIsShoppingModalOpen(false)}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[60] flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer"
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative cursor-default"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            className="border rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl p-6 space-y-5 cursor-default transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
           >
-            <div className="flex justify-between items-start border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
               <div>
-                <span className="text-[10px] font-black uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
-                  Meal Planner
-                </span>
-                <h3 className="text-base font-black tracking-tight">
-                  Schedule "{planRecipe.title}"
+                <h3 className="text-lg font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <ShoppingCart className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('addToShoppingListTitle') || 'Add to Shopping List'}
                 </h3>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t('selectOrEditItemsShopping') || 'Select or edit items to add directly to your list'}</p>
               </div>
               <button 
-                type="button" 
-                onClick={() => setShowPlanModal(false)}
-                className="p-1.5 rounded-xl border hover:opacity-80 cursor-pointer"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-3.5 text-xs">
-              <div className="space-y-1">
-                <label className="font-bold">Target Date</label>
-                <input
-                  type="date"
-                  value={planDate}
-                  onChange={(e) => setPlanDate(e.target.value)}
-                  className="w-full border rounded-xl px-3 py-2 text-xs outline-none"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-bold">Meal Slot</label>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {['Breakfast', 'Lunch', 'Dinner', 'Snack'].map(slot => (
-                    <button
-                      key={slot}
-                      type="button"
-                      onClick={() => setPlanMealType(slot)}
-                      className="py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer text-center"
-                      style={planMealType === slot ? {
-                        backgroundColor: 'var(--color-primary)',
-                        borderColor: 'var(--color-primary)',
-                        color: '#ffffff'
-                      } : {
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text-secondary)'
-                      }}
-                    >
-                      {slot}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-3 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
-              <button
                 type="button"
-                onClick={() => setShowPlanModal(false)}
-                className="px-4 py-2 border rounded-xl font-bold text-xs hover:opacity-80"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                onClick={() => setIsShoppingModalOpen(false)} 
+                className="cursor-pointer transition"
+                style={{ color: 'var(--color-text-secondary)' }}
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmAddToPlan}
-                className="px-5 py-2 rounded-xl text-white font-bold text-xs shadow-md hover:opacity-90"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-              >
-                Confirm & Plan
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 8. Add to Cookbook Modal */}
-      {showBookModal && bookTargetRecipe && (
-        <div 
-          onClick={() => setShowBookModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto cursor-pointer animate-in fade-in"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative cursor-default"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <div className="flex justify-between items-start border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <div>
-                <span className="text-[10px] font-black uppercase tracking-wider block text-sky-400">
-                  Cookbooks
-                </span>
-                <h3 className="text-base font-black tracking-tight">
-                  Assign to Cookbook
-                </h3>
-              </div>
-              <button 
-                type="button" 
-                onClick={() => setShowBookModal(false)}
-                className="p-1.5 rounded-xl border hover:opacity-80 cursor-pointer"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              >
-                <X className="h-4 w-4" />
+                <X className="h-5 w-5"/>
               </button>
             </div>
 
-            <div className="space-y-3 text-xs">
-              <label className="font-bold">Select Cookbook Collection:</label>
-              {cookbooks.length === 0 ? (
-                <p className="opacity-70 italic">No cookbooks created yet. Create one in /books.</p>
-              ) : (
-                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                  {cookbooks.map(b => (
-                    <div
-                      key={b.id}
-                      onClick={() => setSelectedBookId(b.id)}
-                      className="p-3 rounded-2xl border flex items-center justify-between cursor-pointer transition hover:opacity-90"
-                      style={{
-                        backgroundColor: selectedBookId === b.id ? 'var(--color-inner-dark)' : 'var(--color-card)',
-                        borderColor: selectedBookId === b.id ? 'var(--color-primary)' : 'var(--color-border)'
-                      }}
-                    >
-                      <span className="font-bold">{b.title}</span>
-                      {selectedBookId === b.id && <Check className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="pt-3 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
-              <button
-                type="button"
-                onClick={() => setShowBookModal(false)}
-                className="px-4 py-2 border rounded-xl font-bold text-xs hover:opacity-80"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={!selectedBookId}
-                onClick={handleConfirmAddToBook}
-                className="px-5 py-2 rounded-xl text-white font-bold text-xs shadow-md disabled:opacity-40 hover:opacity-90"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-              >
-                Save to Book
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 9. Shopping List Modal */}
-      {showShoppingModal && shoppingRecipe && (
-        <div 
-          onClick={() => setShowShoppingModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto cursor-pointer animate-in fade-in"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative cursor-default"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-          >
-            <div className="flex justify-between items-start border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <div>
-                <span className="text-[10px] font-black uppercase tracking-wider block text-emerald-400">
-                  Shopping List
-                </span>
-                <h3 className="text-base font-black tracking-tight">
-                  Export Ingredients ({selectedShoppingItems.length})
-                </h3>
-              </div>
-              <button 
-                type="button" 
-                onClick={() => setShowShoppingModal(false)}
-                className="p-1.5 rounded-xl border hover:opacity-80 cursor-pointer"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-2 text-xs max-h-56 overflow-y-auto pr-1 custom-scrollbar">
-              {(shoppingRecipe.ingredients || []).map((rawIng, i) => {
-                const ing = getIngredientString(rawIng);
-                const isSel = selectedShoppingItems.includes(ing);
-                return (
+            <div className="overflow-y-auto flex-1 space-y-3 pr-1 text-xs">
+              {shoppingModalIngredients.map((ing, idx) => (
+                <div 
+                  key={ing.id} 
+                  className="flex items-center gap-2 p-2.5 rounded-xl border"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
                   <div
-                    key={i}
                     onClick={() => {
-                      setSelectedShoppingItems(prev =>
-                        prev.includes(ing) ? prev.filter(x => x !== ing) : [...prev, ing]
-                      );
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].selected = !updated[idx].selected;
+                      setShoppingModalIngredients(updated);
                     }}
-                    className="p-2 rounded-xl border flex items-center justify-between cursor-pointer"
-                    style={{
-                      backgroundColor: isSel ? 'var(--color-inner-dark)' : 'transparent',
-                      borderColor: 'var(--color-border)'
+                    className="w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition shrink-0"
+                    style={ing.selected ? {
+                      backgroundColor: 'var(--color-primary)',
+                      borderColor: 'var(--color-primary)',
+                      color: '#ffffff'
+                    } : {
+                      borderColor: 'var(--color-border)',
+                      backgroundColor: 'var(--color-card)'
                     }}
                   >
-                    <span className="truncate">{ing}</span>
-                    <input 
-                      type="checkbox" 
-                      checked={isSel} 
-                      onChange={() => {}} 
-                      className="rounded cursor-pointer" 
-                    />
+                    {ing.selected && <CheckSquare className="h-3.5 w-3.5"/>}
                   </div>
-                );
-              })}
+
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={ing.amount}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].amount = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    placeholder={t('amt') || 'Amt'}
+                  />
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={ing.unit}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].unit = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-20 border rounded-lg p-2 text-center outline-none"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)'
+                    }}
+                    placeholder={t('unit') || 'Unit'}
+                  />
+                  <input
+                    type="text"
+                    autoComplete="off"
+                    value={ing.name}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].name = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="flex-1 bg-transparent border-none outline-none px-2"
+                    style={{ color: 'var(--color-text)' }}
+                    placeholder={t('ingredientNamePlaceholder') || 'Ingredient name...'}
+                  />
+                  <select
+                    value={ing.category}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].category = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)'
+                    }}
+                  >
+                    {categories.map((cat) => (
+                      <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
             </div>
 
             <div className="pt-3 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
               <button
                 type="button"
-                onClick={() => setShowShoppingModal(false)}
-                className="px-4 py-2 border rounded-xl font-bold text-xs hover:opacity-80"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                onClick={() => setIsShoppingModalOpen(false)}
+                className="px-4 py-2 rounded-xl font-bold text-xs cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  color: 'var(--color-text-secondary)'
+                }}
               >
-                Cancel
+                {t('cancel') || 'Cancel'}
               </button>
               <button
                 type="button"
-                disabled={selectedShoppingItems.length === 0}
-                onClick={handleConfirmShoppingList}
-                className="px-5 py-2 rounded-xl text-white font-bold text-xs shadow-md disabled:opacity-40 hover:opacity-90"
+                onClick={handleConfirmAddToShoppingList}
+                className="px-6 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 shadow-lg cursor-pointer"
                 style={{ backgroundColor: 'var(--color-primary)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
               >
-                Add to List
+                <ShoppingCart className="h-3.5 w-3.5"/> {t('addSelectedToList') || 'Add Selected to List'}
               </button>
             </div>
           </div>
