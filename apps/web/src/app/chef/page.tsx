@@ -1,3 +1,4 @@
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 // @ts-nocheck
 'use client';
 import AiQuotaBar from '@/components/AiQuotaBar';
@@ -937,7 +938,7 @@ export default function ChefChatPage() {
               className="flex items-center gap-2 px-3 py-1.5 rounded-xl border shadow-xs"
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
             >
-              <Coins className="h-4 w-4 text-amber-500" />
+              <DynamicTokenIcon size={15} className="w-3.5 h-3.5 inline-block" />
               <div className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
                 {tokenBalance} <span className="text-amber-500">{tokenSymbol}</span>
               </div>

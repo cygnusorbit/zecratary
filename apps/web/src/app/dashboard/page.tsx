@@ -1,3 +1,4 @@
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 // @ts-nocheck
 'use client';
 
@@ -169,7 +170,7 @@ export default function DashboardPage() {
                 {t('statsTokensRemaining', 'Tokens Remaining')}
               </span>
               <div className="text-base font-black font-mono">
-                {stats.tokenBalance.toLocaleString()} <span className="text-amber-500 text-xs">🪙</span>
+                {stats.tokenBalance.toLocaleString()} <span className="text-amber-500 text-xs"><DynamicTokenIcon size={16} className="w-4 h-4 inline-block" /></span>
               </div>
             </div>
             <Link 

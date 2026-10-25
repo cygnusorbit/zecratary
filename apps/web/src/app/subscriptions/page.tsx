@@ -1,3 +1,4 @@
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 // @ts-nocheck
 'use client';
 
@@ -541,7 +542,7 @@ export default function SubscriptionsPage() {
             className="px-4 py-2.5 rounded-xl text-xs font-bold border transition shadow-xs flex items-center gap-1.5 hover:opacity-80"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
-            <Coins className="h-4 w-4 text-amber-500" />
+            <DynamicTokenIcon className="w-4 h-4 inline-block" />
             <span>{tokenBalance} 🪙</span>
           </Link>
         </div>

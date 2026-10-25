@@ -258,3 +258,20 @@ html.light {
 html.dark {
   color-scheme: dark;
 }
+
+
+/* Suppress animations and color transitions while initial theme hydrates */
+html.theme-preloading,
+html.theme-preloading *,
+html.theme-preloading body {
+  -webkit-transition: none !important;
+  -moz-transition: none !important;
+  -o-transition: none !important;
+  transition: none !important;
+}
+
+html:not(.theme-preloading) body {
+  transition: background-color 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              color 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              border-color 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}

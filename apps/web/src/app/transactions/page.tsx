@@ -1,3 +1,4 @@
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 'use client';
 
 // Generated / Updated by AI Collaborator
@@ -843,7 +844,7 @@ function TransactionsContent() {
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
             title={t('userTokenBalance', 'User Token Balance')}
           >
-            <Coins className="h-4 w-4 text-amber-500" />
+            <DynamicTokenIcon size={16} className="w-4 h-4 inline-block" />
             <span suppressHydrationWarning className="font-mono font-black text-emerald-400">
               {ownerTokenBalance.toLocaleString()}
             </span>
@@ -910,7 +911,7 @@ function TransactionsContent() {
             color: 'var(--color-text-secondary, #94a3b8)'
           }}
         >
-          <Coins className="h-4 w-4 text-amber-500" />
+          <DynamicTokenIcon size={16} className="w-4 h-4 inline-block" />
           <span>{t('tokenTransactionsTab', 'Token Transactions')}</span>
           {tokenSummaryStats.totalEvents > 0 && (
             <span className="ml-1 text-[10px] font-mono px-2 py-0.5 rounded-full border bg-primary/10 border-[var(--color-border)]">
@@ -988,7 +989,7 @@ function TransactionsContent() {
             <div className="border rounded-2xl p-4 shadow-md space-y-1 bg-[var(--color-card)] border-[var(--color-border)]">
               <div className="flex items-center justify-between text-xs font-bold opacity-70">
                 <span>{t('userTokenBalance', 'User Token Balance')}</span>
-                <Coins className="h-4 w-4 text-amber-500" />
+                <DynamicTokenIcon size={16} className="w-4 h-4 inline-block" />
               </div>
               <div className="text-2xl font-black font-mono text-emerald-400 flex items-baseline gap-1.5">
                 <span suppressHydrationWarning>{ownerTokenBalance.toLocaleString()}</span>
@@ -1137,7 +1138,7 @@ function TransactionsContent() {
                           </td>
                           <td className="p-3.5 font-mono text-xs font-bold">
                             <div className="flex items-center gap-1">
-                              <Coins className="h-3.5 w-3.5 text-amber-500" />
+                              <DynamicTokenIcon size={16} className="w-4 h-4 inline-block" />
                               <span>{numBalanceAfter.toLocaleString()}</span>
                               <span className="text-amber-500 text-[11px]">{tokenIdentity.tokenSymbol}</span>
                             </div>

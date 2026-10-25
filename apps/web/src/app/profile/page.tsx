@@ -1,3 +1,4 @@
+import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 // @ts-nocheck
 'use client';
 
@@ -550,7 +551,7 @@ function ProfileContent() {
             </Link>
           </div>
           <div className="text-2xl font-black font-mono">
-            {tokenBalance.toLocaleString()} <span className="text-amber-500 text-xs">🪙</span>
+            {tokenBalance.toLocaleString()} <span className="text-amber-500 text-xs"><DynamicTokenIcon size={16} className="w-4 h-4 inline-block" /></span>
           </div>
         </div>
 
