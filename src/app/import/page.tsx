@@ -43,7 +43,7 @@ export default function ImportPage() {
   const [activeTab, setActiveTab] = useState<'url' | 'text' | 'image'>('url');
   const [recipeTypes, setRecipeTypes] = useState<string[]>(DEFAULT_RECIPE_TYPES);
 
-  // Form States (Autofill Safe)
+  // Form States (Autofill Guardrails)
   const [url, setUrl] = useState('');
   const [textTitle, setTextTitle] = useState('');
   const [textCategory, setTextCategory] = useState('Main Dish');
@@ -630,15 +630,19 @@ export default function ImportPage() {
 
   return (
     <div 
-      className="w-full min-w-full space-y-6 pb-24 font-sans transition-colors duration-200"
+      id="zecratary-import-canvas"
+      role="region"
+      aria-label={t('importRecipeTitle', 'AI Recipe Importer')}
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
       style={{ 
         width: '100%',
-        paddingLeft: '10px', 
-        paddingRight: '10px',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
         color: 'var(--color-text)' 
       }}
     >
-      {/* Clean Header: "Strict Filters Active" & Token Topup Box Removed (Task 0) */}
+      {/* Clean Telemetry Header: Removed Badge & Inline Topup Capsule */}
       <div 
         className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" 
         style={{ borderColor: 'var(--color-border)' }}
@@ -684,14 +688,15 @@ export default function ImportPage() {
         </div>
       </div>
 
-      {/* Main Container Card: 100% Fluid Width with Smooth Theme Transitions (Task 1) */}
+      {/* Main Fluid Card: 100% Fluid Width with Smooth Theme Transitions */}
       <div 
         role="region"
         data-lpignore="true"
-        className="w-full rounded-3xl p-6 space-y-6 shadow-xl border transition-colors duration-200"
+        className="w-full max-w-full rounded-3xl p-6 space-y-6 shadow-xl border transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
-          borderColor: 'var(--color-border)'
+          borderColor: 'var(--color-border)',
+          boxSizing: 'border-box'
         }}
       >
         {/* Method Tab Bar with Token Cost Pills */}
@@ -1017,7 +1022,7 @@ export default function ImportPage() {
           </div>
         )}
 
-        {/* Notifications & Language-Agnostic Status Banner (Task 3) */}
+        {/* Notifications & Language-Agnostic Status Banner */}
         {status && (
           <div
             className="p-4 rounded-2xl border text-xs font-semibold flex items-center justify-between gap-2 animate-in fade-in"
