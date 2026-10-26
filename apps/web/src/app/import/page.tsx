@@ -1,5 +1,5 @@
+// Generated / Updated by AI Collaborator
 'use client';
-// @ts-nocheck
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -22,7 +22,6 @@ const DEFAULT_RECIPE_TYPES = [
 function decodeHtmlEntities(str: string): string {
   if (!str) return '';
   return str
-    .replace(/<[^>]*>/g, '')
     .replace(/&quot;/g, '"')
     .replace(/&#0*39;/g, "'")
     .replace(/&apos;/g, "'")
@@ -44,7 +43,7 @@ export default function ImportPage() {
   const [activeTab, setActiveTab] = useState<'url' | 'text' | 'image'>('url');
   const [recipeTypes, setRecipeTypes] = useState<string[]>(DEFAULT_RECIPE_TYPES);
 
-  // Form States (Autofill Safe)
+  // Form States
   const [url, setUrl] = useState('');
   const [textTitle, setTextTitle] = useState('');
   const [textCategory, setTextCategory] = useState('Main Dish');
@@ -68,7 +67,7 @@ export default function ImportPage() {
   const [tokenPackages, setTokenPackages] = useState<any[]>([]);
   const [isTokenPurchaseOpen, setIsTokenPurchaseOpen] = useState(false);
 
-  // Synchronized dynamically from /admin/ai-settings
+  // Synced dynamically from /admin/ai-settings
   const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.5-flash');
   const [activeAiProvider, setActiveAiProvider] = useState<string>('gemini');
   const [enableWebSearch, setEnableWebSearch] = useState<boolean>(true);
@@ -79,40 +78,37 @@ export default function ImportPage() {
   const [fetchingTelemetry, setFetchingTelemetry] = useState(true);
   const [status, setStatus] = useState<{ type: 'success' | 'error' | 'warning'; msg: string } | null>(null);
 
+  const applySavedTheme = useCallback(() => {
+    try {
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
+    } catch (_) {}
+  }, []);
+
   const fetchTokenAndAiTelemetry = useCallback(async () => {
     try {
       const user = getCurrentUser();
-      const params = new URLSearchParams();
-      if (user?.id) params.set('userId', user.id);
-      if (user?.email) params.set('email', user.email);
-      const queryParam = params.toString() ? `?${params.toString()}` : '';
-
-      // 1. Authoritative synchronization with /admin/ai-settings via /api/admin/settings
+      const queryParam = user?.id ? `?userId=${encodeURIComponent(user.id)}` : user?.email ? `?email=${encodeURIComponent(user.email)}` : '';
+      
+      // 1. Synchronize with /admin/ai-settings
       try {
         const aiRes = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
         if (aiRes.ok) {
           const aiData = await aiRes.json();
-          const s = aiData.settings || aiData;
-          const chef = aiData.chefAiSettings || s.chefAiSettings || s.aiSettings || {};
-          const resolvedModel = aiData.aiModel || chef.model || s.aiModel || s.model;
-          const resolvedProvider = aiData.aiProvider || chef.provider || s.aiProvider || 'gemini';
+          if (aiData.success || aiData.settings) {
+            const s = aiData.settings || aiData;
+            const chef = aiData.chefAiSettings || s.chefAiSettings || s.aiSettings || {};
+            const resolvedModel = aiData.aiModel || chef.model || s.aiModel || s.model;
+            const resolvedProvider = aiData.aiProvider || chef.provider || s.aiProvider || 'gemini';
 
-          if (resolvedModel) {
-            setActiveAiModel(resolvedModel.replace(/^models\//, ''));
-          }
-          if (resolvedProvider) {
-            setActiveAiProvider(resolvedProvider);
-          }
-          if (chef.enableWebSearch !== undefined) {
-            setEnableWebSearch(Boolean(chef.enableWebSearch));
-          } else if (s.enableWebSearch !== undefined) {
-            setEnableWebSearch(Boolean(s.enableWebSearch));
-          }
-          if (chef.strictDietEnforcement !== undefined) {
-            setStrictDietEnforcement(Boolean(chef.strictDietEnforcement));
-          }
-          if (Array.isArray(chef.filterWordsList)) {
-            setFilterWordsList(chef.filterWordsList.filter(Boolean));
+            if (resolvedModel) setActiveAiModel(resolvedModel);
+            if (resolvedProvider) setActiveAiProvider(resolvedProvider);
+            if (chef.enableWebSearch !== undefined) {
+              setEnableWebSearch(Boolean(chef.enableWebSearch));
+            } else if (s.enableWebSearch !== undefined) {
+              setEnableWebSearch(Boolean(s.enableWebSearch));
+            }
+            if (chef.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chef.strictDietEnforcement));
+            if (Array.isArray(chef.filterWordsList)) setFilterWordsList(chef.filterWordsList);
           }
         }
       } catch (_) {}
@@ -141,7 +137,7 @@ export default function ImportPage() {
         }
       } catch (_) {}
 
-      // 3. Direct synchronization with /admin/token-setting endpoint
+      // 3. Direct synchronization with /admin/token-setting
       try {
         let adminRes = await fetch(`/api/admin/token-setting?t=${Date.now()}`, { cache: 'no-store' });
         if (!adminRes.ok) {
@@ -172,31 +168,7 @@ export default function ImportPage() {
     }
   }, []);
 
-  const fetchRecipeTypes = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/recipe-type', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        const types = Array.isArray(data) 
-          ? data 
-          : Array.isArray(data?.types) 
-            ? data.types 
-            : Array.isArray(data?.recipeTypes) 
-              ? data.recipeTypes 
-              : [];
-        if (types.length > 0) {
-          const names = types.map((item: any) => 
-            typeof item === 'string' ? item : item.name || item.title || item.label
-          ).filter(Boolean);
-          if (names.length > 0) {
-            setRecipeTypes(names);
-            setTextCategory(prev => names.includes(prev) ? prev : names[0]);
-            return;
-          }
-        }
-      }
-    } catch (_) {}
-
+  const syncRecipeTypes = () => {
     try {
       const stored = localStorage.getItem('zecratary_recipe_types') || 
                      localStorage.getItem('zecratary_recipe_categories');
@@ -208,67 +180,59 @@ export default function ImportPage() {
           ).filter(Boolean);
           if (names.length > 0) {
             setRecipeTypes(names);
-            setTextCategory(prev => names.includes(prev) ? prev : names[0]);
+            if (!names.includes(textCategory)) {
+              setTextCategory(names[0]);
+            }
             return;
           }
         }
       }
     } catch (_) {}
-
     setRecipeTypes(DEFAULT_RECIPE_TYPES);
-  }, []);
-
-  // Cleanup object URLs on unmount to prevent memory leaks
-  useEffect(() => {
-    return () => {
-      previewUrls.forEach(url => URL.revokeObjectURL(url));
-    };
-  }, [previewUrls]);
+  };
 
   useEffect(() => {
-    document.title = `${t('importRecipeTitle', 'AI Recipe Importer')} - Zecratary`;
-    fetchRecipeTypes();
+    document.title = `${t('importRecipeTitle', 'Import Recipe')} - FoodiePrep`;
+    applySavedTheme();
+    syncRecipeTypes();
     fetchTokenAndAiTelemetry();
 
     const handleUpdates = () => {
       fetchTokenAndAiTelemetry();
-      fetchRecipeTypes();
+      syncRecipeTypes();
+      applySavedTheme();
     };
 
-    window.addEventListener('zecratary_theme_mode_changed', handleUpdates);
+    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_updated', applySavedTheme);
     window.addEventListener('zecratary_token_settings_updated', handleUpdates);
     window.addEventListener('zecratary_tokens_updated', handleUpdates);
     window.addEventListener('zecratary_plans_updated', handleUpdates);
     window.addEventListener('zecratary_users_updated', handleUpdates);
     window.addEventListener('zecratary_admin_settings_updated', handleUpdates);
     window.addEventListener('zecratary_settings_updated', handleUpdates);
-    window.addEventListener('zecratary_engine_config_updated', handleUpdates);
-    window.addEventListener('zecratary_languages_updated', handleUpdates);
-    window.addEventListener('zecratary_dictionary_updated', handleUpdates);
-    window.addEventListener('zecratary_locale_changed', handleUpdates);
+    window.addEventListener('zecratary_storage_updated', handleUpdates);
     window.addEventListener('storage', handleUpdates);
 
     return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', handleUpdates);
+      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('zecratary_token_settings_updated', handleUpdates);
       window.removeEventListener('zecratary_tokens_updated', handleUpdates);
       window.removeEventListener('zecratary_plans_updated', handleUpdates);
       window.removeEventListener('zecratary_users_updated', handleUpdates);
       window.removeEventListener('zecratary_admin_settings_updated', handleUpdates);
       window.removeEventListener('zecratary_settings_updated', handleUpdates);
-      window.removeEventListener('zecratary_engine_config_updated', handleUpdates);
-      window.removeEventListener('zecratary_languages_updated', handleUpdates);
-      window.removeEventListener('zecratary_dictionary_updated', handleUpdates);
-      window.removeEventListener('zecratary_locale_changed', handleUpdates);
+      window.removeEventListener('zecratary_storage_updated', handleUpdates);
       window.removeEventListener('storage', handleUpdates);
     };
-  }, [fetchTokenAndAiTelemetry, fetchRecipeTypes, t]);
+  }, [fetchTokenAndAiTelemetry, applySavedTheme, t]);
 
   const handlePostImportSuccess = async (recipeData: any, consumedTokens: number, newBalance?: number) => {
     const user = getCurrentUser();
     const targetUserId = (user?.id || user?.email || 'usr_admin_1').trim();
-    const createdBy = (user?.email || targetUserId).trim();
-    const creatorName = (user?.name || 'Chef').trim();
 
     if (typeof newBalance === 'number') {
       setTokenBalance(newBalance);
@@ -276,77 +240,46 @@ export default function ImportPage() {
       setTokenBalance(prev => Math.max(0, prev - consumedTokens));
     }
 
-    const cleanCategory = recipeData.recipeType || recipeData.category || textCategory || 'Main Dish';
-    const rawImage = recipeData.image || recipeData.imageUrl || recipeData.image_url || '/uploads/recipes/default.jpg';
-    let localhostImage = rawImage;
-
-    // Ensure scraped remote cover image is saved to localhost disk
-    if (rawImage && (rawImage.startsWith('http://') || rawImage.startsWith('https://'))) {
+    // Ensure scraped cover image is synced with /admin/storage (/recipes/images or Supabase)
+    const processedRecipe = { ...recipeData };
+    const rawImage = processedRecipe.image || processedRecipe.imageUrl;
+    
+    if (rawImage && (rawImage.startsWith('http://') || rawImage.startsWith('https://')) && !rawImage.includes('.supabase.co/storage/')) {
       try {
         const dlRes = await fetch('/api/recipes/save-remote-image', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageUrl: rawImage })
+          body: JSON.stringify({ 
+            imageUrl: rawImage,
+            recipeId: processedRecipe.id || `rcp_${Date.now()}`
+          })
         });
         const dlData = await dlRes.json();
-        if (dlData.success && (dlData.localPath || dlData.localUrl)) {
-          localhostImage = dlData.localPath || dlData.localUrl;
+        if (dlData.success && (dlData.url || dlData.localUrl)) {
+          const finalUrl = dlData.url || dlData.localUrl;
+          processedRecipe.image = finalUrl;
+          processedRecipe.imageUrl = finalUrl;
         }
       } catch (_) {}
     }
 
-    const steps = Array.isArray(recipeData.instructions) && recipeData.instructions.length > 0
-      ? recipeData.instructions
-      : Array.isArray(recipeData.directions) && recipeData.directions.length > 0
-        ? recipeData.directions
-        : ['Follow standard chef cooking guidelines for this dish.'];
+    // Default image fallback to /recipes/images/default.jpg
+    if (!processedRecipe.image && !processedRecipe.imageUrl) {
+      processedRecipe.image = '/recipes/images/default.jpg';
+      processedRecipe.imageUrl = '/recipes/images/default.jpg';
+    }
 
-    const normalizedRecipe = {
-      ...recipeData,
-      id: recipeData.id || ('recipe_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)),
-      title: decodeHtmlEntities(recipeData.title || textTitle || 'Imported Recipe'),
-      name: decodeHtmlEntities(recipeData.title || textTitle || 'Imported Recipe'),
-      description: recipeData.description || '',
-      userId: targetUserId,
-      user_id: targetUserId,
-      createdBy: createdBy,
-      created_by: createdBy,
-      creatorName: creatorName,
-      creator_name: creatorName,
-      category: cleanCategory,
-      recipeType: cleanCategory,
-      recipe_type: cleanCategory,
-      imageUrl: localhostImage,
-      image: localhostImage,
-      image_url: localhostImage,
-      ingredients: Array.isArray(recipeData.ingredients) ? recipeData.ingredients : [],
-      instructions: steps,
-      directions: steps,
-      steps: steps,
-      prepTime: String(recipeData.prepTime || recipeData.prepTimeMinutes || '15 mins'),
-      cookTime: String(recipeData.cookTime || recipeData.cookTimeMinutes || '25 mins'),
-      servings: Number(recipeData.servings) || 4,
-      sourceUrl: recipeData.sourceUrl || recipeData.source_url || url || '',
-      source_url: recipeData.sourceUrl || recipeData.source_url || url || '',
-      isFavorite: false,
-      rating: 0
-    };
-
-    // Dual-route persistence across PostgreSQL endpoints
+    // Ensure PostgreSQL & MySQL saved_recipes persistence & /recipes JSON file creation
     try {
-      await Promise.allSettled([
-        persistSavedRecipe(targetUserId, normalizedRecipe, { createdBy, creatorName }),
-        fetch('/api/saved-recipes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(normalizedRecipe)
-        }),
-        fetch('/api/recipes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(normalizedRecipe)
-        })
-      ]);
+      await persistSavedRecipe(targetUserId, processedRecipe, {
+        createdBy: user?.email || targetUserId,
+        creatorName: user?.name || 'You'
+      });
+      await fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([processedRecipe])
+      });
     } catch (_) {}
 
     // Synchronize to localStorage for instantaneous client response
@@ -356,9 +289,9 @@ export default function ImportPage() {
         const raw = localStorage.getItem(key);
         const currentList = raw ? JSON.parse(raw) : [];
         const filtered = Array.isArray(currentList)
-          ? currentList.filter((r: any) => (r.id !== normalizedRecipe.id && (r.title || r.name)?.toLowerCase() !== normalizedRecipe.title?.toLowerCase()))
+          ? currentList.filter((r: any) => (r.id !== recipeData.id && (r.title || r.name)?.toLowerCase() !== recipeData.title?.toLowerCase()))
           : [];
-        localStorage.setItem(key, JSON.stringify([normalizedRecipe, ...filtered]));
+        localStorage.setItem(key, JSON.stringify([processedRecipe, ...filtered]));
       } catch (_) {}
     });
 
@@ -374,26 +307,23 @@ export default function ImportPage() {
 
     setStatus({
       type: 'success',
-      msg: `${t('importSuccessToast', 'Successfully imported')} "${normalizedRecipe.title}"!${deductionMsg}`
+      msg: `${t('importSuccessToast', 'Successfully imported')} "${processedRecipe.title}"!${deductionMsg}`
     });
 
+    // Permanent redirect to canonical /recipes route
     setTimeout(() => {
       router.push('/recipes');
     }, 850);
   };
 
-  const handleUrlImport = async () => {
-    let cleanUrl = url.trim();
-    if (!cleanUrl) return;
-
-    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
-      cleanUrl = `https://${cleanUrl}`;
-    }
+  const handleUrlImport = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
+    if (!url.trim()) return;
 
     if (!enableWebSearch) {
       setStatus({
         type: 'warning',
-        msg: t('webSearchDisabledWarning', 'Web URL imports are currently disabled by the administrator in AI Settings.')
+        msg: t('webSearchDisabledMsg', 'Web URL imports are disabled by the administrator in AI Settings.')
       });
       return;
     }
@@ -418,8 +348,8 @@ export default function ImportPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'url',
-          url: cleanUrl,
-          userId: user?.id || user?.email || 'usr_admin_1',
+          url: url.trim(),
+          userId: user?.id,
           userEmail: user?.email,
           userName: user?.name,
           category: textCategory,
@@ -443,7 +373,8 @@ export default function ImportPage() {
     }
   };
 
-  const handleTextImport = async () => {
+  const handleTextImport = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!rawText.trim()) return;
 
     const cost = isTokenEnabled ? tokenCosts.text : 0;
@@ -469,7 +400,7 @@ export default function ImportPage() {
           text: rawText.trim(),
           title: textTitle.trim(),
           category: textCategory,
-          userId: user?.id || user?.email || 'usr_admin_1',
+          userId: user?.id,
           userEmail: user?.email,
           userName: user?.name,
           model: activeAiModel,
@@ -500,20 +431,17 @@ export default function ImportPage() {
     if (validFiles.length === 0) return;
     const merged = [...selectedFiles, ...validFiles].slice(0, 5);
     setSelectedFiles(merged);
-    previewUrls.forEach(url => URL.revokeObjectURL(url));
     setPreviewUrls(merged.map(f => URL.createObjectURL(f)));
   };
 
   const removeFile = (index: number) => {
-    if (previewUrls[index]) {
-      URL.revokeObjectURL(previewUrls[index]);
-    }
     const updatedFiles = selectedFiles.filter((_, idx) => idx !== index);
     setSelectedFiles(updatedFiles);
     setPreviewUrls(previewUrls.filter((_, idx) => idx !== index));
   };
 
-  const handleImageImport = async () => {
+  const handleImageImport = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (selectedFiles.length === 0) return;
 
     const cost = isTokenEnabled ? tokenCosts.photo : 0;
@@ -535,27 +463,15 @@ export default function ImportPage() {
       const formData = new FormData();
       formData.append('file', primaryFile);
 
-      let localPhotoPath = '';
+      // Saves via /api/recipes/upload which uploads to Supabase S3 or /recipes/images
+      let localPhotoPath = '/recipes/images/default.jpg';
       try {
         const uploadRes = await fetch('/api/recipes/upload', {
           method: 'POST',
           body: formData
         });
-        if (uploadRes.ok) {
-          const uploadData = await uploadRes.json();
-          if (uploadData?.url) localPhotoPath = uploadData.url;
-        }
-      } catch (_) {}
-
-      // Convert file to Base64 data URL for direct Vision OCR ingestion
-      let base64Data = '';
-      try {
-        base64Data = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve((reader.result as string) || '');
-          reader.onerror = () => resolve('');
-          reader.readAsDataURL(primaryFile);
-        });
+        const uploadData = await uploadRes.json();
+        if (uploadData?.url) localPhotoPath = uploadData.url;
       } catch (_) {}
 
       const res = await fetch('/api/ai/import', {
@@ -563,11 +479,10 @@ export default function ImportPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'photo',
-          image: localPhotoPath || base64Data,
-          base64: base64Data,
+          image: localPhotoPath,
           title: primaryFile.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' '),
           category: textCategory,
-          userId: user?.id || user?.email || 'usr_admin_1',
+          userId: user?.id,
           userEmail: user?.email,
           userName: user?.name,
           model: activeAiModel,
@@ -610,25 +525,17 @@ export default function ImportPage() {
         <div className="flex flex-wrap items-center gap-2.5">
           <div 
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
-            style={{ 
-              backgroundColor: 'var(--color-inner-dark)', 
-              borderColor: 'var(--color-border)', 
-              color: 'var(--color-text)' 
-            }}
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
             title={t('activeModelConfiguredTooltip', 'Active Model configured dynamically in /admin/ai-settings')}
           >
-            <Cpu className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+            <Cpu className="h-3.5 w-3.5 text-orange-400" />
             <span className="font-mono">{activeAiModel}</span>
           </div>
 
           {!isTokenEnabled && (
             <div 
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider"
-              style={{ 
-                backgroundColor: 'var(--color-inner-dark)', 
-                borderColor: 'var(--color-emerald)',
-                color: 'var(--color-emerald)'
-              }}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider text-emerald-400"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
               title={t('tokenFreeModeTooltip', 'Token consumption is currently bypassed (Free Mode) in /admin/token-setting')}
             >
               <Sparkles className="h-3 w-3" />
@@ -651,14 +558,14 @@ export default function ImportPage() {
             className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl border shadow-sm"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
           >
-            <Coins className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+            <Coins className="h-4 w-4 text-amber-500" />
             <div className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
-              {tokenBalance} <span style={{ color: 'var(--color-primary)' }}>{tokenSymbol}</span>
+              {tokenBalance} <span className="text-amber-500">{tokenSymbol}</span>
             </div>
             <button
               type="button"
               onClick={() => setIsTokenPurchaseOpen(true)}
-              className="ml-1 text-[10px] font-extrabold px-2 py-0.5 rounded-lg text-white transition hover:opacity-90 cursor-pointer shadow-xs"
+              className="ml-1 text-[10px] font-extrabold px-2 py-0.5 rounded-lg text-white transition hover:opacity-90 cursor-pointer"
               style={{ backgroundColor: 'var(--color-primary)' }}
             >
               {t('topUpBtn', 'Top Up')}
@@ -667,10 +574,8 @@ export default function ImportPage() {
         </div>
       </div>
 
-      {/* Main Container Card (Form-Free Container, Constraint 9) */}
+      {/* Main Container Card */}
       <div 
-        role="region"
-        data-lpignore="true"
         className="rounded-3xl p-6 space-y-6 shadow-xl border transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
@@ -686,9 +591,9 @@ export default function ImportPage() {
           }}
         >
           {[
-            { id: 'url', label: t('urlTab', 'Web URL'), icon: Link2, cost: tokenCosts.url },
-            { id: 'text', label: t('textTab', 'Recipe Text'), icon: FileText, cost: tokenCosts.text },
-            { id: 'image', label: t('imageTab', 'Photo / OCR'), icon: ImageIcon, cost: tokenCosts.photo },
+            { id: 'url', label: t('urlTab', 'URL'), icon: Link2, cost: tokenCosts.url },
+            { id: 'text', label: t('textTab', 'Text'), icon: FileText, cost: tokenCosts.text },
+            { id: 'image', label: t('imageTab', 'Image'), icon: ImageIcon, cost: tokenCosts.photo },
           ].map((tab) => {
             const isActive = activeTab === tab.id;
             return (
@@ -702,8 +607,8 @@ export default function ImportPage() {
                 className="flex-1 py-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
                 style={isActive ? {
                   backgroundColor: 'var(--color-card)',
-                  color: 'var(--color-primary)',
-                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-emerald)',
+                  borderColor: 'var(--color-emerald)',
                   borderWidth: '1px',
                   boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
                 } : {
@@ -734,7 +639,7 @@ export default function ImportPage() {
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
           >
             <div className="flex items-center gap-2">
-              <ShieldAlert className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }} />
+              <ShieldAlert className="h-4 w-4 shrink-0 text-amber-500" />
               <span>
                 <strong>{t('dietNoticeTitle', 'AI Dietary Restrictions Enforced')}:</strong> {t('dietNoticeDesc', 'Recipes containing avoid terms')} ({filterWordsList.slice(0, 4).join(', ')}{filterWordsList.length > 4 ? '...' : ''}) {t('willBeBlocked', 'will be automatically blocked.')}
               </span>
@@ -744,15 +649,11 @@ export default function ImportPage() {
 
         {/* TAB 1: URL IMPORT */}
         {activeTab === 'url' && (
-          <div className="space-y-4">
+          <div role="region" aria-label="URL Import" data-lpignore="true" className="space-y-4">
             {!enableWebSearch && (
               <div 
-                className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2"
-                style={{ 
-                  backgroundColor: 'var(--color-inner-dark)', 
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-primary)'
-                }}
+                className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 text-amber-500"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'rgba(245, 158, 11, 0.4)' }}
               >
                 <AlertTriangle className="h-4 w-4 shrink-0" />
                 <span>{t('webSearchDisabledWarning', 'Web URL imports are currently disabled by the administrator in AI Settings.')}</span>
@@ -765,10 +666,8 @@ export default function ImportPage() {
               </label>
               <input
                 type="url"
-                autoComplete="off"
+                required
                 data-lpignore="true"
-                data-form-type="other"
-                spellCheck="false"
                 disabled={!enableWebSearch}
                 placeholder={t('recipeWebUrlPlaceholder', 'https://www.recipetineats.com/... or food blog URL')}
                 value={url}
@@ -794,12 +693,12 @@ export default function ImportPage() {
               type="button"
               onClick={() => handleUrlImport()}
               disabled={loading || !url.trim() || !enableWebSearch}
-              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50 hover:opacity-90"
+              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary)' }}
             >
               <Sparkles className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {loading 
-                ? t('downloadingPhotoParsingSteps', 'Parsing recipe & deducting tokens...') 
+                ? t('downloadingPhotoParsingSteps', 'Parsing recipe & syncing storage...') 
                 : isTokenEnabled && tokenCosts.url > 0
                   ? `${t('importRecipeBtn', 'Import Recipe')} (${tokenCosts.url} ${tokenSymbol})`
                   : `${t('importRecipeBtn', 'Import Recipe')} (${t('freeBadge', 'Free')})`}
@@ -809,7 +708,7 @@ export default function ImportPage() {
 
         {/* TAB 2: TEXT IMPORT */}
         {activeTab === 'text' && (
-          <div className="space-y-4">
+          <div role="region" aria-label="Text Import" data-lpignore="true" className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
@@ -817,10 +716,7 @@ export default function ImportPage() {
                 </label>
                 <input
                   type="text"
-                  autoComplete="off"
                   data-lpignore="true"
-                  data-form-type="other"
-                  spellCheck="false"
                   placeholder={t('recipeTitlePlaceholder', 'e.g. Homemade Apple Cake')}
                   value={textTitle}
                   onChange={(e) => setTextTitle(e.target.value)}
@@ -830,7 +726,7 @@ export default function ImportPage() {
                       handleTextImport();
                     }
                   }}
-                  className="w-full border rounded-xl px-4 py-3 text-sm outline-none font-medium"
+                  className="w-full border rounded-xl px-4 py-3 text-sm outline-none"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
@@ -847,7 +743,7 @@ export default function ImportPage() {
                 <select
                   value={textCategory}
                   onChange={(e) => setTextCategory(e.target.value)}
-                  className="w-full border rounded-xl px-4 py-3 text-sm outline-none cursor-pointer font-bold"
+                  className="w-full border rounded-xl px-4 py-3 text-sm outline-none cursor-pointer"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
@@ -868,20 +764,12 @@ export default function ImportPage() {
                 {t('pasteIngredientsSteps', 'Paste Ingredients & Steps *')}
               </label>
               <textarea
-                autoComplete="off"
-                data-lpignore="true"
-                data-form-type="other"
-                spellCheck="false"
+                required
                 rows={7}
-                placeholder={t('pasteRecipeContentPlaceholder', 'Paste ingredients and cooking steps here... (Ctrl+Enter to Import)')}
+                data-lpignore="true"
+                placeholder={t('pasteRecipeContentPlaceholder', 'Paste ingredients and cooking steps here...')}
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
-                onKeyDown={(e) => {
-                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                    e.preventDefault();
-                    handleTextImport();
-                  }
-                }}
                 className="w-full border rounded-xl p-4 text-xs outline-none resize-none font-mono"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
@@ -897,7 +785,7 @@ export default function ImportPage() {
               type="button"
               onClick={() => handleTextImport()}
               disabled={loading || !rawText.trim()}
-              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50 hover:opacity-90"
+              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary)' }}
             >
               <Sparkles className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -910,9 +798,9 @@ export default function ImportPage() {
           </div>
         )}
 
-        {/* TAB 3: IMAGE / PHOTO OCR IMPORT */}
+        {/* TAB 3: IMAGE / PHOTO IMPORT */}
         {activeTab === 'image' && (
-          <div className="space-y-4">
+          <div role="region" aria-label="Image Import" data-lpignore="true" className="space-y-4">
             <div>
               <label className="block text-xs font-bold mb-2" style={{ color: 'var(--color-text)' }}>
                 {t('recipeImagesMax5', 'Recipe Images (up to 5)')}
@@ -923,9 +811,11 @@ export default function ImportPage() {
                 onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}
                 onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); if (e.dataTransfer.files) handleFilesAdded(e.dataTransfer.files); }}
                 onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed rounded-2xl py-12 px-6 flex flex-col items-center justify-center text-center cursor-pointer transition relative"
+                className={`border-2 border-dashed rounded-2xl py-12 px-6 flex flex-col items-center justify-center text-center cursor-pointer transition relative ${
+                  isDragging ? 'border-emerald-400' : 'hover:border-emerald-400'
+                }`}
                 style={{
-                  borderColor: isDragging ? 'var(--color-primary)' : 'var(--color-border)',
+                  borderColor: isDragging ? 'var(--color-emerald)' : 'var(--color-border)',
                   backgroundColor: 'var(--color-inner-dark)'
                 }}
               >
@@ -938,17 +828,17 @@ export default function ImportPage() {
                   className="hidden"
                 />
                 <div className="w-14 h-14 rounded-full flex items-center justify-center mb-3">
-                  <Upload className="h-10 w-10 stroke-[2.2]" style={{ color: 'var(--color-primary)' }} />
+                  <Upload className="h-10 w-10 stroke-[2.2]" style={{ color: 'var(--color-emerald)' }} />
                 </div>
                 <p className="text-xs sm:text-sm font-semibold tracking-wide" style={{ color: 'var(--color-text)' }}>
                   <span style={{ color: 'var(--color-primary)' }} className="font-bold">
                     {t('clickToUpload', 'Click to upload')}
                   </span>{' '}
-                  <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                  <span className="font-semibold" style={{ color: 'var(--color-emerald)' }}>
                     {t('orDragAndDrop', 'or drag and drop')}
                   </span>
                 </p>
-                <p className="text-[11px] font-medium mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                <p className="text-[11px] font-medium mt-1" style={{ color: 'var(--color-emerald)' }}>
                   {t('pngJpgWebpMax5', 'PNG, JPG, or WEBP (Cookbook captures or food photos)')}
                 </p>
               </div>
@@ -987,12 +877,12 @@ export default function ImportPage() {
               type="button"
               onClick={() => handleImageImport()}
               disabled={loading || selectedFiles.length === 0}
-              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50 hover:opacity-90"
+              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary)' }}
             >
               <Upload className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {loading 
-                ? t('aiSearchingRecipeImporting', 'AI OCR analyzing & importing...') 
+                ? t('aiSearchingRecipeImporting', 'AI OCR analyzing & uploading to storage...') 
                 : isTokenEnabled && tokenCosts.photo > 0
                   ? `${t('importRecipeFromImages', 'Import Recipe from Images')} (${tokenCosts.photo} ${tokenSymbol})`
                   : `${t('importRecipeFromImages', 'Import Recipe from Images')} (${t('freeBadge', 'Free')})`}
@@ -1004,14 +894,18 @@ export default function ImportPage() {
         {status && (
           <div
             className="p-4 rounded-2xl border text-xs font-semibold flex items-center justify-between gap-2 animate-in fade-in"
-            style={{
+            style={status.type === 'success' ? {
               backgroundColor: 'var(--color-inner-dark)',
-              borderColor: status.type === 'success' 
-                ? 'var(--color-emerald)' 
-                : status.type === 'warning' 
-                  ? 'var(--color-border)' 
-                  : 'rgba(239, 68, 68, 0.4)',
-              color: status.type === 'success' ? 'var(--color-emerald)' : status.type === 'warning' ? '#f59e0b' : '#ef4444'
+              borderColor: 'var(--color-emerald)',
+              color: 'var(--color-emerald)'
+            } : status.type === 'warning' ? {
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'rgba(245, 158, 11, 0.5)',
+              color: '#f59e0b'
+            } : {
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'rgba(239, 68, 68, 0.4)',
+              color: '#ef4444'
             }}
           >
             <div className="flex items-center gap-2">
@@ -1029,7 +923,7 @@ export default function ImportPage() {
               <button
                 type="button"
                 onClick={() => setIsTokenPurchaseOpen(true)}
-                className="px-3 py-1 rounded-xl font-bold text-[11px] text-white shrink-0 cursor-pointer shadow-sm hover:opacity-90"
+                className="px-3 py-1 rounded-xl font-bold text-[11px] text-white shrink-0 cursor-pointer shadow-sm"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 {t('buyTokensNowBtn', 'Buy Tokens')}
@@ -1043,7 +937,7 @@ export default function ImportPage() {
       <TokenPurchaseModal
         isOpen={isTokenPurchaseOpen}
         onClose={() => setIsTokenPurchaseOpen(false)}
-        userId={getCurrentUser()?.id || getCurrentUser()?.email || 'usr_admin_1'}
+        userId={getCurrentUser()?.id}
         userEmail={getCurrentUser()?.email}
         tokenSymbol={tokenSymbol}
         packages={tokenPackages}

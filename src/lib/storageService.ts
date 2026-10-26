@@ -1,5 +1,5 @@
-// Centralized Media Storage Engine (Localhost & Supabase S3)
-// GitHub: cygnusorbit/zecratary (Constraints 8, 10)
+// Centralized Media Storage Engine (Universal /recipes/images & Supabase S3)
+// GitHub: cygnusorbit/zecratary
 
 import fs from 'fs';
 import path from 'path';
@@ -11,6 +11,7 @@ export interface StorageConfig {
   localhost: {
     uploadDir: string;
     publicPrefix: string;
+    recipesJsonDir: string;
     maxSizeMb: number;
     allowedTypes?: string;
   };
@@ -28,10 +29,11 @@ export interface StorageConfig {
 export const DEFAULT_STORAGE_CONFIG: StorageConfig = {
   provider: 'localhost',
   localhost: {
-    uploadDir: 'public/uploads/recipes',
-    publicPrefix: '/uploads/recipes',
+    uploadDir: 'public/recipes/images',
+    publicPrefix: '/recipes/images',
+    recipesJsonDir: 'public/recipes',
     maxSizeMb: 10,
-    allowedTypes: 'image/jpeg, image/png, image/webp, image/gif',
+    allowedTypes: 'image/jpeg, image/png, image/webp, image/gif, image/avif',
   },
   supabase: {
     enabled: true,
@@ -66,12 +68,22 @@ export async function getStorageSettings(): Promise<StorageConfig> {
 
   // Fallback to local server JSON store
   try {
-    const jsonPath = path.join(process.cwd(), 'data', 'admin_settings.json');
-    if (fs.existsSync(jsonPath)) {
-      const fileData = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-      if (fileData.storage_settings) {
-        memoryStorageConfig = { ...DEFAULT_STORAGE_CONFIG, ...fileData.storage_settings };
-        return memoryStorageConfig;
+    const jsonPaths = [
+      path.join(process.cwd(), 'data', 'admin_settings.json'),
+      path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+    ];
+    for (const jp of jsonPaths) {
+      if (fs.existsSync(jp)) {
+        const fileData = JSON.parse(fs.readFileSync(jp, 'utf8'));
+        if (fileData.storage_settings) {
+          memoryStorageConfig = {
+            ...DEFAULT_STORAGE_CONFIG,
+            ...fileData.storage_settings,
+            localhost: { ...DEFAULT_STORAGE_CONFIG.localhost, ...(fileData.storage_settings.localhost || {}) },
+            supabase: { ...DEFAULT_STORAGE_CONFIG.supabase, ...(fileData.storage_settings.supabase || {}) },
+          };
+          return memoryStorageConfig;
+        }
       }
     }
   } catch (_) {}
@@ -80,16 +92,17 @@ export async function getStorageSettings(): Promise<StorageConfig> {
 }
 
 export async function saveStorageSettings(config: Partial<StorageConfig>): Promise<StorageConfig> {
+  const current = await getStorageSettings();
   const merged: StorageConfig = {
-    ...memoryStorageConfig,
+    ...current,
     ...config,
-    localhost: { ...memoryStorageConfig.localhost, ...(config.localhost || {}) },
-    supabase: { ...memoryStorageConfig.supabase, ...(config.supabase || {}) },
+    localhost: { ...current.localhost, ...(config.localhost || {}) },
+    supabase: { ...current.supabase, ...(config.supabase || {}) },
   };
 
   memoryStorageConfig = merged;
 
-  // 1. Commit to PostgreSQL
+  // 1. Commit to PostgreSQL & MySQL
   try {
     await query(`
       INSERT INTO admin_settings (id, storage_settings, updated_at)
@@ -111,9 +124,7 @@ export async function saveStorageSettings(config: Partial<StorageConfig>): Promi
   for (const jp of jsonPaths) {
     try {
       const dir = path.dirname(jp);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       let existing = {};
       if (fs.existsSync(jp)) {
         try { existing = JSON.parse(fs.readFileSync(jp, 'utf8')); } catch (_) {}
@@ -126,7 +137,7 @@ export async function saveStorageSettings(config: Partial<StorageConfig>): Promi
   return merged;
 }
 
-// Native AWS S3 SigV4 Upload Implementation (Zero external dependency bloat)
+// Native AWS S3 SigV4 Upload Implementation for Supabase S3 Gateway
 export async function uploadToSupabaseS3(
   buffer: Buffer,
   filename: string,
@@ -176,7 +187,6 @@ export async function uploadToSupabaseS3(
 
   const uploadTargetUrl = `${endpointUrl.protocol}//${host}${canonicalUri}`;
 
-  // Fixed TS2769: BodyInit expects Uint8Array (ArrayBufferView / BufferSource)
   const res = await fetch(uploadTargetUrl, {
     method: 'PUT',
     headers: {
@@ -194,7 +204,6 @@ export async function uploadToSupabaseS3(
     throw new Error(`Supabase S3 upload failed (HTTP ${res.status}): ${errorText}`);
   }
 
-  // Return public CDN url if configured, otherwise fallback to S3 URL
   if (config.publicUrl) {
     const base = config.publicUrl.replace(/\/+$/, '');
     return `${base}/${filename}`;
@@ -212,23 +221,63 @@ export async function uploadMediaFile(
   const ext = path.extname(originalFilename) || '.jpg';
   const cleanName = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}${ext}`;
 
-  if (settings.provider === 'supabase' && settings.supabase.enabled) {
+  if (settings.provider === 'supabase' && settings.supabase.enabled && settings.supabase.secretAccessKey) {
     try {
       return await uploadToSupabaseS3(buffer, cleanName, contentType, settings.supabase);
     } catch (err: any) {
-      console.warn('[Storage] Supabase S3 failed, falling back to localhost:', err.message);
+      console.warn('[Storage] Supabase S3 failed, falling back to /recipes/images:', err.message);
     }
   }
 
-  // Localhost Disk Storage Fallback / Default
-  const uploadDir = path.join(process.cwd(), settings.localhost.uploadDir || 'public/uploads/recipes');
-  if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
+  // Universal Localhost Disk Storage: Write to /recipes/images
+  const targetDirs = [
+    path.join(process.cwd(), 'recipes', 'images'),
+    path.join(process.cwd(), 'public', 'recipes', 'images'),
+    path.join(process.cwd(), 'apps', 'web', 'recipes', 'images'),
+    path.join(process.cwd(), 'apps', 'web', 'public', 'recipes', 'images'),
+  ];
+
+  for (const d of targetDirs) {
+    try {
+      if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, cleanName), buffer);
+    } catch (_) {}
   }
 
-  const filePath = path.join(uploadDir, cleanName);
-  fs.writeFileSync(filePath, buffer);
-
-  const prefix = settings.localhost.publicPrefix || '/uploads/recipes';
+  const prefix = settings.localhost.publicPrefix || '/recipes/images';
   return `${prefix}/${cleanName}`;
+}
+
+export function getUniversalDiskDiagnostics() {
+  const root = process.cwd();
+  const recipesDir = path.join(root, 'public', 'recipes');
+  const imagesDir = path.join(root, 'public', 'recipes', 'images');
+
+  let recipesCount = 0;
+  let imagesCount = 0;
+  let jsonDirWritable = false;
+  let imagesDirWritable = false;
+
+  try {
+    if (!fs.existsSync(recipesDir)) fs.mkdirSync(recipesDir, { recursive: true });
+    recipesCount = fs.readdirSync(recipesDir).filter(f => f.endsWith('.json')).length;
+    fs.accessSync(recipesDir, fs.constants.W_OK);
+    jsonDirWritable = true;
+  } catch (_) {}
+
+  try {
+    if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
+    imagesCount = fs.readdirSync(imagesDir).filter(f => /\.(jpg|jpeg|png|webp|gif|avif)$/i.test(f)).length;
+    fs.accessSync(imagesDir, fs.constants.W_OK);
+    imagesDirWritable = true;
+  } catch (_) {}
+
+  return {
+    recipesCount,
+    imagesCount,
+    jsonDirWritable,
+    imagesDirWritable,
+    jsonDirPath: 'public/recipes',
+    imagesDirPath: 'public/recipes/images',
+  };
 }

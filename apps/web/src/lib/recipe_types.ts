@@ -1,63 +1,79 @@
-// Server-backed Recipe Types Store
-// Synchronizes dynamically with PostgreSQL with zero localStorage writes
+import { useState, useEffect } from 'react';
 
-import { fetchServerAdminSettings, persistServerAdminSettings } from '@/lib/adminSync';
-
-export const DEFAULT_RECIPE_TYPES: string[] = [
-  'Breakfast',
-  'Lunch',
-  'Dinner',
-  'Snack',
-  'Dessert',
-  'Beverage',
-  'Appetizer',
-  'Salad',
-  'Soup',
-  'Side Dish',
-  'Baking'
+const DEFAULT_TYPES = [
+  'Main Dish', 'Breakfast', 'Lunch', 'Dinner', 'Appetiser', 
+  'Side Dish', 'Dessert', 'Snacks', 'Beverages', 'Soup', 'Salad'
 ];
 
-let memoryRecipeTypes: string[] = [...DEFAULT_RECIPE_TYPES];
-
-export function getStoredRecipeTypes(): string[] {
-  return [...memoryRecipeTypes];
-}
-
-export function setMemoryRecipeTypes(types: string[]): void {
-  if (Array.isArray(types) && types.length > 0) {
-    memoryRecipeTypes = [...types];
-  }
-}
-
-export async function saveRecipeTypes(types: string[]): Promise<boolean> {
-  memoryRecipeTypes = [...types];
-
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('zecratary_recipe_types_changed', { detail: types }));
-    window.dispatchEvent(new CustomEvent('zecratary_recipe_types_updated', { detail: types }));
-  }
-
-  let success = false;
-
-  // 1. Direct PostgreSQL API Save
-  try {
-    const res = await fetch('/api/admin/recipe-type', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipeTypes: types })
-    });
-    if (res.ok) success = true;
-  } catch (_) {}
-
-  // 2. Settings Synchronizer Save
-  try {
-    const res2 = await persistServerAdminSettings({ recipeTypes: types });
-    if (res2) success = true;
-  } catch (_) {}
-
-  return success;
-}
+const DEFAULT_CATEGORIES = [
+  'Produce', 'Meat & Seafood', 'Pantry & Dry Goods', 'Dairy & Eggs',
+  'Bakery', 'Frozen', 'Spices & Seasonings', 'Canned Goods', 'Condiments & Sauces', 'Other'
+];
 
 export function useRecipeTypes(): string[] {
-  return getStoredRecipeTypes();
+  const [types, setTypes] = useState<string[]>(DEFAULT_TYPES);
+
+  useEffect(() => {
+    async function fetchTypes() {
+      try {
+        const res = await fetch('/api/admin/recipe-type', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          const list = Array.isArray(data) ? data : (data.types || data.recipeTypes || []);
+          if (list.length > 0) {
+            setTypes(list.map((x: any) => typeof x === 'string' ? x : (x.name || x.label || x.id)).filter(Boolean));
+            return;
+          }
+        }
+      } catch (_) {}
+
+      try {
+        const local = localStorage.getItem('zecratary_recipe_types') || localStorage.getItem('zecratary_recipe_categories');
+        if (local) {
+          const parsed = JSON.parse(local);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setTypes(parsed.map((x: any) => typeof x === 'string' ? x : (x.name || x.label || x.id)).filter(Boolean));
+          }
+        }
+      } catch (_) {}
+    }
+
+    fetchTypes();
+  }, []);
+
+  return types;
+}
+
+export function useIngredientCategories(): string[] {
+  const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
+
+  useEffect(() => {
+    async function fetchCategories() {
+      try {
+        const res = await fetch('/api/admin/ingredient-categories', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          const list = Array.isArray(data) ? data : (data.categories || data.ingredientCategories || []);
+          if (list.length > 0) {
+            setCategories(list.map((x: any) => typeof x === 'string' ? x : (x.name || x.label || x.id)).filter(Boolean));
+            return;
+          }
+        }
+      } catch (_) {}
+
+      try {
+        const local = localStorage.getItem('zecratary_categories') || localStorage.getItem('zecratary_ingredient_categories');
+        if (local) {
+          const parsed = JSON.parse(local);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setCategories(parsed.map((x: any) => typeof x === 'string' ? x : (x.name || x.label || x.id)).filter(Boolean));
+          }
+        }
+      } catch (_) {}
+    }
+
+    fetchCategories();
+  }, []);
+
+  return categories;
 }

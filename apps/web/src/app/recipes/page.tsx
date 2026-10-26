@@ -9,7 +9,7 @@ import {
   Trash2, Save, Plus, ImagePlus, Users, Calendar,
   GripVertical, CheckSquare, CheckCircle2, Type, ExternalLink,
   Carrot, Hourglass, ChevronLeft, ChevronRight, LayoutGrid,
-  Grid3X3, Rows3
+  Grid3X3, Rows3, Globe, Lock, FileJson, Sparkles, Download
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { syncUserSavedRecipes, persistSavedRecipe, deleteSavedRecipe } from '@/lib/recipeSync';
@@ -73,6 +73,9 @@ export default function RecipesPage() {
   const [filterFavorites, setFilterFavorites] = useState(false);
   const [filterCooked, setFilterCooked] = useState(false);
   
+  // Tab State: 'my_recipes' | 'marketplace'
+  const [activeTab, setActiveTab] = useState<'my_recipes' | 'marketplace'>('my_recipes');
+
   // Ingredients Filter State
   const [ingredientQuery, setIngredientQuery] = useState('');
   const [selectedIngredientsList, setSelectedIngredientsList] = useState<string[]>([]);
@@ -166,23 +169,51 @@ export default function RecipesPage() {
     return `https://${urlStr}`;
   };
 
-  const loadData = useCallback(async (user: User | null) => {
-    if (!user) return;
+  const isOwner = (rec: any): boolean => {
+    if (!currentUser) return true;
+    const uid = currentUser.id || 'usr_admin_1';
+    const email = currentUser.email || '';
+    return (
+      rec.userId === uid ||
+      rec.user_id === uid ||
+      rec.ownerId === uid ||
+      rec.createdBy === uid ||
+      rec.createdBy === email ||
+      rec.created_by === email ||
+      rec.creatorEmail === email
+    );
+  };
+
+  const loadData = useCallback(async (user: User | null, tab: 'my_recipes' | 'marketplace' = activeTab) => {
     setCategories(getStoredCategories());
-    const targetUserId = (user.id || 'usr_admin_1').trim();
+    const targetUserId = (user?.id || 'usr_admin_1').trim();
+    const targetEmail = user?.email || '';
 
     try {
       setLoading(true);
-      const rawRecipes = await syncUserSavedRecipes(targetUserId);
+      const queryParams = new URLSearchParams();
+      queryParams.set('userId', targetUserId);
+      if (targetEmail) queryParams.set('email', targetEmail);
+      if (tab === 'marketplace') queryParams.set('marketplace', 'true');
+      queryParams.set('t', String(Date.now()));
+
+      const res = await fetch(`/api/recipes/saved?${queryParams.toString()}`, { cache: 'no-store' });
+      let rawRecipes: any[] = [];
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.recipes)) rawRecipes = data.recipes;
+      }
 
       const userRecipes = rawRecipes.map((r: any) => {
         const cleanType = getCleanRecipeType(r);
         return {
           ...r,
-          userId: targetUserId,
+          userId: r.userId || r.user_id || targetUserId,
           recipeType: cleanType,
           category: cleanType,
           bookId: r.book_id || r.bookId || null,
+          isPublic: Boolean(r.is_public ?? r.isPublic ?? false),
+          is_public: Boolean(r.is_public ?? r.isPublic ?? false),
           isFavorite: Boolean(r.is_favorite || r.isFavorite),
           is_favorite: Boolean(r.is_favorite || r.isFavorite),
           isCooked: Boolean(r.is_cooked || r.isCooked),
@@ -191,6 +222,8 @@ export default function RecipesPage() {
           note: r.note || '',
           sourceUrl: r.source_url || r.sourceUrl || '',
           source_url: r.source_url || r.sourceUrl || '',
+          creatorName: r.creatorName || r.creator_name || r.ownerName || 'Chef',
+          creatorEmail: r.creatorEmail || r.creator_email || r.ownerEmail || '',
           tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
         };
       });
@@ -214,13 +247,7 @@ export default function RecipesPage() {
         } catch (_) {}
       }
 
-      const userBooks = parsedBooks.filter((b: any) => {
-        if (!b.userId && !b.createdBy) return true;
-        if (b.userId) return b.userId === targetUserId;
-        return b.createdBy === user.email || b.createdBy === targetUserId;
-      });
-
-      setBooks(userBooks.map((b: any) => ({
+      setBooks(parsedBooks.map((b: any) => ({
         ...b,
         recipeCount: userRecipes.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
       })));
@@ -229,7 +256,7 @@ export default function RecipesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeTab]);
 
   useEffect(() => {
     applyGlobalTheme();
@@ -255,13 +282,13 @@ export default function RecipesPage() {
       return;
     }
     setCurrentUser(user);
-    loadData(user);
+    loadData(user, activeTab);
 
     const handleSync = () => {
       const activeUser = getCurrentUser();
       if (activeUser) {
         setCurrentUser(activeUser);
-        loadData(activeUser);
+        loadData(activeUser, activeTab);
       }
     };
 
@@ -280,7 +307,7 @@ export default function RecipesPage() {
       window.removeEventListener('zecratary_auth_changed', handleSync);
       window.removeEventListener('storage', handleSync);
     };
-  }, [loadData, router, t]);
+  }, [loadData, router, t, activeTab]);
 
   const saveAllRecipes = (updatedUserList: any[]) => {
     if (!currentUser) return;
@@ -292,6 +319,8 @@ export default function RecipesPage() {
       user_id: targetUserId,
       bookId: r.bookId || r.book_id || null,
       book_id: r.bookId || r.book_id || null,
+      isPublic: Boolean(r.isPublic ?? r.is_public),
+      is_public: Boolean(r.isPublic ?? r.is_public),
       isFavorite: Boolean(r.isFavorite ?? r.is_favorite),
       is_favorite: Boolean(r.isFavorite ?? r.is_favorite),
       isCooked: Boolean(r.isCooked ?? r.is_cooked),
@@ -317,6 +346,118 @@ export default function RecipesPage() {
       recipeCount: updatedWithId.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
     }));
     setBooks(updatedBooks);
+  };
+
+  // Toggle Public / Private Sharing (Marketplace)
+  const handleTogglePublic = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const target = recipes.find(r => r.id === id);
+    if (!target) return;
+    const newPub = !(target.isPublic || target.is_public);
+
+    const updated = recipes.map(r => r.id === id ? { ...r, isPublic: newPub, is_public: newPub } : r);
+    setRecipes(updated);
+
+    if (selectedRecipe?.id === id) {
+      setSelectedRecipe({ ...selectedRecipe, isPublic: newPub, is_public: newPub });
+    }
+
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, isPublic: newPub, is_public: newPub })
+      });
+      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+      alert(newPub ? '🌐 Recipe is now Public on Marketplace!' : '🔒 Recipe set to Private.');
+    } catch (_) {}
+  };
+
+  // Export Complete Recipe JSON with Ownership Telemetry
+  const handleExportJson = (recipe: any, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const currentU = currentUser || getCurrentUser();
+    const exportPayload = {
+      schemaVersion: '1.0.0',
+      exportedAt: new Date().toISOString(),
+      id: recipe.id,
+      ownership: {
+        userId: recipe.userId || recipe.user_id || currentU?.id || 'usr_admin_1',
+        createdBy: recipe.createdBy || recipe.created_by || currentU?.email || 'chef@zecratary.local',
+        creatorName: recipe.creatorName || recipe.creator_name || currentU?.name || 'Chef',
+        creatorEmail: recipe.creatorEmail || recipe.creator_email || currentU?.email || ''
+      },
+      owner: {
+        id: recipe.userId || recipe.user_id || currentU?.id || 'usr_admin_1',
+        name: recipe.creatorName || recipe.creator_name || currentU?.name || 'Chef',
+        email: recipe.creatorEmail || recipe.creator_email || currentU?.email || ''
+      },
+      ownerId: recipe.userId || recipe.user_id || currentU?.id || 'usr_admin_1',
+      ownerName: recipe.creatorName || recipe.creator_name || currentU?.name || 'Chef',
+      ownerEmail: recipe.creatorEmail || recipe.creator_email || currentU?.email || '',
+      userId: recipe.userId || recipe.user_id || currentU?.id || 'usr_admin_1',
+      createdBy: recipe.createdBy || recipe.created_by || currentU?.email || 'chef@zecratary.local',
+      creatorName: recipe.creatorName || recipe.creator_name || currentU?.name || 'Chef',
+      isPublic: Boolean(recipe.isPublic ?? recipe.is_public),
+      title: recipe.title || recipe.name || 'Untitled Recipe',
+      description: recipe.description || '',
+      recipeType: recipe.recipeType || recipe.category || 'Main Dish',
+      cuisine: recipe.cuisine || '',
+      servings: recipe.servings || 4,
+      prepTimeMinutes: recipe.prepTimeMinutes || 15,
+      cookTimeMinutes: recipe.cookTimeMinutes || 25,
+      ingredients: recipe.ingredients || [],
+      instructions: recipe.instructions || recipe.directions || [],
+      nutrition: recipe.nutrition || {},
+      imageUrl: recipe.imageUrl || recipe.image || '',
+      sourceUrl: recipe.sourceUrl || recipe.source_url || '',
+      isFavorite: Boolean(recipe.isFavorite ?? recipe.is_favorite),
+      isCooked: Boolean(recipe.isCooked ?? recipe.is_cooked),
+      rating: Number(recipe.rating) || 0,
+      note: recipe.note || '',
+      tags: recipe.tags || []
+    };
+
+    const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(exportPayload, null, 2))}`;
+    const downloadAnchor = document.createElement('a');
+    const safeFilename = (recipe.title || recipe.name || 'recipe')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '_')
+      .replace(/_+/g, '_')
+      .substring(0, 50);
+    downloadAnchor.setAttribute('href', jsonString);
+    downloadAnchor.setAttribute('download', `${safeFilename}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  // Clone Marketplace Recipe into Personal Collection
+  const handleSaveToMyRecipes = async (recipe: any, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!currentUser) return;
+
+    const clonedId = `rcp_copy_${Date.now().toString(36)}`;
+    const cloned = {
+      ...recipe,
+      id: clonedId,
+      userId: currentUser.id || 'usr_admin_1',
+      user_id: currentUser.id || 'usr_admin_1',
+      createdBy: currentUser.email || 'user@zecratary.local',
+      creatorName: `${currentUser.name || 'You'} (copied from ${recipe.creatorName || 'Community'})`,
+      isPublic: false,
+      is_public: false
+    };
+
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([cloned])
+      });
+      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+      alert(`"${recipe.title}" copied to your Saved Recipes!`);
+    } catch (_) {}
   };
 
   const toggleFavorite = async (e: React.MouseEvent, id: string) => {
@@ -412,7 +553,7 @@ export default function RecipesPage() {
     if (!selectedRecipe || !currentUser) return;
 
     const recName = selectedRecipe.title || selectedRecipe.name || 'Untitled Recipe';
-    const recImage = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80';
+    const recImage = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || '/recipes/images/default.jpg';
     const targetUserId = currentUser.id || 'usr_admin_1';
 
     const newPlanItem = {
@@ -461,11 +602,6 @@ export default function RecipesPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newPlanItem)
-        }),
-        fetch('/api/meal-plan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newPlanItem)
         })
       ]);
     } catch (_) {}
@@ -473,14 +609,11 @@ export default function RecipesPage() {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('zecratary_planner_updated'));
       window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
-      window.dispatchEvent(new Event('zecratary_meal_plans_updated'));
       window.dispatchEvent(new Event('storage'));
     }
 
     setShowAddToPlanModal(false);
-    const alertMsg = (t('scheduledMealAlert') || 'Successfully scheduled "{title}" in your meal plan!')
-      .replace('{title}', recName);
-    alert(alertMsg);
+    alert(`Successfully scheduled "${recName}" in your meal plan!`);
   };
 
   const updateSelectedRecipeState = async (key: string, val: any) => {
@@ -489,6 +622,7 @@ export default function RecipesPage() {
     if (key === 'isFavorite') updatedRec.is_favorite = val;
     if (key === 'isCooked') updatedRec.is_cooked = val;
     if (key === 'bookId') updatedRec.book_id = val;
+    if (key === 'isPublic') updatedRec.is_public = val;
 
     setSelectedRecipe(updatedRec);
     const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
@@ -509,21 +643,8 @@ export default function RecipesPage() {
     
     try {
       await Promise.allSettled([
-        fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { 
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id })
-        }),
-        fetch(`/api/saved-recipes?id=${encodeURIComponent(id)}`, { 
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id })
-        }),
-        fetch(`/api/recipes?id=${encodeURIComponent(id)}`, { 
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id })
-        })
+        fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
+        fetch(`/api/recipes?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
       ]);
 
       if (typeof deleteSavedRecipe === 'function') {
@@ -535,33 +656,13 @@ export default function RecipesPage() {
       setSelectedRecipe(null);
       setIsEditing(false);
 
-      const updatedBooks = books.map((b: any) => ({
-        ...b,
-        recipeCount: updated.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
-      }));
-      setBooks(updatedBooks);
-
-      try {
-        const localKeys = ['zecratary_saved_recipes', 'zecratary_recipes', 'zecratary_user_recipes', 'saved_recipes', 'zecratary_imported_recipes'];
-        for (const k of localKeys) {
-          const raw = localStorage.getItem(k);
-          if (raw) {
-            const arr = JSON.parse(raw);
-            if (Array.isArray(arr)) {
-              const cleaned = arr.filter((x: any) => x.id !== id);
-              localStorage.setItem(k, JSON.stringify(cleaned));
-            }
-          }
-        }
-      } catch (_) {}
-
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
         window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
       }
     } catch (err) {
       console.error('[RecipesPage] Error deleting recipe:', err);
-      alert(t('errorDeletingRecipe') || 'Failed to delete recipe. Please try again.');
+      alert('Failed to delete recipe. Please try again.');
     }
   };
 
@@ -806,30 +907,20 @@ export default function RecipesPage() {
     } catch (_) {}
 
     try {
-      await Promise.allSettled([
-        fetch('/api/shopping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formatted)
-        }),
-        fetch('/api/shopping-list', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formatted)
-        })
-      ]);
+      await fetch('/api/shopping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formatted)
+      });
     } catch (_) {}
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('zecratary_shopping_updated'));
-      window.dispatchEvent(new Event('zecratary_shopping_list_updated'));
       window.dispatchEvent(new Event('storage'));
     }
 
     setIsShoppingModalOpen(false);
-    const alertMsg = (t('addedItemsShoppingAlert') || 'Added {count} items to your Shopping List!')
-      .replace('{count}', String(selectedItems.length));
-    alert(alertMsg);
+    alert(`Added ${selectedItems.length} items to your Shopping List!`);
   };
 
   const handleAddIngredientFilter = () => {
@@ -849,7 +940,13 @@ export default function RecipesPage() {
     return recipes.filter(r => {
       const q = search.toLowerCase().trim();
       const title = (r.title || r.name || '').toLowerCase();
-      if (q && !title.includes(q)) return false;
+      const creator = (r.creatorName || r.ownerName || '').toLowerCase();
+      if (q && !title.includes(q) && !creator.includes(q)) return false;
+
+      // Tab filtering
+      if (activeTab === 'marketplace') {
+        if (!(r.isPublic || r.is_public)) return false;
+      }
 
       if (filterFavorites && !r.isFavorite) return false;
       if (filterCooked && !r.isCooked) return false;
@@ -895,11 +992,11 @@ export default function RecipesPage() {
 
       return true;
     });
-  }, [recipes, search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime]);
+  }, [recipes, activeTab, search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime, gridMode]);
+  }, [activeTab, search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime, gridMode]);
 
   const itemsPerPage = GRID_CONFIG[gridMode].perPage;
   const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
@@ -925,7 +1022,7 @@ export default function RecipesPage() {
             {t('savedRecipesTitle') || 'Saved Recipes'}
           </h1>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {(t('savedRecipesSubtitle') || 'Your collection of favorite recipes ({count})').replace('{count}', String(recipes.length))}
+            {(t('savedRecipesSubtitle') || 'Your collection of recipes ({count})').replace('{count}', String(recipes.length))}
           </p>
         </div>
 
@@ -964,6 +1061,21 @@ export default function RecipesPage() {
             })}
           </div>
 
+          {/* Import Recipe Button */}
+          <Link
+            href="/import"
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-sm hover:opacity-80"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/>
+            <span>{t('importRecipe') || 'Import'}</span>
+          </Link>
+
+          {/* Create Recipe Button */}
           <Link 
             className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg"
             href="/manual"
@@ -984,7 +1096,7 @@ export default function RecipesPage() {
             <input
               type="text"
               data-lpignore="true"
-              placeholder={t('searchByNamePlaceholder') || 'Search by name'}
+              placeholder={t('searchByNamePlaceholder') || 'Search by name or creator'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none transition-colors"
@@ -1015,9 +1127,45 @@ export default function RecipesPage() {
           </button>
         </div>
 
-        {/* Filter Pills */}
+        {/* Filter Pills with Marketplace Tab */}
         {showFilters && (
           <div className="flex flex-wrap items-center gap-2 pt-1 animate-in fade-in text-xs font-semibold select-none">
+            {/* My Recipes vs Marketplace Tab Pills */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('my_recipes')}
+              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              style={activeTab === 'my_recipes' ? {
+                backgroundColor: 'var(--color-primary)',
+                borderColor: 'var(--color-primary)',
+                color: '#ffffff'
+              } : {
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <span>{t('myRecipes') || 'My Recipes'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('marketplace')}
+              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              style={activeTab === 'marketplace' ? {
+                backgroundColor: 'var(--color-emerald)',
+                borderColor: 'var(--color-emerald)',
+                color: '#ffffff'
+              } : {
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-emerald)'
+              }}
+            >
+              <Globe className="h-3.5 w-3.5"/>
+              <span>{t('marketplaceTab') || 'Marketplace'}</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setFilterFavorites(!filterFavorites)}
@@ -1255,106 +1403,6 @@ export default function RecipesPage() {
                 </div>
               )}
             </div>
-
-            {/* Prep Time Dropdown */}
-            <div className="relative" onClick={(e) => e.stopPropagation()}>
-              <button
-                type="button"
-                onClick={() => setOpenDropdown(openDropdown === 'prepTime' ? null : 'prepTime')}
-                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-                style={selectedPrepTime !== 'All Prep Times' ? {
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-emerald)',
-                  color: 'var(--color-emerald)'
-                } : {
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              >
-                <Hourglass className="h-3.5 w-3.5 opacity-70"/>
-                <span>{selectedPrepTime === 'All Prep Times' ? (t('prepTime') || 'Prep Time') : selectedPrepTime}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
-              </button>
-
-              {openDropdown === 'prepTime' && (
-                <div 
-                  className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)'
-                  }}
-                >
-                  {['All Prep Times', 'Under 15m', '15-30m', 'Over 30m'].map((time) => (
-                    <button
-                      key={time}
-                      type="button"
-                      onClick={() => { setSelectedPrepTime(time); setOpenDropdown(null); }}
-                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
-                      style={selectedPrepTime === time ? {
-                        backgroundColor: 'var(--color-inner-dark)',
-                        color: 'var(--color-text)',
-                        border: '1px solid var(--color-border)'
-                      } : {
-                        color: 'var(--color-text-secondary)'
-                      }}
-                    >
-                      {time}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Cook Time Dropdown */}
-            <div className="relative" onClick={(e) => e.stopPropagation()}>
-              <button
-                type="button"
-                onClick={() => setOpenDropdown(openDropdown === 'cookTime' ? null : 'cookTime')}
-                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-                style={selectedCookTime !== 'All Cook Times' ? {
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-emerald)',
-                  color: 'var(--color-emerald)'
-                } : {
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              >
-                <Clock className="h-3.5 w-3.5 opacity-70"/>
-                <span>{selectedCookTime === 'All Cook Times' ? (t('cookTime') || 'Cook Time') : selectedCookTime}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
-              </button>
-
-              {openDropdown === 'cookTime' && (
-                <div 
-                  className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)'
-                  }}
-                >
-                  {['All Cook Times', 'Under 15m', '15-30m', 'Over 30m'].map((time) => (
-                    <button
-                      key={time}
-                      type="button"
-                      onClick={() => { setSelectedCookTime(time); setOpenDropdown(null); }}
-                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
-                      style={selectedCookTime === time ? {
-                        backgroundColor: 'var(--color-inner-dark)',
-                        color: 'var(--color-text)',
-                        border: '1px solid var(--color-border)'
-                      } : {
-                        color: 'var(--color-text-secondary)'
-                      }}
-                    >
-                      {time}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
         )}
       </div>
@@ -1364,12 +1412,29 @@ export default function RecipesPage() {
         <div className="text-xs py-12 text-center" style={{ color: 'var(--color-text-secondary)' }}>
           {t('loadingRecipes') || 'Loading recipes...'}
         </div>
+      ) : paginatedRecipes.length === 0 ? (
+        <div 
+          className="border rounded-2xl p-12 text-center space-y-3"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <Book className="h-8 w-8 mx-auto opacity-30" />
+          <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-text)' }}>
+            {activeTab === 'marketplace' ? 'No community recipes on Marketplace yet' : 'No recipes found in your collection'}
+          </h3>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            {activeTab === 'marketplace'
+              ? 'Share your delicious creations to Marketplace so other home chefs can discover them!'
+              : 'Try importing or creating new recipes to build your flat file and database collection.'}
+          </p>
+        </div>
       ) : (
         <div className={`grid ${GRID_CONFIG[gridMode].colsClass} gap-4 sm:gap-5`}>
           {paginatedRecipes.map((r) => {
             const cardBook = books.find(b => b.id === (r.bookId || r.book_id));
             const cardTypeBadge = getCleanRecipeType(r);
             const cfg = GRID_CONFIG[gridMode];
+            const userOwns = isOwner(r);
+            const isPub = Boolean(r.isPublic || r.is_public);
 
             return (
               <div
@@ -1391,13 +1456,30 @@ export default function RecipesPage() {
                 <div>
                   <div className={`relative ${cfg.imgHeight} w-full overflow-hidden`} style={{ backgroundColor: 'var(--color-inner-dark)' }}>
                     <img
-                      src={r.imageUrl || r.image || '/uploads/recipes/default.jpg'}
+                      src={r.imageUrl || r.image || '/recipes/images/default.jpg'}
                       alt={r.title || r.name}
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                     />
                     
-                    {/* Card Action Buttons */}
+                    {/* Card Action Badges: Public / Cooked / Favorite */}
                     <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
+                      {/* Marketplace Visibility Toggle (If Owner) */}
+                      {userOwns && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleTogglePublic(e, r.id)}
+                          className="p-1.5 rounded-full backdrop-blur-md transition shadow-md cursor-pointer border"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: isPub ? 'var(--color-emerald)' : 'var(--color-border)',
+                            color: isPub ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
+                          }}
+                          title={isPub ? 'Public on Marketplace (Click to Make Private)' : 'Private (Click to Share on Marketplace)'}
+                        >
+                          {isPub ? <Globe className="h-3.5 w-3.5 stroke-[2.5]" /> : <Lock className="h-3.5 w-3.5" />}
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         onClick={(e) => toggleCooked(e, r.id)}
@@ -1446,16 +1528,42 @@ export default function RecipesPage() {
                   </div>
 
                   <div className="p-3.5 space-y-1.5">
-                    <h3 
-                      className={`font-bold ${cfg.titleSize} leading-snug line-clamp-2`}
-                      style={{ color: 'var(--color-text)' }}
-                    >
-                      {r.title || r.name}
-                    </h3>
+                    <div className="flex items-center justify-between gap-1">
+                      <h3 
+                        className={`font-bold ${cfg.titleSize} leading-snug line-clamp-2`}
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        {r.title || r.name}
+                      </h3>
+                      {isPub && (
+                        <span 
+                          className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded border flex items-center gap-0.5 shrink-0"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-emerald)',
+                            color: 'var(--color-emerald)'
+                          }}
+                        >
+                          <Globe className="h-2.5 w-2.5" /> Market
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Creator Attribution on Marketplace */}
+                    {(r.creatorName || r.ownerName) && (
+                      <p className="text-[11px] font-semibold text-emerald-400 truncate">
+                        By {r.creatorName || r.ownerName}
+                      </p>
+                    )}
                   </div>
                 </div>
 
-                <div className="px-3.5 pb-3 pt-0 flex items-center justify-between gap-1">
+                {/* Card Action Row: Export JSON & Delete */}
+                <div 
+                  className="px-3.5 pb-3 pt-2 border-t flex items-center justify-between gap-1"
+                  style={{ borderColor: 'var(--color-border)' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span 
                       className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0"
@@ -1471,9 +1579,56 @@ export default function RecipesPage() {
                     ) : null}
                   </div>
 
-                  <span className="text-[11px] flex items-center gap-1 shrink-0 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-                    <Clock className="h-3 w-3"/> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
-                  </span>
+                  <div className="flex items-center gap-1">
+                    {/* Green Export JSON Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => handleExportJson(r, e)}
+                      className="px-2 py-1 rounded-xl text-[11px] font-bold border transition flex items-center gap-1 cursor-pointer shadow-xs hover:opacity-90"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-emerald)',
+                        color: 'var(--color-emerald)'
+                      }}
+                      title="Export complete recipe JSON with ownership"
+                    >
+                      <FileJson className="h-3.5 w-3.5" />
+                      <span className="hidden sm:inline">Export JSON</span>
+                    </button>
+
+                    {/* If on Marketplace and not owned: Allow copying */}
+                    {activeTab === 'marketplace' && !userOwns ? (
+                      <button
+                        type="button"
+                        onClick={(e) => handleSaveToMyRecipes(r, e)}
+                        className="px-2 py-1 rounded-xl text-[11px] font-bold border transition flex items-center gap-1 cursor-pointer shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                        title="Copy to My Recipes"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Save</span>
+                      </button>
+                    ) : (
+                      userOwns && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteRecipe(r.id)}
+                          className="p-1 rounded-xl border text-red-400 hover:text-red-500 cursor-pointer shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'rgba(239, 68, 68, 0.3)'
+                          }}
+                          title="Delete Recipe"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -1591,13 +1746,41 @@ export default function RecipesPage() {
                 <div className="space-y-5 pb-6">
                   <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
                     <img
-                      src={selectedRecipe.imageUrl || selectedRecipe.image || '/uploads/recipes/default.jpg'}
+                      src={selectedRecipe.imageUrl || selectedRecipe.image || '/recipes/images/default.jpg'}
                       alt={selectedRecipe.title || selectedRecipe.name}
                       className="absolute inset-0 w-full h-full object-cover"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
 
                     <div className="relative z-10 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <span 
+                          className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full border shadow-sm backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          {recipeCategoryBadge}
+                        </span>
+
+                        <span 
+                          className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                            borderColor: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : 'rgba(255,255,255,0.2)',
+                            color: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : '#ffffff'
+                          }}
+                        >
+                          {(selectedRecipe.isPublic || selectedRecipe.is_public) ? (
+                            <><Globe className="h-3 w-3" /> Public on Marketplace</>
+                          ) : (
+                            <><Lock className="h-3 w-3" /> Private (Only You)</>
+                          )}
+                        </span>
+                      </div>
+
                       <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
                         {selectedRecipe.title || selectedRecipe.name}
                       </h2>
@@ -1609,9 +1792,21 @@ export default function RecipesPage() {
                         <span className="border text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/60 border-white/20">
                           <Clock className="h-3.5 w-3.5"/> {(t('prepTimePrefix') || 'Prep: {time} minutes').replace('{time}', String(selectedRecipe.prepTimeMinutes || 30))}
                         </span>
-                        <span className="border text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/60 border-white/20">
-                          <Utensils className="h-3.5 w-3.5"/> {recipeCategoryBadge}
-                        </span>
+
+                        {isOwner(selectedRecipe) && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleTogglePublic(e, selectedRecipe.id)}
+                            className="px-3 py-1.5 rounded-full border font-bold text-xs transition flex items-center gap-1 cursor-pointer bg-black/60"
+                            style={{
+                              borderColor: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : 'rgba(255,255,255,0.3)',
+                              color: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : '#ffffff'
+                            }}
+                          >
+                            {(selectedRecipe.isPublic || selectedRecipe.is_public) ? <Globe className="h-3.5 w-3.5"/> : <Lock className="h-3.5 w-3.5"/>}
+                            <span>{(selectedRecipe.isPublic || selectedRecipe.is_public) ? 'Marketplace (Public)' : 'Make Public'}</span>
+                          </button>
+                        )}
                         
                         <button
                           type="button"
@@ -1787,18 +1982,22 @@ export default function RecipesPage() {
                       >
                         <Timer className="h-3.5 w-3.5"/> {t('timerBtn') || 'Timer'}
                       </button>
-                      <button
-                        type="button"
-                        onClick={handleOpenEdit}
-                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
-                        }}
-                      >
-                        <Edit3 className="h-3.5 w-3.5"/> {t('editBtn') || 'Edit'}
-                      </button>
+                      
+                      {isOwner(selectedRecipe) && (
+                        <button
+                          type="button"
+                          onClick={handleOpenEdit}
+                          className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          <Edit3 className="h-3.5 w-3.5"/> {t('editBtn') || 'Edit'}
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         onClick={() => {
@@ -2055,18 +2254,36 @@ export default function RecipesPage() {
 
                   {/* MODAL FOOTER */}
                   <div className="px-5 flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteRecipe(selectedRecipe.id)}
-                      className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'rgba(239, 68, 68, 0.4)',
-                        color: '#ef4444'
-                      }}
-                    >
-                      <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipeBtn') || 'Delete Recipe'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {/* Green Export JSON Button */}
+                      <button
+                        type="button"
+                        onClick={() => handleExportJson(selectedRecipe)}
+                        className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-emerald)',
+                          color: 'var(--color-emerald)'
+                        }}
+                      >
+                        <FileJson className="h-3.5 w-3.5"/> Export JSON
+                      </button>
+
+                      {isOwner(selectedRecipe) && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteRecipe(selectedRecipe.id)}
+                          className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'rgba(239, 68, 68, 0.4)',
+                            color: '#ef4444'
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipeBtn') || 'Delete Recipe'}
+                        </button>
+                      )}
+                    </div>
 
                     <div className="flex items-center gap-2 ml-auto text-xs">
                       <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>

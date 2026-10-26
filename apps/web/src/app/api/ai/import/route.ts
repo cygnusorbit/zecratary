@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
     let parsedDescription = '';
     let ingredientsList: string[] = [];
     let directionsList: string[] = [];
-    let parsedImageUrl = '/uploads/recipes/default.jpg';
+    let parsedImageUrl = '/recipes/images/default.jpg';
     let prepTime = '15 mins';
     let cookTime = '25 mins';
     let servings = 4;
@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
         directionsList = Array.isArray(scraped?.directions) && scraped.directions.length > 0
           ? scraped.directions
           : (Array.isArray(scraped?.instructions) ? scraped.instructions : []);
-        parsedImageUrl = scraped?.imageUrl || scraped?.image || '/uploads/recipes/default.jpg';
+        parsedImageUrl = scraped?.imageUrl || scraped?.image || '/recipes/images/default.jpg';
         prepTime = scraped?.prepTime || prepTime;
         cookTime = scraped?.cookTime || cookTime;
         servings = Number(scraped?.servings) || 4;
@@ -214,7 +214,7 @@ Return ONLY valid JSON matching this schema:
         ];
       }
 
-      parsedImageUrl = inputContent.startsWith('/uploads/') ? inputContent : '/uploads/recipes/default.jpg';
+      parsedImageUrl = inputContent.startsWith('/uploads/') ? inputContent : '/recipes/images/default.jpg';
     } 
     // 3. RAW TEXT RECIPE IMPORT (AI PARSER)
     else {
