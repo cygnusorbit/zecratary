@@ -122,6 +122,7 @@ export default function Sidebar() {
 
   // 2. Core State Hooks
   const [user, setUser] = useState<User | null>(null);
+  const currentUser = user;
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
   const [siteIcon, setSiteIcon] = useState<string>(DEFAULT_SITE_ICON);
   const [isOpen, setIsOpen] = useState<boolean>(false);
@@ -689,7 +690,9 @@ export default function Sidebar() {
   // 12. Guard Rail: Unconditional Hook Execution Complete Before Early Return
   const isHomePage = Boolean(pathname === '/' || pathname === '' || pathname === '/index');
   const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
-  if (isAuthRoute) return null;
+  if (!mounted || isAuthRoute || isHomePage || (!user && !currentUser)) {
+    return null;
+  }
 
   const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import {useParams, useRouter, usePathname} from 'next/navigation';
 import Link from 'next/link';
 import { 
   Sun, Moon, Globe, Shield, Zap, Sparkles, ChefHat, BookOpen, 
@@ -217,6 +217,9 @@ const DEFAULT_SUBSCRIPTION_PLANS = [
 ];
 
 export default function DynamicHomePage() {
+  const pathnameHook = usePathname();
+  const pathname = pathnameHook || '';
+
   const params = useParams();
   const router = useRouter();
   const { t } = useTranslation();
@@ -388,6 +391,39 @@ export default function DynamicHomePage() {
         color: 'var(--color-text)',
       }}
     >
+      {/* Global CSS Reset for Public Homepage: Remove application shell offsets */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        body.is-homepage-view,
+        body:has(#zecratary-homepage-root) {
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+        body.is-homepage-view main,
+        body.is-homepage-view [role="main"],
+        body.is-homepage-view #zecratary-main-content,
+        body.is-homepage-view .main-content,
+        body:has(#zecratary-homepage-root) main,
+        body:has(#zecratary-homepage-root) [role="main"],
+        body:has(#zecratary-homepage-root) #zecratary-main-content,
+        body:has(#zecratary-homepage-root) .main-content {
+          padding-top: 0 !important;
+          padding-left: 0 !important;
+          padding-right: 0 !important;
+          margin-left: 0 !important;
+          margin-right: 0 !important;
+          width: 100% !important;
+          max-width: 100% !important;
+        }
+        body.is-homepage-view aside,
+        body.is-homepage-view #zecratary-desktop-topbar,
+        body.is-homepage-view .zecratary-mobile-topbar,
+        body:has(#zecratary-homepage-root) aside,
+        body:has(#zecratary-homepage-root) #zecratary-desktop-topbar,
+        body:has(#zecratary-homepage-root) .zecratary-mobile-topbar {
+          display: none !important;
+        }
+      ` }} />
+
       {/* 1. PUBLIC HOMEPAGE HEADER NAVIGATION */}
       <header
         className="sticky top-0 z-40 border-b backdrop-blur-md theme-harmonized-card"
@@ -479,6 +515,98 @@ export default function DynamicHomePage() {
       </header>
 
       {/* 2. DYNAMIC CONTENT CANVAS */}
+            {/* ───────────────────────────────────────────────────────────── */}
+      {/* RESTORED PUBLIC TOP NAVIGATION MENU (Driven by /admin/frontend) */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      <header
+        className="sticky top-0 z-50 w-full border-b backdrop-blur-md transition-colors duration-200"
+        style={{
+          backgroundColor: 'var(--color-card, rgba(15, 23, 42, 0.85))',
+          borderColor: 'var(--color-border, rgba(255, 255, 255, 0.1))',
+          color: 'var(--color-text, #ffffff)'
+        }}
+      >
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          {/* BRAND IDENTITY */}
+          <Link href="/" className="flex items-center gap-2.5 font-black text-lg tracking-tight">
+            {typeof siteIcon === 'string' && (siteIcon.startsWith('http') || siteIcon.startsWith('/') || siteIcon.startsWith('data:')) ? (
+              <img src={siteIcon} alt="Logo" className="w-8 h-8 rounded-lg object-contain" />
+            ) : (
+              <span className="text-2xl">{siteIcon || '🍳'}</span>
+            )}
+            <span style={{ color: 'var(--color-primary, #10b981)' }}>{siteName || 'Zecratary'}</span>
+          </Link>
+
+          {/* DYNAMIC NAVIGATION LINKS FROM /admin/frontend */}
+          <nav className="hidden md:flex items-center gap-6 text-xs font-bold uppercase tracking-wider">
+            {Array.isArray(navPages) && navPages.map((page: any) => {
+              const pageSlug = page.is_default || page.slug === 'home' ? '/' : `/${page.slug}`;
+              const active = pathname === pageSlug;
+              return (
+                <Link
+                  key={page.id || page.slug}
+                  href={pageSlug}
+                  className="transition hover:opacity-100"
+                  style={{
+                    color: active ? 'var(--color-primary, #10b981)' : 'var(--color-text-secondary, #94a3b8)'
+                  }}
+                >
+                  {page.title}
+                </Link>
+              );
+            })}
+          </nav>
+
+          {/* TOP CONTROLS & AUTH CTA */}
+          <div className="hidden md:flex items-center gap-3">
+            {/* THEME TOGGLE */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="p-2 rounded-xl border transition cursor-pointer"
+              style={{
+                backgroundColor: 'var(--color-inner-dark, #111726)',
+                borderColor: 'var(--color-border, #1e293b)'
+              }}
+              title={isDarkMode ? 'Day Mode' : 'Dark Mode'}
+            >
+              {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-300" />}
+            </button>
+
+            {/* DYNAMIC AUTHENTICATION CTA */}
+            {currentUser ? (
+              <Link
+                href="/dashboard"
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition hover:opacity-90 flex items-center gap-1.5"
+                style={{ backgroundColor: 'var(--color-primary, #10b981)' }}
+              >
+                <span>{typeof t === 'function' ? t('dashboard', 'Dashboard') : 'Dashboard'}</span>
+              </Link>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/login"
+                  className="px-3.5 py-1.5 rounded-xl border text-xs font-bold transition hover:bg-slate-800/20"
+                  style={{
+                    borderColor: 'var(--color-border, #1e293b)',
+                    backgroundColor: 'var(--color-inner-dark, #111726)'
+                  }}
+                >
+                  {typeof t === 'function' ? t('signIn', 'Sign In') : 'Sign In'}
+                </Link>
+                <Link
+                  href="/register"
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white shadow-xs transition hover:opacity-90"
+                  style={{ backgroundColor: 'var(--color-primary, #10b981)' }}
+                >
+                  {typeof t === 'function' ? t('getStarted', 'Get Started') : 'Get Started'}
+                </Link>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
       <main
         id="zecratary-homepage-canvas"
         className="flex-1 w-full mx-auto"
