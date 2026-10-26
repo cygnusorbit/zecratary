@@ -1,12 +1,11 @@
 // @ts-nocheck
 'use client';
-import AiQuotaBar from '@/components/AiQuotaBar';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   ChefHat, Send, SlidersHorizontal, Edit3, Clock, Flame, Users, RefreshCw, 
   Calendar, CalendarPlus, X, Utensils, Loader2, User as UserIcon, 
   Check, Sparkles, Bookmark, RotateCcw, Package, Plus, Trash2, ChevronDown, 
-  Coins, Cpu, ShieldAlert, Mic, MicOff, Volume2, Square, Award, ExternalLink,
+  Cpu, Mic, MicOff, Volume2, Square, Award, ExternalLink,
   Layers, CheckCircle2, ShoppingCart, Globe, Table, LayoutGrid
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
@@ -866,8 +865,6 @@ export default function ChefChatPage() {
       className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 flex flex-col h-[calc(100vh-5.5rem)] justify-between space-y-3 pb-2 font-sans relative transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
-      <AiQuotaBar />
-
       {toastMessage && (
         <div 
           className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
@@ -882,7 +879,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOP HEADER - 100% FLUID BAR */}
+      {/* TOP HEADER - 100% FLUID BAR (Cleaned of Quota, Token Box & Strict Filters) */}
       <div 
         className="w-full space-y-3 border-b pb-3 shrink-0 transition-colors duration-200"
         style={{ borderColor: 'var(--color-border)' }}
@@ -967,34 +964,6 @@ export default function ChefChatPage() {
             >
               <Cpu className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
               <span className="font-mono">{activeAiModel}</span>
-            </div>
-
-            {strictDietEnforcement && (
-              <div 
-                className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
-              >
-                <ShieldAlert className="h-3 w-3" />
-                <span>{t('strictFilters', 'Strict Filters')}</span>
-              </div>
-            )}
-
-            <div 
-              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border shadow-xs"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-            >
-              <Coins className="h-4 w-4 text-amber-500" />
-              <div className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
-                {tokenBalance} <span className="text-amber-500">{tokenSymbol}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsTokenPurchaseOpen(true)}
-                className="ml-1 text-[10px] font-extrabold px-2 py-0.5 rounded-lg text-white transition hover:opacity-90 cursor-pointer shadow-xs"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-              >
-                {t('topUp', 'Top Up')}
-              </button>
             </div>
 
             <button
@@ -1658,7 +1627,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* PROMPT INPUT BAR - 100% WIDTH */}
+      {/* PROMPT INPUT BAR */}
       <div 
         className="w-full border rounded-2xl p-1.5 flex items-center gap-2 shrink-0 shadow-xl transition-colors duration-200"
         style={{
@@ -2081,7 +2050,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOKEN PURCHASE MODAL */}
+      {/* TOKEN PURCHASE MODAL (Triggered on-demand when tokens run low) */}
       <TokenPurchaseModal
         isOpen={isTokenPurchaseOpen}
         onClose={() => setIsTokenPurchaseOpen(false)}
