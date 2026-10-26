@@ -42,7 +42,6 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertCircle,
-  AlertTriangle,
   ExternalLink,
   Layers,
   HardDrive
@@ -58,17 +57,6 @@ interface TokenPackage {
   price: number;
   badge?: string;
   isPopular?: boolean;
-}
-
-interface InAppNotification {
-  id: string;
-  title: string;
-  message: string;
-  type: 'info' | 'warning' | 'success' | 'urgent' | 'promo' | 'system';
-  isRead: boolean;
-  actionUrl?: string;
-  actionLabel?: string;
-  timestamp: string;
 }
 
 const DEFAULT_FALLBACK_PACKAGES: TokenPackage[] = [
@@ -155,15 +143,10 @@ export default function Sidebar() {
   const [walletBalance, setWalletBalance] = useState<number>(0);
   const [walletCurrency, setWalletCurrency] = useState<string>('USD');
   const [walletSymbol, setWalletSymbol] = useState<string>('$');
-  const [walletPresets, setWalletPresets] = useState<number[]>([10, 25, 50, 100]);
   const [showWalletTopUpMenu, setShowWalletTopUpMenu] = useState<boolean>(false);
   const [showWalletMobileMenu, setShowWalletMobileMenu] = useState<boolean>(false);
-  const [purchasingWallet, setPurchasingWallet] = useState<boolean>(false);
-  const [walletTopUpSuccessMsg, setWalletTopUpSuccessMsg] = useState<string>('');
-  const [walletTopUpErrorMsg, setWalletTopUpErrorMsg] = useState<string>('');
 
   // Notifications & Profile state
-  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
   const [showNotificationsMobile, setShowNotificationsMobile] = useState<boolean>(false);
@@ -270,48 +253,37 @@ export default function Sidebar() {
           if (data.user && typeof data.user.wallet_balance !== 'undefined') {
             setWalletBalance(parseFloat(data.user.wallet_balance || 0));
           }
-          if (data.settings) {
-            if (data.settings.currency) {
-              setWalletCurrency(data.settings.currency);
-              setWalletSymbol(CURRENCY_SYMBOLS[data.settings.currency] || '$');
-            }
-            if (Array.isArray(data.settings.preset_amounts) && data.settings.preset_amounts.length > 0) {
-              setWalletPresets(data.settings.preset_amounts.map(Number));
-            }
+          if (data.settings && data.settings.currency) {
+            setWalletCurrency(data.settings.currency);
+            setWalletSymbol(CURRENCY_SYMBOLS[data.settings.currency] || '$');
           }
         }
       }
     } catch (_) {}
   }, []);
 
-  const fetchNotifications = useCallback(async (currentUser?: any) => {
-    try {
-      let activeUser = currentUser || user;
-      if (!activeUser && typeof window !== 'undefined') {
-        try {
-          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user');
-          if (raw) activeUser = JSON.parse(raw);
-        } catch (_) {}
-        if (!activeUser) activeUser = getCurrentUser();
+  // Synchronize CSS Root Variables (--sidebar-width and --topbar-height)
+  useEffect(() => {
+    const updateLayoutTokens = () => {
+      if (typeof window === 'undefined') return;
+      const isMobile = window.innerWidth < 768;
+      
+      if (isMobile) {
+        document.documentElement.style.setProperty('--sidebar-width', '0px');
+        document.documentElement.style.setProperty('--topbar-height', '3.5rem');
+      } else if (isCollapsed && !isOpen) {
+        document.documentElement.style.setProperty('--sidebar-width', '5rem');
+        document.documentElement.style.setProperty('--topbar-height', '4rem');
+      } else {
+        document.documentElement.style.setProperty('--sidebar-width', '16rem');
+        document.documentElement.style.setProperty('--topbar-height', '4rem');
       }
+    };
 
-      const userEmail = activeUser?.email || 'admin@zecratary.com';
-      const userId = activeUser?.id || '';
-
-      const res = await fetch(`/api/notifications?email=${encodeURIComponent(userEmail)}&userId=${encodeURIComponent(userId)}&t=${Date.now()}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          if (Array.isArray(data.notifications)) {
-            setNotifications(data.notifications);
-          }
-          if (typeof data.unreadCount === 'number') {
-            setUnreadCount(data.unreadCount);
-          }
-        }
-      }
-    } catch (_) {}
-  }, [user]);
+    updateLayoutTokens();
+    window.addEventListener('resize', updateLayoutTokens);
+    return () => window.removeEventListener('resize', updateLayoutTokens);
+  }, [isCollapsed, isOpen]);
 
   useEffect(() => {
     setMounted(true);
@@ -325,7 +297,6 @@ export default function Sidebar() {
     loadLanguagesFromAdmin();
     fetchUserTokenAndNotifications(currentUser);
     fetchWalletData(currentUser);
-    fetchNotifications(currentUser);
 
     // Restore saved section collapse preferences
     if (typeof window !== 'undefined') {
@@ -380,7 +351,6 @@ export default function Sidebar() {
       setUser(updated);
       fetchUserTokenAndNotifications(updated);
       fetchWalletData(updated);
-      fetchNotifications(updated);
     };
     const handleSiteSync = () => {
       setSiteName(getSiteName());
@@ -449,12 +419,11 @@ export default function Sidebar() {
       window.removeEventListener('zecratary_wallet_updated', handleWalletSync);
       window.removeEventListener('zecratary_wallet_settings_updated', handleWalletSync);
     };
-  }, [fetchUserTokenAndNotifications, fetchWalletData, fetchNotifications]);
+  }, [fetchUserTokenAndNotifications, fetchWalletData]);
 
-  // Route-Aware Auto-Expansion: Automatically expand the category that contains the active route
+  // Route-Aware Auto-Expansion
   useEffect(() => {
     if (!pathname) return;
-
     if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
       setOpenSections(prev => prev.create ? prev : { ...prev, create: true });
     } else if (['/recipes', '/saved', '/books', '/pantry'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
@@ -534,54 +503,13 @@ export default function Sidebar() {
     }
   };
 
-  const handleQuickWalletTopUp = async (amountToDeposit: number) => {
-    if (!amountToDeposit || amountToDeposit <= 0) return;
-    setPurchasingWallet(true);
-    setWalletTopUpErrorMsg('');
-    setWalletTopUpSuccessMsg('');
-
-    try {
-      const currentUser = getCurrentUser() || user;
-      const userEmail = currentUser?.email || 'admin@zecratary.com';
-
-      const res = await fetch('/api/wallet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: userEmail,
-          amount: amountToDeposit,
-          gateway: 'stripe',
-          gatewayTxId: `gw_topbar_${Date.now()}`
-        })
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to top up wallet balance');
-      }
-
-      const newWalletBal = typeof data.wallet_balance === 'number' ? data.wallet_balance : (walletBalance + amountToDeposit);
-      setWalletBalance(newWalletBal);
-      setWalletTopUpSuccessMsg(data.message || `Successfully added ${walletSymbol}${amountToDeposit.toFixed(2)} to your wallet!`);
-
-      window.dispatchEvent(new Event('zecratary_wallet_updated'));
-      setTimeout(() => {
-        setWalletTopUpSuccessMsg('');
-      }, 4000);
-    } catch (err: any) {
-      setWalletTopUpErrorMsg(err.message || 'Deposit failed. Please try again.');
-    } finally {
-      setPurchasingWallet(false);
-    }
-  };
-
   const isAdmin = user && (
     user.role === 'admin' || 
     user.email === 'admin@foodieprep.com' || 
     user.email?.includes('admin')
   );
 
-  // Item 1 Fix: Evaluates both /recipes and /saved so Saved Recipes highlights properly
+  // Evaluates both /recipes and /saved so Saved Recipes highlights accurately
   const isActive = (href: string) => {
     if (href === '/dashboard') return pathname === '/dashboard' || pathname === '/';
     if (href === '/admin') return pathname === '/admin';
@@ -608,8 +536,6 @@ export default function Sidebar() {
 
   const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
-
-  // Item 2: Unified Icon Style matching all other sidebar icons
   const iconStyle = { color: 'var(--color-sidebar-icon, var(--color-primary))' };
   const displayPackages = tokenPackages.length > 0 ? tokenPackages : DEFAULT_FALLBACK_PACKAGES;
 
@@ -625,7 +551,7 @@ export default function Sidebar() {
         </Link>
 
         <div className="flex items-center gap-1.5">
-          {/* Mobile Wallet Balance & Top Up (Icon Only '+') */}
+          {/* Mobile Wallet Balance & Top Up */}
           <div className="relative" ref={walletMobileDropdownRef}>
             <button
               type="button"
@@ -648,7 +574,7 @@ export default function Sidebar() {
             </button>
           </div>
 
-          {/* Mobile Token Balance & Top Up (Item 3: Icon Only '+', No Text) */}
+          {/* Mobile Token Balance & Top Up (Icon Only '+') */}
           <div className="relative" ref={topUpMobileDropdownRef}>
             <button
               type="button"
@@ -661,52 +587,13 @@ export default function Sidebar() {
               className="flex items-center gap-1.5 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
               title="Token Balance & Top Up"
             >
-              <Coins className="h-3.5 w-3.5 text-amber-500" />
+              <Coins className="h-3.5 w-3.5" style={iconStyle} />
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
                 {mounted ? tokenBalance.toLocaleString() : '0'}
               </span>
               <span className="p-1 rounded-md bg-[var(--color-primary)] text-white text-[10px] font-sans font-black flex items-center justify-center">
                 <Plus className="h-2.5 w-2.5 stroke-[3]" />
               </span>
-            </button>
-          </div>
-
-          {/* Mobile Notifications Bell */}
-          <div className="relative" ref={notifMobileDropdownRef}>
-            <button
-              type="button"
-              onClick={() => {
-                setShowNotificationsMobile(!showNotificationsMobile);
-                setShowWalletMobileMenu(false);
-                setShowTopUpMobileMenu(false);
-                setShowProfileMenu(false);
-              }}
-              className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
-              aria-label="Notifications"
-            >
-              <Bell className="h-4 w-4" style={iconStyle} />
-              {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md">
-                  {unreadCount > 9 ? '9+' : unreadCount}
-                </span>
-              )}
-            </button>
-          </div>
-
-          {/* Profile Button */}
-          <div className="relative" ref={profileDropdownRef}>
-            <button
-              type="button"
-              onClick={() => {
-                setShowProfileMenu(!showProfileMenu);
-                setShowTopUpMobileMenu(false);
-                setShowWalletMobileMenu(false);
-                setShowNotificationsMobile(false);
-              }}
-              className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer flex items-center justify-center"
-              aria-label="User Profile"
-            >
-              <UserIcon className="h-4 w-4" style={iconStyle} />
             </button>
           </div>
 
@@ -753,7 +640,6 @@ export default function Sidebar() {
                 <span className="text-[10px] font-bold opacity-60 font-mono">{walletCurrency}</span>
               </Link>
 
-              {/* Item 3: Icon Only '+' Button (No "Top Up" text) */}
               <button
                 type="button"
                 onClick={() => {
@@ -772,7 +658,7 @@ export default function Sidebar() {
             </div>
           </div>
 
-          {/* TOKEN BALANCE & TOP UP (ITEM 3: ICON ONLY '+', NO "TOP UP" TEXT) */}
+          {/* TOKEN BALANCE & TOP UP (ICON ONLY '+') */}
           <div className="relative flex items-center" ref={topUpDropdownRef}>
             <div className="flex items-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40">
               <Link 
@@ -780,14 +666,13 @@ export default function Sidebar() {
                 className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
                 title={t('viewTokenBalance') || 'View Token Balance & Summary'}
               >
-                <Coins className="h-4 w-4 text-amber-500 group-hover:scale-110 transition-transform" />
+                <Coins className="h-4 w-4" style={iconStyle} />
                 <span suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
                   {mounted ? tokenBalance.toLocaleString() : '0'}
                 </span>
                 <span className="text-xs font-bold text-amber-500 font-mono">{tokenSymbol}</span>
               </Link>
 
-              {/* Item 3: Icon Only '+' Button (No "Top Up" text) */}
               <button
                 type="button"
                 onClick={() => {
@@ -814,7 +699,7 @@ export default function Sidebar() {
                 <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
                   <div className="flex items-center gap-2.5">
                     <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
-                      <Coins className="h-4 w-4 text-amber-500" />
+                      <Coins className="h-4 w-4" style={iconStyle} />
                     </div>
                     <div>
                       <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
@@ -834,14 +719,11 @@ export default function Sidebar() {
                 <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                   {displayPackages.map((pkg) => {
                     const price = Number(pkg.price);
-                    const canAfford = walletBalance >= price;
                     return (
                       <div 
                         key={pkg.id}
-                        className={`p-3 rounded-2xl border transition flex items-center justify-between gap-3 group ${
-                          !canAfford ? 'border-amber-500/30' : 'hover:border-[var(--color-primary)]/50'
-                        }`}
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: canAfford ? 'var(--color-border)' : 'rgba(245, 158, 11, 0.4)' }}
+                        className="p-3 rounded-2xl border transition flex items-center justify-between gap-3 group hover:border-[var(--color-primary)]/50"
+                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
                       >
                         <div className="min-w-0 space-y-0.5">
                           <div className="flex items-center gap-1.5">
@@ -946,7 +828,6 @@ export default function Sidebar() {
                     className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
                     style={{ color: 'var(--color-text)' }}
                   >
-                    {/* Item 2 Fix: Coins icon inherits shared iconStyle */}
                     <Coins className="h-4 w-4" style={iconStyle} />
                     <span>{t('token') || 'Token'}</span>
                   </Link>
@@ -987,14 +868,17 @@ export default function Sidebar() {
         />
       )}
 
-      {/* SIDEBAR CONTAINER */}
-      <aside className={`
-        fixed md:sticky top-0 left-0 z-50 h-screen bg-[var(--color-card)] border-r border-[var(--color-border)] 
-        flex flex-col justify-between shrink-0 select-none transition-all duration-300 ease-in-out
-        ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}
-        ${isOpen ? 'translate-x-0 w-64 p-5' : '-translate-x-full md:translate-x-0'}
-        ${!isOpen && showCollapsed ? 'md:w-20 p-3' : 'md:w-64 p-5'}
-      `}>
+      {/* SIDEBAR CONTAINER: STRICTLY POSITION: FIXED OUT-OF-FLOW (ZERO HEIGHT COLLISION) */}
+      <aside 
+        id="zecratary-sidebar"
+        className={`
+          fixed top-0 left-0 z-40 h-screen bg-[var(--color-card)] border-r border-[var(--color-border)] 
+          flex flex-col justify-between shrink-0 select-none transition-all duration-300 ease-in-out
+          ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}
+          ${isOpen ? 'translate-x-0 w-64 p-5' : '-translate-x-full md:translate-x-0'}
+          ${!isOpen && showCollapsed ? 'md:w-20 p-3' : 'md:w-64 p-5'}
+        `}
+      >
         <div className="space-y-4 overflow-y-auto overflow-x-hidden pr-1">
           {showCollapsed ? (
             <div className="flex flex-col items-center gap-3 pb-2 border-b border-[var(--color-border)]">
@@ -1048,7 +932,7 @@ export default function Sidebar() {
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('dashboard')}</span>}
             </Link>
 
-            {/* ITEM 4: COLLAPSIBLE SECTION: CREATE */}
+            {/* COLLAPSIBLE SECTION: CREATE */}
             <div className="pt-2">
               {!showCollapsed && (
                 <button
@@ -1082,7 +966,7 @@ export default function Sidebar() {
               )}
             </div>
 
-            {/* ITEM 4: COLLAPSIBLE SECTION: MANAGE */}
+            {/* COLLAPSIBLE SECTION: MANAGE */}
             <div className="pt-2">
               {!showCollapsed && (
                 <button
@@ -1100,7 +984,6 @@ export default function Sidebar() {
               )}
               {(openSections.manage || showCollapsed) && (
                 <div className="space-y-1 pt-0.5">
-                  {/* Item 1 Fix: Targets /recipes and highlights whenever visiting /recipes */}
                   <Link href="/recipes" className={navClass('/recipes')} title={t('savedRecipes')}>
                     <BookOpen className="h-4 w-4 shrink-0" style={iconStyle} />
                     {!showCollapsed && <span className="truncate whitespace-nowrap">{t('savedRecipes')}</span>}
@@ -1117,7 +1000,7 @@ export default function Sidebar() {
               )}
             </div>
 
-            {/* ITEM 4: COLLAPSIBLE SECTION: PLAN */}
+            {/* COLLAPSIBLE SECTION: PLAN */}
             <div className="pt-2">
               {!showCollapsed && (
                 <button
@@ -1151,7 +1034,7 @@ export default function Sidebar() {
               )}
             </div>
 
-            {/* ITEM 4: COLLAPSIBLE SECTION: ADMIN ACCESS */}
+            {/* COLLAPSIBLE SECTION: ADMIN ACCESS */}
             {isAdmin && (
               <div className="pt-2">
                 {!showCollapsed && (
@@ -1176,7 +1059,6 @@ export default function Sidebar() {
                       <Cpu className="h-4 w-4 shrink-0" style={iconStyle} />
                       {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}
                     </Link>
-                    {/* Item 2 Fix: Coins icon in Admin Access uses unified iconStyle */}
                     <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} title="Token Settings">
                       <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
                       {!showCollapsed && <span className="truncate whitespace-nowrap">Token Settings</span>}
@@ -1275,43 +1157,36 @@ export default function Sidebar() {
             </div>
           )}
 
-          {/* PROFILE */}
           <Link href="/profile" className={navClass('/profile')} title={t('profile')}>
             <Settings className="h-4 w-4 shrink-0" style={iconStyle} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('profile')}</span>}
           </Link>
 
-          {/* ITEM 2: TOKEN WITH UNIFIED THEME ICON STYLE */}
           <Link href="/token" className={navClass('/token')} title={t('token') || 'Token'}>
             <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('token') || 'Token'}</span>}
           </Link>
 
-          {/* WALLET */}
           <Link href="/wallet" className={navClass('/wallet')} title={t('wallet') || 'Wallet'}>
             <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('wallet') || 'Wallet'}</span>}
           </Link>
 
-          {/* SUBSCRIPTIONS */}
           <Link href="/subscriptions" className={navClass('/subscriptions')} title={t('subscriptions') || 'Subscriptions'}>
             <Layers className="h-4 w-4 shrink-0" style={iconStyle} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('subscriptions') || 'Subscriptions'}</span>}
           </Link>
 
-          {/* BILLING */}
           <Link href="/billing" className={navClass('/billing')} title={t('billing') || 'Billing'}>
             <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('billing') || 'Billing'}</span>}
           </Link>
 
-          {/* CONTACTS */}
           <Link href="/contacts" className={navClass('/contacts')} title={t('contactUs')}>
             <Mail className="h-4 w-4 shrink-0" style={iconStyle} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('contactUs')}</span>}
           </Link>
 
-          {/* LOGOUT */}
           <button
             onClick={() => {
               logoutUser();
