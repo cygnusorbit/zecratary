@@ -48,6 +48,20 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "importedRecipeFallback": "Imported Recipe",
+    "previewImageAlt": "Recipe image preview",
+    "standardCookingGuidelines": "Follow standard chef cooking guidelines for this dish.",
+    "catMainDish": "Main Dish",
+    "catBreakfast": "Breakfast",
+    "catLunch": "Lunch",
+    "catDinner": "Dinner",
+    "catAppetizer": "Appetizer",
+    "catSideDish": "Side Dish",
+    "catDessert": "Dessert",
+    "catSnacks": "Snacks",
+    "catBeverages": "Beverages",
+    "catSoup": "Soup",
+    "catSalad": "Salad",
     "importPageTitle": "Import Recipe",
     "importPageSubtitle": "Extract ingredients, measurements, and cooking instructions from any URL, text, or food photograph.",
     "tabUrl": "Website URL",
