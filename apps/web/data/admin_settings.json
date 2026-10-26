@@ -4188,7 +4188,10 @@
       "under60Mins": "Under 60 mins",
       "over60Mins": "60+ mins",
       "noRecipesFound": "No recipes found matching your criteria.",
-      "clearAllFilters": "Clear all filters"
+      "clearAllFilters": "Clear all filters",
+      "grid3x3": "3x3 Grid (9 per page)",
+      "grid4x4": "4x4 Grid (16 per page)",
+      "grid5x5": "5x5 Grid (25 per page)"
     },
     "th": {
       "importPageTitle": "นำเข้าสูตรอาหาร",
@@ -4405,7 +4408,10 @@
       "under60Mins": "ไม่เกิน 60 นาที",
       "over60Mins": "มากกว่า 60 นาที",
       "noRecipesFound": "ไม่พบสูตรอาหารที่ตรงกับเงื่อนไขการค้นหา",
-      "clearAllFilters": "ล้างตัวกรองทั้งหมด"
+      "clearAllFilters": "ล้างตัวกรองทั้งหมด",
+      "grid3x3": "มุมมอง 3x3 (9 สูตรต่อหน้า)",
+      "grid4x4": "มุมมอง 4x4 (16 สูตรต่อหน้า)",
+      "grid5x5": "มุมมอง 5x5 (25 สูตรต่อหน้า)"
     },
     "es": {
       "importPageTitle": "Importar Receta",
@@ -4622,7 +4628,10 @@
       "under60Mins": "Menos de 60 mins",
       "over60Mins": "Más de 60 mins",
       "noRecipesFound": "No se encontraron recetas con estos criterios.",
-      "clearAllFilters": "Limpiar todos los filtros"
+      "clearAllFilters": "Limpiar todos los filtros",
+      "grid3x3": "Cuadrícula 3x3 (9 por página)",
+      "grid4x4": "Cuadrícula 4x4 (16 por página)",
+      "grid5x5": "Cuadrícula 5x5 (25 por página)"
     },
     "fr": {
       "importPageTitle": "Importer une recette",
@@ -4839,7 +4848,10 @@
       "under60Mins": "Moins de 60 mins",
       "over60Mins": "Plus de 60 mins",
       "noRecipesFound": "Aucune recette ne correspond à votre recherche.",
-      "clearAllFilters": "Effacer tous les filtres"
+      "clearAllFilters": "Effacer tous les filtres",
+      "grid3x3": "Grille 3x3 (9 par page)",
+      "grid4x4": "Grille 4x4 (16 par page)",
+      "grid5x5": "Grille 5x5 (25 par page)"
     }
   }
 }

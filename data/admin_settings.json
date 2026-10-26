@@ -2353,7 +2353,10 @@
       "exportJsonBtn": "Export JSON",
       "jsonExportedSuccessToast": "Recipe exported as JSON file successfully!",
       "recipePreviewLabel": "Recipe Preview",
-      "stepsCount": "{count} steps"
+      "stepsCount": "{count} steps",
+      "grid3x3": "3x3 Grid (9 per page)",
+      "grid4x4": "4x4 Grid (16 per page)",
+      "grid5x5": "5x5 Grid (25 per page)"
     },
     "th": {
       "storageTitle": "การกำหนดค่าพื้นที่จัดเก็บสื่อและรูปภาพ",
@@ -4426,7 +4429,10 @@
       "exportJsonBtn": "ส่งออก JSON",
       "jsonExportedSuccessToast": "ส่งออกสูตรอาหารเป็นไฟล์ JSON เรียบร้อยแล้ว!",
       "recipePreviewLabel": "ตัวอย่างสูตรอาหาร",
-      "stepsCount": "{count} ขั้นตอน"
+      "stepsCount": "{count} ขั้นตอน",
+      "grid3x3": "มุมมอง 3x3 (9 สูตรต่อหน้า)",
+      "grid4x4": "มุมมอง 4x4 (16 สูตรต่อหน้า)",
+      "grid5x5": "มุมมอง 5x5 (25 สูตรต่อหน้า)"
     },
     "es": {
       "storageTitle": "Configuración de Almacenamiento de Medios",
@@ -6499,7 +6505,10 @@
       "exportJsonBtn": "Exportar JSON",
       "jsonExportedSuccessToast": "¡Receta exportada como archivo JSON con éxito!",
       "recipePreviewLabel": "Vista Previa de la Receta",
-      "stepsCount": "{count} pasos"
+      "stepsCount": "{count} pasos",
+      "grid3x3": "Cuadrícula 3x3 (9 por página)",
+      "grid4x4": "Cuadrícula 4x4 (16 por página)",
+      "grid5x5": "Cuadrícula 5x5 (25 por página)"
     },
     "fr": {
       "storageTitle": "Configuration du Stockage des Médias",
@@ -8559,7 +8568,10 @@
       "exportJsonBtn": "Exporter JSON",
       "jsonExportedSuccessToast": "Recette exportée en fichier JSON avec succès !",
       "recipePreviewLabel": "Aperçu de la Recette",
-      "stepsCount": "{count} étapes"
+      "stepsCount": "{count} étapes",
+      "grid3x3": "Grille 3x3 (9 par page)",
+      "grid4x4": "Grille 4x4 (16 par page)",
+      "grid5x5": "Grille 5x5 (25 par page)"
     }
   }
 }

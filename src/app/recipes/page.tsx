@@ -7,13 +7,14 @@ import Link from 'next/link';
 import { 
   Search, Filter, Heart, CheckCircle2, AlertCircle, ChefHat, 
   Clock, Users, ArrowUpRight, Sparkles, Plus, Trash2, Edit3, 
-  Grid3X3, LayoutGrid, Rows3, ChevronLeft, ChevronRight, FileJson, 
-  Upload, X, Volume2, Play, Pause, RotateCcw, Share2, Lock, 
-  Globe, HardDrive, Cloud, RefreshCw, Tag, ExternalLink, Calendar, 
-  ShoppingCart, BookOpen, GripVertical, ArrowUp, ArrowDown
+  ChevronLeft, ChevronRight, FileJson, Upload, X, Volume2, 
+  Play, Pause, RotateCcw, Share2, Lock, Globe, HardDrive, 
+  Cloud, RefreshCw, Tag, ExternalLink, Calendar, ShoppingCart, 
+  BookOpen, GripVertical, ArrowUp, ArrowDown
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+import { IconGrid3x3, IconGrid4x4, IconGrid5x5 } from '@/components/GridDensityIcons';
 
 type GridMode = '3x3' | '4x4' | '5x5';
 
@@ -92,12 +93,11 @@ export default function RecipesPage() {
   const [fontSizeScale, setFontSizeScale] = useState(100);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
   const [recipeNotes, setRecipeNotes] = useState('');
-  const [isNotesSaved, setIsNotesSaved] = useState(false);
 
-  // Web Audio Kitchen Timer
+  // Kitchen Timer Widget State
   const [activeTimer, setActiveTimer] = useState<{ running: boolean; remainingSeconds: number; initialSeconds: number } | null>(null);
 
-  // Task 4: Interactive Import Recipe Modal State
+  // Import Recipe Modal State
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importImageFile, setImportImageFile] = useState<File | null>(null);
   const [importImagePreview, setImportImagePreview] = useState<string>('');
@@ -109,25 +109,6 @@ export default function RecipesPage() {
   const [isDraggingJson, setIsDraggingJson] = useState(false);
   const importImageInputRef = useRef<HTMLInputElement | null>(null);
   const importJsonInputRef = useRef<HTMLInputElement | null>(null);
-
-  // Recipe Edit Studio Modal State
-  const [isEditing, setIsEditing] = useState(false);
-  const [editTab, setEditTab] = useState<'info' | 'ingredients' | 'steps'>('info');
-  const [editForm, setEditForm] = useState<any>({
-    title: '', description: '', recipeType: 'Main Dish', sourceUrl: '',
-    servings: 4, prepTimeMinutes: 30, cookTimeMinutes: 10, imageUrl: '',
-    ingredients: [], instructions: []
-  });
-  const [isReorderingIngredients, setIsReorderingIngredients] = useState(false);
-  const [isReorderingSteps, setIsReorderingSteps] = useState(false);
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-
-  // Modal Sub-dialogs (Meal Planner & Shopping Cart)
-  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
-  const [planDate, setPlanDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [planMealType, setPlanMealType] = useState('Dinner');
-  const [isShoppingModalOpen, setIsShoppingModalOpen] = useState(false);
-  const [shoppingIngredients, setShoppingIngredients] = useState<string[]>([]);
 
   // Toast Notification State
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
@@ -158,7 +139,7 @@ export default function RecipesPage() {
     }
   }, []);
 
-  // Web Audio Chime Synthesizer
+  // Web Audio Synthesizer Chime
   const playChimeSound = () => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -178,7 +159,6 @@ export default function RecipesPage() {
     } catch (_) {}
   };
 
-  // Kitchen Timer Interval Effect
   useEffect(() => {
     let interval: any = null;
     if (activeTimer && activeTimer.running && activeTimer.remainingSeconds > 0) {
@@ -276,7 +256,6 @@ export default function RecipesPage() {
     loadData(user, true);
     fetchStorageSettings();
 
-    // Restore saved grid density
     try {
       const savedGrid = localStorage.getItem('zecratary_recipe_grid_mode') as GridMode;
       if (savedGrid && GRID_CONFIG[savedGrid]) setGridMode(savedGrid);
@@ -322,7 +301,6 @@ export default function RecipesPage() {
     setCurrentPage(1);
   };
 
-  // Fractional Servings Amount Calculator
   const calculateScaledAmount = (rawAmt: any, baseServings: number, currentServings: number) => {
     if (!rawAmt || isNaN(Number(rawAmt))) {
       if (typeof rawAmt === 'string' && rawAmt.includes('/')) {
@@ -349,7 +327,6 @@ export default function RecipesPage() {
     return Number.isInteger(scaled) ? scaled : Number(scaled.toFixed(2));
   };
 
-  // Available unique ingredients for popover filter
   const allAvailableIngredients = useMemo(() => {
     const set = new Set<string>();
     recipes.forEach(r => {
@@ -366,10 +343,8 @@ export default function RecipesPage() {
     return Array.from(set).sort();
   }, [recipes]);
 
-  // Filtered Recipes Pipeline
   const filteredRecipes = useMemo(() => {
     return recipes.filter(r => {
-      // Search Filter
       if (search.trim()) {
         const q = search.toLowerCase();
         const matchesTitle = (r.title || '').toLowerCase().includes(q);
@@ -382,20 +357,15 @@ export default function RecipesPage() {
         if (!matchesTitle && !matchesDesc && !matchesNotes && !matchesIng) return false;
       }
 
-      // Quick Toggles
       if (filterFavorites && !r.isFavorite) return false;
       if (filterCooked && !r.isCooked) return false;
-
-      // Category Dropdown
       if (selectedType !== 'ALL' && r.recipeType !== selectedType) return false;
 
-      // Rating Dropdown
       if (selectedRating !== 'ALL') {
         const minRating = Number(selectedRating);
         if ((r.rating || 0) < minRating) return false;
       }
 
-      // Prep Time Filter
       if (selectedPrepTime !== 'ALL') {
         const prep = Number(r.prepTimeMinutes || r.prepTime || 0);
         if (selectedPrepTime === '15' && prep > 15) return false;
@@ -404,7 +374,6 @@ export default function RecipesPage() {
         if (selectedPrepTime === '60+' && prep <= 60) return false;
       }
 
-      // Cook Time Filter
       if (selectedCookTime !== 'ALL') {
         const cook = Number(r.cookTimeMinutes || r.cookTime || 0);
         if (selectedCookTime === '15' && cook > 15) return false;
@@ -413,7 +382,6 @@ export default function RecipesPage() {
         if (selectedCookTime === '60+' && cook <= 60) return false;
       }
 
-      // Ingredient Multi-Select Popover
       if (selectedIngredientsList.length > 0) {
         const recIngs = Array.isArray(r.ingredients)
           ? r.ingredients.map((i: any) => (typeof i === 'string' ? i : i.name || i.item || '').toLowerCase())
@@ -426,19 +394,16 @@ export default function RecipesPage() {
     });
   }, [recipes, search, filterFavorites, filterCooked, selectedType, selectedRating, selectedPrepTime, selectedCookTime, selectedIngredientsList]);
 
-  // Reset pagination on filter change
   useEffect(() => {
     setCurrentPage(1);
   }, [search, filterFavorites, filterCooked, selectedType, selectedRating, selectedPrepTime, selectedCookTime, selectedIngredientsList, gridMode]);
 
-  // Pagination Slice
   const itemsPerPage = GRID_CONFIG[gridMode].perPage;
   const totalPages = Math.max(1, Math.ceil(filteredRecipes.length / itemsPerPage));
   const safeCurrentPage = Math.min(currentPage, totalPages);
   const startIndex = (safeCurrentPage - 1) * itemsPerPage;
   const paginatedRecipes = filteredRecipes.slice(startIndex, startIndex + itemsPerPage);
 
-  // Optimistic Toggle Favorite
   const handleToggleFavorite = async (e: React.MouseEvent, recipe: any) => {
     e.stopPropagation();
     isSelfUpdatingRef.current = true;
@@ -459,7 +424,6 @@ export default function RecipesPage() {
     }
   };
 
-  // Optimistic Toggle Cooked
   const handleToggleCooked = async (e: React.MouseEvent, recipe: any) => {
     e.stopPropagation();
     isSelfUpdatingRef.current = true;
@@ -480,7 +444,6 @@ export default function RecipesPage() {
     }
   };
 
-  // Toggle Public Marketplace Visibility
   const handleTogglePublic = async (e: React.MouseEvent, recipe: any) => {
     e.stopPropagation();
     const newStatus = !recipe.isPublic;
@@ -498,7 +461,6 @@ export default function RecipesPage() {
     } catch (_) {}
   };
 
-  // Export Recipe JSON
   const handleExportJson = (recipe: any) => {
     try {
       const exportData = {
@@ -554,7 +516,6 @@ export default function RecipesPage() {
     }
   };
 
-  // Delete Recipe
   const handleDeleteRecipe = async (e: React.MouseEvent, recipeId: string) => {
     e.stopPropagation();
     if (!confirm(t('confirmDeleteRecipe', 'Are you sure you want to delete this recipe?'))) return;
@@ -581,9 +542,6 @@ export default function RecipesPage() {
     } catch (_) {}
   };
 
-  // ----------------------------------------------------------------------
-  // Task 4: Interactive Import Recipe Modal Handlers with /admin/storage
-  // ----------------------------------------------------------------------
   const handleImportImageUpload = async (file: File) => {
     if (!file.type.startsWith('image/')) {
       showToast(t('uploadOrDragHint', 'Supports PNG, JPG, WEBP (Max 10MB)'), 'error');
@@ -659,7 +617,6 @@ export default function RecipesPage() {
       const recipeId = importedRecipeData.id || ('rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
       let finalImageUrl = importImagePreview || importedRecipeData.imageUrl || importedRecipeData.image || importedRecipeData.image_url || '/recipes/images/default.jpg';
 
-      // Sync Remote Image with /admin/storage engine if necessary
       if (!importImagePreview && (finalImageUrl.startsWith('http://') || finalImageUrl.startsWith('https://'))) {
         try {
           const dlRes = await fetch('/api/recipes/save-remote-image', {
@@ -718,7 +675,6 @@ export default function RecipesPage() {
         createdAt: new Date().toISOString()
       };
 
-      // Persist to database endpoints
       await Promise.allSettled([
         fetch('/api/saved-recipes', {
           method: 'POST',
@@ -732,7 +688,6 @@ export default function RecipesPage() {
         })
       ]);
 
-      // Hydrate local state & storage keys
       setRecipes(prev => [normalizedRecipe, ...prev.filter(r => r.id !== normalizedRecipe.id)]);
       const storageKeys = ['zecratary_recipes', 'zecratary_saved_recipes', 'saved_recipes'];
       storageKeys.forEach(k => {
@@ -744,12 +699,10 @@ export default function RecipesPage() {
         } catch (_) {}
       });
 
-      // Dispatch global synchronization events
       window.dispatchEvent(new Event('zecratary_recipes_updated'));
       window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
       window.dispatchEvent(new Event('storage'));
 
-      // Close modal & reset fields
       setIsImportModalOpen(false);
       setImportImageFile(null);
       setImportImagePreview('');
@@ -814,43 +767,53 @@ export default function RecipesPage() {
           </p>
         </div>
 
-        {/* Action Cluster: Grid Density & Import/Create Buttons */}
+        {/* Action Cluster: Precise 3x3, 4x4, 5x5 Grid Switcher + Import/Create */}
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* Grid Density Switcher (3x3, 4x4, 5x5) */}
+          {/* Grid Density Switcher with Exact Proportional Grid Icons */}
           <div 
+            role="group"
+            aria-label="Grid layout density switcher"
             className="flex items-center p-1 rounded-xl border shadow-xs"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
           >
+            {/* 3x3 Density Toggle Button (9 cells) */}
             <button
               type="button"
               onClick={() => changeGridMode('3x3')}
               className="p-1.5 rounded-lg transition cursor-pointer"
               style={gridMode === '3x3' ? { backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' } : { color: 'var(--color-text-secondary)' }}
-              title="3x3 Compact Grid"
+              title={t('grid3x3', '3x3 Grid (9 per page)')}
+              aria-label={t('grid3x3', '3x3 Grid (9 per page)')}
             >
-              <Grid3X3 className="h-4 w-4" />
+              <IconGrid3x3 className="h-4 w-4" />
             </button>
+
+            {/* 4x4 Density Toggle Button (16 cells) */}
             <button
               type="button"
               onClick={() => changeGridMode('4x4')}
               className="p-1.5 rounded-lg transition cursor-pointer"
               style={gridMode === '4x4' ? { backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' } : { color: 'var(--color-text-secondary)' }}
-              title="4x4 Standard Grid"
+              title={t('grid4x4', '4x4 Grid (16 per page)')}
+              aria-label={t('grid4x4', '4x4 Grid (16 per page)')}
             >
-              <LayoutGrid className="h-4 w-4" />
+              <IconGrid4x4 className="h-4 w-4" />
             </button>
+
+            {/* 5x5 Density Toggle Button (25 cells) */}
             <button
               type="button"
               onClick={() => changeGridMode('5x5')}
               className="p-1.5 rounded-lg transition cursor-pointer"
               style={gridMode === '5x5' ? { backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' } : { color: 'var(--color-text-secondary)' }}
-              title="5x5 Dense Grid"
+              title={t('grid5x5', '5x5 Grid (25 per page)')}
+              aria-label={t('grid5x5', '5x5 Grid (25 per page)')}
             >
-              <Rows3 className="h-4 w-4" />
+              <IconGrid5x5 className="h-4 w-4" />
             </button>
           </div>
 
-          {/* Task 4: Import Recipe Modal Trigger Button */}
+          {/* Import Recipe Modal Trigger Button */}
           <button
             type="button"
             onClick={() => setIsImportModalOpen(true)}
@@ -885,7 +848,6 @@ export default function RecipesPage() {
         style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
       >
         <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
-          {/* Main Search Input */}
           <div 
             className="flex-1 flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-xs"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
@@ -909,7 +871,6 @@ export default function RecipesPage() {
             )}
           </div>
 
-          {/* Quick Toggle Buttons: Favorites & Cooked */}
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -947,7 +908,6 @@ export default function RecipesPage() {
               <span>{t('filterCooked', 'Cooked')}</span>
             </button>
 
-            {/* Filter by Ingredient Popover Trigger */}
             <div className="relative">
               <button
                 type="button"
@@ -972,7 +932,6 @@ export default function RecipesPage() {
                 )}
               </button>
 
-              {/* Popover Card */}
               {isIngredientPopoverOpen && (
                 <div 
                   className="absolute right-0 mt-2 w-72 p-3.5 rounded-2xl border shadow-2xl z-40 space-y-3 animate-in fade-in"
@@ -1130,7 +1089,6 @@ export default function RecipesPage() {
                   }}
                 />
 
-                {/* Category Badge */}
                 <span 
                   className="absolute top-3 left-3 text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg backdrop-blur-md shadow-md"
                   style={{ backgroundColor: 'rgba(0, 0, 0, 0.65)', color: '#ffffff' }}
@@ -1138,7 +1096,6 @@ export default function RecipesPage() {
                   {recipe.recipeType}
                 </span>
 
-                {/* Heart & Cooked Action Pills */}
                 <div className="absolute top-3 right-3 flex items-center gap-1.5">
                   <button
                     type="button"
@@ -1174,7 +1131,6 @@ export default function RecipesPage() {
                   )}
                 </div>
 
-                {/* Prep, Cook, Servings Badges */}
                 <div className="flex items-center gap-3 text-[11px] font-semibold opacity-90" style={{ color: 'var(--color-text-secondary)' }}>
                   <span className="flex items-center gap-1">
                     <Clock className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
@@ -1186,12 +1142,10 @@ export default function RecipesPage() {
                   </span>
                 </div>
 
-                {/* Card Footer: Public/Private Marketplace Toggle, Green Export JSON & Delete */}
                 <div 
                   className="pt-2 border-t flex items-center justify-between gap-1 text-[11px]"
                   style={{ borderColor: 'var(--color-border)' }}
                 >
-                  {/* Public/Private Slide Toggle */}
                   <button
                     type="button"
                     onClick={(e) => handleTogglePublic(e, recipe)}
@@ -1212,7 +1166,6 @@ export default function RecipesPage() {
                   </button>
 
                   <div className="flex items-center gap-1.5">
-                    {/* Green Export JSON Button */}
                     <button
                       type="button"
                       onClick={(e) => { e.stopPropagation(); handleExportJson(recipe); }}
@@ -1224,7 +1177,6 @@ export default function RecipesPage() {
                       <span>JSON</span>
                     </button>
 
-                    {/* Delete Recipe Button */}
                     <button
                       type="button"
                       onClick={(e) => handleDeleteRecipe(e, recipe.id)}
@@ -1300,9 +1252,7 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Task 4: Interactive Recipe Import Modal with /admin/storage Engine   */}
-      {/* ------------------------------------------------------------------ */}
+      {/* Import Recipe Modal */}
       {isImportModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
           <div 
@@ -1311,7 +1261,6 @@ export default function RecipesPage() {
             className="w-full max-w-2xl rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl border max-h-[90vh] overflow-y-auto"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
-            {/* Modal Header & Storage Telemetry Pill */}
             <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
               <div>
                 <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
@@ -1323,7 +1272,6 @@ export default function RecipesPage() {
               </div>
 
               <div className="flex items-center gap-2">
-                {/* /admin/storage Telemetry */}
                 <div 
                   className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-[10px] font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
@@ -1343,7 +1291,7 @@ export default function RecipesPage() {
               </div>
             </div>
 
-            {/* Step 1: Drag & Drop Center-Click Cover Image Upload */}
+            {/* Step 1: Drag & Drop Cover Image */}
             <div className="space-y-2">
               <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
                 {t('dragDropImageLabel', 'Drag & Drop recipe image here')}
@@ -1514,9 +1462,7 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Recipe Detail Full Modal with Kitchen Timer & Servings Stepper     */}
-      {/* ------------------------------------------------------------------ */}
+      {/* Recipe Detail Full Modal with Kitchen Timer */}
       {selectedRecipe && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
           <div 
@@ -1525,7 +1471,6 @@ export default function RecipesPage() {
             className="w-full max-w-3xl rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl border max-h-[90vh] overflow-y-auto"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
           >
-            {/* Modal Top Header */}
             <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
               <div>
                 <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md" style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-primary)' }}>

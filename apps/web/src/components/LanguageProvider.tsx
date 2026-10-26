@@ -48,6 +48,9 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "grid3x3": "3x3 Grid (9 per page)",
+    "grid4x4": "4x4 Grid (16 per page)",
+    "grid5x5": "5x5 Grid (25 per page)",
     "recipesTitle": "Recipe Library",
     "importRecipeModalTitle": "Import Recipe from JSON",
     "importRecipeModalSubtitle": "Upload a recipe JSON file and attach an optional cover image",
