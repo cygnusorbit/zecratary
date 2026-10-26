@@ -2,17 +2,21 @@ import fs from 'fs';
 import path from 'path';
 import { getStorageSettings, uploadToSupabaseS3 } from '@/lib/storageService';
 
-export interface RecipeOwnership {
-  userId: string;
-  createdBy: string;
-  creatorName: string;
-  creatorEmail: string;
+export interface RecipeOwner {
+  id: string;
+  name: string;
+  email: string;
 }
 
-export interface FullRecipeRecord {
+export interface StoredRecipe {
   id: string;
-  ownership: RecipeOwnership;
-  owner: { id: string; name: string; email: string };
+  ownership: {
+    userId: string;
+    createdBy: string;
+    creatorName: string;
+    creatorEmail: string;
+  };
+  owner: RecipeOwner;
   ownerId: string;
   ownerName: string;
   ownerEmail: string;
@@ -47,37 +51,44 @@ export interface FullRecipeRecord {
   updatedAt: string;
 }
 
-const getRecipeDirs = (): string[] => {
-  const root = process.cwd();
-  return [
-    path.join(root, 'recipes'),
-    path.join(root, 'public', 'recipes'),
-    path.join(root, 'apps', 'web', 'recipes'),
-    path.join(root, 'apps', 'web', 'public', 'recipes')
-  ];
-};
+// Resolves canonical apps/web/public directory across monorepo layouts
+export function getCanonicalWebPublicDir(): string {
+  const cwd = process.cwd();
+  // If running inside apps/web
+  if (fs.existsSync(path.join(cwd, 'public')) && (fs.existsSync(path.join(cwd, 'src', 'app')) || fs.existsSync(path.join(cwd, 'app')))) {
+    return path.join(cwd, 'public');
+  }
+  // If running from workspace root
+  if (fs.existsSync(path.join(cwd, 'apps', 'web', 'public'))) {
+    return path.join(cwd, 'apps', 'web', 'public');
+  }
+  if (fs.existsSync(path.join(cwd, 'public'))) {
+    return path.join(cwd, 'public');
+  }
+  return path.join(cwd, 'apps', 'web', 'public');
+}
 
-const getImageDirs = (): string[] => {
-  const root = process.cwd();
-  return [
-    path.join(root, 'recipes', 'images'),
-    path.join(root, 'public', 'recipes', 'images'),
-    path.join(root, 'apps', 'web', 'recipes', 'images'),
-    path.join(root, 'apps', 'web', 'public', 'recipes', 'images')
-  ];
-};
+export function getRecipeJsonDir(): string {
+  const dir = path.join(getCanonicalWebPublicDir(), 'recipes');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+export function getRecipeImageDir(): string {
+  const dir = path.join(getRecipeJsonDir(), 'images');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 export async function saveRecipeImageLocally(recipeId: string, imageInput?: string): Promise<string> {
   if (!imageInput || typeof imageInput !== 'string') return '/recipes/images/default.jpg';
-  
-  // If already hosted on Supabase or local /recipes/images
   if (imageInput.includes('.supabase.co/storage/v1/object/public/')) return imageInput;
   if (imageInput.startsWith('/recipes/images/')) return imageInput;
 
   const safeId = recipeId.replace(/[^a-zA-Z0-9_-]/g, '_');
   const settings = await getStorageSettings();
 
-  // 1. Check if Supabase S3 is active
+  // 1. Supabase S3 Storage Provider
   if (settings.provider === 'supabase' && settings.supabase.enabled && settings.supabase.secretAccessKey) {
     try {
       let buffer: Buffer | null = null;
@@ -112,13 +123,12 @@ export async function saveRecipeImageLocally(recipeId: string, imageInput?: stri
         return cloudUrl;
       }
     } catch (err: any) {
-      console.warn('[recipeFiles] Supabase upload error, falling back to disk:', err.message);
+      console.warn('[recipeFiles] Supabase upload failed, falling back to disk:', err.message);
     }
   }
 
-  // 2. Localhost Disk Fallback to /recipes/images/
-  const targetDirs = getImageDirs();
-  targetDirs.forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+  // 2. Canonical Local Disk Storage: Save directly to apps/web/public/recipes/images
+  const targetDir = getRecipeImageDir();
 
   if (imageInput.startsWith('data:image/')) {
     try {
@@ -126,10 +136,7 @@ export async function saveRecipeImageLocally(recipeId: string, imageInput?: stri
       if (match) {
         const ext = match[1] === 'jpeg' ? 'jpg' : match[1];
         const filename = `${safeId}_${Date.now()}.${ext}`;
-        const buffer = Buffer.from(match[2], 'base64');
-        targetDirs.forEach(d => {
-          try { fs.writeFileSync(path.join(d, filename), buffer); } catch (_) {}
-        });
+        fs.writeFileSync(path.join(targetDir, filename), Buffer.from(match[2], 'base64'));
         return `/recipes/images/${filename}`;
       }
     } catch (_) {}
@@ -150,11 +157,8 @@ export async function saveRecipeImageLocally(recipeId: string, imageInput?: stri
         else if (contentType.includes('webp')) ext = 'webp';
 
         const filename = `${safeId}_${Date.now()}.${ext}`;
-        const arrayBuf = await res.arrayBuffer();
-        const buffer = Buffer.from(arrayBuf);
-        targetDirs.forEach(d => {
-          try { fs.writeFileSync(path.join(d, filename), buffer); } catch (_) {}
-        });
+        const buffer = Buffer.from(await res.arrayBuffer());
+        fs.writeFileSync(path.join(targetDir, filename), buffer);
         return `/recipes/images/${filename}`;
       }
     } catch (_) {}
@@ -163,7 +167,7 @@ export async function saveRecipeImageLocally(recipeId: string, imageInput?: stri
   return imageInput;
 }
 
-export function saveRecipeJsonFile(recipe: any, ownerInfo?: Partial<RecipeOwnership>): FullRecipeRecord {
+export function saveRecipeJsonFile(recipe: any, ownerInfo?: any): StoredRecipe {
   const id = recipe.id || `rcp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
 
@@ -185,7 +189,7 @@ export function saveRecipeJsonFile(recipe: any, ownerInfo?: Partial<RecipeOwners
   }
   if (!Array.isArray(rawInstructions)) rawInstructions = [];
 
-  const record: FullRecipeRecord = {
+  const record: StoredRecipe = {
     id,
     ownership: { userId, createdBy, creatorName, creatorEmail },
     owner: { id: userId, name: creatorName, email: creatorEmail },
@@ -215,7 +219,7 @@ export function saveRecipeJsonFile(recipe: any, ownerInfo?: Partial<RecipeOwners
     sourceUrl: recipe.sourceUrl || recipe.source_url || '',
     isFavorite: Boolean(recipe.isFavorite ?? recipe.is_favorite),
     isCooked: Boolean(recipe.isCooked ?? recipe.is_cooked),
-    rating: Number(recipe.rating) || 0,
+    rating: Number(recipe.rating) || 5,
     note: recipe.note || '',
     bookId: recipe.bookId || recipe.book_id || null,
     tags: Array.isArray(recipe.tags) ? recipe.tags : [recipe.recipeType || 'Main Dish'],
@@ -223,33 +227,39 @@ export function saveRecipeJsonFile(recipe: any, ownerInfo?: Partial<RecipeOwners
     updatedAt: new Date().toISOString()
   };
 
-  const jsonStr = JSON.stringify(record, null, 2);
-  const targetDirs = getRecipeDirs();
-  targetDirs.forEach(d => {
-    try {
-      if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
-      fs.writeFileSync(path.join(d, `${safeId}.json`), jsonStr, 'utf-8');
-    } catch (_) {}
-  });
+  // Save to canonical apps/web/public/recipes/<id>.json
+  const targetDir = getRecipeJsonDir();
+  const filePath = path.join(targetDir, `${safeId}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(record, null, 2), 'utf-8');
 
   return record;
 }
 
-export function loadAllRecipeJsonFiles(): FullRecipeRecord[] {
-  const map = new Map<string, FullRecipeRecord>();
-  const targetDirs = getRecipeDirs();
+export function loadAllRecipeJsonFiles(): StoredRecipe[] {
+  const map = new Map<string, StoredRecipe>();
+  const primaryDir = getRecipeJsonDir();
+  const searchDirs = [primaryDir];
 
-  targetDirs.forEach(d => {
+  // Also read from legacy directory if files still exist
+  const root = process.cwd();
+  const legacyDir = path.join(root, 'public', 'recipes');
+  if (fs.existsSync(legacyDir) && path.resolve(legacyDir) !== path.resolve(primaryDir)) {
+    searchDirs.push(legacyDir);
+  }
+
+  searchDirs.forEach(dir => {
     try {
-      if (fs.existsSync(d)) {
-        const files = fs.readdirSync(d).filter(f => f.endsWith('.json') && !f.includes('index.json'));
+      if (fs.existsSync(dir)) {
+        const files = fs.readdirSync(dir).filter(f => f.endsWith('.json') && !f.includes('index.json') && !f.startsWith('package'));
         files.forEach(f => {
           try {
-            const raw = fs.readFileSync(path.join(d, f), 'utf-8');
+            const raw = fs.readFileSync(path.join(dir, f), 'utf-8');
             const data = JSON.parse(raw);
             if (data && (data.id || data.title)) {
               const id = data.id || f.replace('.json', '');
-              map.set(id, { ...data, id });
+              if (!map.has(id)) {
+                map.set(id, { ...data, id });
+              }
             }
           } catch (_) {}
         });
@@ -262,32 +272,29 @@ export function loadAllRecipeJsonFiles(): FullRecipeRecord[] {
 
 export function updateRecipePublicVisibility(id: string, isPublic: boolean): boolean {
   const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const targetDirs = getRecipeDirs();
+  const targetDir = getRecipeJsonDir();
+  const filePath = path.join(targetDir, `${safeId}.json`);
   let updated = false;
 
-  targetDirs.forEach(d => {
-    try {
-      const fp = path.join(d, `${safeId}.json`);
-      if (fs.existsSync(fp)) {
-        const data = JSON.parse(fs.readFileSync(fp, 'utf-8'));
-        data.isPublic = isPublic;
-        data.visibility = isPublic ? 'public' : 'private';
-        data.updatedAt = new Date().toISOString();
-        fs.writeFileSync(fp, JSON.stringify(data, null, 2), 'utf-8');
-        updated = true;
-      }
-    } catch (_) {}
-  });
+  try {
+    if (fs.existsSync(filePath)) {
+      const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      data.isPublic = isPublic;
+      data.visibility = isPublic ? 'public' : 'private';
+      data.updatedAt = new Date().toISOString();
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+      updated = true;
+    }
+  } catch (_) {}
 
   return updated;
 }
 
 export function deleteRecipeJsonFile(id: string): void {
   const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
-  getRecipeDirs().forEach(d => {
-    try {
-      const fp = path.join(d, `${safeId}.json`);
-      if (fs.existsSync(fp)) fs.unlinkSync(fp);
-    } catch (_) {}
-  });
+  const targetDir = getRecipeJsonDir();
+  const filePath = path.join(targetDir, `${safeId}.json`);
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch (_) {}
 }

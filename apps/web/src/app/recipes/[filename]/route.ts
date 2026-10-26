@@ -1,31 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { getRecipeJsonDir } from '@/lib/recipeFiles';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ filename: string }> }) {
+export async function GET(
+  req: NextRequest,
+  context: { params: Promise<{ filename: string }> }
+) {
   try {
-    const { filename } = await params;
+    const { filename } = await context.params;
     const safeName = path.basename(filename);
-    const searchDirs = [
-      path.join(process.cwd(), 'recipes', safeName),
-      path.join(process.cwd(), 'public', 'recipes', safeName),
-      path.join(process.cwd(), 'apps', 'web', 'recipes', safeName),
-      path.join(process.cwd(), 'apps', 'web', 'public', 'recipes', safeName)
-    ];
+    const primaryPath = path.join(getRecipeJsonDir(), safeName);
 
-    for (const filePath of searchDirs) {
-      if (fs.existsSync(filePath)) {
-        const data = fs.readFileSync(filePath, 'utf-8');
-        return new NextResponse(data, {
-          headers: {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'public, max-age=30, stale-while-revalidate=120'
-          }
-        });
-      }
+    if (fs.existsSync(primaryPath)) {
+      const data = fs.readFileSync(primaryPath, 'utf-8');
+      return new NextResponse(data, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'public, max-age=60, stale-while-revalidate=300'
+        }
+      });
     }
+
+    const fallbackPath = path.join(process.cwd(), 'public', 'recipes', safeName);
+    if (fs.existsSync(fallbackPath)) {
+      const data = fs.readFileSync(fallbackPath, 'utf-8');
+      return new NextResponse(data, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'public, max-age=60, stale-while-revalidate=300'
+        }
+      });
+    }
+
     return NextResponse.json({ error: 'Recipe JSON not found' }, { status: 404 });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });

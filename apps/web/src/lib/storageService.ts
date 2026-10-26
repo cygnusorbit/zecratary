@@ -1,4 +1,4 @@
-// Centralized Media Storage Engine (Universal /recipes/images & Supabase S3)
+// Centralized Media Storage Engine (Canonical apps/web/public/recipes)
 // GitHub: cygnusorbit/zecratary
 
 import fs from 'fs';
@@ -29,9 +29,9 @@ export interface StorageConfig {
 export const DEFAULT_STORAGE_CONFIG: StorageConfig = {
   provider: 'localhost',
   localhost: {
-    uploadDir: 'public/recipes/images',
+    uploadDir: 'apps/web/public/recipes/images',
     publicPrefix: '/recipes/images',
-    recipesJsonDir: 'public/recipes',
+    recipesJsonDir: 'apps/web/public/recipes',
     maxSizeMb: 10,
     allowedTypes: 'image/jpeg, image/png, image/webp, image/gif, image/avif',
   },
@@ -47,6 +47,20 @@ export const DEFAULT_STORAGE_CONFIG: StorageConfig = {
 };
 
 let memoryStorageConfig: StorageConfig = { ...DEFAULT_STORAGE_CONFIG };
+
+export function getCanonicalWebPublicDir(): string {
+  const cwd = process.cwd();
+  if (fs.existsSync(path.join(cwd, 'public')) && (fs.existsSync(path.join(cwd, 'src', 'app')) || fs.existsSync(path.join(cwd, 'app')))) {
+    return path.join(cwd, 'public');
+  }
+  if (fs.existsSync(path.join(cwd, 'apps', 'web', 'public'))) {
+    return path.join(cwd, 'apps', 'web', 'public');
+  }
+  if (fs.existsSync(path.join(cwd, 'public'))) {
+    return path.join(cwd, 'public');
+  }
+  return path.join(cwd, 'apps', 'web', 'public');
+}
 
 export async function getStorageSettings(): Promise<StorageConfig> {
   try {
@@ -225,33 +239,23 @@ export async function uploadMediaFile(
     try {
       return await uploadToSupabaseS3(buffer, cleanName, contentType, settings.supabase);
     } catch (err: any) {
-      console.warn('[Storage] Supabase S3 failed, falling back to /recipes/images:', err.message);
+      console.warn('[Storage] Supabase S3 failed, falling back to apps/web/public/recipes/images:', err.message);
     }
   }
 
-  // Universal Localhost Disk Storage: Write to /recipes/images
-  const targetDirs = [
-    path.join(process.cwd(), 'recipes', 'images'),
-    path.join(process.cwd(), 'public', 'recipes', 'images'),
-    path.join(process.cwd(), 'apps', 'web', 'recipes', 'images'),
-    path.join(process.cwd(), 'apps', 'web', 'public', 'recipes', 'images'),
-  ];
-
-  for (const d of targetDirs) {
-    try {
-      if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
-      fs.writeFileSync(path.join(d, cleanName), buffer);
-    } catch (_) {}
-  }
+  // Canonical Local Disk Storage: Save directly to apps/web/public/recipes/images
+  const targetDir = path.join(getCanonicalWebPublicDir(), 'recipes', 'images');
+  if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+  fs.writeFileSync(path.join(targetDir, cleanName), buffer);
 
   const prefix = settings.localhost.publicPrefix || '/recipes/images';
   return `${prefix}/${cleanName}`;
 }
 
 export function getUniversalDiskDiagnostics() {
-  const root = process.cwd();
-  const recipesDir = path.join(root, 'public', 'recipes');
-  const imagesDir = path.join(root, 'public', 'recipes', 'images');
+  const publicDir = getCanonicalWebPublicDir();
+  const recipesDir = path.join(publicDir, 'recipes');
+  const imagesDir = path.join(recipesDir, 'images');
 
   let recipesCount = 0;
   let imagesCount = 0;
@@ -277,7 +281,7 @@ export function getUniversalDiskDiagnostics() {
     imagesCount,
     jsonDirWritable,
     imagesDirWritable,
-    jsonDirPath: 'public/recipes',
-    imagesDirPath: 'public/recipes/images',
+    jsonDirPath: 'apps/web/public/recipes',
+    imagesDirPath: 'apps/web/public/recipes/images',
   };
 }

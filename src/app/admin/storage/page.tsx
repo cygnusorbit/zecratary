@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { 
   HardDrive, Cloud, Server, Check, AlertCircle, Save, 
-  Wifi, Copy, Eye, EyeOff, FolderCheck, Folder, ArrowLeft, RefreshCw, FileJson, Image as ImageIcon
+  Wifi, Copy, Eye, EyeOff, FolderCheck, ArrowLeft, RefreshCw, FileJson, Image as ImageIcon
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -46,9 +46,9 @@ const SUPABASE_RECOMMENDED = {
 };
 
 const LOCALHOST_RECOMMENDED = {
-  uploadDir: 'public/recipes/images',
+  uploadDir: 'apps/web/public/recipes/images',
   publicPrefix: '/recipes/images',
-  recipesJsonDir: 'public/recipes',
+  recipesJsonDir: 'apps/web/public/recipes',
   maxSizeMb: 10,
   allowedTypes: 'image/jpeg, image/png, image/webp, image/gif, image/avif',
 };
@@ -190,7 +190,7 @@ export default function AdminStorageSettingsPage() {
     return (
       <div className="py-20 text-center space-y-3">
         <div className="animate-spin h-8 w-8 rounded-full border-2 border-t-transparent mx-auto" style={{ borderColor: 'var(--color-primary)' }} />
-        <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Loading universal storage settings...</p>
+        <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Loading storage settings...</p>
       </div>
     );
   }
@@ -216,7 +216,7 @@ export default function AdminStorageSettingsPage() {
             <span>{t('storageSettingsTitle', 'Storage & Media Configuration')}</span>
           </h1>
           <p className="text-xs sm:text-sm pt-1" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('storageSubtitle', 'Configure where recipe JSON files (/recipes) and image binaries (/recipes/images or Supabase) are ingested and stored.')}
+            {t('storageSubtitle', 'Configure where recipe JSON files (apps/web/public/recipes) and image binaries are ingested and stored.')}
           </p>
         </div>
 
@@ -265,7 +265,7 @@ export default function AdminStorageSettingsPage() {
                 color: 'var(--color-emerald)'
               }}
             >
-              Live Sync
+              apps/web Live Sync
             </span>
           </div>
 
@@ -278,7 +278,7 @@ export default function AdminStorageSettingsPage() {
                 <FileJson className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
                 <div>
                   <div className="font-bold">Recipe JSON Directory</div>
-                  <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>/recipes (*.json)</div>
+                  <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>apps/web/public/recipes (*.json)</div>
                 </div>
               </div>
               <div className="text-right">
@@ -297,7 +297,7 @@ export default function AdminStorageSettingsPage() {
                 <ImageIcon className="h-5 w-5" style={{ color: 'var(--color-emerald)' }} />
                 <div>
                   <div className="font-bold">Recipe Image Directory</div>
-                  <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>/recipes/images</div>
+                  <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>apps/web/public/recipes/images</div>
                 </div>
               </div>
               <div className="text-right">
@@ -339,9 +339,9 @@ export default function AdminStorageSettingsPage() {
               </span>
             </div>
             <div>
-              <h3 className="font-extrabold text-base">Localhost (/recipes/images)</h3>
+              <h3 className="font-extrabold text-base">Localhost (apps/web/public/recipes/images)</h3>
               <p className="text-xs pt-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                Stores images directly inside <code className="px-1.5 py-0.5 rounded bg-black/40">public/recipes/images</code> on your server filesystem with instantaneous streaming.
+                Stores images directly inside <code className="px-1.5 py-0.5 rounded bg-black/40">apps/web/public/recipes/images</code> with instantaneous static delivery.
               </p>
             </div>
           </div>
@@ -370,7 +370,7 @@ export default function AdminStorageSettingsPage() {
             <div>
               <h3 className="font-extrabold text-base">Supabase Storage (S3 Protocol)</h3>
               <p className="text-xs pt-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                Offloads images directly to your Supabase S3 bucket (<code className="px-1.5 py-0.5 rounded bg-black/40">recipes</code>). Ideal for cloud deployments to keep server disk lightweight.
+                Offloads images directly to your Supabase S3 bucket (<code className="px-1.5 py-0.5 rounded bg-black/40">recipes</code>). Keeps server disk lightweight.
               </p>
             </div>
           </div>
@@ -394,7 +394,7 @@ export default function AdminStorageSettingsPage() {
                 <span>Supabase S3 Configuration</span>
               </h2>
               <p className="text-xs pt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                Connect to your bucket using Supabase Storage via the S3 protocol. All recipe JSON records will still be saved to /recipes.
+                Connect to your bucket using Supabase Storage via the S3 protocol. All recipe JSON records are saved to apps/web/public/recipes.
               </p>
             </div>
 
@@ -597,7 +597,7 @@ export default function AdminStorageSettingsPage() {
                 <span>Localhost Server Disk Configuration</span>
               </h2>
               <p className="text-xs pt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                Store uploaded and scraped images directly inside your server public directory (/recipes/images).
+                Store uploaded and scraped images directly inside apps/web/public/recipes/images.
               </p>
             </div>
 
@@ -619,7 +619,7 @@ export default function AdminStorageSettingsPage() {
                 data-lpignore="true"
                 value={settings.localhost.uploadDir}
                 onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, uploadDir: e.target.value } }))}
-                placeholder="public/recipes/images"
+                placeholder="apps/web/public/recipes/images"
                 className="w-full px-3 py-2.5 rounded-xl border outline-none"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               />
@@ -633,7 +633,7 @@ export default function AdminStorageSettingsPage() {
                 data-lpignore="true"
                 value={settings.localhost.recipesJsonDir}
                 onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, recipesJsonDir: e.target.value } }))}
-                placeholder="public/recipes"
+                placeholder="apps/web/public/recipes"
                 className="w-full px-3 py-2.5 rounded-xl border outline-none"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               />
