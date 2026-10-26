@@ -2375,7 +2375,18 @@
       "mealType": "Meal Type",
       "time": "Time",
       "notes": "Notes",
-      "addSelectedToList": "Add Selected to List"
+      "addSelectedToList": "Add Selected to List",
+      "timerSettingsTitle": "Kitchen Timer",
+      "timerForRecipe": "Timer for: {title}",
+      "setTimerUpTo60Min": "Set a cooking countdown up to 60 minutes.",
+      "minutesLabel": "Minutes",
+      "quickPresets": "Quick Presets",
+      "startTimer": "Start Timer",
+      "timerDone": "Done!",
+      "kitchenTimer": "Kitchen Timer",
+      "pause": "Pause",
+      "resume": "Resume",
+      "dismissTimer": "Dismiss Timer"
     },
     "th": {
       "storageTitle": "การกำหนดค่าพื้นที่จัดเก็บสื่อและรูปภาพ",
@@ -4470,7 +4481,18 @@
       "mealType": "ประเภทมื้อ",
       "time": "เวลา",
       "notes": "บันทึกเพิ่มเติม",
-      "addSelectedToList": "เพิ่มรายการที่เลือกลงในรายการซื้อของ"
+      "addSelectedToList": "เพิ่มรายการที่เลือกลงในรายการซื้อของ",
+      "timerSettingsTitle": "นาฬิกาจับเวลาในครัว",
+      "timerForRecipe": "ตั้งเวลาสำหรับ: {title}",
+      "setTimerUpTo60Min": "กำหนดเวลานับถอยหลังการปรุงอาหารได้สูงสุด 60 นาที",
+      "minutesLabel": "นาที",
+      "quickPresets": "เวลาสำเร็จรูป",
+      "startTimer": "เริ่มจับเวลา",
+      "timerDone": "เสร็จสิ้น!",
+      "kitchenTimer": "นาฬิกาจับเวลาในครัว",
+      "pause": "หยุดชั่วคราว",
+      "resume": "เล่นต่อ",
+      "dismissTimer": "ปิดการจับเวลา"
     },
     "es": {
       "storageTitle": "Configuración de Almacenamiento de Medios",
@@ -6565,7 +6587,18 @@
       "mealType": "Tipo de Comida",
       "time": "Hora",
       "notes": "Notas",
-      "addSelectedToList": "Añadir Seleccionados a la Lista"
+      "addSelectedToList": "Añadir Seleccionados a la Lista",
+      "timerSettingsTitle": "Temporizador de Cocina",
+      "timerForRecipe": "Temporizador para: {title}",
+      "setTimerUpTo60Min": "Configure una cuenta regresiva de cocina de hasta 60 minutos.",
+      "minutesLabel": "Minutos",
+      "quickPresets": "Ajustes Rápidos",
+      "startTimer": "Iniciar Temporizador",
+      "timerDone": "¡Listo!",
+      "kitchenTimer": "Temporizador de Cocina",
+      "pause": "Pausar",
+      "resume": "Reanudar",
+      "dismissTimer": "Descartar Temporizador"
     },
     "fr": {
       "storageTitle": "Configuration du Stockage des Médias",
@@ -8647,7 +8680,18 @@
       "mealType": "Type de Repas",
       "time": "Heure",
       "notes": "Notes",
-      "addSelectedToList": "Ajouter la Sélection à la Liste"
+      "addSelectedToList": "Ajouter la Sélection à la Liste",
+      "timerSettingsTitle": "Minuteur de Cuisine",
+      "timerForRecipe": "Minuteur pour : {title}",
+      "setTimerUpTo60Min": "Réglez un compte à rebours de cuisson jusqu'à 60 minutes.",
+      "minutesLabel": "Minutes",
+      "quickPresets": "Préréglages Rapides",
+      "startTimer": "Démarrer le Minuteur",
+      "timerDone": "Terminé !",
+      "kitchenTimer": "Minuteur de Cuisine",
+      "pause": "Pause",
+      "resume": "Reprendre",
+      "dismissTimer": "Fermer le Minuteur"
     }
   }
 }
