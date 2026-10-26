@@ -1,5 +1,5 @@
-'use client';
 // @ts-nocheck
+'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
@@ -7,7 +7,7 @@ import Link from 'next/link';
 import { 
   Book, Plus, Trash2, Edit3, Search, X, Check, BookOpen,
   FolderPlus, ChevronRight, Utensils, Save, Sparkles, RefreshCw,
-  CheckCircle2, AlertCircle
+  CheckCircle2, AlertCircle, SearchX
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -60,7 +60,7 @@ export default function BooksPage() {
     setLoading(true);
 
     try {
-      // 1. Fetch recipes from both endpoints to accurately compute collection counts
+      // 1. Fetch recipes to dynamically count collection contents
       let loadedRecipes: any[] = [];
       try {
         const sRes = await fetch(`/api/saved-recipes?userId=${encodeURIComponent(activeUserId)}&t=${Date.now()}`, { cache: 'no-store' });
@@ -85,7 +85,6 @@ export default function BooksPage() {
         }
       } catch (_) {}
 
-      // Fallback to localStorage if offline
       if (loadedRecipes.length === 0 && typeof window !== 'undefined') {
         try {
           const localR = localStorage.getItem('zecratary_saved_recipes') || localStorage.getItem('zecratary_recipes');
@@ -124,7 +123,6 @@ export default function BooksPage() {
         } catch (_) {}
       }
 
-      // Dynamically calculate accurate recipe counts
       const syncdBooks = loadedBooks.map((b: any) => ({
         ...b,
         recipeCount: loadedRecipes.filter((r: any) => isRecipeInBook(r, b.id)).length
@@ -137,6 +135,19 @@ export default function BooksPage() {
       setLoading(false);
     }
   }, []);
+
+  // Global ESC key to close open modals & collection drawer
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showAddModal) setShowAddModal(false);
+        if (showEditModal) setShowEditModal(false);
+        if (selectedBook) setSelectedBook(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showAddModal, showEditModal, selectedBook]);
 
   useEffect(() => {
     document.title = `${t('cookbooksTitle', 'Recipe Cookbooks')} - Zecratary`;
@@ -165,6 +176,7 @@ export default function BooksPage() {
     window.addEventListener('zecratary_languages_updated', handleSync);
     window.addEventListener('zecratary_dictionary_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('zecratary_theme_mode_changed', handleSync);
 
     return () => {
       window.removeEventListener('storage', handleSync);
@@ -175,6 +187,7 @@ export default function BooksPage() {
       window.removeEventListener('zecratary_languages_updated', handleSync);
       window.removeEventListener('zecratary_dictionary_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('zecratary_theme_mode_changed', handleSync);
     };
   }, [loadData, router, t]);
 
@@ -198,16 +211,19 @@ export default function BooksPage() {
 
     try {
       localStorage.setItem('zecratary_recipe_books', JSON.stringify(updated));
-      await fetch('/api/books', {
+      const res = await fetch('/api/books', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newBook)
       });
+      if (!res.ok) throw new Error('Database write error');
+
       window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
       window.dispatchEvent(new Event('storage'));
       showToast(t('bookCreatedToast', 'Cookbook created successfully!'));
     } catch (err) {
       console.error('Failed to create book in PostgreSQL:', err);
+      showToast(t('failedToCreateBook', 'Failed to create cookbook. Please try again.'), 'error');
     }
 
     setNewTitle('');
@@ -249,16 +265,19 @@ export default function BooksPage() {
 
     try {
       localStorage.setItem('zecratary_recipe_books', JSON.stringify(updated));
-      await fetch('/api/books', {
+      const res = await fetch('/api/books', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedBook)
       });
+      if (!res.ok) throw new Error('Database update error');
+
       window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
       window.dispatchEvent(new Event('storage'));
       showToast(t('bookUpdatedToast', 'Cookbook updated successfully!'));
     } catch (err) {
       console.error('Failed to update book in PostgreSQL:', err);
+      showToast(t('failedToUpdateBook', 'Failed to update cookbook. Please try again.'), 'error');
     }
 
     setShowEditModal(false);
@@ -270,7 +289,8 @@ export default function BooksPage() {
     if (!confirm(t('confirmDeleteBook', 'Are you sure you want to delete this recipe book?'))) return;
     
     try {
-      await fetch(`/api/books?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const res = await fetch(`/api/books?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Database delete error');
 
       const updated = books.filter((b) => b.id !== id);
       setBooks(updated);
@@ -297,6 +317,7 @@ export default function BooksPage() {
       showToast(t('bookDeletedToast', 'Cookbook removed from your library.'));
     } catch (err) {
       console.error('Error deleting book:', err);
+      showToast(t('failedToDeleteBook', 'Failed to delete cookbook. Please try again.'), 'error');
     }
   };
 
@@ -316,8 +337,17 @@ export default function BooksPage() {
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
+      id="zecratary-books-canvas"
+      role="region"
+      aria-label={t('cookbooksTitle', 'Recipe Cookbooks')}
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
+      style={{ 
+        width: '100%',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        color: 'var(--color-text)' 
+      }}
     >
       {/* Toast Alert Banner */}
       {toastMessage && (
@@ -339,7 +369,10 @@ export default function BooksPage() {
       )}
 
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+      <div 
+        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2 border-b pb-4" 
+        style={{ borderColor: 'var(--color-border)' }}
+      >
         <div className="space-y-1">
           <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
             {t('cookbooksTitle', 'Recipe Cookbooks')}
@@ -380,8 +413,9 @@ export default function BooksPage() {
       {/* Search Bar with Full Theme Bindings (Autofill Safe) */}
       <div 
         role="region"
+        aria-label={t('searchCookbooksPlaceholder', 'Search cookbooks')}
         data-lpignore="true"
-        className="relative"
+        className="relative w-full"
       >
         <Search 
           className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none opacity-60" 
@@ -396,7 +430,7 @@ export default function BooksPage() {
           placeholder={t('searchCookbooksPlaceholder', 'Search cookbooks by title or description...')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-full border rounded-2xl pl-11 pr-4 py-2.5 text-sm outline-none transition shadow-xs font-medium"
+          className="w-full border rounded-2xl pl-11 pr-10 py-2.5 text-sm outline-none transition shadow-xs font-medium"
           style={{
             backgroundColor: 'var(--color-card)',
             borderColor: 'var(--color-border)',
@@ -405,16 +439,28 @@ export default function BooksPage() {
           onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
           onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
         />
+        {search && (
+          <button
+            type="button"
+            onClick={() => setSearch('')}
+            className="absolute right-3.5 top-3 p-1 rounded-full opacity-60 hover:opacity-100 transition cursor-pointer"
+            style={{ color: 'var(--color-text-secondary)' }}
+            title={t('clearSearchBtn', 'Clear Search')}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
-      {/* Cookbook Grid */}
+      {/* Cookbook Grid with Responsive Breakpoints for Fluid Canvas */}
       {loading ? (
-        <div className="text-center py-12 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+        <div className="text-center py-16 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
           {t('loadingCookbooks', 'Loading cookbooks...')}
         </div>
-      ) : filteredBooks.length === 0 ? (
+      ) : books.length === 0 ? (
+        /* Empty State: Zero Cookbooks in Library */
         <div 
-          className="text-center py-16 px-4 border border-dashed rounded-3xl space-y-3"
+          className="text-center py-20 px-4 border border-dashed rounded-3xl space-y-3"
           style={{
             backgroundColor: 'var(--color-inner-dark)',
             borderColor: 'var(--color-border)'
@@ -445,8 +491,47 @@ export default function BooksPage() {
             <Plus className="h-4 w-4" /> {t('createFirstCookbook', 'Create First Cookbook')}
           </button>
         </div>
+      ) : filteredBooks.length === 0 ? (
+        /* Empty Search Filter State */
+        <div 
+          className="text-center py-16 px-4 border border-dashed rounded-3xl space-y-3"
+          style={{
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: 'var(--color-border)'
+          }}
+        >
+          <div 
+            className="w-12 h-12 rounded-2xl flex items-center justify-center mx-auto shadow-sm border opacity-60"
+            style={{ 
+              backgroundColor: 'var(--color-card)', 
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)' 
+            }}
+          >
+            <SearchX className="h-6 w-6"/>
+          </div>
+          <h3 className="text-base font-bold" style={{ color: 'var(--color-text)' }}>
+            {t('noSearchResultsTitle', 'No Matching Cookbooks')}
+          </h3>
+          <p className="text-xs max-w-sm mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('noSearchResultsDesc', 'No cookbooks match your current search query. Try searching with different keywords.')}
+          </p>
+          <button
+            type="button"
+            onClick={() => setSearch('')}
+            className="border font-bold text-xs px-4 py-2 rounded-xl transition shadow-xs inline-flex items-center gap-1.5 cursor-pointer hover:opacity-90"
+            style={{ 
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-primary)'
+            }}
+          >
+            <X className="h-3.5 w-3.5" /> {t('clearSearchBtn', 'Clear Search')}
+          </button>
+        </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        /* Full-Width Fluid Multi-Column Grid */
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-5">
           {filteredBooks.map((b) => (
             <div
               key={b.id}
@@ -460,7 +545,6 @@ export default function BooksPage() {
               <div>
                 <div className={`h-28 w-full bg-gradient-to-r ${b.coverColor || COVER_GRADIENTS[0].className} p-4 flex flex-col justify-between relative`}>
                   <div className="flex items-center justify-between">
-                    {/* High-Contrast Dynamic Badge for Day Mode */}
                     <span 
                       className="text-xs font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full flex items-center gap-1.5 border shadow-sm backdrop-blur-md transition"
                       style={{
@@ -473,7 +557,6 @@ export default function BooksPage() {
                       {(t('recipesCountSuffix', '{count} Recipes')).replace('{count}', String(b.recipeCount || 0))}
                     </span>
 
-                    {/* High-Contrast Action Buttons for Day Mode */}
                     <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
@@ -583,7 +666,7 @@ export default function BooksPage() {
                   <Utensils className="h-8 w-8 mx-auto opacity-30" />
                   <p>{t('noRecipesInBookYet', 'No recipes added to this cookbook yet.')}</p>
                   <Link 
-                    href="/recipes"
+                    href="/saved"
                     className="inline-block font-bold text-xs hover:underline pt-1"
                     style={{ color: 'var(--color-primary)' }}
                   >
@@ -594,7 +677,7 @@ export default function BooksPage() {
                 selectedBookRecipes.map((r) => (
                   <div
                     key={r.id}
-                    onClick={() => router.push('/recipes')}
+                    onClick={() => router.push('/saved')}
                     className="p-3 rounded-xl border flex items-center justify-between gap-3 transition cursor-pointer hover:scale-[1.01] shadow-xs"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -604,7 +687,7 @@ export default function BooksPage() {
                     <div className="flex items-center gap-3 min-w-0">
                       <img 
                         src={r.imageUrl || r.image || '/uploads/recipes/default.jpg'} 
-                        alt={r.title || r.name}
+                        alt={r.title || r.name || t('recipeImageAlt', 'Recipe cover photo')}
                         className="w-12 h-12 rounded-lg object-cover border shrink-0"
                         style={{ borderColor: 'var(--color-border)' }}
                       />
@@ -622,7 +705,7 @@ export default function BooksPage() {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        router.push('/recipes');
+                        router.push('/saved');
                       }}
                       className="px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer shadow-xs hover:opacity-80"
                       style={{
@@ -656,7 +739,7 @@ export default function BooksPage() {
         </div>
       )}
 
-      {/* CREATE COOKBOOK MODAL (NO NATIVE FORM - AUTOFILL SAFE) */}
+      {/* CREATE COOKBOOK MODAL (ACCESSIBLE DIV - AUTOFILL SAFE) */}
       {showAddModal && (
         <div 
           onClick={() => setShowAddModal(false)}
@@ -803,7 +886,7 @@ export default function BooksPage() {
         </div>
       )}
 
-      {/* EDIT COOKBOOK MODAL (NO NATIVE FORM - AUTOFILL SAFE) */}
+      {/* EDIT COOKBOOK MODAL (ACCESSIBLE DIV - AUTOFILL SAFE) */}
       {showEditModal && (
         <div 
           onClick={() => setShowEditModal(false)}

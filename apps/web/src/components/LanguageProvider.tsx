@@ -48,6 +48,12 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "noSearchResultsTitle": "No Matching Cookbooks",
+    "noSearchResultsDesc": "No cookbooks match your current search query. Try searching with different keywords.",
+    "failedToCreateBook": "Failed to create cookbook. Please check your connection and try again.",
+    "failedToUpdateBook": "Failed to update cookbook. Please try again.",
+    "failedToDeleteBook": "Failed to delete cookbook. Please try again.",
+    "recipeImageAlt": "Recipe cover photo",
     "grid3x3": "3x3 Grid (9 per page)",
     "grid4x4": "4x4 Grid (16 per page)",
     "grid5x5": "5x5 Grid (25 per page)",

@@ -2386,7 +2386,13 @@
       "kitchenTimer": "Kitchen Timer",
       "pause": "Pause",
       "resume": "Resume",
-      "dismissTimer": "Dismiss Timer"
+      "dismissTimer": "Dismiss Timer",
+      "noSearchResultsTitle": "No Matching Cookbooks",
+      "noSearchResultsDesc": "No cookbooks match your current search query. Try searching with different keywords.",
+      "failedToCreateBook": "Failed to create cookbook. Please check your connection and try again.",
+      "failedToUpdateBook": "Failed to update cookbook. Please try again.",
+      "failedToDeleteBook": "Failed to delete cookbook. Please try again.",
+      "recipeImageAlt": "Recipe cover photo"
     },
     "th": {
       "storageTitle": "การกำหนดค่าพื้นที่จัดเก็บสื่อและรูปภาพ",
@@ -3187,7 +3193,7 @@
       "newRecipeBtn": "สร้างสูตรอาหาร",
       "cookbooksTitle": "ตำราอาหารและคอลเลกชัน",
       "cookbooksSubtitle": "จัดระเบียบและรวบรวมสูตรอาหารที่บันทึกไว้เป็นคอลเลกชันตามต้องการ ({count})",
-      "reloadBtn": "โหลดใหม่",
+      "reloadBtn": "โหลดข้อมูลใหม่",
       "newCookbookBtn": "สร้างตำราอาหารใหม่",
       "searchCookbooksPlaceholder": "ค้นหาตำราอาหารตามชื่อหรือคำอธิบาย...",
       "loadingCookbooks": "กำลังโหลดตำราอาหาร...",
@@ -3213,7 +3219,7 @@
       "createCookbookBtn": "สร้างตำราอาหาร",
       "editCookbookTitle": "แก้ไขตำราอาหาร",
       "editCookbookSubtitle": "อัปเดตชื่อ คำอธิบาย และธีมสีหน้าปก",
-      "saveChanges": "บันทึกการแก้ไข",
+      "saveChanges": "บันทึกการเปลี่ยนแปลง",
       "confirmDeleteBook": "คุณแน่ใจหรือไม่ว่าต้องการลบตำราอาหารเล่มนี้?",
       "bookCreatedToast": "สร้างตำราอาหารเรียบร้อยแล้ว!",
       "bookUpdatedToast": "อัปเดตตำราอาหารเรียบร้อยแล้ว!",
@@ -4492,7 +4498,13 @@
       "kitchenTimer": "นาฬิกาจับเวลาในครัว",
       "pause": "หยุดชั่วคราว",
       "resume": "เล่นต่อ",
-      "dismissTimer": "ปิดการจับเวลา"
+      "dismissTimer": "ปิดการจับเวลา",
+      "noSearchResultsTitle": "ไม่พบตำราอาหารที่ค้นหา",
+      "noSearchResultsDesc": "ไม่มีตำราอาหารที่ตรงกับคำค้นหาปัจจุบันของคุณ ลองค้นหาด้วยคำสำคัญอื่น",
+      "failedToCreateBook": "ไม่สามารถสร้างตำราอาหารได้ โปรดตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง",
+      "failedToUpdateBook": "ไม่สามารถอัปเดตตำราอาหารได้ โปรดลองอีกครั้ง",
+      "failedToDeleteBook": "ไม่สามารถลบตำราอาหารได้ โปรดลองอีกครั้ง",
+      "recipeImageAlt": "รูปภาพหน้าปกสูตรอาหาร"
     },
     "es": {
       "storageTitle": "Configuración de Almacenamiento de Medios",
@@ -6598,7 +6610,13 @@
       "kitchenTimer": "Temporizador de Cocina",
       "pause": "Pausar",
       "resume": "Reanudar",
-      "dismissTimer": "Descartar Temporizador"
+      "dismissTimer": "Descartar Temporizador",
+      "noSearchResultsTitle": "No se encontraron recetarios coincidentes",
+      "noSearchResultsDesc": "Ningún recetario coincide con sus términos de búsqueda. Intente buscar con otras palabras clave.",
+      "failedToCreateBook": "No se pudo crear el recetario. Compruebe su conexión e inténtelo de nuevo.",
+      "failedToUpdateBook": "No se pudo actualizar el recetario. Por favor inténtelo de nuevo.",
+      "failedToDeleteBook": "No se pudo eliminar el recetario. Por favor inténtelo de nuevo.",
+      "recipeImageAlt": "Foto de portada de la receta"
     },
     "fr": {
       "storageTitle": "Configuration du Stockage des Médias",
@@ -7399,7 +7417,7 @@
       "newRecipeBtn": "Créer une Recette",
       "cookbooksTitle": "Livres de Cuisine",
       "cookbooksSubtitle": "Organisez et regroupez vos recettes sauvegardées en collections personnalisées ({count})",
-      "reloadBtn": "Recharger",
+      "reloadBtn": "Actualiser",
       "newCookbookBtn": "Nouveau Livre",
       "searchCookbooksPlaceholder": "Rechercher des livres de cuisine par titre ou description...",
       "loadingCookbooks": "Chargement des livres de cuisine...",
@@ -8336,7 +8354,7 @@
       "deleteTypeModalTitle": "Supprimer le Type de Recette",
       "deleteTypeConfirmMsg": "Êtes-vous sûr de vouloir supprimer ce type de recette ? Les recettes associées resteront intactes.",
       "noRecipeTypesFound": "Aucun type de recette ne correspond à votre recherche.",
-      "clearSearchBtn": "Effacer la Recherche",
+      "clearSearchBtn": "Effacer la recherche",
       "moveUpTooltip": "Monter",
       "moveDownTooltip": "Descendre",
       "recipeTypeSavedSuccess": "Type de recette enregistré avec succès !",
@@ -8691,7 +8709,13 @@
       "kitchenTimer": "Minuteur de Cuisine",
       "pause": "Pause",
       "resume": "Reprendre",
-      "dismissTimer": "Fermer le Minuteur"
+      "dismissTimer": "Fermer le Minuteur",
+      "noSearchResultsTitle": "Aucun livre de cuisine correspondant",
+      "noSearchResultsDesc": "Aucun livre de cuisine ne correspond à votre recherche. Essayez de chercher avec d'autres mots-clés.",
+      "failedToCreateBook": "Échec de la création du livre de recettes. Veuillez vérifier votre connexion et réessayer.",
+      "failedToUpdateBook": "Échec de la mise à jour du livre de recettes. Veuillez réessayer.",
+      "failedToDeleteBook": "Échec de la suppression du livre de recettes. Veuillez réessayer.",
+      "recipeImageAlt": "Photo de couverture de la recette"
     }
   }
 }
