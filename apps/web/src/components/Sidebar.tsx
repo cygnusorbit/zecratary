@@ -1,9 +1,7 @@
+// Generated / Updated by AI Collaborator
 'use client';
 
-// Generated / Updated by AI Collaborator
-
 import packageInfo from '../../package.json';
-import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -44,8 +42,10 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   ExternalLink,
-  Layers
+  Layers,
+  HardDrive
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
@@ -58,6 +58,17 @@ interface TokenPackage {
   price: number;
   badge?: string;
   isPopular?: boolean;
+}
+
+interface InAppNotification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'warning' | 'success' | 'urgent' | 'promo' | 'system';
+  isRead: boolean;
+  actionUrl?: string;
+  actionLabel?: string;
+  timestamp: string;
 }
 
 const DEFAULT_FALLBACK_PACKAGES: TokenPackage[] = [
@@ -116,13 +127,12 @@ const isImageIcon = (icon?: unknown): icon is string =>
   );
 
 export default function Sidebar() {
-  // 1. Navigation & Translation Hooks
-  const pathname = usePathname() || '';
-  const { t, locale, setLocale } = useTranslation();
+  const pathname = usePathname();
+  const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
+  if (isAuthRoute) return null;
 
-  // 2. Core State Hooks
+  const { t, locale, setLocale } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
-  const currentUser = user;
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
   const [siteIcon, setSiteIcon] = useState<string>(DEFAULT_SITE_ICON);
   const [isOpen, setIsOpen] = useState<boolean>(false);
@@ -130,15 +140,9 @@ export default function Sidebar() {
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
   const [mounted, setMounted] = useState<boolean>(false);
 
-  // 3. Balances & Token Package State Hooks
+  // Live Token & Top Up state
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
-  const [tokenIcon, setTokenIcon] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      try { return localStorage.getItem('zecratary_token_icon') || ''; } catch (_) {}
-    }
-    return '';
-  });
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
   const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
   const [showTopUpMenu, setShowTopUpMenu] = useState<boolean>(false);
@@ -147,7 +151,7 @@ export default function Sidebar() {
   const [topUpSuccessMsg, setTopUpSuccessMsg] = useState<string>('');
   const [topUpErrorMsg, setTopUpErrorMsg] = useState<string>('');
 
-  // 4. Live Wallet Balance State Hooks
+  // Live Wallet Balance & Top Up state
   const [walletBalance, setWalletBalance] = useState<number>(0);
   const [walletCurrency, setWalletCurrency] = useState<string>('USD');
   const [walletSymbol, setWalletSymbol] = useState<string>('$');
@@ -158,14 +162,37 @@ export default function Sidebar() {
   const [walletTopUpSuccessMsg, setWalletTopUpSuccessMsg] = useState<string>('');
   const [walletTopUpErrorMsg, setWalletTopUpErrorMsg] = useState<string>('');
 
-  // 5. Notifications & Profile Dropdown State Hooks
-  const [unreadCount, setUnreadCount] = useState<number>(3);
+  // Notifications & Profile state
+  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
+  const [showNotificationsMobile, setShowNotificationsMobile] = useState<boolean>(false);
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
 
-  // 6. Dropdown Click-Outside Refs
+  // Collapsible Categories: Create, Manage, Plan, Admin Access
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    create: true,
+    manage: true,
+    plan: true,
+    admin: true
+  });
+
+  const toggleSection = (sectionKey: string) => {
+    setOpenSections(prev => {
+      const next = { ...prev, [sectionKey]: !prev[sectionKey] };
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('zecratary_sidebar_sections', JSON.stringify(next));
+        } catch (_) {}
+      }
+      return next;
+    });
+  };
+
+  // Dropdown click-outside refs
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const notifDropdownRef = useRef<HTMLDivElement>(null);
+  const notifMobileDropdownRef = useRef<HTMLDivElement>(null);
   const topUpDropdownRef = useRef<HTMLDivElement>(null);
   const topUpMobileDropdownRef = useRef<HTMLDivElement>(null);
   const walletDropdownRef = useRef<HTMLDivElement>(null);
@@ -199,8 +226,8 @@ export default function Sidebar() {
     } catch (_) {}
   };
 
-  // 7. Data Fetchers Declared with useCallback
-  const fetchUserTokenAndNotifications = useCallback(async (currentUser?: any) => {
+  const fetchUserTokenAndNotifications = useCallback(async (currentUser: any) => {
+    if (!currentUser) return;
     try {
       let cfgRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
       if (!cfgRes.ok) {
@@ -210,15 +237,7 @@ export default function Sidebar() {
         const cfgData = await cfgRes.json();
         const cfg = cfgData.settings || cfgData.config || cfgData;
         if (cfg) {
-          if (cfg.tokenSymbol && cfg.tokenSymbol !== '🪙') {
-          setTokenSymbol(cfg.tokenSymbol);
-          try { localStorage.setItem('zecratary_token_symbol', cfg.tokenSymbol); } catch (_) {}
-        }
-        if (cfg.tokenIcon !== undefined && cfg.tokenIcon !== '') {
-          setTokenIcon(cfg.tokenIcon);
-          try { localStorage.setItem('zecratary_token_icon', cfg.tokenIcon); } catch (_) {}
-        }
-        if (cfg.tokenIcon !== undefined) { setTokenIcon(cfg.tokenIcon || ''); try { localStorage.setItem('zecratary_token_icon', cfg.tokenIcon || ''); } catch (_) {} }
+          if (cfg.tokenSymbol) setTokenSymbol(cfg.tokenSymbol);
           if (cfg.tokenName) setTokenName(cfg.tokenName);
           if (Array.isArray(cfg.packages) && cfg.packages.length > 0) {
             setTokenPackages(cfg.packages);
@@ -226,98 +245,30 @@ export default function Sidebar() {
         }
       }
 
-      let activeUser = currentUser || user;
-      if (!activeUser && typeof window !== 'undefined') {
-        try {
-          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user');
-          if (raw) activeUser = JSON.parse(raw);
-        } catch (_) {}
-        if (!activeUser) activeUser = getCurrentUser();
-      }
-
-      const userEmail = activeUser?.email || 'admin@zecratary.com';
-      const userId = activeUser?.id || '';
-
-      const queryParam = userId 
-        ? `?userId=${encodeURIComponent(userId)}&email=${encodeURIComponent(userEmail)}`
-        : `?email=${encodeURIComponent(userEmail)}`;
+      const queryParam = currentUser.id 
+        ? `?userId=${encodeURIComponent(currentUser.id)}&email=${encodeURIComponent(currentUser.email || '')}`
+        : `?email=${encodeURIComponent(currentUser.email || '')}`;
       
       const tokenRes = await fetch(`/api/tokens${queryParam}&t=${Date.now()}`, { cache: 'no-store' });
       if (tokenRes.ok) {
         const tokenData = await tokenRes.json();
-        if (tokenData.success) {
-          const bal = typeof tokenData.balance === 'number'
-            ? tokenData.balance
-            : typeof tokenData.tokenBalance === 'number'
-            ? tokenData.tokenBalance
-            : null;
-
-          if (bal !== null) {
-            setTokenBalance(bal);
-            if (typeof window !== 'undefined') {
-              try {
-                const raw = localStorage.getItem('zecratary_user');
-                if (raw) {
-                  const u = JSON.parse(raw);
-                  u.token_balance = bal;
-                  u.tokenBalance = bal;
-                  localStorage.setItem('zecratary_user', JSON.stringify(u));
-                }
-              } catch (_) {}
-            }
-          }
-          if (typeof tokenData.walletBalance === 'number') {
-            setWalletBalance(tokenData.walletBalance);
-          }
-          if (tokenData.tokenSymbol && tokenData.tokenSymbol !== '🪙') {
-            setTokenSymbol(tokenData.tokenSymbol);
-            try { localStorage.setItem('zecratary_token_symbol', tokenData.tokenSymbol); } catch (_) {}
-          }
-          if (tokenData.tokenIcon !== undefined && tokenData.tokenIcon !== '') {
-            setTokenIcon(tokenData.tokenIcon);
-            try { localStorage.setItem('zecratary_token_icon', tokenData.tokenIcon); } catch (_) {}
-          }
-        if (tokenData.tokenIcon !== undefined) { setTokenIcon(tokenData.tokenIcon || ''); try { localStorage.setItem('zecratary_token_icon', tokenData.tokenIcon || ''); } catch (_) {} }
+        if (tokenData.success && typeof tokenData.balance === 'number') {
+          setTokenBalance(tokenData.balance);
+          if (tokenData.tokenSymbol) setTokenSymbol(tokenData.tokenSymbol);
         }
       }
     } catch (_) {}
-  }, [user]);
+  }, []);
 
-  const fetchWalletData = useCallback(async (currentUser?: any) => {
+  const fetchWalletData = useCallback(async (currentUser: any) => {
     try {
-      let activeUser = currentUser || user;
-      if (!activeUser && typeof window !== 'undefined') {
-        try {
-          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user');
-          if (raw) activeUser = JSON.parse(raw);
-        } catch (_) {}
-        if (!activeUser) activeUser = getCurrentUser();
-      }
-      const userEmail = activeUser?.email || 'admin@zecratary.com';
-      const userId = activeUser?.id || '';
-      const queryParam = userId
-        ? `?userId=${encodeURIComponent(userId)}&email=${encodeURIComponent(userEmail)}`
-        : `?email=${encodeURIComponent(userEmail)}`;
-
-      const res = await fetch(`/api/wallet${queryParam}&t=${Date.now()}`, { cache: 'no-store' });
+      const userEmail = currentUser?.email || 'admin@zecratary.com';
+      const res = await fetch(`/api/wallet?email=${encodeURIComponent(userEmail)}&t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
-          const rawBal = data.wallet_balance ?? data.walletBalance ?? data.balance ?? data.user?.wallet_balance;
-          if (rawBal !== undefined && rawBal !== null) {
-            const wBal = typeof rawBal === 'number' ? rawBal : parseFloat(rawBal) || 0;
-            setWalletBalance(wBal);
-            if (typeof window !== 'undefined') {
-              try {
-                const raw = localStorage.getItem('zecratary_user');
-                if (raw) {
-                  const u = JSON.parse(raw);
-                  u.wallet_balance = wBal;
-                  u.walletBalance = wBal;
-                  localStorage.setItem('zecratary_user', JSON.stringify(u));
-                }
-              } catch (_) {}
-            }
+          if (data.user && typeof data.user.wallet_balance !== 'undefined') {
+            setWalletBalance(parseFloat(data.user.wallet_balance || 0));
           }
           if (data.settings) {
             if (data.settings.currency) {
@@ -331,87 +282,39 @@ export default function Sidebar() {
         }
       }
     } catch (_) {}
-  }, [user]);
+  }, []);
 
-  const showCollapsed = isCollapsed && !isOpen;
-
-  // 8. TOP-LEVEL EFFECT 1: Real-Time Cross-Window & Tab Balance Synchronization
-  useEffect(() => {
-    let channel: BroadcastChannel | null = null;
+  const fetchNotifications = useCallback(async (currentUser?: any) => {
     try {
-      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-        channel = new BroadcastChannel('zecratary_balance_channel');
-        channel.onmessage = (event) => {
-          if (event.data) {
-            if (event.data.wallet_balance !== undefined) setWalletBalance(Number(event.data.wallet_balance) || 0);
-            if (event.data.token_balance !== undefined) setTokenBalance(Number(event.data.token_balance) || 0);
+      let activeUser = currentUser || user;
+      if (!activeUser && typeof window !== 'undefined') {
+        try {
+          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user');
+          if (raw) activeUser = JSON.parse(raw);
+        } catch (_) {}
+        if (!activeUser) activeUser = getCurrentUser();
+      }
+
+      const userEmail = activeUser?.email || 'admin@zecratary.com';
+      const userId = activeUser?.id || '';
+
+      const res = await fetch(`/api/notifications?email=${encodeURIComponent(userEmail)}&userId=${encodeURIComponent(userId)}&t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          if (Array.isArray(data.notifications)) {
+            setNotifications(data.notifications);
           }
-        };
+          if (typeof data.unreadCount === 'number') {
+            setUnreadCount(data.unreadCount);
+          }
+        }
       }
     } catch (_) {}
+  }, [user]);
 
-    const handleExternalBalance = (e: any) => {
-      if (e?.detail) {
-        if (e.detail.wallet_balance !== undefined) setWalletBalance(Number(e.detail.wallet_balance) || 0);
-        if (e.detail.token_balance !== undefined) setTokenBalance(Number(e.detail.token_balance) || 0);
-      }
-      fetchWalletData();
-      fetchUserTokenAndNotifications();
-    };
-
-    window.addEventListener('zecratary_wallet_updated', handleExternalBalance);
-    window.addEventListener('zecratary_tokens_updated', handleExternalBalance);
-    window.addEventListener('zecratary_token_settings_updated', (e: any) => {
-      if (e?.detail?.tokenSymbol) setTokenSymbol(e.detail.tokenSymbol);
-      if (e?.detail?.tokenIcon !== undefined) setTokenIcon(e.detail.tokenIcon || '');
-    });
-    window.addEventListener('zecratary_token_updated', handleExternalBalance);
-    window.addEventListener('focus', () => { fetchWalletData(); fetchUserTokenAndNotifications(); });
-
-    return () => {
-      if (channel) channel.close();
-      window.removeEventListener('zecratary_wallet_updated', handleExternalBalance);
-      window.removeEventListener('zecratary_tokens_updated', handleExternalBalance);
-      window.removeEventListener('zecratary_token_updated', handleExternalBalance);
-    };
-  }, [fetchWalletData, fetchUserTokenAndNotifications]);
-
-  // 9. TOP-LEVEL EFFECT 2: Layout CSS Property Synchronization (--sidebar-width, --topbar-height)
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const isMobile = window.innerWidth < 768;
-    const currentSidebarWidth = isMobile ? '0px' : (showCollapsed ? '5rem' : '16rem');
-    const currentTopbarHeight = isMobile ? '3.5rem' : '4rem';
-    
-    document.documentElement.style.setProperty('--sidebar-width', currentSidebarWidth);
-    document.documentElement.style.setProperty('--topbar-height', currentTopbarHeight);
-
-    const handleResize = () => {
-      const mob = window.innerWidth < 768;
-      document.documentElement.style.setProperty('--sidebar-width', mob ? '0px' : (showCollapsed ? '5rem' : '16rem'));
-      document.documentElement.style.setProperty('--topbar-height', mob ? '3.5rem' : '4rem');
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [showCollapsed]);
-
-  // 10. TOP-LEVEL EFFECT 3: Primary Mounting, Theme, Window Listeners & Outside Clicks
   useEffect(() => {
     setMounted(true);
-
-    if (typeof window !== 'undefined') {
-      try {
-        const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user');
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (typeof parsed.token_balance === 'number') setTokenBalance(parsed.token_balance);
-          else if (typeof parsed.tokenBalance === 'number') setTokenBalance(parsed.tokenBalance);
-          if (typeof parsed.wallet_balance === 'number') setWalletBalance(parsed.wallet_balance);
-        }
-      } catch (_) {}
-    }
-
     const currentUser = getCurrentUser();
     setUser(currentUser);
     const name = getSiteName();
@@ -422,6 +325,17 @@ export default function Sidebar() {
     loadLanguagesFromAdmin();
     fetchUserTokenAndNotifications(currentUser);
     fetchWalletData(currentUser);
+    fetchNotifications(currentUser);
+
+    // Restore saved section collapse preferences
+    if (typeof window !== 'undefined') {
+      try {
+        const savedSections = localStorage.getItem('zecratary_sidebar_sections');
+        if (savedSections) {
+          setOpenSections(prev => ({ ...prev, ...JSON.parse(savedSections) }));
+        }
+      } catch (_) {}
+    }
 
     const savedMode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
     if (savedMode) {
@@ -451,7 +365,10 @@ export default function Sidebar() {
       if (currentCategory !== prevCategory) {
         if (currentCategory === 'tablet') setIsCollapsed(true);
         else if (currentCategory === 'desktop') setIsCollapsed(false);
-        if (currentCategory !== 'mobile') setIsOpen(false);
+        if (currentCategory !== 'mobile') {
+          setIsOpen(false);
+          setShowNotificationsMobile(false);
+        }
         prevCategory = currentCategory;
       }
     };
@@ -463,6 +380,7 @@ export default function Sidebar() {
       setUser(updated);
       fetchUserTokenAndNotifications(updated);
       fetchWalletData(updated);
+      fetchNotifications(updated);
     };
     const handleSiteSync = () => {
       setSiteName(getSiteName());
@@ -476,7 +394,7 @@ export default function Sidebar() {
     };
     const handleTokenSync = () => {
       const u = getCurrentUser();
-      fetchUserTokenAndNotifications(u);
+      if (u) fetchUserTokenAndNotifications(u);
     };
     const handleWalletSync = () => {
       const u = getCurrentUser();
@@ -489,6 +407,9 @@ export default function Sidebar() {
       }
       if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target as Node)) {
         setShowNotifications(false);
+      }
+      if (notifMobileDropdownRef.current && !notifMobileDropdownRef.current.contains(e.target as Node)) {
+        setShowNotificationsMobile(false);
       }
       if (topUpDropdownRef.current && !topUpDropdownRef.current.contains(e.target as Node)) {
         setShowTopUpMenu(false);
@@ -512,10 +433,6 @@ export default function Sidebar() {
     window.addEventListener('zecratary_theme_changed', handleThemeModeSync);
     window.addEventListener('zecratary_token_settings_updated', handleTokenSync);
     window.addEventListener('zecratary_tokens_updated', handleTokenSync);
-    window.addEventListener('zecratary_token_settings_updated', (e: any) => {
-      if (e?.detail?.tokenSymbol) setTokenSymbol(e.detail.tokenSymbol);
-      if (e?.detail?.tokenIcon !== undefined) setTokenIcon(e.detail.tokenIcon || '');
-    });
     window.addEventListener('zecratary_wallet_updated', handleWalletSync);
     window.addEventListener('zecratary_wallet_settings_updated', handleWalletSync);
 
@@ -532,17 +449,21 @@ export default function Sidebar() {
       window.removeEventListener('zecratary_wallet_updated', handleWalletSync);
       window.removeEventListener('zecratary_wallet_settings_updated', handleWalletSync);
     };
-  }, [fetchUserTokenAndNotifications, fetchWalletData]);
+  }, [fetchUserTokenAndNotifications, fetchWalletData, fetchNotifications]);
 
-  // 11. TOP-LEVEL EFFECT 4: Reset Menus on Route Change
+  // Route-Aware Auto-Expansion: Automatically expand the category that contains the active route
   useEffect(() => {
-    setIsOpen(false);
-    setShowProfileMenu(false);
-    setShowNotifications(false);
-    setShowTopUpMenu(false);
-    setShowTopUpMobileMenu(false);
-    setShowWalletTopUpMenu(false);
-    setShowWalletMobileMenu(false);
+    if (!pathname) return;
+
+    if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+      setOpenSections(prev => prev.create ? prev : { ...prev, create: true });
+    } else if (['/recipes', '/saved', '/books', '/pantry'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+      setOpenSections(prev => prev.manage ? prev : { ...prev, manage: true });
+    } else if (['/shopping', '/planner', '/templates'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+      setOpenSections(prev => prev.plan ? prev : { ...prev, plan: true });
+    } else if (pathname.startsWith('/admin')) {
+      setOpenSections(prev => prev.admin ? prev : { ...prev, admin: true });
+    }
   }, [pathname]);
 
   const toggleThemeMode = () => {
@@ -556,20 +477,22 @@ export default function Sidebar() {
     }
   };
 
+  useEffect(() => {
+    setIsOpen(false);
+    setShowProfileMenu(false);
+    setShowNotifications(false);
+    setShowNotificationsMobile(false);
+    setShowTopUpMenu(false);
+    setShowTopUpMobileMenu(false);
+    setShowWalletTopUpMenu(false);
+    setShowWalletMobileMenu(false);
+  }, [pathname]);
+
   const handlePurchasePackage = async (pkg: TokenPackage) => {
     if (!pkg) return;
     setPurchasingId(pkg.id);
     setTopUpErrorMsg('');
     setTopUpSuccessMsg('');
-
-    const price = Number(pkg.price) || 0;
-    if (walletBalance < price) {
-      setPurchasingId(null);
-      setTopUpErrorMsg(
-        t('insufficientWalletForTokens', `Insufficient wallet balance ($${walletBalance.toFixed(2)}). This package requires $${price.toFixed(2)}. Please top up your wallet first.`)
-      );
-      return;
-    }
 
     try {
       const currentUser = getCurrentUser() || user;
@@ -594,28 +517,18 @@ export default function Sidebar() {
 
       const newBal = typeof data.balance === 'number' ? data.balance : (tokenBalance + Number(pkg.tokens));
       setTokenBalance(newBal);
-
-      if (typeof data.newWalletBalance === 'number') {
-        setWalletBalance(data.newWalletBalance);
-      } else if (typeof data.wallet_balance === 'number') {
-        setWalletBalance(data.wallet_balance);
-      } else {
-        setWalletBalance(prev => Math.max(0, prev - price));
-      }
-
       setTopUpSuccessMsg(
-        t('tokenPurchasedSuccess', `Successfully purchased ${pkg.name}! +${Number(pkg.tokens).toLocaleString()} ${tokenSymbol} added (${walletSymbol}${price.toFixed(2)} deducted from Wallet).`)
+        t('tokenPurchasedSuccess', `Successfully added +${Number(pkg.tokens).toLocaleString()} ${tokenSymbol}!`)
       );
 
       window.dispatchEvent(new Event('zecratary_tokens_updated'));
       window.dispatchEvent(new Event('zecratary_token_settings_updated'));
-      window.dispatchEvent(new Event('zecratary_wallet_updated'));
 
       setTimeout(() => {
         setTopUpSuccessMsg('');
       }, 4000);
     } catch (err: any) {
-      setTopUpErrorMsg(err.message || 'Purchase failed. Please check your wallet balance.');
+      setTopUpErrorMsg(err.message || 'Purchase failed. Please try again.');
     } finally {
       setPurchasingId(null);
     }
@@ -668,12 +581,18 @@ export default function Sidebar() {
     user.email?.includes('admin')
   );
 
+  // Item 1 Fix: Evaluates both /recipes and /saved so Saved Recipes highlights properly
   const isActive = (href: string) => {
     if (href === '/dashboard') return pathname === '/dashboard' || pathname === '/';
     if (href === '/admin') return pathname === '/admin';
     if (href === '/chef') return pathname === '/chef';
+    if (href === '/recipes' || href === '/saved') {
+      return pathname === '/recipes' || pathname.startsWith('/recipes/') || pathname === '/saved' || pathname.startsWith('/saved/');
+    }
     return pathname === href || pathname.startsWith(`${href}/`);
   };
+
+  const showCollapsed = isCollapsed && !isOpen;
 
   const navClass = (href: string) => `
     w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition-colors duration-150 select-none
@@ -687,15 +606,10 @@ export default function Sidebar() {
     }
   `;
 
-  // 12. Guard Rail: Unconditional Hook Execution Complete Before Early Return
-  const isHomePage = Boolean(pathname === '/' || pathname === '' || pathname === '/index');
-  const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
-  if (!mounted || isAuthRoute || isHomePage || (!user && !currentUser)) {
-    return null;
-  }
-
   const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
+
+  // Item 2: Unified Icon Style matching all other sidebar icons
   const iconStyle = { color: 'var(--color-sidebar-icon, var(--color-primary))' };
   const displayPackages = tokenPackages.length > 0 ? tokenPackages : DEFAULT_FALLBACK_PACKAGES;
 
@@ -705,12 +619,13 @@ export default function Sidebar() {
       <header className="md:hidden sticky top-0 z-40 bg-[var(--color-card)] border-b border-[var(--color-border)] px-4 py-3 flex items-center justify-between w-full">
         <Link href="/dashboard" className="flex items-center gap-2">
           {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
-          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[110px]">
+          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[100px]">
             {displayName}
           </span>
         </Link>
+
         <div className="flex items-center gap-1.5">
-          {/* Mobile Wallet Balance & Top Up */}
+          {/* Mobile Wallet Balance & Top Up (Icon Only '+') */}
           <div className="relative" ref={walletMobileDropdownRef}>
             <button
               type="button"
@@ -718,6 +633,7 @@ export default function Sidebar() {
                 setShowWalletMobileMenu(!showWalletMobileMenu);
                 setShowTopUpMobileMenu(false);
                 setShowProfileMenu(false);
+                setShowNotificationsMobile(false);
               }}
               className="flex items-center gap-1 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
               title="Wallet Balance & Top Up"
@@ -726,90 +642,13 @@ export default function Sidebar() {
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
                 {walletSymbol}{mounted ? walletBalance.toFixed(0) : '0'}
               </span>
-              <span className="px-1 py-0.2 rounded-md bg-[var(--color-primary)] text-white text-[9px] font-sans font-black flex items-center">
-                <Plus className="h-2 w-2 stroke-[3]" />
+              <span className="p-1 rounded-md bg-[var(--color-primary)] text-white text-[10px] font-sans font-black flex items-center justify-center">
+                <Plus className="h-2.5 w-2.5 stroke-[3]" />
               </span>
             </button>
-
-            {/* Mobile Wallet Top Up Drawer */}
-            {showWalletMobileMenu && (
-              <div 
-                className="fixed inset-x-3 top-16 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in max-h-[82vh] overflow-y-auto"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              >
-                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2">
-                    <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
-                    <div>
-                      <h3 className="text-xs font-black uppercase tracking-wider">{t('walletTopUp', 'Wallet Top-Up')}</h3>
-                      <p className="text-[10px] opacity-70">
-                        {t('topbarAvailableWallet', 'Available Wallet')}:{' '}
-                        <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
-                          {walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'} {walletCurrency}
-                        </span>
-                      </p>
-                    </div>
-                  </div>
-                  <button 
-                    type="button"
-                    onClick={() => setShowWalletMobileMenu(false)}
-                    className="p-1 rounded-lg border border-[var(--color-border)] cursor-pointer"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-
-                {walletTopUpSuccessMsg && (
-                  <div className="p-2.5 rounded-xl border text-xs font-bold text-emerald-400 border-emerald-500/30 bg-emerald-500/10 flex items-center gap-2">
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                    <span>{walletTopUpSuccessMsg}</span>
-                  </div>
-                )}
-                {walletTopUpErrorMsg && (
-                  <div className="p-2.5 rounded-xl border text-xs font-bold text-red-400 border-red-500/30 bg-red-500/10 flex items-center gap-2">
-                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                    <span>{walletTopUpErrorMsg}</span>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <span className="text-[10px] font-black uppercase tracking-wider opacity-60">
-                    {t('quickDepositAmounts', 'Select Deposit Amount')}
-                  </span>
-                  <div className="grid grid-cols-2 gap-2">
-                    {walletPresets.map((amt) => (
-                      <button
-                        key={amt}
-                        type="button"
-                        disabled={purchasingWallet}
-                        onClick={() => handleQuickWalletTopUp(amt)}
-                        className="p-3 rounded-2xl border flex items-center justify-between font-mono font-bold text-xs cursor-pointer active:scale-95"
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                      >
-                        <span>+{walletSymbol}{amt}</span>
-                        <span className="text-[10px] font-sans px-2 py-0.5 rounded-lg bg-[var(--color-primary)] text-white">
-                          {purchasingWallet ? <RefreshCw className="h-3 w-3 animate-spin" /> : t('topbarAddFunds', 'Add')}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="pt-2 border-t text-center" style={{ borderColor: 'var(--color-border)' }}>
-                  <Link
-                    href="/wallet"
-                    onClick={() => setShowWalletMobileMenu(false)}
-                    className="text-xs font-bold hover:underline"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    {t('openFullWallet', 'Go to Full Wallet Portal')}
-                  </Link>
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* Mobile Token Balance & Top Up */}
+          {/* Mobile Token Balance & Top Up (Item 3: Icon Only '+', No Text) */}
           <div className="relative" ref={topUpMobileDropdownRef}>
             <button
               type="button"
@@ -817,173 +656,41 @@ export default function Sidebar() {
                 setShowTopUpMobileMenu(!showTopUpMobileMenu);
                 setShowWalletMobileMenu(false);
                 setShowProfileMenu(false);
+                setShowNotificationsMobile(false);
               }}
-              className="flex items-center gap-1 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
+              className="flex items-center gap-1.5 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
+              title="Token Balance & Top Up"
             >
-              <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block shrink-0" />
+              <Coins className="h-3.5 w-3.5 text-amber-500" />
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
                 {mounted ? tokenBalance.toLocaleString() : '0'}
               </span>
-              <span className="px-1.5 py-0.2 rounded-md bg-[var(--color-primary)] text-white text-[10px] font-sans font-black flex items-center gap-0.5">
+              <span className="p-1 rounded-md bg-[var(--color-primary)] text-white text-[10px] font-sans font-black flex items-center justify-center">
                 <Plus className="h-2.5 w-2.5 stroke-[3]" />
-                <span>{t('topbarTopUp', 'Top Up')}</span>
               </span>
             </button>
+          </div>
 
-            {/* Mobile Top Up Drawer */}
-            {showTopUpMobileMenu && (
-              <div 
-                className="fixed inset-x-3 top-16 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in max-h-[82vh] overflow-y-auto"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              >
-                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2">
-                    <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block shrink-0" />
-                    <div>
-                      <h3 className="text-xs font-black uppercase tracking-wider">{t('topUpTokens', 'Top Up Tokens')}</h3>
-                      <p className="text-[10px] opacity-70">
-                        {t('topbarAvailableTokens', 'Available Tokens')}:{' '}
-                        <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
-                          {mounted ? tokenBalance.toLocaleString() : '0'} {tokenSymbol}
-                        </span>
-                      </p>
-                    </div>
-                  </div>
-                  <button 
-                    type="button"
-                    onClick={() => setShowTopUpMobileMenu(false)}
-                    className="p-1 rounded-lg border border-[var(--color-border)] cursor-pointer"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-
-                {/* Wallet Balance Status Banner */}
-                <div className="p-2.5 rounded-2xl border flex items-center justify-between gap-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2">
-                    <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
-                    <div className="text-[11px]">
-                      <span className="opacity-70 text-[9px] uppercase font-bold block">{t('payWithWallet', 'Wallet Balance')}:</span>
-                      <span suppressHydrationWarning className="font-mono font-bold" style={{ color: 'var(--color-emerald)' }}>
-                        {walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowTopUpMobileMenu(false);
-                      setShowWalletMobileMenu(true);
-                    }}
-                    className="px-2.5 py-1 rounded-xl text-[10px] font-extrabold text-white cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                  >
-                    +{t('topbarTopUp', 'Top Up')}
-                  </button>
-                </div>
-
-                {topUpSuccessMsg && (
-                  <div className="p-2.5 rounded-xl border text-xs font-bold text-emerald-400 border-emerald-500/30 bg-emerald-500/10 flex items-center gap-2">
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                    <span>{topUpSuccessMsg}</span>
-                  </div>
-                )}
-                {topUpErrorMsg && (
-                  <div className="p-2.5 rounded-xl border text-xs font-bold text-red-400 border-red-500/30 bg-red-500/10 flex flex-col gap-1">
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                      <span>{topUpErrorMsg}</span>
-                    </div>
-                    {topUpErrorMsg.includes('wallet') && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowTopUpMobileMenu(false);
-                          setShowWalletMobileMenu(true);
-                        }}
-                        className="text-left text-[10px] font-extrabold underline text-white pt-1"
-                      >
-                        👉 {t('depositWalletNow', 'Deposit funds into your Wallet now')}
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  {displayPackages.map((pkg) => {
-                    const price = Number(pkg.price);
-                    const canAfford = walletBalance >= price;
-                    return (
-                      <div 
-                        key={pkg.id}
-                        className={`p-3 rounded-2xl border flex items-center justify-between gap-2 ${
-                          !canAfford ? 'opacity-85 border-amber-500/30' : ''
-                        }`}
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: canAfford ? 'var(--color-border)' : 'rgba(245, 158, 11, 0.4)' }}
-                      >
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-black truncate">{pkg.name}</span>
-                            {pkg.badge && (
-                              <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded bg-amber-500/20 text-amber-500">
-                                {pkg.badge}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-xs font-mono font-bold" style={{ color: 'var(--color-emerald)' }}>
-                            +{Number(pkg.tokens).toLocaleString()} {tokenSymbol}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 shrink-0">
-                          <div className="text-right">
-                            <span className="text-xs font-mono font-black">${price.toFixed(2)}</span>
-                            {!canAfford && (
-                              <div className="text-[8px] text-amber-400 font-bold">
-                                Need ${(price - walletBalance).toFixed(2)}
-                              </div>
-                            )}
-                          </div>
-                          {canAfford ? (
-                            <button
-                              type="button"
-                              disabled={purchasingId === pkg.id}
-                              onClick={() => handlePurchasePackage(pkg)}
-                              className="px-3 py-1.5 rounded-xl text-xs font-extrabold text-white cursor-pointer disabled:opacity-50"
-                              style={{ backgroundColor: 'var(--color-primary)' }}
-                            >
-                              {purchasingId === pkg.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : (t('buy', 'Buy'))}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowTopUpMobileMenu(false);
-                                setShowWalletMobileMenu(true);
-                              }}
-                              className="px-2.5 py-1.5 rounded-xl text-[10px] font-bold text-amber-300 border border-amber-500/40 bg-amber-500/10 cursor-pointer"
-                            >
-                              {t('topUpWalletShort', 'Top Up')}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="pt-2 border-t text-center" style={{ borderColor: 'var(--color-border)' }}>
-                  <Link
-                    href="/subscriptions"
-                    onClick={() => setShowTopUpMobileMenu(false)}
-                    className="text-xs font-bold hover:underline"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    {t('viewSubscriptionPlans', 'View Monthly Subscription Plans')}
-                  </Link>
-                </div>
-              </div>
-            )}
+          {/* Mobile Notifications Bell */}
+          <div className="relative" ref={notifMobileDropdownRef}>
+            <button
+              type="button"
+              onClick={() => {
+                setShowNotificationsMobile(!showNotificationsMobile);
+                setShowWalletMobileMenu(false);
+                setShowTopUpMobileMenu(false);
+                setShowProfileMenu(false);
+              }}
+              className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
+              aria-label="Notifications"
+            >
+              <Bell className="h-4 w-4" style={iconStyle} />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
           </div>
 
           {/* Profile Button */}
@@ -994,120 +701,13 @@ export default function Sidebar() {
                 setShowProfileMenu(!showProfileMenu);
                 setShowTopUpMobileMenu(false);
                 setShowWalletMobileMenu(false);
+                setShowNotificationsMobile(false);
               }}
               className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer flex items-center justify-center"
               aria-label="User Profile"
             >
               <UserIcon className="h-4 w-4" style={iconStyle} />
             </button>
-
-            {showProfileMenu && (
-              <div 
-                className="absolute right-0 mt-2 w-64 rounded-2xl border p-2.5 space-y-2 shadow-2xl z-50 animate-in fade-in"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-              >
-                <div className="px-2 py-1 border-b border-[var(--color-border)] pb-2 flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
-                    <UserIcon className="w-3.5 h-3.5" style={iconStyle} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
-                      {user?.name || user?.email || 'User Account'}
-                    </p>
-                    <p className="text-[10px] opacity-60 truncate">{user?.email || 'Authenticated'}</p>
-                  </div>
-                </div>
-
-                <div className="px-2 py-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs font-bold">
-                    <Languages className="h-3.5 w-3.5" style={iconStyle} />
-                    <span>{t('topbarLanguages', 'Languages')}</span>
-                  </div>
-                  <select
-                    value={locale}
-                    onChange={(e) => setLocale(e.target.value)}
-                    className="bg-transparent text-xs font-bold outline-none cursor-pointer"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    {availableLanguages.map((lang) => (
-                      <option key={lang.code} value={lang.code} className={isDarkMode ? 'bg-[#111726] text-white' : 'bg-white text-slate-900'}>
-                        {lang.flag} {lang.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={toggleThemeMode}
-                  className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    {isDarkMode ? <Moon className="h-3.5 w-3.5" style={iconStyle} /> : <Sun className="h-3.5 w-3.5 text-amber-500" />}
-                    <span>{isDarkMode ? t('topbarThemeDark', 'Dark Mode') : t('topbarThemeDay', 'Light Mode')}</span>
-                  </div>
-                  <span className="text-[10px] opacity-60 font-mono">{isDarkMode ? 'Dark' : 'Day'}</span>
-                </button>
-
-                <Link
-                  href="/token"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                >
-                  <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block shrink-0" />
-                  <span>{t('topbarTokens', 'Token')}</span>
-                </Link>
-
-                <Link
-                  href="/wallet"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                >
-                  <Wallet className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                  <span>{t('topbarWallet', 'Store Wallet')}</span>
-                </Link>
-
-                <Link
-                  href="/subscriptions"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                >
-                  <Layers className="h-3.5 w-3.5" style={iconStyle} />
-                  <span>{t('subscriptions', 'Subscriptions')}</span>
-                </Link>
-
-                <Link
-                  href="/billing"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                >
-                  <CreditCard className="h-3.5 w-3.5" style={iconStyle} />
-                  <span>{t('billing', 'Billing')}</span>
-                </Link>
-
-                <Link
-                  href="/contacts"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                >
-                  <Mail className="h-3.5 w-3.5" style={iconStyle} />
-                  <span>{t('contactUs', 'Contact Us')}</span>
-                </Link>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowProfileMenu(false);
-                    logoutUser();
-                    window.location.href = '/login';
-                  }}
-                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 transition cursor-pointer border-t border-[var(--color-border)] pt-2"
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                  <span>{t('topbarSignOut', 'Logout')}</span>
-                </button>
-              </div>
-            )}
           </div>
 
           <button
@@ -1129,12 +729,7 @@ export default function Sidebar() {
         className={`hidden md:flex fixed top-0 right-0 z-30 h-16 bg-[var(--color-card)] border-b border-[var(--color-border)] px-6 items-center justify-between transition-all duration-300 ${
           showCollapsed ? 'left-20' : 'left-64'
         }`}
-        style={{
-          height: '4rem',
-          paddingTop: 0,
-          paddingBottom: 0,
-          boxSizing: 'border-box'
-        }}
+        style={{ height: '4rem', boxSizing: 'border-box' }}
       >
         <div className="flex items-center gap-3">
           <span className="text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-inner-dark)]" style={{ color: 'var(--color-primary)' }}>
@@ -1143,23 +738,22 @@ export default function Sidebar() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* WALLET BALANCE & TOP UP WIDGET */}
+          {/* WALLET BALANCE & TOP UP (ICON ONLY '+') */}
           <div className="relative flex items-center" ref={walletDropdownRef}>
             <div className="flex items-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40">
               <Link 
                 href="/wallet" 
                 className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
-                title={t('viewWalletBalance', 'View Wallet Balance & History')}
+                title={t('viewWalletBalance') || 'View Wallet Balance & History'}
               >
                 <Wallet className="h-4 w-4 text-[var(--color-primary)] group-hover:scale-110 transition-transform" />
                 <span suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
                   {walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'}
                 </span>
-                <span className="text-[10px] font-bold opacity-60 font-mono">
-                  {walletCurrency}
-                </span>
+                <span className="text-[10px] font-bold opacity-60 font-mono">{walletCurrency}</span>
               </Link>
 
+              {/* Item 3: Icon Only '+' Button (No "Top Up" text) */}
               <button
                 type="button"
                 onClick={() => {
@@ -1168,132 +762,32 @@ export default function Sidebar() {
                   setShowNotifications(false);
                   setShowProfileMenu(false);
                 }}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
+                className="flex items-center justify-center p-1.5 px-2.5 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
                 style={{ backgroundColor: 'var(--color-primary)' }}
-                title={t('topbarTopUp', 'Top Up Wallet Balance')}
+                title={t('topUpWallet') || 'Top Up Wallet Balance'}
                 aria-label="Top Up Wallet"
               >
-                <Plus className="h-3 w-3 stroke-[3]" />
-                <span>{t('topbarTopUp', 'Top Up')}</span>
-                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${showWalletTopUpMenu ? 'rotate-180' : ''}`} />
+                <Plus className="h-3.5 w-3.5 stroke-[3]" />
               </button>
             </div>
-
-            {/* Wallet Quick Top Up Dropdown Menu */}
-            {showWalletTopUpMenu && (
-              <div 
-                className="absolute right-0 top-full mt-2 w-88 sm:w-96 rounded-3xl border p-4 space-y-3.5 shadow-2xl z-50 animate-in fade-in"
-                style={{ 
-                  backgroundColor: 'var(--color-card)', 
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              >
-                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
-                      <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                        {t('walletTopUp', 'Store Wallet Top-Up')}
-                      </h3>
-                      <p className="text-[10px] opacity-70">
-                        {t('topbarAvailableWallet', 'Available Wallet')}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                    <span suppressHydrationWarning>{walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'}</span>
-                    <span className="text-[10px] opacity-60 font-bold">{walletCurrency}</span>
-                  </div>
-                </div>
-
-                {walletTopUpSuccessMsg && (
-                  <div 
-                    className="p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 animate-in fade-in"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
-                  >
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                    <span className="text-[11px]">{walletTopUpSuccessMsg}</span>
-                  </div>
-                )}
-
-                {walletTopUpErrorMsg && (
-                  <div 
-                    className="p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 animate-in fade-in"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: '#ef4444', color: '#ef4444' }}
-                  >
-                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                    <span className="text-[11px]">{walletTopUpErrorMsg}</span>
-                  </div>
-                )}
-
-                {/* Quick Presets Grid */}
-                <div className="space-y-2">
-                  <span className="text-[10px] font-black uppercase tracking-wider opacity-60">
-                    {t('quickDepositAmounts', 'Choose Deposit Amount')}
-                  </span>
-                  <div className="grid grid-cols-4 gap-2">
-                    {walletPresets.map((amt) => (
-                      <button
-                        key={amt}
-                        type="button"
-                        disabled={purchasingWallet}
-                        onClick={() => handleQuickWalletTopUp(amt)}
-                        className="py-2.5 px-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/60 text-center font-mono font-bold text-xs transition cursor-pointer active:scale-95 disabled:opacity-50"
-                      >
-                        +{walletSymbol}{amt}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Footer Links */}
-                <div className="pt-2 border-t flex flex-col gap-1.5 text-[11px]" style={{ borderColor: 'var(--color-border)' }}>
-                  <Link
-                    href="/wallet"
-                    onClick={() => setShowWalletTopUpMenu(false)}
-                    className="flex items-center justify-between text-xs font-bold hover:underline"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    <span>{t('openFullWallet', 'Go to Full Wallet Portal (Custom Amount & Methods)')}</span>
-                    <ExternalLink className="h-3 w-3" />
-                  </Link>
-                  {isAdmin && (
-                    <Link
-                      href="/admin/wallet-settings"
-                      onClick={() => setShowWalletTopUpMenu(false)}
-                      className="flex items-center justify-between text-[10px] font-semibold opacity-70 hover:opacity-100 hover:underline"
-                      style={{ color: 'var(--color-text)' }}
-                    >
-                      <span>{t('adminWalletSettings', 'Admin: Wallet Settings & Ledger')}</span>
-                      <Settings className="h-3 w-3" />
-                    </Link>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* TOKEN BALANCE & TOP UP WIDGET */}
+          {/* TOKEN BALANCE & TOP UP (ITEM 3: ICON ONLY '+', NO "TOP UP" TEXT) */}
           <div className="relative flex items-center" ref={topUpDropdownRef}>
             <div className="flex items-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40">
               <Link 
                 href="/token" 
                 className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
-                title={t('viewTokenBalance', 'View Token Balance & Summary')}
+                title={t('viewTokenBalance') || 'View Token Balance & Summary'}
               >
-                <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 inline-block shrink-0" />
+                <Coins className="h-4 w-4 text-amber-500 group-hover:scale-110 transition-transform" />
                 <span suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
                   {mounted ? tokenBalance.toLocaleString() : '0'}
                 </span>
-                <span className="text-xs font-bold text-amber-500 font-mono">
-                  {tokenSymbol}
-                </span>
+                <span className="text-xs font-bold text-amber-500 font-mono">{tokenSymbol}</span>
               </Link>
 
-              {/* Top Up Button with Dropdown Trigger */}
+              {/* Item 3: Icon Only '+' Button (No "Top Up" text) */}
               <button
                 type="button"
                 onClick={() => {
@@ -1302,38 +796,32 @@ export default function Sidebar() {
                   setShowNotifications(false);
                   setShowProfileMenu(false);
                 }}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
+                className="flex items-center justify-center p-1.5 px-2.5 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
                 style={{ backgroundColor: 'var(--color-primary)' }}
-                title={t('topbarTopUp', 'Top Up Tokens')}
+                title={t('topUpTokens') || 'Top Up Tokens'}
                 aria-label="Top Up Tokens"
               >
-                <Plus className="h-3 w-3 stroke-[3]" />
-                <span>{t('topbarTopUp', 'Top Up')}</span>
-                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${showTopUpMenu ? 'rotate-180' : ''}`} />
+                <Plus className="h-3.5 w-3.5 stroke-[3]" />
               </button>
             </div>
 
-            {/* Top Up Dropdown Menu */}
+            {/* Token Packages Dropdown Menu */}
             {showTopUpMenu && (
               <div 
                 className="absolute right-0 top-full mt-2 w-88 sm:w-96 rounded-3xl border p-4 space-y-3.5 shadow-2xl z-50 animate-in fade-in"
-                style={{ 
-                  backgroundColor: 'var(--color-card)', 
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               >
                 <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
                   <div className="flex items-center gap-2.5">
                     <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
-                      <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 inline-block shrink-0" />
+                      <Coins className="h-4 w-4 text-amber-500" />
                     </div>
                     <div>
                       <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                        {t('topUpTokens', 'Top Up Tokens')}
+                        {t('topUpTokens') || 'Top Up Tokens'}
                       </h3>
                       <p className="text-[10px] opacity-70">
-                        {t('topbarAvailableTokens', 'Available Tokens')}
+                        {t('topUpSubtitle') || 'Add tokens directly to your balance'}
                       </p>
                     </div>
                   </div>
@@ -1343,73 +831,6 @@ export default function Sidebar() {
                   </div>
                 </div>
 
-                {/* Live Wallet Balance Status Card */}
-                <div 
-                  className="p-3 rounded-2xl border flex items-center justify-between gap-3 shadow-xs"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="p-2 rounded-xl bg-[var(--color-primary)]/10 text-[var(--color-primary)] flex-shrink-0">
-                      <Wallet className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-[10px] uppercase font-bold opacity-60">{t('paymentSource', 'Payment Source')}: Store Wallet</div>
-                      <div suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                        {walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'} {walletCurrency}
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowTopUpMenu(false);
-                      setShowWalletTopUpMenu(true);
-                    }}
-                    className="px-3 py-1 rounded-xl text-[11px] font-extrabold text-white transition cursor-pointer flex items-center gap-1 shadow-xs hover:brightness-110 active:scale-95 flex-shrink-0"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                    title={t('topbarAddFunds', 'Top Up Wallet Balance')}
-                  >
-                    <Plus className="h-3 w-3 stroke-[3]" />
-                    <span>{t('topbarAddFunds', 'Add Funds')}</span>
-                  </button>
-                </div>
-
-                {topUpSuccessMsg && (
-                  <div 
-                    className="p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 animate-in fade-in"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
-                  >
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                    <span className="text-[11px]">{topUpSuccessMsg}</span>
-                  </div>
-                )}
-
-                {topUpErrorMsg && (
-                  <div 
-                    className="p-2.5 rounded-xl border text-xs font-bold flex flex-col gap-1.5 animate-in fade-in"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: '#ef4444', color: '#ef4444' }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                      <span className="text-[11px]">{topUpErrorMsg}</span>
-                    </div>
-                    {topUpErrorMsg.includes('wallet') && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowTopUpMenu(false);
-                          setShowWalletTopUpMenu(true);
-                        }}
-                        className="self-start text-[10px] font-extrabold text-white underline hover:opacity-80 cursor-pointer pt-0.5"
-                      >
-                        👉 {t('clickToTopUpWallet', 'Click here to top up your Wallet balance first')}
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {/* Packages List */}
                 <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                   {displayPackages.map((pkg) => {
                     const price = Number(pkg.price);
@@ -1424,9 +845,7 @@ export default function Sidebar() {
                       >
                         <div className="min-w-0 space-y-0.5">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
-                              {pkg.name}
-                            </span>
+                            <span className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>{pkg.name}</span>
                             {pkg.badge && (
                               <span className="px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider rounded-md bg-amber-500/15 text-amber-500 border border-amber-500/30">
                                 {pkg.badge}
@@ -1440,82 +859,26 @@ export default function Sidebar() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
-                          <div className="text-right">
-                            <span className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
-                              ${price.toFixed(2)}
-                            </span>
-                            {!canAfford && (
-                              <div className="text-[9px] font-bold text-amber-400">
-                                Short ${(price - walletBalance).toFixed(2)}
-                              </div>
-                            )}
-                          </div>
-
-                          {canAfford ? (
-                            <button
-                              type="button"
-                              disabled={purchasingId === pkg.id}
-                              onClick={() => handlePurchasePackage(pkg)}
-                              className="px-3.5 py-1.5 rounded-xl text-xs font-extrabold text-white transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:brightness-110 active:scale-95 shadow-xs"
-                              style={{ backgroundColor: 'var(--color-primary)' }}
-                            >
-                              {purchasingId === pkg.id ? (
-                                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <>
-                                  <Sparkles className="h-3 w-3" />
-                                  <span>{t('buy', 'Buy')}</span>
-                                </>
-                              )}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowTopUpMenu(false);
-                                setShowWalletTopUpMenu(true);
-                              }}
-                              className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold text-amber-300 border border-amber-500/40 bg-amber-500/10 transition flex items-center gap-1 cursor-pointer hover:bg-amber-500/20 active:scale-95 shadow-xs"
-                              title={t('topUpWalletToBuy', 'Deposit Funds in Wallet to Buy')}
-                            >
-                              <Wallet className="h-3 w-3 text-amber-400" />
-                              <span>{t('topUpWalletShort', 'Top Up')}</span>
-                            </button>
-                          )}
+                          <span className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>${price.toFixed(2)}</span>
+                          <button
+                            type="button"
+                            disabled={purchasingId === pkg.id}
+                            onClick={() => handlePurchasePackage(pkg)}
+                            className="px-3.5 py-1.5 rounded-xl text-xs font-extrabold text-white transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:brightness-110 active:scale-95 shadow-xs"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                          >
+                            {purchasingId === pkg.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : (t('buy') || 'Buy')}
+                          </button>
                         </div>
                       </div>
                     );
                   })}
                 </div>
-
-                {/* Footer Links */}
-                <div className="pt-2 border-t flex flex-col gap-1.5 text-[11px]" style={{ borderColor: 'var(--color-border)' }}>
-                  <Link
-                    href="/subscriptions"
-                    onClick={() => setShowTopUpMenu(false)}
-                    className="flex items-center justify-between text-xs font-bold hover:underline"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    <span>{t('viewSubscriptionPlans', 'View Monthly Subscription Plans')}</span>
-                    <ExternalLink className="h-3 w-3" />
-                  </Link>
-                  {isAdmin && (
-                    <Link
-                      href="/admin/token-setting"
-                      onClick={() => setShowTopUpMenu(false)}
-                      className="flex items-center justify-between text-[10px] font-semibold opacity-70 hover:opacity-100 hover:underline"
-                      style={{ color: 'var(--color-text)' }}
-                    >
-                      <span>{t('adminManagePackages', 'Admin: Manage Packages in /admin/token-setting')}</span>
-                      <Settings className="h-3 w-3" />
-                    </Link>
-                  )}
-                </div>
               </div>
             )}
           </div>
 
-          {/* Notification Icon with Dropdown */}
+          {/* NOTIFICATION BELL */}
           <div className="relative" ref={notifDropdownRef}>
             <button
               type="button"
@@ -1530,47 +893,14 @@ export default function Sidebar() {
             >
               <Bell className="h-4 w-4" style={iconStyle} />
               {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md">
-                  {unreadCount}
+                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md animate-pulse">
+                  {unreadCount > 99 ? '99+' : unreadCount}
                 </span>
               )}
             </button>
-
-            {showNotifications && (
-              <div 
-                className="absolute right-0 mt-2 w-80 rounded-2xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-              >
-                <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-                  <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                    {t('topbarNotifications', 'Notifications')}
-                  </h3>
-                  <button 
-                    onClick={() => { setUnreadCount(0); setShowNotifications(false); }}
-                    className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
-                  >
-                    Mark all read
-                  </button>
-                </div>
-                <div className="space-y-2 max-h-60 overflow-y-auto pr-1 text-xs">
-                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
-                    <p className="font-bold">🎉 Welcome to Zecratary!</p>
-                    <p className="text-[11px] opacity-75">Your account has been initialized with free AI token credits.</p>
-                  </div>
-                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
-                    <p className="font-bold">⚡ AI Model Updated</p>
-                    <p className="text-[11px] opacity-75">Gemini models are fully synchronized and ready for your recipes.</p>
-                  </div>
-                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
-                    <p className="font-bold">🔒 Security Secured</p>
-                    <p className="text-[11px] opacity-75">PostgreSQL database storage connected successfully.</p>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* Profile Dropdown */}
+          {/* PROFILE DROPDOWN */}
           <div className="relative" ref={profileDropdownRef}>
             <button
               type="button"
@@ -1582,7 +912,6 @@ export default function Sidebar() {
               }}
               className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
               aria-label="User Profile Dropdown"
-              title="Profile & Settings"
             >
               <UserIcon className="h-4 w-4" style={iconStyle} />
             </button>
@@ -1605,54 +934,21 @@ export default function Sidebar() {
                       {user?.name || user?.email || 'User Account'}
                     </p>
                     <p className="text-[11px] opacity-60 truncate">
-                      {user?.email || t('viewProfile', 'View Profile')}
+                      {user?.email || t('viewProfile') || 'View Profile'}
                     </p>
                   </div>
                 </Link>
 
                 <div className="space-y-1 pt-1">
-                  <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-bold" style={{ color: 'var(--color-text)' }}>
-                      <Languages className="w-4 h-4" style={iconStyle} />
-                      <span>{t('topbarLanguages', 'Languages')}</span>
-                    </div>
-                    <select
-                      value={locale}
-                      onChange={(e) => setLocale(e.target.value)}
-                      className="bg-transparent text-xs font-bold outline-none cursor-pointer"
-                      style={{ color: 'var(--color-primary)' }}
-                    >
-                      {availableLanguages.map((lang) => (
-                        <option key={lang.code} value={lang.code} className={isDarkMode ? 'bg-[#111726] text-white' : 'bg-white text-slate-900'}>
-                          {lang.flag} {lang.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={toggleThemeMode}
-                    className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition cursor-pointer text-left"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      {isDarkMode ? <Moon className="h-4 w-4" style={iconStyle} /> : <Sun className="h-4 w-4 text-amber-500" />}
-                      <span>{isDarkMode ? t('topbarThemeDark', 'Dark Mode') : t('topbarThemeDay', 'Light Mode')}</span>
-                    </div>
-                    <span className="text-[10px] font-mono opacity-60 px-2 py-0.5 rounded-md border border-[var(--color-border)]">
-                      {isDarkMode ? 'Dark' : 'Day'}
-                    </span>
-                  </button>
-
                   <Link
                     href="/token"
                     onClick={() => setShowProfileMenu(false)}
                     className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
                     style={{ color: 'var(--color-text)' }}
                   >
-                    <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block shrink-0" />
-                    <span>{t('topbarTokens', 'Token')}</span>
+                    {/* Item 2 Fix: Coins icon inherits shared iconStyle */}
+                    <Coins className="h-4 w-4" style={iconStyle} />
+                    <span>{t('token') || 'Token'}</span>
                   </Link>
 
                   <Link
@@ -1662,37 +958,7 @@ export default function Sidebar() {
                     style={{ color: 'var(--color-text)' }}
                   >
                     <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
-                    <span>{t('topbarWallet', 'Store Wallet')}</span>
-                  </Link>
-
-                  <Link
-                    href="/subscriptions"
-                    onClick={() => setShowProfileMenu(false)}
-                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <Layers className="h-4 w-4" style={iconStyle} />
-                    <span>{t('subscriptions', 'Subscriptions')}</span>
-                  </Link>
-
-                  <Link
-                    href="/billing"
-                    onClick={() => setShowProfileMenu(false)}
-                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <CreditCard className="h-4 w-4" style={iconStyle} />
-                    <span>{t('billing', 'Billing')}</span>
-                  </Link>
-
-                  <Link
-                    href="/contacts"
-                    onClick={() => setShowProfileMenu(false)}
-                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <Mail className="h-4 w-4" style={iconStyle} />
-                    <span>{t('contactUs', 'Contact Us')}</span>
+                    <span>{t('myWallet') || 'Store Wallet'}</span>
                   </Link>
 
                   <button
@@ -1705,7 +971,7 @@ export default function Sidebar() {
                     className="w-full flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 transition cursor-pointer text-left border-t border-[var(--color-border)] mt-1.5 pt-2"
                   >
                     <LogOut className="h-4 w-4" />
-                    <span>{t('topbarSignOut', 'Logout')}</span>
+                    <span>{t('logout') || 'Logout'}</span>
                   </button>
                 </div>
               </div>
@@ -1723,7 +989,7 @@ export default function Sidebar() {
 
       {/* SIDEBAR CONTAINER */}
       <aside className={`
-        fixed top-0 left-0 z-40 h-screen bg-[var(--color-card)] border-r border-[var(--color-border)] 
+        fixed md:sticky top-0 left-0 z-50 h-screen bg-[var(--color-card)] border-r border-[var(--color-border)] 
         flex flex-col justify-between shrink-0 select-none transition-all duration-300 ease-in-out
         ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}
         ${isOpen ? 'translate-x-0 w-64 p-5' : '-translate-x-full md:translate-x-0'}
@@ -1782,115 +1048,181 @@ export default function Sidebar() {
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('dashboard')}</span>}
             </Link>
 
-            {!showCollapsed && (
-              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
-                {t('create')}
-              </div>
-            )}
-            <Link href="/chef" className={navClass('/chef')} title={t('chefAi')}>
-              <MessageSquare className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('chefAi')}</span>}
-            </Link>
-            <Link href="/import" className={navClass('/import')} title={t('import')}>
-              <UploadCloud className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('import')}</span>}
-            </Link>
-            <Link href="/manual" className={navClass('/manual')} title={t('manual')}>
-              <SquarePen className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('manual')}</span>}
-            </Link>
+            {/* ITEM 4: COLLAPSIBLE SECTION: CREATE */}
+            <div className="pt-2">
+              {!showCollapsed && (
+                <button
+                  type="button"
+                  onClick={() => toggleSection('create')}
+                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition cursor-pointer select-none rounded-lg ${
+                    isDarkMode ? 'text-slate-500 hover:text-slate-300 hover:bg-[#141b2d]/40' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                  }`}
+                  aria-expanded={openSections.create}
+                  title={openSections.create ? t('collapseSection', 'Collapse section') : t('expandSection', 'Expand section')}
+                >
+                  <span className="truncate">{t('create')}</span>
+                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-70 ${openSections.create ? 'rotate-0' : '-rotate-90'}`} />
+                </button>
+              )}
+              {(openSections.create || showCollapsed) && (
+                <div className="space-y-1 pt-0.5">
+                  <Link href="/chef" className={navClass('/chef')} title={t('chefAi')}>
+                    <MessageSquare className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('chefAi')}</span>}
+                  </Link>
+                  <Link href="/import" className={navClass('/import')} title={t('import')}>
+                    <UploadCloud className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('import')}</span>}
+                  </Link>
+                  <Link href="/manual" className={navClass('/manual')} title={t('manual')}>
+                    <SquarePen className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('manual')}</span>}
+                  </Link>
+                </div>
+              )}
+            </div>
 
-            {!showCollapsed && (
-              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
-                {t('manage')}
-              </div>
-            )}
-            <Link href="/recipes" className={navClass('/saved')} title={t('savedRecipes')}>
-              <BookOpen className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('savedRecipes')}</span>}
-            </Link>
-            <Link href="/books" className={navClass('/books')} title={t('books')}>
-              <Book className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('books')}</span>}
-            </Link>
-            <Link href="/pantry" className={navClass('/pantry')}>
-              <Package className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('pantry')}</span>}
-            </Link>
+            {/* ITEM 4: COLLAPSIBLE SECTION: MANAGE */}
+            <div className="pt-2">
+              {!showCollapsed && (
+                <button
+                  type="button"
+                  onClick={() => toggleSection('manage')}
+                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition cursor-pointer select-none rounded-lg ${
+                    isDarkMode ? 'text-slate-500 hover:text-slate-300 hover:bg-[#141b2d]/40' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                  }`}
+                  aria-expanded={openSections.manage}
+                  title={openSections.manage ? t('collapseSection', 'Collapse section') : t('expandSection', 'Expand section')}
+                >
+                  <span className="truncate">{t('manage')}</span>
+                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-70 ${openSections.manage ? 'rotate-0' : '-rotate-90'}`} />
+                </button>
+              )}
+              {(openSections.manage || showCollapsed) && (
+                <div className="space-y-1 pt-0.5">
+                  {/* Item 1 Fix: Targets /recipes and highlights whenever visiting /recipes */}
+                  <Link href="/recipes" className={navClass('/recipes')} title={t('savedRecipes')}>
+                    <BookOpen className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('savedRecipes')}</span>}
+                  </Link>
+                  <Link href="/books" className={navClass('/books')} title={t('books')}>
+                    <Book className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('books')}</span>}
+                  </Link>
+                  <Link href="/pantry" className={navClass('/pantry')}>
+                    <Package className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('pantry')}</span>}
+                  </Link>
+                </div>
+              )}
+            </div>
 
-            {!showCollapsed && (
-              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
-                {t('plan')}
-              </div>
-            )}
-            <Link href="/shopping" className={navClass('/shopping')} title={t('shoppingList')}>
-              <ShoppingCart className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('shoppingList')}</span>}
-            </Link>
-            <Link href="/planner" className={navClass('/planner')}>
-              <Calendar className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('planner')}</span>}
-            </Link>
-            <Link href="/templates" className={navClass('/templates')}>
-              <LayoutTemplate className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('templates')}</span>}
-            </Link>
+            {/* ITEM 4: COLLAPSIBLE SECTION: PLAN */}
+            <div className="pt-2">
+              {!showCollapsed && (
+                <button
+                  type="button"
+                  onClick={() => toggleSection('plan')}
+                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition cursor-pointer select-none rounded-lg ${
+                    isDarkMode ? 'text-slate-500 hover:text-slate-300 hover:bg-[#141b2d]/40' : 'text-slate-600 hover:text-slate-950 hover:bg-slate-200/50'
+                  }`}
+                  aria-expanded={openSections.plan}
+                  title={openSections.plan ? t('collapseSection', 'Collapse section') : t('expandSection', 'Expand section')}
+                >
+                  <span className="truncate">{t('plan')}</span>
+                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-70 ${openSections.plan ? 'rotate-0' : '-rotate-90'}`} />
+                </button>
+              )}
+              {(openSections.plan || showCollapsed) && (
+                <div className="space-y-1 pt-0.5">
+                  <Link href="/shopping" className={navClass('/shopping')} title={t('shoppingList')}>
+                    <ShoppingCart className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('shoppingList')}</span>}
+                  </Link>
+                  <Link href="/planner" className={navClass('/planner')}>
+                    <Calendar className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('planner')}</span>}
+                  </Link>
+                  <Link href="/templates" className={navClass('/templates')}>
+                    <LayoutTemplate className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('templates')}</span>}
+                  </Link>
+                </div>
+              )}
+            </div>
 
+            {/* ITEM 4: COLLAPSIBLE SECTION: ADMIN ACCESS */}
             {isAdmin && (
-              <div className="pt-2 space-y-1">
+              <div className="pt-2">
                 {!showCollapsed && (
-                  <span className="block text-[10px] font-extrabold uppercase tracking-wider text-[var(--color-primary)] px-3 pt-2 truncate">
-                    {t('adminAccess') || 'Admin Access'}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => toggleSection('admin')}
+                    className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-[var(--color-primary)] transition cursor-pointer select-none rounded-lg hover:opacity-85 hover:bg-[var(--color-primary)]/10"
+                    aria-expanded={openSections.admin}
+                    title={openSections.admin ? t('collapseSection', 'Collapse section') : t('expandSection', 'Expand section')}
+                  >
+                    <span className="truncate">{t('adminAccess') || 'Admin Access'}</span>
+                    <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-75 ${openSections.admin ? 'rotate-0' : '-rotate-90'}`} />
+                  </button>
                 )}
-                <Link href="/admin" className={navClass('/admin')} title="Admin Setting">
-                  <ShieldCheck className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Admin Setting</span>}
-                </Link>
-                <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} title="Ai Settings">
-                  <Cpu className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}
-                </Link>
-                <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} title="Token Settings">
-                  <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 shrink-0" />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Token Settings</span>}
-                </Link>
-                <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} title="Wallet Settings">
-                  <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Wallet Settings</span>}
-                </Link>
-                <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} title={t('notificationSettings', 'Notification Settings')}>
-                  <BellRing className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('notificationSettings', 'Notification Settings')}</span>}
-                </Link>
-                <Link href="/admin/plans" className={navClass('/admin/plans')} title="Subscription Plans">
-                  <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Subscription Plans</span>}
-                </Link>
-                <Link href="/admin/payment" className={navClass('/admin/payment')} title="Payment Gateway">
-                  <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Payment Gateway</span>}
-                </Link>
-                <Link href="/admin/social-login-setting" className={navClass('/admin/social-login-setting')} title="Social Login">
-                  <Key className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Social Login</span>}
-                </Link>
-                <Link href="/admin/users" className={navClass('/admin/users')} title="Users">
-                  <UserPlus className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Users</span>}
-                </Link>
-                <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} title="Recipe Type">
-                  <Utensils className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Recipe Type</span>}
-                </Link>
-                <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} title="Ingredient Category">
-                  <Tag className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Ingredient Category</span>}
-                </Link>
-                <Link href="/admin/language" className={navClass('/admin/language')} title="Language">
-                  <Languages className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Language</span>}
-                </Link>
+                {(openSections.admin || showCollapsed) && (
+                  <div className="space-y-1 pt-0.5">
+                    <Link href="/admin" className={navClass('/admin')} title="Admin Setting">
+                      <ShieldCheck className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Admin Setting</span>}
+                    </Link>
+                    <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} title="Ai Settings">
+                      <Cpu className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}
+                    </Link>
+                    {/* Item 2 Fix: Coins icon in Admin Access uses unified iconStyle */}
+                    <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} title="Token Settings">
+                      <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Token Settings</span>}
+                    </Link>
+                    <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} title="Wallet Settings">
+                      <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Wallet Settings</span>}
+                    </Link>
+                    <Link href="/admin/storage" className={navClass('/admin/storage')} title="Storage Settings">
+                      <HardDrive className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Storage Settings</span>}
+                    </Link>
+                    <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} title={t('notificationSettings', 'Notification Settings')}>
+                      <BellRing className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">{t('notificationSettings', 'Notification Settings')}</span>}
+                    </Link>
+                    <Link href="/admin/plans" className={navClass('/admin/plans')} title="Subscription Plans">
+                      <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Subscription Plans</span>}
+                    </Link>
+                    <Link href="/admin/payment" className={navClass('/admin/payment')} title="Payment Gateway">
+                      <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Payment Gateway</span>}
+                    </Link>
+                    <Link href="/admin/social-login-setting" className={navClass('/admin/social-login-setting')} title="Social Login">
+                      <Key className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Social Login</span>}
+                    </Link>
+                    <Link href="/admin/users" className={navClass('/admin/users')} title="Users">
+                      <UserPlus className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Users</span>}
+                    </Link>
+                    <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} title="Recipe Type">
+                      <Utensils className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Recipe Type</span>}
+                    </Link>
+                    <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} title="Ingredient Category">
+                      <Tag className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Ingredient Category</span>}
+                    </Link>
+                    <Link href="/admin/language" className={navClass('/admin/language')} title="Language">
+                      <Languages className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Language</span>}
+                    </Link>
+                  </div>
+                )}
               </div>
             )}
           </nav>
@@ -1900,23 +1232,6 @@ export default function Sidebar() {
         <div className="pt-3 border-t border-[var(--color-border)] space-y-1">
           {showCollapsed ? (
             <div className="flex flex-col items-center gap-2 p-1">
-              <div className={`relative flex items-center justify-center p-2 rounded-xl border border-[var(--color-border)] text-base cursor-pointer hover:border-[var(--color-primary)]/50 transition ${
-                isDarkMode ? 'bg-[#070b13]' : 'bg-slate-200'
-              }`} title={availableLanguages.find((l) => l.code === locale)?.name || 'Language'}>
-                <span>{availableLanguages.find((l) => l.code === locale)?.flag || '🌐'}</span>
-                <select
-                  value={locale}
-                  onChange={(e) => setLocale(e.target.value)}
-                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                  title="Change language"
-                >
-                  {availableLanguages.map((lang) => (
-                    <option key={lang.code} value={lang.code} className={isDarkMode ? 'bg-[#111726] text-white' : 'bg-white text-slate-900'}>
-                      {lang.flag} {lang.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
               <button
                 type="button"
                 onClick={toggleThemeMode}
@@ -1966,34 +1281,34 @@ export default function Sidebar() {
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('profile')}</span>}
           </Link>
 
-          {/* TOKEN */}
-          <Link href="/token" className={navClass('/token')} title={t('topbarTokens', 'Token')}>
-            <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 shrink-0" />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('topbarTokens', 'Token')}</span>}
+          {/* ITEM 2: TOKEN WITH UNIFIED THEME ICON STYLE */}
+          <Link href="/token" className={navClass('/token')} title={t('token') || 'Token'}>
+            <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
+            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('token') || 'Token'}</span>}
           </Link>
 
           {/* WALLET */}
-          <Link href="/wallet" className={navClass('/wallet')} title={t('topbarWallet', 'Wallet')}>
+          <Link href="/wallet" className={navClass('/wallet')} title={t('wallet') || 'Wallet'}>
             <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('topbarWallet', 'Wallet')}</span>}
+            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('wallet') || 'Wallet'}</span>}
           </Link>
 
           {/* SUBSCRIPTIONS */}
-          <Link href="/subscriptions" className={navClass('/subscriptions')} title={t('subscriptions', 'Subscriptions')}>
+          <Link href="/subscriptions" className={navClass('/subscriptions')} title={t('subscriptions') || 'Subscriptions'}>
             <Layers className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('subscriptions', 'Subscriptions')}</span>}
+            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('subscriptions') || 'Subscriptions'}</span>}
           </Link>
 
           {/* BILLING */}
-          <Link href="/billing" className={navClass('/billing')} title={t('billing', 'Billing')}>
+          <Link href="/billing" className={navClass('/billing')} title={t('billing') || 'Billing'}>
             <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('billing', 'Billing')}</span>}
+            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('billing') || 'Billing'}</span>}
           </Link>
 
           {/* CONTACTS */}
-          <Link href="/contacts" className={navClass('/contacts')} title={t('contactUs', 'Contact Us')}>
+          <Link href="/contacts" className={navClass('/contacts')} title={t('contactUs')}>
             <Mail className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('contactUs', 'Contact Us')}</span>}
+            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('contactUs')}</span>}
           </Link>
 
           {/* LOGOUT */}
@@ -2005,10 +1320,10 @@ export default function Sidebar() {
             className={`w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer text-left ${
               isDarkMode ? 'text-slate-400 hover:text-red-400 hover:bg-red-950/20' : 'text-slate-800 hover:text-red-600 hover:bg-red-100/70 font-bold'
             }`}
-            title={t('topbarSignOut', 'Logout')}
+            title={t('logout')}
           >
             <LogOut className="h-4 w-4 shrink-0" />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('topbarSignOut', 'Logout')}</span>}
+            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('logout')}</span>}
           </button>
 
           <div className={`pt-2 select-none flex items-center ${showCollapsed ? 'justify-center text-[10px]' : 'px-3.5 justify-between text-[11px]'} font-mono ${
