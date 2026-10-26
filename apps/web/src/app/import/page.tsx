@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
   Link2, FileText, Image as ImageIcon, Sparkles, AlertCircle, 
-  CheckCircle2, Upload, X, ShieldAlert, Cpu, AlertTriangle
+  CheckCircle2, Upload, X, ShieldAlert, Cpu, AlertTriangle,
+  Globe, Lock, ArrowRight
 } from 'lucide-react';
 import { getCurrentUser } from '@/lib/auth';
 import { persistSavedRecipe } from '@/lib/recipeSync';
@@ -49,9 +50,14 @@ export default function ImportPage() {
   const [textCategory, setTextCategory] = useState('Main Dish');
   const [rawText, setRawText] = useState('');
   
+  // Recipe Visibility Slide-Toggle State
+  const [isPublic, setIsPublic] = useState(false);
+
+  // Drag & Drop State with Depth Ref to prevent child bubbling
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const dragDepthRef = useRef(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Token & AI Settings Telemetry
@@ -242,6 +248,27 @@ export default function ImportPage() {
     };
   }, [previewUrls]);
 
+  // Support direct clipboard paste (Ctrl+V / Cmd+V) for image OCR
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      if (activeTab !== 'image') return;
+      if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length > 0) {
+        const imageFiles: File[] = [];
+        for (let i = 0; i < e.clipboardData.files.length; i++) {
+          if (e.clipboardData.files[i].type.startsWith('image/')) {
+            imageFiles.push(e.clipboardData.files[i]);
+          }
+        }
+        if (imageFiles.length > 0) {
+          e.preventDefault();
+          handleFilesAdded(imageFiles);
+        }
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [activeTab]);
+
   useEffect(() => {
     document.title = `${t('importRecipeTitle', 'AI Recipe Importer')} - Zecratary`;
     fetchRecipeTypes();
@@ -346,6 +373,8 @@ export default function ImportPage() {
       sourceUrl: recipeData.sourceUrl || recipeData.source_url || url || '',
       source_url: recipeData.sourceUrl || recipeData.source_url || url || '',
       isFavorite: false,
+      is_public: isPublic,
+      isPublic: isPublic,
       rating: 0
     };
 
@@ -445,6 +474,7 @@ export default function ImportPage() {
           userEmail: user?.email,
           userName: user?.name,
           category: textCategory,
+          isPublic: isPublic,
           model: activeAiModel,
           provider: activeAiProvider
         })
@@ -497,6 +527,7 @@ export default function ImportPage() {
           text: rawText.trim(),
           title: textTitle.trim(),
           category: textCategory,
+          isPublic: isPublic,
           userId: user?.id || user?.email || 'usr_admin_1',
           userEmail: user?.email,
           userName: user?.name,
@@ -525,6 +556,7 @@ export default function ImportPage() {
     }
   };
 
+  // Robust Drag and Drop File Handlers
   const handleFilesAdded = (files: FileList | File[]) => {
     const validFiles: File[] = [];
     for (let i = 0; i < files.length; i++) {
@@ -544,6 +576,40 @@ export default function ImportPage() {
     const updatedFiles = selectedFiles.filter((_, idx) => idx !== index);
     setSelectedFiles(updatedFiles);
     setPreviewUrls(previewUrls.filter((_, idx) => idx !== index));
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current += 1;
+    setIsDragging(true);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current -= 1;
+    if (dragDepthRef.current <= 0) {
+      dragDepthRef.current = 0;
+      setIsDragging(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = 0;
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFilesAdded(e.dataTransfer.files);
+    }
   };
 
   const handleImageImport = async () => {
@@ -600,6 +666,7 @@ export default function ImportPage() {
           base64: base64Data,
           title: primaryFile.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' '),
           category: textCategory,
+          isPublic: isPublic,
           userId: user?.id || user?.email || 'usr_admin_1',
           userEmail: user?.email,
           userName: user?.name,
@@ -642,7 +709,7 @@ export default function ImportPage() {
         color: 'var(--color-text)' 
       }}
     >
-      {/* Clean Telemetry Header: Removed Badge & Inline Topup Capsule */}
+      {/* Header telemetry without badges or inline topup boxes */}
       <div 
         className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" 
         style={{ borderColor: 'var(--color-border)' }}
@@ -764,6 +831,85 @@ export default function ImportPage() {
           </div>
         )}
 
+        {/* Slide-Toggle Button: Show Private / Public Marketplace */}
+        <div 
+          className="p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors duration-200"
+          style={{
+            backgroundColor: 'var(--color-inner-dark)',
+            borderColor: 'var(--color-border)'
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <div 
+              className="p-2.5 rounded-xl border flex items-center justify-center shrink-0 transition-colors duration-200"
+              style={{
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: isPublic ? '#ea580c' : 'var(--color-text-secondary)'
+              }}
+            >
+              {isPublic ? <Globe className="h-5 w-5" /> : <Lock className="h-5 w-5" />}
+            </div>
+            <div>
+              <div className="text-xs font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <span>{t('visibilityLabel', 'Recipe Visibility')}:</span>
+                <span 
+                  className="px-2 py-0.5 rounded-md text-[11px] font-extrabold uppercase tracking-wide border transition-colors duration-200"
+                  style={isPublic ? {
+                    backgroundColor: 'rgba(234, 88, 12, 0.12)',
+                    borderColor: 'rgba(234, 88, 12, 0.35)',
+                    color: '#ea580c'
+                  } : {
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)'
+                  }}
+                >
+                  {isPublic ? t('publicMarketplace', 'Public Marketplace') : t('privateRecipe', 'Private Recipe')}
+                </span>
+              </div>
+              <p className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                {isPublic 
+                  ? t('visibilityPublicDesc', 'Published to the community marketplace for all foodies to discover')
+                  : t('visibilityPrivateDesc', 'Saved exclusively to your personal recipe box')}
+              </p>
+            </div>
+          </div>
+
+          {/* Standard Repository Slide-Toggle Switch */}
+          <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-center">
+            <span 
+              className="text-[11px] font-bold uppercase transition-colors duration-200 select-none hidden sm:inline"
+              style={{ 
+                color: isPublic ? '#ea580c' : 'var(--color-text-secondary)' 
+              }}
+            >
+              {isPublic ? t('publicMarketplace', 'Public') : t('privateRecipe', 'Private')}
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isPublic}
+              onClick={() => setIsPublic(prev => !prev)}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none shadow-xs ${
+                isPublic ? '' : 'bg-gray-300 dark:bg-gray-700'
+              }`}
+              style={{
+                backgroundColor: isPublic ? '#ea580c' : undefined
+              }}
+              title={isPublic ? t('publicMarketplace', 'Public Marketplace') : t('privateRecipe', 'Private Recipe')}
+            >
+              <span className="sr-only">{isPublic ? t('publicMarketplace', 'Public Marketplace') : t('privateRecipe', 'Private Recipe')}</span>
+              <span
+                aria-hidden="true"
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                  isPublic ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
         {/* TAB 1: URL IMPORT */}
         {activeTab === 'url' && (
           <div className="space-y-4">
@@ -807,24 +953,33 @@ export default function ImportPage() {
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text)'
                 }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onFocus={(e) => (e.currentTarget.style.borderColor = '#ea580c')}
                 onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
               />
             </div>
 
+            {/* Ember Next Button */}
             <button
               type="button"
               onClick={() => handleUrlImport()}
               disabled={loading || !url.trim() || !enableWebSearch}
-              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50 hover:opacity-90"
-              style={{ backgroundColor: 'var(--color-primary)' }}
+              className="w-full text-white font-black py-4 rounded-xl transition flex items-center justify-center gap-2.5 text-sm tracking-wide shadow-xl cursor-pointer disabled:opacity-50 hover:brightness-110 active:scale-[0.99]"
+              style={{
+                background: 'linear-gradient(135deg, #f59e0b 0%, #ea580c 100%)',
+                color: '#ffffff',
+                boxShadow: '0 8px 20px -4px rgba(234, 88, 12, 0.45)',
+                border: '1px solid rgba(245, 158, 11, 0.4)'
+              }}
             >
               <Sparkles className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              {loading 
-                ? t('downloadingPhotoParsingSteps', 'Parsing recipe & deducting tokens...') 
-                : isTokenEnabled && tokenCosts.url > 0
-                  ? `${t('importRecipeBtn', 'Import Recipe')} (${tokenCosts.url} ${tokenSymbol})`
-                  : `${t('importRecipeBtn', 'Import Recipe')} (${t('freeBadge', 'Free')})`}
+              <span>
+                {loading 
+                  ? t('downloadingPhotoParsingSteps', 'Parsing recipe & deducting tokens...') 
+                  : isTokenEnabled && tokenCosts.url > 0
+                    ? `${t('nextImportRecipe', 'Next: Import Recipe')} (${tokenCosts.url} ${tokenSymbol})`
+                    : `${t('nextImportRecipe', 'Next: Import Recipe')} (${t('freeBadge', 'Free')})`}
+              </span>
+              <ArrowRight className="h-4 w-4 ml-0.5" />
             </button>
           </div>
         )}
@@ -858,7 +1013,7 @@ export default function ImportPage() {
                     borderColor: 'var(--color-border)',
                     color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                  onFocus={(e) => (e.currentTarget.style.borderColor = '#ea580c')}
                   onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
               </div>
@@ -910,24 +1065,33 @@ export default function ImportPage() {
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text)'
                 }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onFocus={(e) => (e.currentTarget.style.borderColor = '#ea580c')}
                 onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
               />
             </div>
 
+            {/* Ember Next Button */}
             <button
               type="button"
               onClick={() => handleTextImport()}
               disabled={loading || !rawText.trim()}
-              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50 hover:opacity-90"
-              style={{ backgroundColor: 'var(--color-primary)' }}
+              className="w-full text-white font-black py-4 rounded-xl transition flex items-center justify-center gap-2.5 text-sm tracking-wide shadow-xl cursor-pointer disabled:opacity-50 hover:brightness-110 active:scale-[0.99]"
+              style={{
+                background: 'linear-gradient(135deg, #f59e0b 0%, #ea580c 100%)',
+                color: '#ffffff',
+                boxShadow: '0 8px 20px -4px rgba(234, 88, 12, 0.45)',
+                border: '1px solid rgba(245, 158, 11, 0.4)'
+              }}
             >
               <Sparkles className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              {loading 
-                ? t('processingSavingRecipe', 'Processing & saving recipe...') 
-                : isTokenEnabled && tokenCosts.text > 0
-                  ? `${t('saveAndImportRecipe', 'Save & Import Recipe')} (${tokenCosts.text} ${tokenSymbol})`
-                  : `${t('saveAndImportRecipe', 'Save & Import Recipe')} (${t('freeBadge', 'Free')})`}
+              <span>
+                {loading 
+                  ? t('processingSavingRecipe', 'Processing & saving recipe...') 
+                  : isTokenEnabled && tokenCosts.text > 0
+                    ? `${t('nextBtn', 'Next')}: ${t('saveAndImportRecipe', 'Save & Import Recipe')} (${tokenCosts.text} ${tokenSymbol})`
+                    : `${t('nextBtn', 'Next')}: ${t('saveAndImportRecipe', 'Save & Import Recipe')} (${t('freeBadge', 'Free')})`}
+              </span>
+              <ArrowRight className="h-4 w-4 ml-0.5" />
             </button>
           </div>
         )}
@@ -936,19 +1100,27 @@ export default function ImportPage() {
         {activeTab === 'image' && (
           <div className="space-y-4">
             <div>
-              <label className="block text-xs font-bold mb-2" style={{ color: 'var(--color-text)' }}>
-                {t('recipeImagesMax5', 'Recipe Images (up to 5)')}
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                  {t('recipeImagesMax5', 'Recipe Images (up to 5)')}
+                </label>
+                <span className="text-[10px] font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('pasteClipboardPrompt', 'Or paste screenshot from clipboard (Ctrl+V)')}
+                </span>
+              </div>
 
+              {/* Drag and Drop Zone with depth tracking & visual feedback */}
               <div
-                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
-                onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}
-                onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); if (e.dataTransfer.files) handleFilesAdded(e.dataTransfer.files); }}
+                onDragEnter={handleDragEnter}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed rounded-2xl py-12 px-6 flex flex-col items-center justify-center text-center cursor-pointer transition relative"
+                className="border-2 border-dashed rounded-3xl py-12 px-6 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-200 relative select-none"
                 style={{
-                  borderColor: isDragging ? 'var(--color-primary)' : 'var(--color-border)',
-                  backgroundColor: 'var(--color-inner-dark)'
+                  borderColor: isDragging ? '#ea580c' : 'var(--color-border)',
+                  backgroundColor: isDragging ? 'rgba(234, 88, 12, 0.08)' : 'var(--color-inner-dark)',
+                  transform: isDragging ? 'scale(1.008)' : 'scale(1)'
                 }}
               >
                 <input
@@ -956,21 +1128,34 @@ export default function ImportPage() {
                   type="file"
                   accept="image/png, image/jpeg, image/webp"
                   multiple
-                  onChange={(e) => e.target.files && handleFilesAdded(e.target.files)}
+                  onChange={(e) => {
+                    if (e.target.files) handleFilesAdded(e.target.files);
+                    e.target.value = '';
+                  }}
                   className="hidden"
                 />
-                <div className="w-14 h-14 rounded-full flex items-center justify-center mb-3">
-                  <Upload className="h-10 w-10 stroke-[2.2]" style={{ color: 'var(--color-primary)' }} />
+                <div 
+                  className="w-16 h-16 rounded-2xl flex items-center justify-center mb-3.5 border pointer-events-none transition-transform duration-200"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: isDragging ? '#ea580c' : 'var(--color-border)',
+                    transform: isDragging ? 'scale(1.1)' : 'scale(1)'
+                  }}
+                >
+                  <Upload 
+                    className="h-8 w-8 stroke-[2.3]" 
+                    style={{ color: isDragging ? '#ea580c' : 'var(--color-primary)' }} 
+                  />
                 </div>
-                <p className="text-xs sm:text-sm font-semibold tracking-wide" style={{ color: 'var(--color-text)' }}>
-                  <span style={{ color: 'var(--color-primary)' }} className="font-bold">
-                    {t('clickToUpload', 'Click to upload')}
+                <p className="text-xs sm:text-sm font-semibold tracking-wide pointer-events-none" style={{ color: 'var(--color-text)' }}>
+                  <span style={{ color: isDragging ? '#ea580c' : 'var(--color-primary)' }} className="font-extrabold">
+                    {isDragging ? t('dropImagesHere', 'Drop recipe photos here...') : t('clickToUpload', 'Click to upload')}
                   </span>{' '}
                   <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('orDragAndDrop', 'or drag and drop')}
+                    {!isDragging && t('orDragAndDrop', 'or drag and drop')}
                   </span>
                 </p>
-                <p className="text-[11px] font-medium mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                <p className="text-[11px] font-medium mt-1 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}>
                   {t('pngJpgWebpMax5', 'PNG, JPG, or WEBP (Cookbook captures or food photos)')}
                 </p>
               </div>
@@ -985,7 +1170,7 @@ export default function ImportPage() {
                   {previewUrls.map((previewUrl, idx) => (
                     <div
                       key={idx}
-                      className="relative h-24 rounded-xl overflow-hidden border group shadow"
+                      className="relative h-24 rounded-2xl overflow-hidden border group shadow"
                       style={{
                         borderColor: 'var(--color-border)',
                         backgroundColor: 'var(--color-inner-dark)'
@@ -995,9 +1180,9 @@ export default function ImportPage() {
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); removeFile(idx); }}
-                        className="absolute top-1 right-1 p-1 bg-black/70 hover:bg-black text-white rounded-full transition cursor-pointer"
+                        className="absolute top-1.5 right-1.5 p-1 bg-black/75 hover:bg-black text-white rounded-full transition cursor-pointer"
                       >
-                        <X className="h-3 w-3" />
+                        <X className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   ))}
@@ -1005,24 +1190,33 @@ export default function ImportPage() {
               </div>
             )}
 
+            {/* Ember Next Button */}
             <button
               type="button"
               onClick={() => handleImageImport()}
               disabled={loading || selectedFiles.length === 0}
-              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50 hover:opacity-90"
-              style={{ backgroundColor: 'var(--color-primary)' }}
+              className="w-full text-white font-black py-4 rounded-xl transition flex items-center justify-center gap-2.5 text-sm tracking-wide shadow-xl cursor-pointer disabled:opacity-50 hover:brightness-110 active:scale-[0.99]"
+              style={{
+                background: 'linear-gradient(135deg, #f59e0b 0%, #ea580c 100%)',
+                color: '#ffffff',
+                boxShadow: '0 8px 20px -4px rgba(234, 88, 12, 0.45)',
+                border: '1px solid rgba(245, 158, 11, 0.4)'
+              }}
             >
               <Upload className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              {loading 
-                ? t('aiSearchingRecipeImporting', 'AI OCR analyzing & importing...') 
-                : isTokenEnabled && tokenCosts.photo > 0
-                  ? `${t('importRecipeFromImages', 'Import Recipe from Images')} (${tokenCosts.photo} ${tokenSymbol})`
-                  : `${t('importRecipeFromImages', 'Import Recipe from Images')} (${t('freeBadge', 'Free')})`}
+              <span>
+                {loading 
+                  ? t('aiSearchingRecipeImporting', 'AI OCR analyzing & importing...') 
+                  : isTokenEnabled && tokenCosts.photo > 0
+                    ? `${t('nextBtn', 'Next')}: ${t('importRecipeFromImages', 'Import Recipe from Images')} (${tokenCosts.photo} ${tokenSymbol})`
+                    : `${t('nextBtn', 'Next')}: ${t('importRecipeFromImages', 'Import Recipe from Images')} (${t('freeBadge', 'Free')})`}
+              </span>
+              <ArrowRight className="h-4 w-4 ml-0.5" />
             </button>
           </div>
         )}
 
-        {/* Notifications & Language-Agnostic Status Banner */}
+        {/* Status Banner */}
         {status && (
           <div
             className="p-4 rounded-2xl border text-xs font-semibold flex items-center justify-between gap-2 animate-in fade-in"
@@ -1051,8 +1245,8 @@ export default function ImportPage() {
               <button
                 type="button"
                 onClick={() => setIsTokenPurchaseOpen(true)}
-                className="px-3 py-1 rounded-xl font-bold text-[11px] text-white shrink-0 cursor-pointer shadow-sm hover:opacity-90"
-                style={{ backgroundColor: 'var(--color-primary)' }}
+                className="px-3.5 py-1.5 rounded-xl font-bold text-xs text-white shrink-0 cursor-pointer shadow-sm hover:opacity-90"
+                style={{ backgroundColor: '#ea580c' }}
               >
                 {t('buyTokensNowBtn', 'Buy Tokens')}
               </button>
