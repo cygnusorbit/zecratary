@@ -397,6 +397,12 @@ export default function ChefAISettingsPage() {
           window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
           window.dispatchEvent(new Event('zecratary_settings_updated'));
           window.dispatchEvent(new Event('zecratary_engine_config_updated'));
+      window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
+      try {
+        const syncCh = new BroadcastChannel('zecratary_ai_settings_sync');
+        syncCh.postMessage({ model, provider });
+        syncCh.close();
+      } catch (_) {}
         }
       } else if (!silent) {
         setTestResult({ success: false, message: testData.error || t('geminiHandshakeFailed', 'Gemini handshake failed.') });
@@ -593,6 +599,12 @@ export default function ChefAISettingsPage() {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
       window.dispatchEvent(new Event('zecratary_engine_config_updated'));
+      window.dispatchEvent(new Event('zecratary_chef_ai_settings_updated'));
+      try {
+        const syncCh = new BroadcastChannel('zecratary_ai_settings_sync');
+        syncCh.postMessage({ model, provider });
+        syncCh.close();
+      } catch (_) {}
       window.dispatchEvent(new Event('zecratary_settings_updated'));
       window.dispatchEvent(new Event('storage'));
     }

@@ -2,11 +2,11 @@
 'use client';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
-  ChefHat, Send, SlidersHorizontal, Edit3, Clock, Flame, Users, RefreshCw, 
-  Calendar, CalendarPlus, X, Utensils, Loader2, User as UserIcon, 
-  Check, Sparkles, Bookmark, RotateCcw, Package, Plus, Trash2, ChevronDown, 
-  Cpu, Mic, MicOff, Volume2, Square, Award, ExternalLink,
-  Layers, CheckCircle2, ShoppingCart, Globe, Table, LayoutGrid
+  ChefHat, Send, SlidersHorizontal, Edit3, Clock, Flame, Users, 
+  Calendar, CalendarPlus, X, Loader2, User as UserIcon, 
+  Sparkles, Bookmark, Package, Plus, Trash2, ChevronDown, 
+  Cpu, Mic, MicOff, Volume2, Square, Award,
+  Layers, CheckCircle2, ShoppingCart, Globe
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -113,12 +113,13 @@ export default function ChefChatPage() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Synced from /admin/ai-settings (PostgreSQL backed)
+  // Dynamic AI Model & Settings Synced with /admin/ai-settings
+  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-3.5-flash-lite');
+  const [activeAiProvider, setActiveAiProvider] = useState<string>('gemini');
   const [questionnaireSections, setQuestionnaireSections] = useState<any[]>(DEFAULT_SECTIONS);
   const [activeTopicTitle, setActiveTopicTitle] = useState<string>('Standard Wizard');
   const [wizardQuestionsList, setWizardQuestionsList] = useState<string[]>([]);
   const [resultDisplayMode, setResultDisplayMode] = useState<'card' | 'compact' | 'detailed'>('card');
-  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.5-flash');
   const [strictDietEnforcement, setStrictDietEnforcement] = useState<boolean>(false);
   const [filterWordsList, setFilterWordsList] = useState<string[]>([]);
   const [enablePantryContext, setEnablePantryContext] = useState<boolean>(true);
@@ -132,14 +133,13 @@ export default function ChefChatPage() {
   const [enableVoiceInteraction, setEnableVoiceInteraction] = useState<boolean>(true);
   const [voiceSpeed, setVoiceSpeed] = useState<number>(1.0);
   const [voiceAutoPlay, setVoiceAutoPlay] = useState<boolean>(false);
-  const [selectedVoiceName, setSelectedVoiceName] = useState<string>('en-US-Neural2-F');
   
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const [isListening, setIsListening] = useState<boolean>(false);
   const speechRecognitionRef = useRef<any>(null);
 
-  // Token System Telemetry Synced with /admin/token-setting
+  // Token Telemetry
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
@@ -158,10 +158,9 @@ export default function ChefChatPage() {
   const [tastesList, setTastesList] = useState<string[]>(['Less Spicy']);
   const [newTasteInput, setNewTasteInput] = useState<string>('');
 
-  // Wizard Questionnaire Flow State
+  // Wizard Flow State
   const [wizardStep, setWizardStep] = useState<number | null>(null);
   const [wizardAnswers, setWizardAnswers] = useState<Record<number, string>>({});
-  const [savedRecipeIds, setSavedRecipeIds] = useState<string[]>([]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -264,7 +263,6 @@ export default function ChefChatPage() {
     return user.id || (user.email ? user.email.toLowerCase().trim() : 'usr_admin_1');
   }, []);
 
-  // 1. Load Pantry Inventory dynamically from PostgreSQL via /api/pantry
   const loadPantryItems = useCallback(async (user: User | null) => {
     try {
       const userKey = getUserKey(user);
@@ -284,10 +282,8 @@ export default function ChefChatPage() {
     } catch (_) {}
   }, [getUserKey]);
 
-  // 2. Load User Preferences from PostgreSQL
   const loadUserPreferences = useCallback(async (user: User | null) => {
     const userKey = getUserKey(user);
-
     try {
       const res = await fetch(`/api/user/preferences?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
       if (res.ok) {
@@ -412,7 +408,7 @@ export default function ChefChatPage() {
     showToast(t('prefsClearedToast', 'Preferences cleared!'));
   };
 
-  // 3. Load Telemetry, AI Model, and Token Costs
+  // Synchronize AI Model, Telemetry, and Dynamic Parameters from /admin/ai-settings
   const fetchTokenAndAiTelemetry = useCallback(async () => {
     try {
       const active = currentUserRef.current || getCurrentUser();
@@ -430,35 +426,36 @@ export default function ChefChatPage() {
         }
       }
 
-      try {
-        const sRes = await fetch('/api/admin/settings', { cache: 'no-store' });
-        if (sRes.ok) {
-          const sData = await safeJsonParse(sRes);
-          const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
-          if (chefCfg) {
-            if (chefCfg.model || sData?.aiModel) setActiveAiModel(chefCfg.model || sData?.aiModel);
-            if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
-            if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
-            if (chefCfg.enablePantryContext !== undefined) setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
-            if (chefCfg.maxPlanDays !== undefined) setMaxPlanDays(Number(chefCfg.maxPlanDays) || 7);
-            if (chefCfg.resultDisplayMode) setResultDisplayMode(chefCfg.resultDisplayMode);
-            if (chefCfg.enableVoiceInteraction !== undefined) setEnableVoiceInteraction(Boolean(chefCfg.enableVoiceInteraction));
-            if (chefCfg.voiceSpeed !== undefined) setVoiceSpeed(Number(chefCfg.voiceSpeed));
-            if (chefCfg.voiceAutoPlay !== undefined) setVoiceAutoPlay(Boolean(chefCfg.voiceAutoPlay));
-            if (chefCfg.selectedVoiceName) setSelectedVoiceName(chefCfg.selectedVoiceName);
-            if (Array.isArray(chefCfg.recommendedRecipeUrls)) setRecommendedRecipeUrls(chefCfg.recommendedRecipeUrls.filter(Boolean));
+      // Dynamic AI Settings from PostgreSQL admin_settings
+      const sRes = await fetch('/api/admin/settings', { cache: 'no-store' });
+      if (sRes.ok) {
+        const sData = await safeJsonParse(sRes);
+        const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
+        if (chefCfg) {
+          const resolvedModel = chefCfg.model || sData?.aiModel || sData?.settings?.aiModel;
+          const resolvedProvider = chefCfg.provider || sData?.aiProvider || sData?.settings?.aiProvider;
+          if (resolvedModel) setActiveAiModel(resolvedModel);
+          if (resolvedProvider) setActiveAiProvider(resolvedProvider);
 
-            if (Array.isArray(chefCfg.sections) && chefCfg.sections.length > 0) {
-              const activeSecs = chefCfg.sections.filter((s: any) => s.enabled !== false);
-              const toUse = activeSecs.length > 0 ? activeSecs : chefCfg.sections;
-              setQuestionnaireSections(toUse);
-              const allQs = toUse.flatMap((s: any) => s.questions || []);
-              setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
-            }
+          if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
+          if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
+          if (chefCfg.enablePantryContext !== undefined) setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
+          if (chefCfg.maxPlanDays !== undefined) setMaxPlanDays(Number(chefCfg.maxPlanDays) || 7);
+          if (chefCfg.resultDisplayMode) setResultDisplayMode(chefCfg.resultDisplayMode);
+          if (chefCfg.enableVoiceInteraction !== undefined) setEnableVoiceInteraction(Boolean(chefCfg.enableVoiceInteraction));
+          if (chefCfg.voiceSpeed !== undefined) setVoiceSpeed(Number(chefCfg.voiceSpeed));
+          if (chefCfg.voiceAutoPlay !== undefined) setVoiceAutoPlay(Boolean(chefCfg.voiceAutoPlay));
+          if (Array.isArray(chefCfg.recommendedRecipeUrls)) setRecommendedRecipeUrls(chefCfg.recommendedRecipeUrls.filter(Boolean));
+
+          if (Array.isArray(chefCfg.sections) && chefCfg.sections.length > 0) {
+            const activeSecs = chefCfg.sections.filter((s: any) => s.enabled !== false);
+            const toUse = activeSecs.length > 0 ? activeSecs : chefCfg.sections;
+            setQuestionnaireSections(toUse);
+            const allQs = toUse.flatMap((s: any) => s.questions || []);
+            setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
           }
         }
-      } catch (_) {}
-
+      }
     } catch (err) {
       console.warn('Failed to fetch /chef telemetry:', err);
     }
@@ -483,23 +480,41 @@ export default function ChefChatPage() {
       fetchTokenAndAiTelemetry();
     };
 
+    // Cross-Tab Broadcast Channel Sync
+    let channel: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        channel = new BroadcastChannel('zecratary_ai_settings_sync');
+        channel.onmessage = (event) => {
+          if (event.data?.model) setActiveAiModel(event.data.model);
+          if (event.data?.provider) setActiveAiProvider(event.data.provider);
+          handleSync();
+        };
+      } catch (_) {}
+    }
+
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_theme_mode_changed', handleSync);
     window.addEventListener('zecratary_tokens_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
     window.addEventListener('zecratary_pantry_updated', handleSync);
     window.addEventListener('zecratary_chef_ai_settings_updated', handleSync);
+    window.addEventListener('zecratary_engine_config_updated', handleSync);
     window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    window.addEventListener('zecratary_settings_updated', handleSync);
     window.addEventListener('zecratary_dictionary_updated', handleSync);
 
     return () => {
+      channel?.close();
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_theme_mode_changed', handleSync);
       window.removeEventListener('zecratary_tokens_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
       window.removeEventListener('zecratary_pantry_updated', handleSync);
       window.removeEventListener('zecratary_chef_ai_settings_updated', handleSync);
+      window.removeEventListener('zecratary_engine_config_updated', handleSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+      window.removeEventListener('zecratary_settings_updated', handleSync);
       window.removeEventListener('zecratary_dictionary_updated', handleSync);
     };
   }, [loadUserPreferences, loadPantryItems, fetchTokenAndAiTelemetry]);
@@ -682,6 +697,8 @@ export default function ChefChatPage() {
               questionnaireAnswers: updatedAnswers,
               userId: activeAuth?.id || 'usr_admin_1',
               userEmail: activeAuth?.email || 'admin@zecratary.com',
+              model: activeAiModel,
+              provider: activeAiProvider,
               preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
               pantry: enablePantryContext ? pantryIngredientsList : [],
               recommendedRecipeUrls
@@ -725,6 +742,8 @@ export default function ChefChatPage() {
           userId: activeAuth?.id || 'usr_admin_1',
           userEmail: activeAuth?.email || 'admin@zecratary.com',
           source: 'chef',
+          model: activeAiModel,
+          provider: activeAiProvider,
           preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
           pantry: enablePantryContext ? pantryIngredientsList : [],
           recommendedRecipeUrls
@@ -754,7 +773,6 @@ export default function ChefChatPage() {
     }
   };
 
-  // 4. Save Recipe to PostgreSQL Database and Local Cache
   const handleSaveRecipeToBook = async (recipe: any) => {
     try {
       const recId = 'saved_ai_' + Date.now();
@@ -785,7 +803,6 @@ export default function ChefChatPage() {
       const raw = localStorage.getItem('zecratary_saved_recipes') || '[]';
       const existing = JSON.parse(raw);
       localStorage.setItem('zecratary_saved_recipes', JSON.stringify([newRec, ...existing]));
-      setSavedRecipeIds(prev => [...prev, recId]);
 
       window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
       window.dispatchEvent(new Event('zecratary_recipes_updated'));
@@ -795,7 +812,6 @@ export default function ChefChatPage() {
     }
   };
 
-  // 5. Add Generated Meal Plan to Weekly Planner
   const handleScheduleMealPlan = async (plan: MealPlanData) => {
     try {
       const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
@@ -826,7 +842,6 @@ export default function ChefChatPage() {
     }
   };
 
-  // 6. Direct Grocery Synchronization for Recommended Recipe
   const handleAddIngredientsToGrocery = async (recipe: RecommendedRecipeData) => {
     try {
       const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
@@ -862,9 +877,25 @@ export default function ChefChatPage() {
 
   return (
     <div 
+      role="region"
+      aria-label={t('chefWorkspaceAria', 'AI Chef Workspace')}
       className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 flex flex-col h-[calc(100vh-5.5rem)] justify-between space-y-3 pb-2 font-sans relative transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
+      {/* Autofill Guardrail CSS Overrides */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        .chef-input:-webkit-autofill,
+        .chef-input:-webkit-autofill:hover,
+        .chef-input:-webkit-autofill:focus,
+        .chef-input:-webkit-autofill:active {
+          -webkit-box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
+          box-shadow: 0 0 0 1000px var(--color-inner-dark) inset !important;
+          -webkit-text-fill-color: var(--color-text) !important;
+          caret-color: var(--color-text) !important;
+          transition: background-color 50000s ease-in-out 0s !important;
+        }
+      `}} />
+
       {toastMessage && (
         <div 
           className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
@@ -879,8 +910,10 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOP HEADER - 100% FLUID BAR (Cleaned of Quota, Token Box & Strict Filters) */}
+      {/* TOP HEADER - 100% FLUID BAR */}
       <div 
+        role="region"
+        aria-label={t('chefHeaderAria', 'Chef Navigation and Active AI Model Status')}
         className="w-full space-y-3 border-b pb-3 shrink-0 transition-colors duration-200"
         style={{ borderColor: 'var(--color-border)' }}
       >
@@ -958,12 +991,24 @@ export default function ChefChatPage() {
               </div>
             )}
 
+            {/* DYNAMIC AI MODEL BADGE SYNCED WITH /admin/ai-settings */}
             <div 
-              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-xs"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-xs transition-all duration-200"
+              style={{ 
+                backgroundColor: 'var(--color-inner-dark)', 
+                borderColor: 'var(--color-border)', 
+                color: 'var(--color-text)' 
+              }}
+              title={(t('activeAiModelTooltip', 'Active AI Model: {model} ({provider})')).replace('{model}', activeAiModel).replace('{provider}', activeAiProvider.toUpperCase())}
             >
-              <Cpu className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-              <span className="font-mono">{activeAiModel}</span>
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <Cpu className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-primary)' }} />
+              <span className="font-mono text-[11px] font-extrabold tracking-tight truncate max-w-[140px] sm:max-w-none">
+                {activeAiModel}
+              </span>
             </div>
 
             <button
@@ -997,7 +1042,11 @@ export default function ChefChatPage() {
         </div>
 
         {/* DIETARY PREFERENCES PILLS */}
-        <div className="flex flex-wrap items-center gap-2 text-xs pt-1 animate-in fade-in">
+        <div 
+          role="region"
+          aria-label={t('dietaryPillsAria', 'Active Dietary and Allergy Preferences')}
+          className="flex flex-wrap items-center gap-2 text-xs pt-1 animate-in fade-in"
+        >
           <span 
             className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
             style={{
@@ -1078,8 +1127,12 @@ export default function ChefChatPage() {
         </div>
       </div>
 
-      {/* MAIN CONVERSATION STREAM - 100% WIDTH FLUID SCROLLER */}
-      <div className="flex-1 overflow-y-auto space-y-4 pr-1.5 custom-scrollbar w-full">
+      {/* MAIN CONVERSATION STREAM */}
+      <div 
+        role="region"
+        aria-label={t('chatConversationAria', 'Recipe Conversation Stream')}
+        className="flex-1 overflow-y-auto space-y-4 pr-1.5 custom-scrollbar w-full"
+      >
         {messages.length === 0 ? (
           <div className="text-center my-auto py-10 space-y-6 max-w-4xl mx-auto">
             <div 
@@ -1101,7 +1154,11 @@ export default function ChefChatPage() {
               </p>
             </div>
 
-            <div className="flex flex-wrap justify-center gap-2.5 max-w-3xl mx-auto">
+            <div 
+              role="region"
+              aria-label={t('questionnaireChipsAria', 'Questionnaire Topics and Quick Prompts')}
+              className="flex flex-wrap justify-center gap-2.5 max-w-3xl mx-auto"
+            >
               <button
                 type="button"
                 onClick={handleStartFullWizard}
@@ -1171,7 +1228,7 @@ export default function ChefChatPage() {
                   key={sec.id}
                   type="button"
                   onClick={() => handleStartTopicWizard(sec)}
-                  className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-xs hover:scale-[1.02] cursor-pointer flex items-center gap-2"
+                  className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-xs hover:scale-[1.02] cursor-pointer flex items-center gap-1.5"
                   style={{
                     backgroundColor: 'var(--color-card)',
                     borderColor: 'var(--color-border)',
@@ -1236,9 +1293,11 @@ export default function ChefChatPage() {
                     </div>
                   )}
 
-                  {/* MULTI-DAY MEAL PLAN PRESENTATION (100% RESPONSIVE GRID) */}
+                  {/* MULTI-DAY MEAL PLAN PRESENTATION */}
                   {m.plan && Array.isArray(m.plan.meals) && m.plan.meals.length > 0 && (
                     <div 
+                      role="region"
+                      aria-label={t('mealPlanAria', 'Generated Multi-Day Meal Plan')}
                       className="border rounded-3xl p-5 space-y-4 shadow-md transition-colors duration-200 w-full"
                       style={{
                         backgroundColor: 'var(--color-card)',
@@ -1381,9 +1440,11 @@ export default function ChefChatPage() {
                     </div>
                   )}
 
-                  {/* FINAL RECOMMENDED RECIPE SHOWCASE CARD */}
+                  {/* FINAL RECOMMENDED RECIPE SHOWCASE */}
                   {m.recommendedRecipe && (
                     <div 
+                      role="region"
+                      aria-label={t('recommendedRecipeAria', 'Final Recommended Recipe Card')}
                       className="border rounded-3xl p-5 space-y-4 shadow-md transition-colors duration-200 w-full"
                       style={{
                         backgroundColor: 'var(--color-card)',
@@ -1558,6 +1619,8 @@ export default function ChefChatPage() {
       {/* PRESET ANSWERS */}
       {wizardStep !== null && currentPresetOptions.length > 0 && (
         <div 
+          role="region"
+          aria-label={t('presetAnswersAria', 'Preset Step Answers')}
           className="p-3 rounded-2xl border space-y-2 animate-in fade-in transition-colors duration-200 w-full"
           style={{
             backgroundColor: 'var(--color-card)',
@@ -1602,7 +1665,11 @@ export default function ChefChatPage() {
 
       {/* TOPIC LAUNCHER CHIPS */}
       {wizardStep === null && activeQuestionnaireSections.length > 0 && (
-        <div className="flex items-center gap-2 overflow-x-auto py-1 px-1 custom-scrollbar shrink-0 w-full">
+        <div 
+          role="region"
+          aria-label={t('questionnaireChipsAria', 'Questionnaire Topics and Quick Prompts')}
+          className="flex items-center gap-2 overflow-x-auto py-1 px-1 custom-scrollbar shrink-0 w-full"
+        >
           <span className="text-[10px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
             <Sparkles className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> {t('questionnaires', 'Questionnaires:')}
           </span>
@@ -1627,8 +1694,10 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* PROMPT INPUT BAR */}
+      {/* PROMPT INPUT BAR WITH DEFENSIVE AUTOFILL GUARDRAILS */}
       <div 
+        role="region"
+        aria-label={t('promptInputAria', 'Culinary Prompt Input Bar')}
         className="w-full border rounded-2xl p-1.5 flex items-center gap-2 shrink-0 shadow-xl transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
@@ -1652,15 +1721,23 @@ export default function ChefChatPage() {
         )}
 
         <input
+          id="chef_prompt_query_field"
+          name="chef_prompt_query_field"
           type="text"
           autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
           data-lpignore="true"
+          data-1p-ignore="true"
+          data-bwignore="true"
           data-form-type="other"
+          aria-label={t('promptInputAria', 'Culinary Prompt Input Bar')}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
           placeholder={isListening ? t('listeningToVoice', 'Listening to your voice...') : `${t('askPromptPlaceholder', 'Ask recipes, cooking tips, or meal plan requests...')} (${chefCost} ${tokenSymbol})`}
-          className="bg-transparent border-none text-sm px-2 flex-1 outline-none font-normal"
+          className="chef-input bg-transparent border-none text-sm px-2 flex-1 outline-none font-normal"
           style={{ color: 'var(--color-text)' }}
         />
         
@@ -1691,6 +1768,9 @@ export default function ChefChatPage() {
       {/* ACCESSIBLE DIETARY PREFERENCES MODAL */}
       {showPreferences && (
         <div 
+          role="dialog"
+          aria-modal="true"
+          aria-label={t('recipePreferencesAria', 'Recipe Preferences Configuration')}
           onClick={() => setShowPreferences(false)}
           className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto cursor-pointer"
         >
@@ -1722,6 +1802,7 @@ export default function ChefChatPage() {
               <button
                 type="button"
                 onClick={() => setShowPreferences(false)}
+                aria-label={t('close', 'Close')}
                 className="p-2 rounded-xl border transition cursor-pointer shadow-xs hover:opacity-80"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
@@ -1852,21 +1933,29 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
+              {/* INGREDIENTS TO AVOID WITH AUTOFILL GUARDRAILS */}
+              <div 
+                role="region"
+                aria-label={t('ingredientsToAvoidTitle', 'Ingredients to Avoid')}
+                className="space-y-2"
+              >
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('ingredientsToAvoidTitle', 'Ingredients to Avoid')}
                 </label>
-                <div 
-                  role="region"
-                  data-lpignore="true"
-                  className="flex gap-2"
-                >
+                <div className="flex gap-2">
                   <input
+                    id="chef_avoid_ingredient_input"
+                    name="chef_avoid_ingredient_input"
                     type="text"
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
-                    spellCheck="false"
+                    aria-label={t('typeIngredientPlaceholder', 'Type an ingredient...')}
                     placeholder={t('typeIngredientPlaceholder', 'Type an ingredient...')}
                     value={newAvoidInput}
                     onChange={(e) => setNewAvoidInput(e.target.value)}
@@ -1876,7 +1965,7 @@ export default function ChefChatPage() {
                         handleAddAvoid();
                       }
                     }}
-                    className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-xs"
+                    className="chef-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-xs"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -1929,7 +2018,12 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              <div className="space-y-2">
+              {/* TASTES & COOKING STYLES WITH AUTOFILL GUARDRAILS */}
+              <div 
+                role="region"
+                aria-label={t('tastesTitle', 'Tastes & Cooking Styles')}
+                className="space-y-2"
+              >
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('tastesTitle', 'Tastes & Cooking Styles')}
                 </label>
@@ -1937,17 +2031,20 @@ export default function ChefChatPage() {
                   {t('tastesDesc', "Anything else about how you like to eat. We'll factor these into your recipes.")}
                 </p>
 
-                <div 
-                  role="region"
-                  data-lpignore="true"
-                  className="flex gap-2"
-                >
+                <div className="flex gap-2">
                   <input
+                    id="chef_taste_preference_input"
+                    name="chef_taste_preference_input"
                     type="text"
                     autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
                     data-form-type="other"
-                    spellCheck="false"
+                    aria-label={t('tastesPlaceholder', 'e.g. prefers larger portions, loves umami, extra garlic...')}
                     placeholder={t('tastesPlaceholder', 'e.g. prefers larger portions, loves umami, extra garlic...')}
                     value={newTasteInput}
                     onChange={(e) => setNewTasteInput(e.target.value)}
@@ -1957,7 +2054,7 @@ export default function ChefChatPage() {
                         handleAddTaste();
                       }
                     }}
-                    className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-xs"
+                    className="chef-input flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-xs"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -2050,7 +2147,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOKEN PURCHASE MODAL (Triggered on-demand when tokens run low) */}
+      {/* TOKEN PURCHASE MODAL */}
       <TokenPurchaseModal
         isOpen={isTokenPurchaseOpen}
         onClose={() => setIsTokenPurchaseOpen(false)}
