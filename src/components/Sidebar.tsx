@@ -1,52 +1,20 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import packageInfo from '../../package.json';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import {
-  Bell,
-  BellRing,
-  Book,
-  BookOpen,
-  Calendar,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  Coins,
-  Cpu,
-  CreditCard,
-  Database,
-  Globe,
-  HardDrive,
-  Key,
-  Landmark,
-  Languages,
-  Layers,
-  LayoutDashboard,
-  LayoutTemplate,
-  LogOut,
-  Menu,
-  MessageSquare,
-  Moon,
-  Package,
-  Plus,
-  Receipt,
-  Settings,
-  ShieldCheck,
-  ShoppingCart,
-  SquarePen,
-  Sun,
-  Tag,
-  UploadCloud,
-  User as UserIcon,
-  UserPlus,
-  Utensils,
-  Wallet,
-  X
+import { 
+  LayoutDashboard, MessageSquare, UploadCloud, SquarePen, BookOpen, 
+  Book, Package, ShoppingCart, Calendar, LayoutTemplate, UserPlus, 
+  ShieldCheck, CreditCard, Tag, Utensils, Settings, LogOut, 
+  Menu, X, Wallet, Languages, Cpu, Moon, Sun, Key, Coins, 
+  Bell, BellRing, User as UserIcon, ChevronDown, 
+  Layers, Check, Database, Receipt, Globe, Mail
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
-import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON } from '@/lib/siteConfig';
-import { DEFAULT_SUPPORTED_LANGUAGES, DEFAULT_SYSTEM_LANGUAGES, SupportedLanguage, useTranslation } from '@/components/LanguageProvider';
+import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
+import { useTranslation } from '@/components/LanguageProvider';
 
 interface InAppNotification {
   id: string;
@@ -56,7 +24,6 @@ interface InAppNotification {
   isRead: boolean;
   actionUrl?: string;
   actionLabel?: string;
-  timestamp?: string;
 }
 
 const CURRENCY_SYMBOLS: Record<string, string> = {
@@ -68,7 +35,7 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   JPY: '¥'
 };
 
-const DEFAULT_FLAG_MAP: Record<string, string> = {
+const LANGUAGE_FLAG_MAP: Record<string, string> = {
   en: '🇺🇸',
   es: '🇪🇸',
   fr: '🇫🇷',
@@ -80,53 +47,17 @@ const DEFAULT_FLAG_MAP: Record<string, string> = {
   ko: '🇰🇷',
   pt: '🇵🇹',
   ru: '🇷🇺',
-  ar: '🇸🇦'
+  ar: '🇸🇦',
+  nl: '🇳🇱',
+  hi: '🇮🇳',
+  vi: '🇻🇳',
+  id: '🇮🇩',
+  tr: '🇹🇷'
 };
 
-const getLanguageFlag = (code?: string, explicitFlag?: string): string => {
-  if (explicitFlag && explicitFlag !== '🌐') return explicitFlag;
-  if (!code || typeof code !== 'string') return '🌐';
-  return DEFAULT_FLAG_MAP[code.toLowerCase().trim()] || '🌐';
-};
-
-const normalizeLanguageItem = (item: any): SupportedLanguage => {
-  if (!item) {
-    return { id: 'lang_en', code: 'en', name: 'English', native: 'English', flag: '🇺🇸', status: 'active', is_default: true };
-  }
-  if (typeof item === 'string') {
-    const code = item.toLowerCase().trim();
-    return {
-      id: `lang_${code}`,
-      code,
-      name: code.toUpperCase(),
-      native: code.toUpperCase(),
-      flag: getLanguageFlag(code),
-      status: 'active',
-      is_default: code === 'en'
-    };
-  }
-  const rawCode = item.code || item.locale || item.lang || item.id || 'en';
-  const code = typeof rawCode === 'string' ? rawCode.toLowerCase().trim() : 'en';
-  const name = item.name || item.label || code.toUpperCase();
-  const native = item.native || item.nativeName || name;
-  const flag = getLanguageFlag(code, item.flag);
-  const status = typeof item.status === 'string' ? item.status.toLowerCase().trim() : 'active';
-  return {
-    id: item.id || `lang_${code}`,
-    code,
-    name,
-    native,
-    flag,
-    direction: item.direction || (code === 'ar' || code === 'he' ? 'rtl' : 'ltr'),
-    status: status || 'active',
-    is_default: Boolean(item.is_default || item.isDefault)
-  };
-};
-
-const isCodeMatch = (item: any, target: string): boolean => {
-  if (!item || !target) return false;
-  const itemCode = typeof item === 'string' ? item : (item.code || item.locale || item.lang || '');
-  return typeof itemCode === 'string' && itemCode.toLowerCase().trim() === target.toLowerCase().trim();
+const getLanguageFlag = (code: string): string => {
+  if (!code) return '🌐';
+  return LANGUAGE_FLAG_MAP[code.toLowerCase().trim()] || '🌐';
 };
 
 const isImageIcon = (icon?: unknown): icon is string =>
@@ -138,12 +69,11 @@ const isImageIcon = (icon?: unknown): icon is string =>
   );
 
 export default function Sidebar() {
+  // 1. ALL REACT 19 HOOKS EXECUTED UNCONDITIONALLY AT TOP LEVEL
   const pathname = usePathname() || '';
   const langContext = useTranslation();
   const t = langContext?.t || ((k: string, fb?: string) => fb || k);
-
-  const rawLang = (langContext as any)?.currentLanguage || (langContext as any)?.locale || (langContext as any)?.language || 'en';
-  const currentLanguage = typeof rawLang === 'string' && rawLang.trim() ? rawLang.trim().toLowerCase() : 'en';
+  const currentLanguage = (langContext as any)?.currentLanguage || (langContext as any)?.locale || (langContext as any)?.language || 'en';
   const changeLanguage = (langContext as any)?.changeLanguage || (langContext as any)?.setLocale || (langContext as any)?.setLanguage || (() => {});
 
   const [mounted, setMounted] = useState<boolean>(false);
@@ -154,10 +84,7 @@ export default function Sidebar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
 
-  // Dynamic Languages directly synced with /admin/language
-  const [availableLanguages, setAvailableLanguages] = useState<SupportedLanguage[]>(DEFAULT_SYSTEM_LANGUAGES);
-
-  // Accordion Sections State
+  // Accordion Sections
   const [openSections, setOpenSections] = useState<{
     create: boolean;
     manage: boolean;
@@ -172,13 +99,13 @@ export default function Sidebar() {
     admin: false,
   });
 
-  // Dropdown States
+  // Top Bar Dropdowns
   const [walletDropdownOpen, setWalletDropdownOpen] = useState<boolean>(false);
   const [notifDropdownOpen, setNotifDropdownOpen] = useState<boolean>(false);
   const [langDropdownOpen, setLangDropdownOpen] = useState<boolean>(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState<boolean>(false);
 
-  // Balances
+  // Balances & Telemetry
   const [tokenBalance, setTokenBalance] = useState<number>(50);
   const [walletBalance, setWalletBalance] = useState<number>(0.00);
   const [currencySymbol, setCurrencySymbol] = useState<string>('$');
@@ -186,70 +113,16 @@ export default function Sidebar() {
 
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const isAuthRoute = Boolean(
-    pathname === '/login' ||
-    pathname === '/register' ||
-    pathname === '/forgot-password' ||
-    pathname.startsWith('/login') ||
-    pathname.startsWith('/register') ||
-    pathname.startsWith('/forgot-password')
-  );
-
-  const isHomePage = Boolean(
-    pathname === '/' ||
-    pathname === '' ||
-    pathname === '/index'
-  );
-
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const root = document.documentElement;
-
-    const updateLayoutMetrics = () => {
-      if (isAuthRoute || isHomePage) {
-        root.style.setProperty('--sidebar-width', '0px');
-        root.style.setProperty('--topbar-height', '0px');
-        return;
-      }
-      if (window.innerWidth < 768) {
-        root.style.setProperty('--sidebar-width', '0px');
-        root.style.setProperty('--topbar-height', '3.5rem');
-      } else {
-        root.style.setProperty('--sidebar-width', isCollapsed ? '5rem' : '16rem');
-        root.style.setProperty('--topbar-height', '4rem');
-      }
-    };
-
-    updateLayoutMetrics();
-    window.addEventListener('resize', updateLayoutMetrics);
-    return () => window.removeEventListener('resize', updateLayoutMetrics);
-  }, [isAuthRoute, isHomePage, isCollapsed]);
-
-  // Synchronize available system languages from /api/admin/languages & Context
-  const syncLanguages = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/languages?t=' + Date.now(), { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        const list = Array.isArray(data.languages) ? data.languages : [];
-        if (list.length > 0) {
-          setAvailableLanguages(list.map(normalizeLanguageItem));
-          return;
-        }
-      }
-    } catch (_) {}
-
-    if (Array.isArray((langContext as any)?.availableLanguages) && (langContext as any).availableLanguages.length > 0) {
-      setAvailableLanguages((langContext as any).availableLanguages.map(normalizeLanguageItem));
-    }
-  }, [langContext]);
-
   const syncUserState = useCallback(() => {
     try {
       const u = getCurrentUser();
       setCurrentUser(u);
       if (typeof getSiteName === 'function') setSiteName(getSiteName());
-      if (typeof getSiteIcon === 'function') setSiteIcon(getSiteIcon());
+      if (typeof getSiteIcon === 'function') {
+        const icon = getSiteIcon();
+        setSiteIcon(icon);
+        updateFavicon(icon);
+      }
 
       if (typeof window !== 'undefined') {
         const themeMode = localStorage.getItem('zecratary_theme_mode') || 'dark';
@@ -257,11 +130,6 @@ export default function Sidebar() {
 
         const cur = localStorage.getItem('zecratary_currency') || 'USD';
         setCurrencySymbol(CURRENCY_SYMBOLS[cur] || '$');
-
-        const storedCollapsed = localStorage.getItem('zecratary_sidebar_collapsed');
-        if (storedCollapsed !== null) {
-          setIsCollapsed(storedCollapsed === 'true');
-        }
 
         const storedSections = localStorage.getItem('zecratary_sidebar_sections');
         if (storedSections) {
@@ -281,6 +149,7 @@ export default function Sidebar() {
     } catch (_) {}
   }, []);
 
+  // Route Auto-Expansion
   useEffect(() => {
     if (!pathname) return;
     if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
@@ -296,63 +165,17 @@ export default function Sidebar() {
     }
   }, [pathname]);
 
-  
-  useEffect(() => {
-    let channel: BroadcastChannel | null = null;
-    try {
-      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-        channel = new BroadcastChannel('zecratary_balance_channel');
-        channel.onmessage = (event) => {
-          if (event.data) {
-            if (event.data.wallet_balance !== undefined) setWalletBalance(Number(event.data.wallet_balance) || 0);
-            if (event.data.token_balance !== undefined) setTokenBalance(Number(event.data.token_balance) || 0);
-          }
-        };
-      }
-    } catch (_) {}
-
-    const handleExternalBalance = (e: any) => {
-      if (e?.detail) {
-        if (e.detail.wallet_balance !== undefined) setWalletBalance(Number(e.detail.wallet_balance) || 0);
-        if (e.detail.token_balance !== undefined) setTokenBalance(Number(e.detail.token_balance) || 0);
-      }
-      fetchWalletData();
-      fetchUserTokenAndNotifications();
-    };
-
-    window.addEventListener('zecratary_wallet_updated', handleExternalBalance);
-    window.addEventListener('zecratary_tokens_updated', handleExternalBalance);
-    window.addEventListener('zecratary_token_updated', handleExternalBalance);
-    window.addEventListener('focus', () => { fetchWalletData(); fetchUserTokenAndNotifications(); });
-
-    return () => {
-      if (channel) channel.close();
-      window.removeEventListener('zecratary_wallet_updated', handleExternalBalance);
-      window.removeEventListener('zecratary_tokens_updated', handleExternalBalance);
-      window.removeEventListener('zecratary_token_updated', handleExternalBalance);
-    };
-  }, [fetchWalletData, fetchUserTokenAndNotifications]);
-
   useEffect(() => {
     setMounted(true);
     syncUserState();
-    syncLanguages();
 
     const handleSync = () => syncUserState();
-    const handleLangSync = () => syncLanguages();
-
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('zecratary_site_settings_changed', handleSync);
     window.addEventListener('zecratary_theme_mode_changed', handleSync);
     window.addEventListener('zecratary_wallet_updated', handleSync);
     window.addEventListener('zecratary_tokens_updated', handleSync);
-
-    // Dynamic Language Synchronization Events from /admin/language
-    window.addEventListener('zecratary_languages_updated', handleLangSync);
-    window.addEventListener('zecratary_locale_changed', handleLangSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleLangSync);
-    window.addEventListener('focus', handleLangSync);
 
     return () => {
       window.removeEventListener('storage', handleSync);
@@ -361,13 +184,8 @@ export default function Sidebar() {
       window.removeEventListener('zecratary_theme_mode_changed', handleSync);
       window.removeEventListener('zecratary_wallet_updated', handleSync);
       window.removeEventListener('zecratary_tokens_updated', handleSync);
-
-      window.removeEventListener('zecratary_languages_updated', handleLangSync);
-      window.removeEventListener('zecratary_locale_changed', handleLangSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleLangSync);
-      window.removeEventListener('focus', handleLangSync);
     };
-  }, [syncUserState, syncLanguages]);
+  }, [syncUserState]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -381,18 +199,6 @@ export default function Sidebar() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  const toggleCollapse = () => {
-    setIsCollapsed(prev => {
-      const next = !prev;
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('zecratary_sidebar_collapsed', next ? 'true' : 'false');
-        } catch (_) {}
-      }
-      return next;
-    });
-  };
 
   const toggleSection = (sectionKey: keyof typeof openSections) => {
     setOpenSections(prev => {
@@ -428,34 +234,24 @@ export default function Sidebar() {
     }
   };
 
-  // Only render ACTIVE system languages from /admin/language
-  const activeLanguages = useMemo(() => {
-    const rawList = Array.isArray(availableLanguages) && availableLanguages.length > 0 
-      ? availableLanguages 
-      : DEFAULT_SYSTEM_LANGUAGES;
-    return rawList
-      .map(normalizeLanguageItem)
-      .filter((l: any) => l.status === 'active' || l.status === '');
-  }, [availableLanguages]);
+  // 2. STRICT ROUTE & AUTHENTICATION SUPPRESSION GUARD
+  const isAuthRoute = Boolean(
+    pathname === '/login' ||
+    pathname === '/register' ||
+    pathname === '/forgot-password' ||
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/register') ||
+    pathname.startsWith('/forgot-password')
+  );
 
-  // Safe Resolution of Active Language Object
-  const currentLangObj = useMemo(() => {
-    const safeLang = typeof currentLanguage === 'string' && currentLanguage ? currentLanguage.toLowerCase().trim() : 'en';
-    const found = activeLanguages.find((l: any) => isCodeMatch(l, safeLang)) || 
-                  availableLanguages.map(normalizeLanguageItem).find((l: any) => isCodeMatch(l, safeLang));
-    
-    if (found) return found;
-    return { 
-      id: `lang_${safeLang}`,
-      code: safeLang, 
-      name: safeLang.toUpperCase(),
-      native: safeLang.toUpperCase(), 
-      flag: getLanguageFlag(safeLang),
-      status: 'active'
-    };
-  }, [activeLanguages, availableLanguages, currentLanguage]);
+  const isHomePage = Boolean(
+    pathname === '/' ||
+    pathname === '' ||
+    pathname === '/index'
+  );
 
-  if (!mounted || isAuthRoute || isHomePage) {
+  // STRICT RULE: Only logged-in users can see sidebar & topbar, and NEVER on the public homepage ('/')
+  if (!mounted || isAuthRoute || isHomePage || !currentUser) {
     return null;
   }
 
@@ -465,19 +261,8 @@ export default function Sidebar() {
     currentUser?.email?.includes('admin')
   );
 
-  const isRouteActive = (route: string): boolean => {
-    if (!pathname) return false;
-    const cleanPath = pathname === '/' ? '/' : pathname.replace(/\/+$/, '');
-    const cleanRoute = route === '/' ? '/' : route.replace(/\/+$/, '');
-
-    if (cleanRoute === '/' || cleanRoute === '/admin') {
-      return cleanPath === cleanRoute;
-    }
-    return cleanPath === cleanRoute || cleanPath.startsWith(`${cleanRoute}/`);
-  };
-
   const navClass = (route: string) => {
-    const active = isRouteActive(route);
+    const active = pathname === route || (route !== '/' && pathname.startsWith(route));
     return `flex items-center gap-3 px-3 py-2 rounded-xl font-bold text-xs transition duration-200 cursor-pointer ${
       active
         ? 'text-white shadow-xs'
@@ -486,7 +271,7 @@ export default function Sidebar() {
   };
 
   const navStyle = (route: string) => {
-    const active = isRouteActive(route);
+    const active = pathname === route || (route !== '/' && pathname.startsWith(route));
     return active
       ? { backgroundColor: 'var(--color-primary)', color: '#ffffff' }
       : { color: 'var(--color-text-secondary)', backgroundColor: 'transparent' };
@@ -494,7 +279,7 @@ export default function Sidebar() {
 
   return (
     <>
-      {/* DESKTOP TOP BAR */}
+      {/* DESKTOP TOP BAR (Authenticated Workspace Only) */}
       <header
         id="zecratary-desktop-topbar"
         className="hidden md:flex fixed top-0 left-0 right-0 h-16 border-b z-40 items-center justify-between px-6 transition-colors duration-200"
@@ -508,7 +293,7 @@ export default function Sidebar() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={toggleCollapse}
+            onClick={() => setIsCollapsed(!isCollapsed)}
             className="p-1.5 rounded-lg border hover:bg-slate-800/20 cursor-pointer transition mr-1"
             style={{ borderColor: 'var(--color-border)' }}
             title={isCollapsed ? t('expandSidebar', 'Expand Menu') : t('collapseSidebar', 'Collapse Menu')}
@@ -525,9 +310,8 @@ export default function Sidebar() {
           </Link>
         </div>
 
-        {/* TOP CONTROLS */}
         <div className="flex items-center gap-3">
-          {/* WALLET / TOKEN BADGE */}
+          {/* WALLET / TOKEN PILL */}
           <div className="relative">
             <button
               type="button"
@@ -566,11 +350,11 @@ export default function Sidebar() {
                 </div>
                 <div className="p-2.5 rounded-xl border space-y-1" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                   <div className="flex justify-between items-center">
-                    <span className="text-muted-foreground">{t('availableTokens', 'Available Tokens')}:</span>
+                    <span className="text-muted-foreground">{t('availableTokens', 'Tokens')}:</span>
                     <span className="font-bold text-amber-400">{tokenBalance.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-muted-foreground">{t('walletCredits', 'Wallet Credits')}:</span>
+                    <span className="text-muted-foreground">{t('walletCredits', 'Credits')}:</span>
                     <span className="font-bold text-emerald-400">{currencySymbol}{walletBalance.toFixed(2)}</span>
                   </div>
                 </div>
@@ -661,7 +445,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* DYNAMIC TOP BAR LANGUAGE PICKER (SYNCS WITH /admin/language) */}
+          {/* LANGUAGE PICKER */}
           <div className="relative">
             <button
               type="button"
@@ -677,81 +461,42 @@ export default function Sidebar() {
                 borderColor: 'var(--color-border)',
                 color: 'var(--color-text)'
               }}
-              title={t('selectLanguage', 'Select Language')}
             >
-              <span className="text-sm">{currentLangObj.flag || getLanguageFlag(currentLanguage)}</span>
-              <span className="uppercase text-[11px] font-extrabold">{currentLangObj.code}</span>
-              <ChevronDown className="h-3 w-3 opacity-60" />
+              <span className="text-sm">{getLanguageFlag(currentLanguage || 'en')}</span>
+              <span className="uppercase text-[11px] font-extrabold">{currentLanguage || 'EN'}</span>
             </button>
 
             {langDropdownOpen && (
               <div
-                className="absolute right-0 mt-2 w-60 border rounded-2xl p-2.5 shadow-xl z-50 space-y-1.5 text-xs"
+                className="absolute right-0 mt-2 w-44 border rounded-2xl p-2 shadow-xl z-50 space-y-1 text-xs"
                 style={{
                   backgroundColor: 'var(--color-card)',
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text)'
                 }}
               >
-                <div 
-                  className="px-2 py-1 text-[10px] font-black uppercase tracking-wider text-muted-foreground opacity-70 border-b mb-1 flex items-center justify-between"
-                  style={{ borderColor: 'var(--color-border)' }}
-                >
-                  <span>{t('availableLanguages', 'LANGUAGES')}</span>
-                  <span className="text-[10px] font-extrabold text-[var(--color-primary)]">
-                    {activeLanguages.length} ACTIVE
-                  </span>
-                </div>
-
-                <div className="max-h-64 overflow-y-auto space-y-1 pr-0.5">
-                  {activeLanguages.map((rawLang: any, idx: number) => {
-                    const lang = normalizeLanguageItem(rawLang);
-                    const isSelected = isCodeMatch(lang.code, currentLanguage);
-                    return (
-                      <button
-                        key={lang.code || `lang_key_${idx}`}
-                        type="button"
-                        onClick={() => {
-                          if (typeof changeLanguage === 'function' && lang.code) {
-                            changeLanguage(lang.code);
-                          }
-                          setLangDropdownOpen(false);
-                        }}
-                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition ${
-                          isSelected ? 'bg-slate-800/60 shadow-xs' : 'hover:bg-slate-800/30'
-                        }`}
-                        style={isSelected ? { color: 'var(--color-primary)' } : {}}
-                      >
-                        <span className="flex items-center gap-2.5 truncate">
-                          <span className="text-base shrink-0 leading-none">{lang.flag || getLanguageFlag(lang.code)}</span>
-                          <span className="truncate">{lang.native || lang.name}</span>
-                        </span>
-                        <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                          <span className="text-[10px] font-black uppercase opacity-60">{lang.code}</span>
-                          {isSelected && <Check className="h-3.5 w-3.5 text-emerald-400" />}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {isAdmin && (
-                  <div className="pt-2 border-t mt-1" style={{ borderColor: 'var(--color-border)' }}>
-                    <Link
-                      href="/admin/language"
-                      onClick={() => setLangDropdownOpen(false)}
-                      className="flex items-center justify-between px-2.5 py-1.5 rounded-xl text-[11px] font-bold text-[var(--color-primary)] hover:bg-slate-800/20 transition"
-                    >
-                      <span>{t('manageLanguages', 'Configure Languages')}</span>
-                      <Languages className="h-3.5 w-3.5" />
-                    </Link>
-                  </div>
-                )}
+                {Object.keys(LANGUAGE_FLAG_MAP).map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => {
+                      if (typeof changeLanguage === 'function') changeLanguage(code);
+                      setLangDropdownOpen(false);
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg hover:bg-slate-800/40 text-xs font-semibold cursor-pointer transition"
+                  >
+                    <span className="flex items-center gap-2">
+                      <span>{LANGUAGE_FLAG_MAP[code]}</span>
+                      <span className="uppercase">{code}</span>
+                    </span>
+                    {currentLanguage === code && <Check className="h-3.5 w-3.5 text-emerald-400" />}
+                  </button>
+                ))}
               </div>
             )}
           </div>
 
-          {/* THEME TOGGLE */}
+          {/* DAY / DARK TOGGLE */}
           <button
             type="button"
             onClick={toggleTheme}
@@ -786,7 +531,7 @@ export default function Sidebar() {
               <div className="w-6 h-6 rounded-lg bg-[var(--color-primary)] text-white flex items-center justify-center font-black text-xs">
                 {currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
               </div>
-              <span className="text-xs font-bold max-w-[80px] truncate">{currentUser?.name || 'Chef'}</span>
+              <span className="text-xs font-bold max-w-[80px] truncate">{currentUser?.name || 'User'}</span>
               <ChevronDown className="h-3 w-3 opacity-60" />
             </button>
 
@@ -800,7 +545,7 @@ export default function Sidebar() {
                 }}
               >
                 <div className="px-3 py-1.5 border-b mb-1" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="font-bold truncate">{currentUser?.name || 'Chef'}</div>
+                  <div className="font-bold truncate">{currentUser?.name || 'User'}</div>
                   <div className="text-[10px] opacity-60 truncate">{currentUser?.email || ''}</div>
                 </div>
                 <Link
@@ -840,7 +585,7 @@ export default function Sidebar() {
         </div>
       </header>
 
-      {/* MOBILE TOP BAR */}
+      {/* MOBILE APPLICATION HEADER */}
       <header
         className="md:hidden fixed top-0 left-0 right-0 h-14 border-b z-40 flex items-center justify-between px-4 transition-colors duration-200"
         style={{
@@ -871,7 +616,7 @@ export default function Sidebar() {
         </button>
       </header>
 
-      {/* DESKTOP SIDEBAR DRAWER WITH ACCORDION SECTIONS */}
+      {/* AUTHENTICATED SIDEBAR NAVIGATION DRAWER */}
       <aside
         className={`hidden md:flex flex-col fixed top-16 bottom-0 left-0 border-r z-30 transition-all duration-200 ${
           isCollapsed ? 'w-20' : 'w-64'
@@ -894,7 +639,7 @@ export default function Sidebar() {
             </Link>
           </div>
 
-          {/* 1. CREATE GROUP */}
+          {/* 1. CREATE ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -927,7 +672,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 2. MANAGE GROUP */}
+          {/* 2. MANAGE ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -944,7 +689,7 @@ export default function Sidebar() {
 
             {(openSections.manage || isCollapsed) && (
               <div className="space-y-0.5">
-                <Link href="/recipes" className={navClass('/saved')} style={navStyle('/saved')} title={t('savedRecipes', 'Saved Recipes')}>
+                <Link href="/saved" className={navClass('/saved')} style={navStyle('/saved')} title={t('savedRecipes', 'Saved Recipes')}>
                   <BookOpen className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('savedRecipes', 'Saved Recipes')}</span>}
                 </Link>
@@ -960,7 +705,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 3. PLAN GROUP */}
+          {/* 3. PLAN ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -981,7 +726,7 @@ export default function Sidebar() {
                   <Calendar className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('mealPlanner', 'Meal Planner')}</span>}
                 </Link>
-                <Link href="/templates" className={navClass('/templates')} style={navStyle('/templates')} title={t('templates', 'Templates')}>
+                <Link href="/templates" className={navClass('/templates')} style={navStyle('/templates')} title={t('templates', 'Meal Blueprints')}>
                   <LayoutTemplate className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('templates', 'Meal Blueprints')}</span>}
                 </Link>
@@ -993,7 +738,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 4. FINANCE & UTILITY GROUP */}
+          {/* 4. FINANCIAL & UTILITY ACCORDION */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -1030,7 +775,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 5. ADMIN MANAGEMENT ACCORDION (With Notification Settings directly above Languages) */}
+          {/* 5. ADMIN MANAGEMENT ACCORDION */}
           {isAdmin && (
             <div className="space-y-1 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               {!isCollapsed ? (
@@ -1064,13 +809,9 @@ export default function Sidebar() {
                     <CreditCard className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('plans', 'Subscription Plans')}</span>}
                   </Link>
-                  <Link href="/admin/payment-gateway" className={navClass('/admin/payment-gateway')} style={navStyle('/admin/payment')} title={t('payments', 'Payments')}>
+                  <Link href="/admin/payment" className={navClass('/admin/payment')} style={navStyle('/admin/payment')} title={t('payments', 'Payments')}>
                     <ShieldCheck className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('payments', 'Payment Gateway')}</span>}
-                  </Link>
-                  <Link href="/admin/storage" className={navClass('/admin/storage')} style={navStyle('/admin/storage')} title={t('storage', 'Storage')}>
-                    <HardDrive className="h-4 w-4 shrink-0" />
-                    {!isCollapsed && <span>{t('storage', 'Storage Settings')}</span>}
                   </Link>
                   <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} style={navStyle('/admin/token-setting')} title={t('tokens', 'Tokens')}>
                     <Coins className="h-4 w-4 shrink-0" />
@@ -1080,13 +821,9 @@ export default function Sidebar() {
                     <Wallet className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('wallet', 'Wallet Settings')}</span>}
                   </Link>
-                  <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} style={navStyle('/admin/notification-settings')} title={t('notifications', 'Notifications')}>
+                  <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} style={navStyle('/admin/notification-settings')} title={t('notifications', 'Alerts')}>
                     <BellRing className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('notifications', 'Notifications')}</span>}
-                  </Link>
-                  <Link href="/admin/language" className={navClass('/admin/language')} style={navStyle('/admin/language')} title={t('languages', 'Languages')}>
-                    <Languages className="h-4 w-4 shrink-0" />
-                    {!isCollapsed && <span>{t('languageSettings', 'Languages')}</span>}
                   </Link>
                   <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} style={navStyle('/admin/ai-settings')} title={t('aiModels', 'AI Models')}>
                     <Cpu className="h-4 w-4 shrink-0" />
@@ -1113,9 +850,22 @@ export default function Sidebar() {
             </div>
           )}
         </div>
+
+        {/* FOOTER CONTROLS */}
+        <div className="p-3 border-t space-y-2" style={{ borderColor: 'var(--color-border)' }}>
+          <Link href="/contacts" className={navClass('/contacts')} style={navStyle('/contacts')} title={t('contactUs', 'Contact Support')}>
+            <Mail className="h-4 w-4 shrink-0" />
+            {!isCollapsed && <span>{t('contactUs', 'Contact Support')}</span>}
+          </Link>
+
+          <div className="flex items-center justify-between pt-1 px-1 text-[10px] font-mono opacity-60">
+            {!isCollapsed && <span>{t('version', 'App Version')}</span>}
+            <span>v{packageInfo.version || '1.0.0'}</span>
+          </div>
+        </div>
       </aside>
 
-      {/* MOBILE DRAWER */}
+      {/* MOBILE APPLICATION DRAWER */}
       {mobileMenuOpen && (
         <div
           className="md:hidden fixed inset-0 z-50 flex"
@@ -1144,7 +894,7 @@ export default function Sidebar() {
               <Link href="/chef" onClick={() => setMobileMenuOpen(false)} className={navClass('/chef')} style={navStyle('/chef')}>
                 <MessageSquare className="h-4 w-4" /> <span>{t('aiChef', 'AI Assistant')}</span>
               </Link>
-              <Link href="/recipes" onClick={() => setMobileMenuOpen(false)} className={navClass('/saved')} style={navStyle('/saved')}>
+              <Link href="/saved" onClick={() => setMobileMenuOpen(false)} className={navClass('/saved')} style={navStyle('/saved')}>
                 <BookOpen className="h-4 w-4" /> <span>{t('savedRecipes', 'Saved Recipes')}</span>
               </Link>
               <Link href="/books" onClick={() => setMobileMenuOpen(false)} className={navClass('/books')} style={navStyle('/books')}>
@@ -1166,29 +916,6 @@ export default function Sidebar() {
                 <Wallet className="h-4 w-4 text-emerald-400" /> <span>{t('walletPortal', 'Store Wallet')}</span>
               </Link>
             </div>
-
-            {isAdmin && (
-              <div className="space-y-1 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                <div className="px-3 text-[10px] font-extrabold uppercase tracking-wider text-[var(--color-primary)]">
-                  {t('adminAccess', 'Admin Management')}
-                </div>
-                <Link href="/admin" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin')} style={navStyle('/admin')}>
-                  <Settings className="h-4 w-4" /> <span>{t('adminOverview', 'Admin Overview')}</span>
-                </Link>
-                <Link href="/admin/notification-settings" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/notification-settings')} style={navStyle('/admin/notification-settings')}>
-                  <BellRing className="h-4 w-4" /> <span>{t('notifications', 'Notifications')}</span>
-                </Link>
-                <Link href="/admin/language" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/language')} style={navStyle('/admin/language')}>
-                  <Languages className="h-4 w-4" /> <span>{t('languageSettings', 'Languages')}</span>
-                </Link>
-                <Link href="/admin/storage" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/storage')} style={navStyle('/admin/storage')}>
-                  <HardDrive className="h-4 w-4" /> <span>{t('storage', 'Storage Settings')}</span>
-                </Link>
-                <Link href="/admin/users" onClick={() => setMobileMenuOpen(false)} className={navClass('/admin/users')} style={navStyle('/admin/users')}>
-                  <UserPlus className="h-4 w-4" /> <span>{t('users', 'User Accounts')}</span>
-                </Link>
-              </div>
-            )}
           </div>
         </div>
       )}

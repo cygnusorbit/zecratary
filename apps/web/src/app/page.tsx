@@ -1,423 +1,239 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { 
-  Sun, Moon, Globe, Shield, Zap, Sparkles, ChefHat, BookOpen, 
-  Clock, Users, Star, ArrowRight, Check, ExternalLink, ChevronDown, 
-  Utensils, Calendar, Layers, ShoppingCart, Heart, Minus, Plus, X 
+  Menu, X, Sun, Moon, Check, ArrowRight, Sparkles, ChefHat, 
+  Clock, Users, Heart, Layers, ShieldCheck, ChevronRight, Globe
 } from 'lucide-react';
-import { useTranslation } from '@/components/LanguageProvider';
-import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON } from '@/lib/siteConfig';
 import { getCurrentUser, User } from '@/lib/auth';
-import { applyThemeToDocument } from '@/lib/themeConfig';
+import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON } from '@/lib/siteConfig';
+import { useTranslation } from '@/components/LanguageProvider';
 
-interface PagePaddingSettings {
-  top?: string;
-  bottom?: string;
-  left?: string;
-  right?: string;
-  x?: string;
-  maxWidth?: string;
-}
-
-interface FooterSettings {
-  enabled?: boolean;
-  aboutText?: string;
-  copyrightText?: string;
-  bgColor?: string;
-  textColor?: string;
-  borderColor?: string;
-  accentColor?: string;
-  columns?: Array<{
-    title: string;
-    links: Array<{ label: string; url: string }>;
-  }>;
-  socials?: Record<string, string>;
-}
-
-interface DynamicPageRecord {
-  id: string;
-  title: string;
-  slug: string;
-  description?: string;
-  content?: string;
-  status: string;
-  is_default: boolean;
-  show_in_nav: boolean;
-  show_in_footer: boolean;
-  order_index: number;
-  elements: any[];
-  padding?: PagePaddingSettings;
-  footer?: FooterSettings;
-}
-
-
-const DEFAULT_FOOTER: FooterSettings = {
-  enabled: true,
-  aboutText: 'Zecratary is an autonomous culinary intelligence platform designed for intelligent recipe management, meal planning, and nutrition telemetry.',
-  copyrightText: '© 2026 Zecratary Inc. All rights reserved.',
-  columns: [
-    {
-      title: 'Platform',
-      links: [
-        { label: 'AI Assistant', url: '/chef' },
-        { label: 'Recipe Library', url: '/saved' },
-        { label: 'Cookbooks', url: '/books' },
-        { label: 'Meal Planner', url: '/planner' },
-      ],
-    },
-    {
-      title: 'Finance & Quotas',
-      links: [
-        { label: 'Token Portal', url: '/token' },
-        { label: 'Store Wallet', url: '/wallet' },
-        { label: 'Subscription Plans', url: '/subscriptions' },
-        { label: 'Billing History', url: '/billing' },
-      ],
-    },
-  ],
-  socials: {
-    twitter: 'https://twitter.com',
-    github: 'https://github.com/cygnusorbit/zecratary',
-    discord: 'https://discord.com',
-  },
+const LANGUAGE_FLAG_MAP: Record<string, string> = {
+  en: '🇺🇸',
+  es: '🇪🇸',
+  fr: '🇫🇷',
+  th: '🇹🇭',
+  de: '🇩🇪',
+  it: '🇮🇹',
+  ja: '🇯🇵',
+  zh: '🇨🇳',
+  ko: '🇰🇷',
+  pt: '🇵🇹',
+  ru: '🇷🇺',
+  ar: '🇸🇦',
+  nl: '🇳🇱',
+  hi: '🇮🇳',
+  vi: '🇻🇳',
+  id: '🇮🇩',
+  tr: '🇹🇷'
 };
 
-const DEFAULT_HOMEPAGE_FALLBACK: DynamicPageRecord = {
-  id: 'page_home',
-  title: 'Home',
-  slug: 'home',
-  description: 'Zecratary Autonomous Culinary Planning Platform',
-  status: 'published',
-  is_default: true,
-  show_in_nav: true,
-  show_in_footer: true,
-  order_index: 1,
-  padding: {
-    top: '2.5rem',
-    bottom: '4rem',
-    left: '1.5rem',
-    right: '1.5rem',
-    maxWidth: 'max-w-7xl',
-  },
-  footer: {
-    enabled: true,
-    aboutText: 'Zecratary is an autonomous culinary intelligence platform designed for intelligent recipe management, meal planning, and nutrition telemetry.',
-    copyrightText: '© 2026 Zecratary Inc. All rights reserved.',
-  },
-  elements: [
-    {
-      id: 'elem_hero',
-      type: 'title',
-      title: 'Autonomous Culinary Planning & Intelligence',
-      subtitle: 'Plan gourmet meals, track pantry macros, scale recipes, and command Chef AI with production-grade telemetry.',
-      level: 'h1',
-      align: 'center',
-    },
-    {
-      id: 'elem_recipes',
-      type: 'recipe',
-      title: 'Featured Culinary Dishes',
-      subtitle: 'Explore community-tested dishes with dynamic serving scaling and nutritional breakdowns.',
-      gridDensity: '3x3',
-      itemsPerPage: 6,
-    },
-    {
-      id: 'elem_plans',
-      type: 'subscription',
-      title: 'Subscription Tiers & AI Quotas',
-      subtitle: 'Choose the ideal culinary quota for home cooks, meal prep pros, and commercial kitchens.',
-      planBillingInterval: 'monthly',
-    },
-  ],
+const getLanguageFlag = (code: string): string => {
+  if (!code) return '🌐';
+  return LANGUAGE_FLAG_MAP[code.toLowerCase().trim()] || '🌐';
 };
 
-const DEFAULT_COMMUNITY_RECIPES = [
-  {
-    id: 'rec_pasta',
-    title: 'Truffle Mushroom Risotto',
-    description: 'Arborio rice slow-simmered in rich vegetable broth with wild mushrooms, shaved parmesan, and white truffle glaze.',
-    prep_time: '15m',
-    cook_time: '25m',
-    servings: '4',
-    is_favorite: true,
-    image: 'https://images.unsplash.com/photo-1633964913295-ceb43826e7c9?auto=format&fit=crop&w=800&q=80',
-    tags: ['Italian', 'Gourmet', 'Vegetarian'],
-    ingredients: ['1.5 cups Arborio rice', '4 cups Vegetable broth', '200g Wild mushrooms', '2 tbsp Truffle oil', '50g Parmesan'],
-    instructions: ['Sauté wild mushrooms until golden.', 'Gradually add warm broth to rice while stirring continuously.', 'Fold in truffle oil and parmesan.'],
-  },
-  {
-    id: 'rec_salmon',
-    title: 'Pan-Seared Citrus Salmon',
-    description: 'Crisp Atlantic salmon fillet glazed with honey-lime marinade, served over fragrant jasmine rice and grilled asparagus.',
-    prep_time: '10m',
-    cook_time: '15m',
-    servings: '2',
-    is_favorite: true,
-    image: 'https://images.unsplash.com/photo-1467003909585-2f8a72700288?auto=format&fit=crop&w=800&q=80',
-    tags: ['Seafood', 'High Protein', 'Keto'],
-    ingredients: ['2 Salmon fillets', '1 tbsp Honey', '1 Lime, juiced', '1 bunch Asparagus', '1 tbsp Olive oil'],
-    instructions: ['Season salmon with salt and pepper.', 'Sear skin-side down for 5 minutes, flip and glaze with lime-honey.', 'Serve hot with asparagus.'],
-  },
-  {
-    id: 'rec_salad',
-    title: 'Mediterranean Quinoa Bowl',
-    description: 'Organic rainbow quinoa tossed with English cucumbers, Kalamata olives, cherry tomatoes, and crumbled feta with lemon vinaigrette.',
-    prep_time: '12m',
-    cook_time: '0m',
-    servings: '3',
-    is_favorite: false,
-    image: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=800&q=80',
-    tags: ['Mediterranean', 'Healthy', 'Gluten-Free'],
-    ingredients: ['2 cups Cooked quinoa', '1 cup Cherry tomatoes', '1/2 cup Kalamata olives', '100g Feta cheese', '2 tbsp Lemon vinaigrette'],
-    instructions: ['Combine cooked quinoa with chopped vegetables.', 'Toss thoroughly with vinaigrette.', 'Top with crumbled feta cheese.'],
-  },
-];
-
-const DEFAULT_SUBSCRIPTION_PLANS = [
-  {
-    slug: 'taster',
-    name: 'Taster',
-    monthly_price: 0,
-    annual_price: 0,
-    tokens: '50,000',
-    features: ['5 Daily AI Recipe Ingests', 'Standard Meal Planner', 'Basic Shopping List', 'Community Recipe Access'],
-    is_free: true,
-  },
-  {
-    slug: 'starter',
-    name: 'Starter Chef',
-    monthly_price: 9.99,
-    annual_price: 89.99,
-    tokens: '100,000',
-    features: ['Unlimited AI Recipe Ingests', 'Automated Nutrition Tracking', 'Smart Pantry Inventory', 'Export to PDF & Markdown'],
-    is_free: false,
-  },
-  {
-    slug: 'pro',
-    name: 'Nutrition Pro',
-    monthly_price: 19.99,
-    annual_price: 189.99,
-    tokens: '250,000',
-    features: ['Deep Nutritional Macro Analytics', 'Multi-Cookbook Collections', 'Autonomous AI Meal Blueprints', 'Priority Cloud Ingestion'],
-    is_free: false,
-    is_popular: true,
-  },
-  {
-    slug: 'master',
-    name: 'Master Culinary',
-    monthly_price: 39.99,
-    annual_price: 349.99,
-    tokens: '600,000',
-    features: ['Unlimited High-Performance Tokens', 'Commercial Multi-Kitchen Quotas', 'Custom AI Prompt Engine', 'Dedicated VIP Concierge'],
-    is_free: false,
-  },
-];
+const isImageIcon = (icon?: unknown): icon is string =>
+  typeof icon === 'string' && (
+    icon.startsWith('/') ||
+    icon.startsWith('http://') ||
+    icon.startsWith('https://') ||
+    icon.startsWith('data:image')
+  );
 
 export default function DynamicHomePage() {
-  const params = useParams();
-  const router = useRouter();
-  const { t } = useTranslation();
+  const pathname = usePathname();
+  const langContext = useTranslation();
+  const t = langContext?.t || ((k: string, fb?: string) => fb || k);
+  const currentLanguage = (langContext as any)?.currentLanguage || (langContext as any)?.locale || (langContext as any)?.language || 'en';
+  const changeLanguage = (langContext as any)?.changeLanguage || (langContext as any)?.setLocale || (langContext as any)?.setLanguage || (() => {});
 
-  const [mounted, setMounted] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
   const [siteIcon, setSiteIcon] = useState<string>(DEFAULT_SITE_ICON);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
+  const [navPages, setNavPages] = useState<any[]>([]);
+  const [activePage, setActivePage] = useState<any>(null);
+  const [recipes, setRecipes] = useState<any[]>([]);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
+  const [langMenuOpen, setLangMenuOpen] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
 
-  // Dynamic CMS Page State
-  const [allPages, setAllPages] = useState<DynamicPageRecord[]>([]);
-  const [activePage, setActivePage] = useState<DynamicPageRecord>(DEFAULT_HOMEPAGE_FALLBACK);
-  const [allRecipes, setAllRecipes] = useState<any[]>(DEFAULT_COMMUNITY_RECIPES);
-  const [plans, setPlans] = useState<any[]>(DEFAULT_SUBSCRIPTION_PLANS);
+  // Synchronize body class for zero-offset full width
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      document.body.classList.add('is-homepage-view');
+      return () => {
+        document.body.classList.remove('is-homepage-view');
+      };
+    }
+  }, []);
 
-  // Element UI States
-  const [planBillingInterval, setPlanBillingInterval] = useState<'monthly' | 'annual'>('monthly');
-  const [activeRecipeModal, setActiveRecipeModal] = useState<any | null>(null);
-  const [modalServings, setModalServings] = useState<number>(4);
-  const [modalFontZoom, setModalFontZoom] = useState<number>(100);
-
-  // Determine active route slug
-  const rawSlug = params?.slug ? (typeof params.slug === 'string' ? params.slug : params.slug[0]) : '';
-  const currentSlug = rawSlug ? rawSlug.replace(/^\/+/, '') : 'home';
-
-  // 1. Synchronize Day/Night Theme State
-  const syncThemeState = useCallback(() => {
+  const syncSettings = useCallback(() => {
     try {
+      setCurrentUser(getCurrentUser());
+      if (typeof getSiteName === 'function') setSiteName(getSiteName());
+      if (typeof getSiteIcon === 'function') setSiteIcon(getSiteIcon());
+
       if (typeof window !== 'undefined') {
-        const storedMode = localStorage.getItem('zecratary_theme_mode');
-        const isDark = storedMode !== 'light' && storedMode !== 'day';
-        setIsDarkMode(isDark);
-        if (isDark) {
-          document.documentElement.classList.add('dark');
-          document.documentElement.classList.remove('light');
-        } else {
-          document.documentElement.classList.remove('dark');
-          document.documentElement.classList.add('light');
-        }
+        const theme = localStorage.getItem('zecratary_theme_mode') || 'dark';
+        setIsDarkMode(theme === 'dark');
       }
     } catch (_) {}
   }, []);
 
+  const fetchFrontendSettings = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await fetch(`/api/admin/frontend?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.pages)) {
+          // Filter published pages for top navigation
+          const published = data.pages.filter((p: any) => p.status === 'published' && p.show_in_nav !== false);
+          setNavPages(published);
+
+          // Find default homepage
+          const home = data.pages.find((p: any) => p.is_default || p.slug === 'home') || data.pages[0];
+          setActivePage(home);
+        }
+      }
+
+      // Fetch featured community recipes
+      const rRes = await fetch(`/api/admin/frontend?all_recipes=true&t=${Date.now()}`, { cache: 'no-store' });
+      if (rRes.ok) {
+        const rData = await rRes.json();
+        if (rData.success && Array.isArray(rData.recipes)) {
+          setRecipes(rData.recipes.slice(0, 6));
+        }
+      }
+    } catch (err) {
+      console.warn('Failed loading homepage frontend settings:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    syncSettings();
+    fetchFrontendSettings();
+
+    const handleSync = () => syncSettings();
+    window.addEventListener('storage', handleSync);
+    window.addEventListener('zecratary_auth_changed', handleSync);
+    window.addEventListener('zecratary_site_settings_changed', handleSync);
+    window.addEventListener('zecratary_theme_mode_changed', handleSync);
+
+    return () => {
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('zecratary_auth_changed', handleSync);
+      window.removeEventListener('zecratary_site_settings_changed', handleSync);
+      window.removeEventListener('zecratary_theme_mode_changed', handleSync);
+    };
+  }, [syncSettings, fetchFrontendSettings]);
+
   const toggleTheme = () => {
-    const nextDark = !isDarkMode;
-    setIsDarkMode(nextDark);
+    const nextMode = !isDarkMode;
+    setIsDarkMode(nextMode);
     if (typeof window !== 'undefined') {
-      const modeStr = nextDark ? 'dark' : 'light';
+      const modeStr = nextMode ? 'dark' : 'light';
       localStorage.setItem('zecratary_theme_mode', modeStr);
-      if (nextDark) {
+      if (nextMode) {
         document.documentElement.classList.add('dark');
         document.documentElement.classList.remove('light');
       } else {
         document.documentElement.classList.remove('dark');
         document.documentElement.classList.add('light');
       }
-      applyThemeToDocument(null);
       window.dispatchEvent(new CustomEvent('zecratary_theme_mode_changed', { detail: { mode: modeStr } }));
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
     }
   };
 
-  // 2. Fetch Dynamic Pages and Recipes
-  const fetchPageData = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/admin/frontend?t=${Date.now()}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (Array.isArray(data.pages) && data.pages.length > 0) {
-          setAllPages(data.pages);
-          const found = data.pages.find((p: DynamicPageRecord) => p.slug === currentSlug) ||
-                        data.pages.find((p: DynamicPageRecord) => p.is_default) ||
-                        data.pages[0];
-          if (found) setActivePage(found);
-        }
-      }
-    } catch (_) {}
-
-    try {
-      const recRes = await fetch('/api/admin/frontend?all_recipes=true', { cache: 'no-store' });
-      if (recRes.ok) {
-        const recData = await recRes.json();
-        if (Array.isArray(recData.recipes) && recData.recipes.length > 0) {
-          setAllRecipes(recData.recipes);
-        }
-      }
-    } catch (_) {}
-
-    try {
-      const planRes = await fetch('/api/admin/plans', { cache: 'no-store' });
-      if (planRes.ok) {
-        const planData = await planRes.json();
-        const pList = Array.isArray(planData.plans) ? planData.plans : (planData || []);
-        if (Array.isArray(pList) && pList.length > 0) {
-          setPlans(pList);
-        }
-      }
-    } catch (_) {}
-  }, [currentSlug]);
-
-  useEffect(() => {
-    setMounted(true);
-    setCurrentUser(getCurrentUser());
-    setSiteName(getSiteName());
-    setSiteIcon(getSiteIcon());
-    syncThemeState();
-    fetchPageData();
-
-    // Bind homepage layout classes to document body
-    if (typeof document !== 'undefined' && document.body) {
-      document.body.classList.add('is-homepage-view');
-    }
-
-    const handleThemeSync = () => syncThemeState();
-    const handlePageSync = () => fetchPageData();
-
-    window.addEventListener('zecratary_theme_mode_changed', handleThemeSync);
-    window.addEventListener('zecratary_theme_updated', handleThemeSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleThemeSync);
-    window.addEventListener('zecratary_frontend_pages_updated', handlePageSync);
-    window.addEventListener('storage', handleThemeSync);
-    window.addEventListener('focus', handlePageSync);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', handleThemeSync);
-      window.removeEventListener('zecratary_theme_updated', handleThemeSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleThemeSync);
-      window.removeEventListener('zecratary_frontend_pages_updated', handlePageSync);
-      window.removeEventListener('storage', handleThemeSync);
-      window.removeEventListener('focus', handlePageSync);
-      if (typeof document !== 'undefined' && document.body) {
-        document.body.classList.remove('is-homepage-view');
-      }
-    };
-  }, [syncThemeState, fetchPageData]);
-
-  const getSafeHostname = (urlStr?: string | null): string => {
-    if (!urlStr) return 'source link';
-    try {
-      return new URL(urlStr).hostname.replace(/^www\./, '');
-    } catch (_) {
-      return urlStr;
-    }
-  };
-
-  const navPages = useMemo(() => {
-    return allPages.filter((p: DynamicPageRecord) => p.show_in_nav && p.status === 'published');
-  }, [allPages]);
-
-  const elementsList = useMemo(() => {
-    return Array.isArray(activePage?.elements) && activePage.elements.length > 0
-      ? activePage.elements
-      : DEFAULT_HOMEPAGE_FALLBACK.elements;
-  }, [activePage]);
-
-  const padTop = activePage?.padding?.top || '2.5rem';
-  const padBottom = activePage?.padding?.bottom || '4rem';
-  const padLeft = activePage?.padding?.left || activePage?.padding?.x || '1.5rem';
-  const padRight = activePage?.padding?.right || activePage?.padding?.x || '1.5rem';
-  const maxWidthClass = activePage?.padding?.maxWidth || 'max-w-7xl';
+  const elements = activePage?.elements || [];
+  const footer = activePage?.footer || {};
 
   return (
     <div
       id="zecratary-homepage-root"
-      className="min-h-screen flex flex-col font-sans antialiased theme-harmonized-card"
+      className="min-h-screen w-full transition-colors duration-200 flex flex-col justify-between"
       style={{
-        backgroundColor: 'var(--color-bg)',
-        color: 'var(--color-text)',
+        backgroundColor: 'var(--color-bg, #0b0f19)',
+        color: 'var(--color-text, #ffffff)'
       }}
     >
-      {/* 1. PUBLIC HOMEPAGE HEADER NAVIGATION */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* GLOBAL CSS RESET: Neutralize Application Sidebar Clearance   */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        body.is-homepage-view,
+        body:has(#zecratary-homepage-root) {
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+        body.is-homepage-view main,
+        body.is-homepage-view [role="main"],
+        body.is-homepage-view #zecratary-main-content,
+        body.is-homepage-view .main-content,
+        body:has(#zecratary-homepage-root) main,
+        body:has(#zecratary-homepage-root) [role="main"],
+        body:has(#zecratary-homepage-root) #zecratary-main-content,
+        body:has(#zecratary-homepage-root) .main-content {
+          padding-top: 0 !important;
+          padding-left: 0 !important;
+          padding-right: 0 !important;
+          margin-left: 0 !important;
+          margin-right: 0 !important;
+          width: 100% !important;
+          max-width: 100% !important;
+        }
+        body.is-homepage-view aside,
+        body.is-homepage-view #zecratary-desktop-topbar,
+        body.is-homepage-view .zecratary-mobile-topbar,
+        body:has(#zecratary-homepage-root) aside,
+        body:has(#zecratary-homepage-root) #zecratary-desktop-topbar,
+        body:has(#zecratary-homepage-root) .zecratary-mobile-topbar {
+          display: none !important;
+        }
+      ` }} />
+
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* DYNAMIC TOP NAVIGATION MENU (Driven by /admin/frontend)       */}
+      {/* ───────────────────────────────────────────────────────────── */}
       <header
-        className="sticky top-0 z-40 border-b backdrop-blur-md theme-harmonized-card"
+        className="sticky top-0 z-50 w-full border-b backdrop-blur-md transition-colors duration-200"
         style={{
-          backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.9)',
-          borderColor: 'var(--color-border)',
-          color: 'var(--color-text)',
+          backgroundColor: 'var(--color-card, rgba(15, 23, 42, 0.85))',
+          borderColor: 'var(--color-border, rgba(255, 255, 255, 0.1))',
+          color: 'var(--color-text, #ffffff)'
         }}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          {/* BRAND */}
-          <Link href="/" className="flex items-center gap-2.5 font-black text-xl text-[var(--color-primary)]">
-            <span className="text-2xl">{siteIcon || '🍳'}</span>
-            <span>{siteName || 'Zecratary'}</span>
+          {/* BRAND IDENTITY */}
+          <Link href="/" className="flex items-center gap-2.5 font-black text-lg tracking-tight">
+            {isImageIcon(siteIcon) ? (
+              <img src={siteIcon} alt="Logo" className="w-8 h-8 rounded-lg object-contain" />
+            ) : (
+              <span className="text-2xl">{siteIcon || '🍳'}</span>
+            )}
+            <span style={{ color: 'var(--color-primary, #10b981)' }}>{siteName || 'Zecratary'}</span>
           </Link>
 
-          {/* DYNAMIC CMS NAVIGATION TABS */}
-          <nav className="hidden md:flex items-center gap-1">
-            {navPages.map((page: DynamicPageRecord) => {
-              const isActive = (currentSlug === 'home' && page.is_default) || currentSlug === page.slug;
+          {/* DYNAMIC NAVIGATION LINKS FROM /admin/frontend */}
+          <nav className="hidden md:flex items-center gap-6 text-xs font-bold uppercase tracking-wider">
+            {navPages.map((page: any) => {
+              const pageSlug = page.is_default || page.slug === 'home' ? '/' : `/${page.slug}`;
+              const active = pathname === pageSlug;
               return (
                 <Link
-                  key={page.id}
-                  href={page.is_default ? '/' : `/${page.slug}`}
-                  className="px-3.5 py-1.5 rounded-xl text-xs font-bold transition"
-                  style={
-                    isActive
-                      ? { backgroundColor: 'var(--color-primary)', color: '#ffffff' }
-                      : { color: 'var(--color-text-secondary)', backgroundColor: 'transparent' }
-                  }
+                  key={page.id || page.slug}
+                  href={pageSlug}
+                  className="transition hover:opacity-100"
+                  style={{
+                    color: active ? 'var(--color-primary, #10b981)' : 'var(--color-text-secondary, #94a3b8)'
+                  }}
                 >
                   {page.title}
                 </Link>
@@ -425,29 +241,72 @@ export default function DynamicHomePage() {
             })}
           </nav>
 
-          {/* ACTIONS: THEME TOGGLE & AUTH */}
-          <div className="flex items-center gap-3">
-            {/* DAY/NIGHT SWITCHER */}
+          {/* TOP CONTROLS & AUTH CTA */}
+          <div className="hidden md:flex items-center gap-3">
+            {/* LANGUAGE SELECTOR */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setLangMenuOpen(!langMenuOpen)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark, #111726)',
+                  borderColor: 'var(--color-border, #1e293b)'
+                }}
+              >
+                <span>{getLanguageFlag(currentLanguage || 'en')}</span>
+                <span className="uppercase">{currentLanguage || 'EN'}</span>
+              </button>
+
+              {langMenuOpen && (
+                <div
+                  className="absolute right-0 mt-2 w-40 border rounded-2xl p-1.5 shadow-xl z-50 space-y-1 text-xs"
+                  style={{
+                    backgroundColor: 'var(--color-card, #0f172a)',
+                    borderColor: 'var(--color-border, #1e293b)'
+                  }}
+                >
+                  {Object.keys(LANGUAGE_FLAG_MAP).slice(0, 6).map((code) => (
+                    <button
+                      key={code}
+                      type="button"
+                      onClick={() => {
+                        if (typeof changeLanguage === 'function') changeLanguage(code);
+                        setLangMenuOpen(false);
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg hover:bg-slate-800/40 font-semibold cursor-pointer"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span>{LANGUAGE_FLAG_MAP[code]}</span>
+                        <span className="uppercase">{code}</span>
+                      </span>
+                      {currentLanguage === code && <Check className="h-3.5 w-3.5 text-emerald-400" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* THEME TOGGLE */}
             <button
               type="button"
               onClick={toggleTheme}
-              className="p-2 rounded-xl border transition cursor-pointer shadow-xs"
+              className="p-2 rounded-xl border transition cursor-pointer"
               style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)',
+                backgroundColor: 'var(--color-inner-dark, #111726)',
+                borderColor: 'var(--color-border, #1e293b)'
               }}
-              title={isDarkMode ? t('switchToDayMode', 'Switch to Day Mode') : t('switchToDarkMode', 'Switch to Dark Mode')}
+              title={isDarkMode ? 'Day Mode' : 'Dark Mode'}
             >
-              {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-700" />}
+              {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-300" />}
             </button>
 
-            {/* CONTEXTUAL AUTH BUTTON */}
+            {/* DYNAMIC AUTHENTICATION CTA */}
             {currentUser ? (
               <Link
                 href="/dashboard"
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition cursor-pointer"
-                style={{ backgroundColor: 'var(--color-primary)' }}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition hover:opacity-90 flex items-center gap-1.5"
+                style={{ backgroundColor: 'var(--color-primary, #10b981)' }}
               >
                 <span>{t('dashboard', 'Dashboard')}</span>
                 <ArrowRight className="h-3.5 w-3.5" />
@@ -456,535 +315,362 @@ export default function DynamicHomePage() {
               <div className="flex items-center gap-2">
                 <Link
                   href="/login"
-                  className="px-3.5 py-2 rounded-xl border text-xs font-bold transition shadow-xs"
+                  className="px-3.5 py-1.5 rounded-xl border text-xs font-bold transition hover:bg-slate-800/20"
                   style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)',
+                    borderColor: 'var(--color-border, #1e293b)',
+                    backgroundColor: 'var(--color-inner-dark, #111726)'
                   }}
                 >
                   {t('signIn', 'Sign In')}
                 </Link>
                 <Link
                   href="/register"
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white shadow-xs transition hover:opacity-90"
+                  style={{ backgroundColor: 'var(--color-primary, #10b981)' }}
                 >
                   {t('getStarted', 'Get Started')}
                 </Link>
               </div>
             )}
           </div>
+
+          {/* MOBILE HAMBURGER BUTTON */}
+          <div className="md:hidden flex items-center gap-2">
+            <button
+              type="button"
+              onClick={toggleTheme}
+              className="p-1.5 rounded-lg border"
+              style={{ borderColor: 'var(--color-border)' }}
+            >
+              {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-300" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="p-2 rounded-xl border cursor-pointer"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
+              }}
+            >
+              {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
+          </div>
         </div>
+
+        {/* MOBILE NAVIGATION DRAWER */}
+        {mobileMenuOpen && (
+          <div
+            className="md:hidden border-b px-4 py-4 space-y-3"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <div className="space-y-1">
+              {navPages.map((page: any) => {
+                const pageSlug = page.is_default || page.slug === 'home' ? '/' : `/${page.slug}`;
+                return (
+                  <Link
+                    key={page.id || page.slug}
+                    href={pageSlug}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="block px-3 py-2 rounded-lg text-sm font-bold"
+                  >
+                    {page.title}
+                  </Link>
+                );
+              })}
+            </div>
+
+            <div className="pt-2 border-t flex flex-col gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              {currentUser ? (
+                <Link
+                  href="/dashboard"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="w-full py-2.5 text-center rounded-xl text-xs font-bold text-white shadow-xs"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                >
+                  {t('dashboard', 'Go to Dashboard')}
+                </Link>
+              ) : (
+                <>
+                  <Link
+                    href="/login"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="w-full py-2 text-center rounded-xl border text-xs font-bold"
+                    style={{ borderColor: 'var(--color-border)' }}
+                  >
+                    {t('signIn', 'Sign In')}
+                  </Link>
+                  <Link
+                    href="/register"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="w-full py-2 text-center rounded-xl text-white text-xs font-bold"
+                    style={{ backgroundColor: 'var(--color-primary)' }}
+                  >
+                    {t('getStarted', 'Get Started')}
+                  </Link>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </header>
 
-      {/* 2. DYNAMIC CONTENT CANVAS */}
-      <main
-        id="zecratary-homepage-canvas"
-        className="flex-1 w-full mx-auto"
-        style={{
-          paddingTop: padTop,
-          paddingBottom: padBottom,
-          paddingLeft: padLeft,
-          paddingRight: padRight,
-          boxSizing: 'border-box',
-        }}
-      >
-        <div className={`w-full mx-auto ${maxWidthClass} space-y-12`}>
-          {elementsList.map((elem: any, elemIdx: number) => {
-            // A. TITLE / HEADING ELEMENT
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* MAIN HOMEPAGE CONTENT (Dynamic Elements from /admin/frontend) */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-16">
+        {elements.length === 0 ? (
+          /* DEFAULT HERO BLOCK */
+          <section className="text-center py-16 md:py-24 space-y-6 max-w-3xl mx-auto">
+            <div
+              className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold border"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-primary)'
+              }}
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>{t('autonomousTelemetry', 'Autonomous Culinary Intelligence')}</span>
+            </div>
+            <h1 className="text-4xl md:text-6xl font-black tracking-tight leading-tight">
+              {activePage?.title || 'Autonomous Culinary Planning & Intelligence'}
+            </h1>
+            <p className="text-base md:text-lg leading-relaxed opacity-80" style={{ color: 'var(--color-text-secondary)' }}>
+              {activePage?.description || 'Plan gourmet meals, track pantry macros, scale recipes, and command Chef AI with production-grade telemetry.'}
+            </p>
+            <div className="flex items-center justify-center gap-4 pt-4">
+              <Link
+                href={currentUser ? '/dashboard' : '/register'}
+                className="px-6 py-3 rounded-2xl text-white text-sm font-bold shadow-lg transition hover:opacity-90 flex items-center gap-2"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                <span>{currentUser ? t('goToDashboard', 'Open Dashboard') : t('startCookingFree', 'Start Cooking Free')}</span>
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+              <Link
+                href="/chef"
+                className="px-6 py-3 rounded-2xl border text-sm font-bold transition hover:bg-slate-800/20"
+                style={{ borderColor: 'var(--color-border)' }}
+              >
+                {t('exploreAiChef', 'Explore Chef AI')}
+              </Link>
+            </div>
+          </section>
+        ) : (
+          elements.map((elem: any) => {
             if (elem.type === 'title') {
-              const alignClass = elem.align === 'center' ? 'text-center' : elem.align === 'right' ? 'text-right' : 'text-left';
               return (
-                <div key={elem.id || `title_${elemIdx}`} className={`space-y-3 ${alignClass}`}>
-                  {elem.level === 'h1' ? (
-                    <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight" style={{ color: elem.color || 'var(--color-text)' }}>
-                      {elem.title || 'Autonomous Culinary Intelligence'}
-                    </h1>
-                  ) : elem.level === 'h3' ? (
-                    <h3 className="text-xl sm:text-2xl font-bold" style={{ color: elem.color || 'var(--color-text)' }}>
-                      {elem.title}
-                    </h3>
-                  ) : (
-                    <h2 className="text-2xl sm:text-4xl font-extrabold" style={{ color: elem.color || 'var(--color-text)' }}>
-                      {elem.title}
-                    </h2>
-                  )}
+                <section key={elem.id} className="text-center py-12 md:py-16 space-y-4 max-w-3xl mx-auto">
+                  <h1 className="text-3xl md:text-5xl font-black tracking-tight">
+                    {elem.title || 'Welcome to Zecratary'}
+                  </h1>
                   {elem.subtitle && (
-                    <p className="text-sm sm:text-base max-w-3xl mx-auto leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                    <p className="text-base md:text-lg opacity-80 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
                       {elem.subtitle}
                     </p>
                   )}
-                </div>
-              );
-            }
-
-            // B. CONTENT / TEXT ELEMENT
-            if (elem.type === 'content') {
-              return (
-                <div
-                  key={elem.id || `content_${elemIdx}`}
-                  className="p-6 rounded-2xl border leading-relaxed text-sm sm:text-base theme-harmonized-card"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: elem.color || 'var(--color-text)',
-                  }}
-                >
-                  <p className="whitespace-pre-line">{elem.content || elem.body || ''}</p>
-                </div>
-              );
-            }
-
-            // C. MULTI-COLUMN ELEMENT
-            if (elem.type === 'column') {
-              const cols = Array.isArray(elem.columns) ? elem.columns : (Array.isArray(elem.cols) ? elem.cols : []);
-              const gridCols = cols.length === 2 ? 'grid-cols-1 md:grid-cols-2' : cols.length === 4 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4' : 'grid-cols-1 md:grid-cols-3';
-              return (
-                <div key={elem.id || `col_${elemIdx}`} className={`grid ${gridCols} gap-6`}>
-                  {cols.map((col: any, colIdx: number) => (
-                    <div
-                      key={col.id || `col_item_${colIdx}`}
-                      className="p-6 rounded-2xl border space-y-3 theme-harmonized-card shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)',
-                      }}
-                    >
-                      {col.icon && <span className="text-3xl block">{col.icon}</span>}
-                      <h3 className="font-bold text-base">{col.title || 'Feature'}</h3>
-                      <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                        {col.content || col.description || ''}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              );
-            }
-
-            // D. PICTURE / MEDIA ELEMENT
-            if (elem.type === 'picture') {
-              return (
-                <div
-                  key={elem.id || `pic_${elemIdx}`}
-                  className="rounded-3xl border overflow-hidden p-2 theme-harmonized-card shadow-xs"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                  }}
-                >
-                  {elem.url ? (
-                    <img src={elem.url} alt={elem.alt || 'Visual'} className="w-full h-80 object-cover rounded-2xl" />
-                  ) : (
-                    <div className="w-full h-64 flex items-center justify-center rounded-2xl text-xs" style={{ backgroundColor: 'var(--color-inner-dark)' }}>
-                      <span>{t('noImageAvailable', 'Image Display Area')}</span>
-                    </div>
-                  )}
-                  {elem.caption && (
-                    <div className="p-3 text-center text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                      {elem.caption}
-                    </div>
-                  )}
-                </div>
-              );
-            }
-
-            // E. BOX / CALLOUT ELEMENT
-            if (elem.type === 'box') {
-              return (
-                <div
-                  key={elem.id || `box_${elemIdx}`}
-                  className="p-8 rounded-3xl border text-center space-y-4 theme-harmonized-card shadow-md"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)',
-                  }}
-                >
-                  {elem.badge && (
-                    <span
-                      className="inline-block px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider text-white"
+                  <div className="pt-4 flex justify-center">
+                    <Link
+                      href={currentUser ? '/dashboard' : '/register'}
+                      className="px-6 py-2.5 rounded-xl text-white text-xs font-bold transition shadow-md"
                       style={{ backgroundColor: 'var(--color-primary)' }}
                     >
-                      {elem.badge}
-                    </span>
-                  )}
-                  <h3 className="text-2xl font-black">{elem.title || 'Gourmet Culinary Workspace'}</h3>
-                  <p className="text-sm max-w-2xl mx-auto leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                    {elem.description || elem.content || ''}
-                  </p>
-                  {elem.buttonText && (
-                    <div className="pt-2">
-                      <Link
-                        href={elem.buttonUrl || '/chef'}
-                        className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-xs text-white shadow-xs transition"
-                        style={{ backgroundColor: 'var(--color-primary)' }}
-                      >
-                        <span>{elem.buttonText}</span>
-                        <ArrowRight className="h-4 w-4" />
-                      </Link>
-                    </div>
-                  )}
-                </div>
+                      {currentUser ? t('openWorkspace', 'Open Workspace') : t('getStartedNow', 'Get Started Now')}
+                    </Link>
+                  </div>
+                </section>
               );
             }
 
-            // F. COMMUNITY RECIPE GALLERY ELEMENT
             if (elem.type === 'recipe') {
-              const displayList = allRecipes.slice(0, elem.itemsPerPage || 6);
               return (
-                <div key={elem.id || `recipe_${elemIdx}`} className="space-y-6">
-                  <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
+                <section key={elem.id} className="space-y-6">
+                  <div className="flex items-center justify-between">
                     <div>
-                      <h2 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                        {elem.title || 'Community Tested Recipes'}
-                      </h2>
+                      <h2 className="text-2xl font-black">{elem.title || 'Featured Culinary Dishes'}</h2>
                       {elem.subtitle && (
-                        <p className="text-xs pt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                          {elem.subtitle}
-                        </p>
+                        <p className="text-xs opacity-70" style={{ color: 'var(--color-text-secondary)' }}>{elem.subtitle}</p>
                       )}
                     </div>
-                    <Link
-                      href="/recipes"
-                      className="text-xs font-bold flex items-center gap-1 hover:underline"
-                      style={{ color: 'var(--color-primary)' }}
-                    >
-                      <span>{t('exploreAllRecipes', 'Browse All Recipes')}</span>
-                      <ArrowRight className="h-3 w-3" />
+                    <Link href="/saved" className="text-xs font-bold flex items-center gap-1 text-[var(--color-primary)] hover:underline">
+                      <span>{t('viewAllRecipes', 'View All')}</span>
+                      <ChevronRight className="h-3.5 w-3.5" />
                     </Link>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {displayList.map((rec: any, recIdx: number) => (
-                      <div
-                        key={rec.id || `rec_${recIdx}`}
-                        onClick={() => {
-                          setActiveRecipeModal(rec);
-                          setModalServings(Number(rec.servings) || 4);
-                        }}
-                        className="rounded-2xl border overflow-hidden cursor-pointer hover:shadow-lg transition flex flex-col theme-harmonized-card"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)',
-                        }}
-                      >
-                        <div className="relative h-44 w-full overflow-hidden bg-slate-800">
-                          {rec.image ? (
-                            <img src={rec.image} alt={rec.title} className="w-full h-full object-cover transition duration-300 hover:scale-105" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-4xl">🍳</div>
+                    {recipes.length > 0 ? (
+                      recipes.map((r: any) => (
+                        <div
+                          key={r.id}
+                          className="rounded-2xl border overflow-hidden transition hover:shadow-lg flex flex-col justify-between"
+                          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                        >
+                          {r.image && (
+                            <img src={r.image} alt={r.title} className="w-full h-44 object-cover" />
                           )}
-                          {rec.is_favorite && (
-                            <span className="absolute top-2.5 right-2.5 p-1.5 rounded-full bg-black/60 text-amber-400">
-                              <Star className="h-3.5 w-3.5 fill-current" />
-                            </span>
-                          )}
-                        </div>
-                        <div className="p-4 flex-1 flex flex-col justify-between space-y-2">
-                          <div>
-                            <h3 className="font-bold text-sm line-clamp-1">{rec.title}</h3>
-                            <p className="text-xs line-clamp-2 pt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                              {rec.description || 'Delicious culinary creation crafted with fresh ingredients.'}
-                            </p>
-                          </div>
-                          <div className="flex items-center justify-between text-[11px] pt-2 border-t" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                            <span className="flex items-center gap-1">
-                              <Clock className="h-3 w-3" />
-                              <span>{rec.cook_time || rec.prep_time || '20m'}</span>
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <Users className="h-3 w-3" />
-                              <span>{rec.servings || 4} servings</span>
-                            </span>
+                          <div className="p-4 space-y-2 flex-1 flex flex-col justify-between">
+                            <div>
+                              <h3 className="font-bold text-sm line-clamp-1">{r.title}</h3>
+                              {r.description && (
+                                <p className="text-xs opacity-70 line-clamp-2 mt-1">{r.description}</p>
+                              )}
+                            </div>
+                            <div className="flex items-center justify-between pt-3 border-t text-[11px] opacity-70" style={{ borderColor: 'var(--color-border)' }}>
+                              <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {r.prep_time || '20m'}</span>
+                              <span className="flex items-center gap-1"><Users className="h-3 w-3" /> {r.servings || 4} serv</span>
+                            </div>
                           </div>
                         </div>
+                      ))
+                    ) : (
+                      <div className="col-span-full py-12 text-center border rounded-2xl border-dashed opacity-60 text-xs">
+                        {t('recipesComingSoon', 'Community recipes will be showcased here.')}
                       </div>
-                    ))}
+                    )}
                   </div>
-                </div>
+                </section>
               );
             }
 
-            // G. SUBSCRIPTION PLAN SHOWCASE ELEMENT
             if (elem.type === 'subscription') {
               return (
-                <div key={elem.id || `plan_${elemIdx}`} className="space-y-6 pt-4">
-                  <div className="text-center space-y-3">
-                    <h2 className="text-3xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                      {elem.title || 'Subscription Tiers & AI Quotas'}
-                    </h2>
+                <section key={elem.id} className="text-center space-y-8 py-8">
+                  <div>
+                    <h2 className="text-2xl md:text-3xl font-black">{elem.title || 'Subscription Tiers & AI Quotas'}</h2>
                     {elem.subtitle && (
-                      <p className="text-xs sm:text-sm max-w-2xl mx-auto" style={{ color: 'var(--color-text-secondary)' }}>
-                        {elem.subtitle}
-                      </p>
+                      <p className="text-xs opacity-75 mt-1" style={{ color: 'var(--color-text-secondary)' }}>{elem.subtitle}</p>
                     )}
-
-                    {/* MONTHLY / ANNUAL TOGGLE PILL */}
-                    <div className="inline-flex items-center p-1 rounded-xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                      <button
-                        type="button"
-                        onClick={() => setPlanBillingInterval('monthly')}
-                        className="px-4 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer"
-                        style={
-                          planBillingInterval === 'monthly'
-                            ? { backgroundColor: 'var(--color-primary)', color: '#ffffff' }
-                            : { color: 'var(--color-text-secondary)' }
-                        }
-                      >
-                        {t('monthlyBilling', 'Monthly')}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPlanBillingInterval('annual')}
-                        className="px-4 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
-                        style={
-                          planBillingInterval === 'annual'
-                            ? { backgroundColor: 'var(--color-primary)', color: '#ffffff' }
-                            : { color: 'var(--color-text-secondary)' }
-                        }
-                      >
-                        <span>{t('annualBilling', 'Annual')}</span>
-                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded-full font-black">SAVE 20%</span>
-                      </button>
-                    </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 pt-4">
-                    {plans.map((p: any, pIdx: number) => {
-                      const price = planBillingInterval === 'annual' ? (p.annual_price || p.price_annual || 0) : (p.monthly_price || p.price_monthly || 0);
-                      const featuresList = Array.isArray(p.features) ? p.features : ['AI Assistant Access', 'Personal Recipe Database', 'Pantry Manager'];
-                      return (
-                        <div
-                          key={p.slug || `tier_${pIdx}`}
-                          className="p-6 rounded-3xl border flex flex-col justify-between space-y-6 theme-harmonized-card shadow-xs relative"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: p.is_popular ? 'var(--color-primary)' : 'var(--color-border)',
-                            color: 'var(--color-text)',
-                          }}
-                        >
-                          {p.is_popular && (
-                            <span
-                              className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-[10px] font-black uppercase text-white shadow-xs"
-                              style={{ backgroundColor: 'var(--color-primary)' }}
-                            >
-                              Most Popular
-                            </span>
-                          )}
-
-                          <div className="space-y-4">
-                            <div>
-                              <h3 className="font-extrabold text-base">{p.name}</h3>
-                              <div className="pt-2 flex items-baseline gap-1">
-                                <span className="text-3xl font-black">${Number(price).toFixed(2)}</span>
-                                <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                                  /{planBillingInterval === 'annual' ? 'yr' : 'mo'}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="space-y-2 text-xs pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
-                              {featuresList.map((feat: any, fIdx: number) => (
-                                <div key={fIdx} className="flex items-center gap-2">
-                                  <Check className="h-3.5 w-3.5 text-[var(--color-primary)] shrink-0" />
-                                  <span style={{ color: 'var(--color-text-secondary)' }}>{feat}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          <Link
-                            href="/subscriptions"
-                            className="w-full py-2.5 text-center rounded-xl font-bold text-xs text-white shadow-xs transition"
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+                    {[
+                      { name: 'Starter Cook', price: '$0', tokens: '50 Free Tokens', features: ['AI Recipe Assistant', 'Standard Pantry', 'Manual Entry'] },
+                      { name: 'Pro Chef', price: '$9.99/mo', tokens: '1,000 Tokens/mo', popular: true, features: ['Unlimited AI Generation', 'Meal Blueprints', 'Pantry Expiry Tracking', 'Recipe Web Scraping'] },
+                      { name: 'Commercial Kitchen', price: '$29.99/mo', tokens: '5,000 Tokens/mo', features: ['Multi-User Access', 'Priority Gemini Models', 'Automated Nutrition Telemetry', 'VIP Support'] },
+                    ].map((plan) => (
+                      <div
+                        key={plan.name}
+                        className={`rounded-2xl border p-6 text-left space-y-4 relative flex flex-col justify-between ${plan.popular ? 'ring-2 ring-[var(--color-primary)]' : ''}`}
+                        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                      >
+                        {plan.popular && (
+                          <span
+                            className="absolute -top-3 right-4 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider text-white"
                             style={{ backgroundColor: 'var(--color-primary)' }}
                           >
-                            {p.is_free ? t('getStartedFree', 'Get Started Free') : t('upgradeToPlan', 'Select Tier')}
-                          </Link>
+                            Most Popular
+                          </span>
+                        )}
+                        <div className="space-y-2">
+                          <h3 className="font-extrabold text-base">{plan.name}</h3>
+                          <div className="text-2xl font-black">{plan.price}</div>
+                          <div className="text-xs font-bold text-amber-400">{plan.tokens}</div>
+                          <ul className="space-y-1.5 pt-3 text-xs opacity-80">
+                            {plan.features.map((f) => (
+                              <li key={f} className="flex items-center gap-2">
+                                <Check className="h-3.5 w-3.5 text-emerald-400" />
+                                <span>{f}</span>
+                              </li>
+                            ))}
+                          </ul>
                         </div>
-                      );
-                    })}
+                        <Link
+                          href="/subscriptions"
+                          className="w-full py-2.5 text-center rounded-xl text-xs font-bold transition block shadow-xs"
+                          style={{
+                            backgroundColor: plan.popular ? 'var(--color-primary)' : 'var(--color-inner-dark)',
+                            color: plan.popular ? '#ffffff' : 'var(--color-text)',
+                            border: plan.popular ? 'none' : '1px solid var(--color-border)'
+                          }}
+                        >
+                          {t('choosePlan', 'Choose Tier')}
+                        </Link>
+                      </div>
+                    ))}
                   </div>
-                </div>
+                </section>
               );
             }
 
             return null;
-          })}
-        </div>
+          })
+        )}
       </main>
 
-      {/* 3. DYNAMIC MULTI-COLUMN FOOTER */}
-      {activePage?.footer?.enabled !== false && (
-        <footer
-          className="border-t theme-harmonized-card"
-          style={{
-            backgroundColor: activePage?.footer?.bgColor || 'var(--color-card)',
-            borderColor: activePage?.footer?.borderColor || 'var(--color-border)',
-            color: activePage?.footer?.textColor || 'var(--color-text)',
-          }}
-        >
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-8">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-              {/* BRAND MISSION */}
-              <div className="space-y-3 md:col-span-2">
-                <div className="flex items-center gap-2 text-[var(--color-primary)] font-black text-lg">
-                  <span>{siteIcon || '🍳'}</span>
-                  <span>{siteName || 'Zecratary'}</span>
-                </div>
-                <p className="text-xs leading-relaxed max-w-md" style={{ color: 'var(--color-text-secondary)' }}>
-                  {activePage?.footer?.aboutText || DEFAULT_HOMEPAGE_FALLBACK.footer?.aboutText}
-                </p>
-              </div>
-
-              {/* NAVIGATION COLUMNS */}
-              {(activePage?.footer?.columns || DEFAULT_FOOTER.columns || []).map((col: any, colIdx: number) => (
-                <div key={colIdx} className="space-y-3">
-                  <h4 className="text-xs font-black uppercase tracking-wider">{col.title}</h4>
-                  <ul className="space-y-2 text-xs">
-                    {(col.links || []).map((link: any, linkIdx: number) => (
-                      <li key={linkIdx}>
-                        <Link href={link.url} className="hover:underline transition" style={{ color: 'var(--color-text-secondary)' }}>
-                          {link.label}
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-
-            {/* COPYRIGHT NOTICE */}
-            <div className="pt-8 border-t flex flex-col sm:flex-row items-center justify-between text-xs" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-              <span>{activePage?.footer?.copyrightText || DEFAULT_HOMEPAGE_FALLBACK.footer?.copyrightText}</span>
-              <div className="flex items-center gap-4 pt-2 sm:pt-0">
-                <Link href="/privacy" className="hover:underline">Privacy</Link>
-                <Link href="/terms" className="hover:underline">Terms</Link>
-                <Link href="/contact" className="hover:underline">Contact</Link>
-              </div>
-            </div>
-          </div>
-        </footer>
-      )}
-
-      {/* 4. FULL RECIPE MODAL POPUP */}
-      {activeRecipeModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs"
-          onClick={() => setActiveRecipeModal(null)}
-        >
-          <div
-            className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl border p-6 space-y-6 theme-harmonized-card shadow-2xl"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between">
-              <div>
-                <h2 className="text-xl font-black">{activeRecipeModal.title}</h2>
-                {activeRecipeModal.source_url && (
-                  <a
-                    href={activeRecipeModal.source_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[11px] flex items-center gap-1 hover:underline pt-1 text-[var(--color-primary)]"
-                  >
-                    <span>{getSafeHostname(activeRecipeModal.source_url)}</span>
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* DYNAMIC FOOTER (Configured in /admin/frontend)                */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      <footer
+        className="w-full border-t py-12 transition-colors duration-200 mt-20"
+        style={{
+          backgroundColor: 'var(--color-card, #0f172a)',
+          borderColor: 'var(--color-border, #1e293b)'
+        }}
+      >
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+            <div className="space-y-3 md:col-span-2">
+              <div className="flex items-center gap-2 font-black text-base text-[var(--color-primary)]">
+                {isImageIcon(siteIcon) ? (
+                  <img src={siteIcon} alt="Logo" className="w-6 h-6 rounded-md object-contain" />
+                ) : (
+                  <span className="text-xl">{siteIcon || '🍳'}</span>
                 )}
+                <span>{siteName || 'Zecratary'}</span>
               </div>
-              <button
-                type="button"
-                onClick={() => setActiveRecipeModal(null)}
-                className="p-1.5 rounded-lg border hover:bg-slate-800/20 cursor-pointer"
-                style={{ borderColor: 'var(--color-border)' }}
-              >
-                <X className="h-4 w-4" />
-              </button>
+              <p className="text-xs leading-relaxed opacity-70 max-w-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                {footer.aboutText || 'Autonomous culinary intelligence platform designed for intelligent recipe management, meal planning, and nutrition telemetry.'}
+              </p>
             </div>
 
-            {activeRecipeModal.image && (
-              <img src={activeRecipeModal.image} alt={activeRecipeModal.title} className="w-full h-56 object-cover rounded-2xl" />
-            )}
-
-            {/* CONTROLS: SERVINGS & ZOOM */}
-            <div className="flex items-center justify-between p-3 rounded-2xl border text-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-              <div className="flex items-center gap-2">
-                <Users className="h-4 w-4 text-[var(--color-primary)]" />
-                <span className="font-bold">Servings:</span>
-                <button
-                  type="button"
-                  onClick={() => setModalServings(Math.max(1, modalServings - 1))}
-                  className="p-1 rounded-md border"
-                  style={{ borderColor: 'var(--color-border)' }}
-                >
-                  <Minus className="h-3 w-3" />
-                </button>
-                <span className="font-black px-1">{modalServings}</span>
-                <button
-                  type="button"
-                  onClick={() => setModalServings(modalServings + 1)}
-                  className="p-1 rounded-md border"
-                  style={{ borderColor: 'var(--color-border)' }}
-                >
-                  <Plus className="h-3 w-3" />
-                </button>
+            {(footer.columns || [
+              {
+                title: 'Platform',
+                links: [
+                  { label: 'AI Assistant', url: '/chef' },
+                  { label: 'Saved Recipes', url: '/saved' },
+                  { label: 'Meal Planner', url: '/planner' },
+                ]
+              },
+              {
+                title: 'Finance & Hub',
+                links: [
+                  { label: 'Token Portal', url: '/token' },
+                  { label: 'Store Wallet', url: '/wallet' },
+                  { label: 'Subscriptions', url: '/subscriptions' },
+                ]
+              }
+            ]).map((col: any, idx: number) => (
+              <div key={idx} className="space-y-2">
+                <h4 className="text-xs font-black uppercase tracking-wider text-[var(--color-primary)]">{col.title}</h4>
+                <ul className="space-y-1.5 text-xs opacity-80">
+                  {col.links?.map((lnk: any, lIdx: number) => (
+                    <li key={lIdx}>
+                      <Link href={lnk.url || '#'} className="hover:underline transition">
+                        {lnk.label}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
               </div>
+            ))}
+          </div>
 
-              <div className="flex items-center gap-2">
-                <span className="font-bold">Text:</span>
-                <button
-                  type="button"
-                  onClick={() => setModalFontZoom(Math.max(80, modalFontZoom - 10))}
-                  className="px-2 py-0.5 rounded border"
-                  style={{ borderColor: 'var(--color-border)' }}
-                >
-                  A-
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setModalFontZoom(Math.min(150, modalFontZoom + 10))}
-                  className="px-2 py-0.5 rounded border"
-                  style={{ borderColor: 'var(--color-border)' }}
-                >
-                  A+
-                </button>
-              </div>
-            </div>
-
-            {/* INGREDIENTS */}
-            <div className="space-y-2">
-              <h3 className="font-extrabold text-sm uppercase tracking-wider text-[var(--color-primary)]">Ingredients</h3>
-              <ul className="space-y-1.5 text-xs" style={{ fontSize: `${modalFontZoom}%` }}>
-                {(Array.isArray(activeRecipeModal.ingredients) ? activeRecipeModal.ingredients : []).map((ing: any, iIdx: number) => (
-                  <li key={iIdx} className="flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-primary)] shrink-0" />
-                    <span>{typeof ing === 'string' ? ing : ing.name || JSON.stringify(ing)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* INSTRUCTIONS */}
-            <div className="space-y-2">
-              <h3 className="font-extrabold text-sm uppercase tracking-wider text-[var(--color-primary)]">Instructions</h3>
-              <ol className="space-y-2 text-xs list-decimal list-inside" style={{ fontSize: `${modalFontZoom}%` }}>
-                {(Array.isArray(activeRecipeModal.instructions) ? activeRecipeModal.instructions : []).map((ins: any, insIdx: number) => (
-                  <li key={insIdx} className="leading-relaxed">
-                    <span>{typeof ins === 'string' ? ins : ins.text || JSON.stringify(ins)}</span>
-                  </li>
-                ))}
-              </ol>
+          <div className="pt-6 border-t flex flex-col sm:flex-row items-center justify-between text-xs opacity-60 gap-4" style={{ borderColor: 'var(--color-border)' }}>
+            <div>{footer.copyrightText || '© 2026 Zecratary Inc. All rights reserved.'}</div>
+            <div className="flex items-center gap-4">
+              <Link href="/privacy" className="hover:underline">Privacy Policy</Link>
+              <Link href="/terms" className="hover:underline">Terms of Service</Link>
+              <Link href="/contacts" className="hover:underline">Contact Support</Link>
             </div>
           </div>
         </div>
-      )}
+      </footer>
     </div>
   );
 }
