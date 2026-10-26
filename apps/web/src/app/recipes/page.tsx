@@ -104,9 +104,7 @@ export default function RecipesPage() {
   const [isNoteOpen, setIsNoteOpen] = useState(false);
   const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
 
-  // ----------------------------------------------------------------------
-  // RESTORED ADJUSTABLE KITCHEN TIMER STATES & PERSISTENCE
-  // ----------------------------------------------------------------------
+  // Kitchen Timer States
   const [isTimerModalOpen, setIsTimerModalOpen] = useState(false);
   const [timerInputMinutes, setTimerInputMinutes] = useState(15);
   const [activeTimer, setActiveTimer] = useState<{
@@ -128,7 +126,7 @@ export default function RecipesPage() {
       const ctx = audioCtxRef.current || new AudioCtx();
       audioCtxRef.current = ctx;
 
-      const notes = [587.33, 880, 1174.66, 1760]; // D5, A5, D6, A6 culinary chime sequence
+      const notes = [587.33, 880, 1174.66, 1760];
       notes.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -145,7 +143,6 @@ export default function RecipesPage() {
     } catch (_) {}
   }, []);
 
-  // Restore Active Timer from LocalStorage on mount
   useEffect(() => {
     try {
       const savedTimerRaw = localStorage.getItem('zecratary_active_timer');
@@ -166,7 +163,6 @@ export default function RecipesPage() {
     } catch (_) {}
   }, []);
 
-  // Active Timer Countdown Interval Effect
   useEffect(() => {
     if (!activeTimer || !activeTimer.isRunning) return;
 
@@ -344,7 +340,60 @@ export default function RecipesPage() {
     }
   }, []);
 
-  // Load Recipes from Multi-Source REST Endpoints & Local Hydration
+  // ----------------------------------------------------------------------
+  // Task 1: Robust Books Loader Matching /books
+  // ----------------------------------------------------------------------
+  const loadBooksData = useCallback(async (targetUserId: string) => {
+    let resolvedBooks: any[] = [];
+
+    try {
+      const [userBooksRes, globalBooksRes] = await Promise.allSettled([
+        fetch(`/api/books?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' }),
+        fetch(`/api/books?t=${Date.now()}`, { cache: 'no-store' })
+      ]);
+
+      if (userBooksRes.status === 'fulfilled' && userBooksRes.value.ok) {
+        const data = await userBooksRes.value.json();
+        const list = Array.isArray(data) ? data : data.books || [];
+        resolvedBooks.push(...list);
+      } else if (globalBooksRes.status === 'fulfilled' && globalBooksRes.value.ok) {
+        const data = await globalBooksRes.value.json();
+        const list = Array.isArray(data) ? data : data.books || [];
+        resolvedBooks.push(...list);
+      }
+    } catch (_) {}
+
+    // Check LocalStorage matching /books exactly
+    const bookKeys = ['zecratary_recipe_books', 'recipe_books', 'zecratary_books', 'books'];
+    bookKeys.forEach(k => {
+      try {
+        const raw = localStorage.getItem(k);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((b: any) => {
+              if (b && b.id && !resolvedBooks.some(x => x.id === b.id)) {
+                resolvedBooks.push(b);
+              }
+            });
+          }
+        }
+      } catch (_) {}
+    });
+
+    if (resolvedBooks.length === 0) {
+      resolvedBooks = [
+        { id: 'book_1', title: 'Family Favorites & Weeknight Dinners', description: 'Quick and easy meals.', recipeIds: [] },
+        { id: 'book_2', title: 'Authentic Asian Cuisine', description: 'Traditional recipes & stir-fries.', recipeIds: [] },
+        { id: 'book_3', title: 'Baking & Desserts', description: 'Sweet treats & pastries.', recipeIds: [] }
+      ];
+    }
+
+    setBooks(resolvedBooks);
+    return resolvedBooks;
+  }, []);
+
+  // Load Recipes and Categories
   const loadData = useCallback(async (user: User | null, showSpinner = false) => {
     if (!user) return;
     if (isSelfUpdatingRef.current) return;
@@ -352,12 +401,13 @@ export default function RecipesPage() {
 
     try {
       const targetUserId = (user.id || user.email || 'usr_admin_1').trim();
-      const [savedRes, recipesRes, booksRes, catRes] = await Promise.allSettled([
+      const [savedRes, recipesRes, catRes] = await Promise.allSettled([
         fetch(`/api/saved-recipes?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' }),
         fetch(`/api/recipes?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' }),
-        fetch(`/api/books?t=${Date.now()}`, { cache: 'no-store' }),
         fetch(`/api/admin/ingredient-categories?t=${Date.now()}`, { cache: 'no-store' })
       ]);
+
+      await loadBooksData(targetUserId);
 
       let combined: any[] = [];
       if (savedRes.status === 'fulfilled' && savedRes.value.ok) {
@@ -369,10 +419,6 @@ export default function RecipesPage() {
         const data = await recipesRes.value.json();
         const list = Array.isArray(data) ? data : data.recipes || [];
         combined.push(...list);
-      }
-      if (booksRes.status === 'fulfilled' && booksRes.value.ok) {
-        const bData = await booksRes.value.json();
-        setBooks(Array.isArray(bData) ? bData : bData.books || []);
       }
       if (catRes.status === 'fulfilled' && catRes.value.ok) {
         const cData = await catRes.value.json();
@@ -409,6 +455,8 @@ export default function RecipesPage() {
             isPublic: Boolean(item.isPublic ?? item.is_public),
             servings: Number(item.servings) || 4,
             rating: Number(item.rating) || 5,
+            bookId: item.bookId || item.book_id || null,
+            book_id: item.book_id || item.bookId || null,
             note: item.note || item.notes || ''
           });
         }
@@ -418,7 +466,7 @@ export default function RecipesPage() {
     } catch (_) {} finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadBooksData]);
 
   useEffect(() => {
     document.title = `${t('recipesTitle', 'Recipe Library')} - Zecratary`;
@@ -449,6 +497,7 @@ export default function RecipesPage() {
     window.addEventListener('storage', handleSync);
     window.addEventListener('zecratary_recipes_updated', handleSync);
     window.addEventListener('zecratary_saved_recipes_updated', handleSync);
+    window.addEventListener('zecratary_recipe_books_updated', handleSync);
     window.addEventListener('zecratary_storage_settings_updated', handleSync);
     window.addEventListener('zecratary_admin_settings_updated', handleSync);
     window.addEventListener('zecratary_theme_mode_changed', handleSync);
@@ -460,6 +509,7 @@ export default function RecipesPage() {
       window.removeEventListener('storage', handleSync);
       window.removeEventListener('zecratary_recipes_updated', handleSync);
       window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_recipe_books_updated', handleSync);
       window.removeEventListener('zecratary_storage_settings_updated', handleSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleSync);
       window.removeEventListener('zecratary_theme_mode_changed', handleSync);
@@ -637,22 +687,108 @@ export default function RecipesPage() {
     } catch (_) {}
   };
 
+  // ----------------------------------------------------------------------
+  // Task 1: Complete "Add to Book" Persistence & Bi-directional Sync
+  // ----------------------------------------------------------------------
   const handleAssignToBook = async (bookId: string) => {
     if (!selectedRecipe) return;
-    const isRemoving = selectedRecipe.bookId === bookId;
+    const isRemoving = selectedRecipe.bookId === bookId || selectedRecipe.book_id === bookId;
     const targetBookId = isRemoving ? null : bookId;
-    const updatedRecipe = { ...selectedRecipe, bookId: targetBookId };
-    setSelectedRecipe(updatedRecipe);
+    const updatedRecipe = { 
+      ...selectedRecipe, 
+      bookId: targetBookId, 
+      book_id: targetBookId 
+    };
 
+    // 1. Optimistic UI updates
+    setSelectedRecipe(updatedRecipe);
     setRecipes(prev => prev.map(r => r.id === selectedRecipe.id ? updatedRecipe : r));
 
+    // 2. LocalStorage recipe updates
+    const storageKeys = ['zecratary_recipes', 'zecratary_saved_recipes', 'saved_recipes'];
+    storageKeys.forEach(k => {
+      try {
+        const raw = localStorage.getItem(k);
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) {
+            const updated = list.map((r: any) => r.id === selectedRecipe.id ? updatedRecipe : r);
+            localStorage.setItem(k, JSON.stringify(updated));
+          }
+        }
+      } catch (_) {}
+    });
+
+    // 3. Update cookbooks in localStorage matching /books
     try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selectedRecipe.id, bookId: targetBookId, book_id: targetBookId })
+      const bookKeys = ['zecratary_recipe_books', 'recipe_books', 'zecratary_books'];
+      bookKeys.forEach(bkKey => {
+        const raw = localStorage.getItem(bkKey);
+        const curBooks = raw ? JSON.parse(raw) : [...books];
+        if (Array.isArray(curBooks)) {
+          const updatedBooks = curBooks.map((b: any) => {
+            let rIds = Array.isArray(b.recipeIds) ? [...b.recipeIds] : (Array.isArray(b.recipe_ids) ? [...b.recipe_ids] : []);
+            if (b.id === bookId) {
+              if (isRemoving) {
+                rIds = rIds.filter((id: string) => id !== selectedRecipe.id);
+              } else if (!rIds.includes(selectedRecipe.id)) {
+                rIds.push(selectedRecipe.id);
+              }
+            } else if (targetBookId) {
+              rIds = rIds.filter((id: string) => id !== selectedRecipe.id);
+            }
+            return { ...b, recipeIds: rIds, recipe_ids: rIds };
+          });
+          localStorage.setItem(bkKey, JSON.stringify(updatedBooks));
+          setBooks(updatedBooks);
+        }
       });
     } catch (_) {}
+
+    // 4. Multi-endpoint server persistence to PostgreSQL
+    const targetUserId = (currentUser?.id || currentUser?.email || 'usr_admin_1').trim();
+    try {
+      await Promise.allSettled([
+        fetch('/api/recipes/saved', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            id: selectedRecipe.id, 
+            bookId: targetBookId, 
+            book_id: targetBookId,
+            userId: targetUserId,
+            user_id: targetUserId 
+          })
+        }),
+        fetch('/api/saved-recipes', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            id: selectedRecipe.id, 
+            bookId: targetBookId, 
+            book_id: targetBookId,
+            userId: targetUserId,
+            user_id: targetUserId 
+          })
+        }),
+        fetch('/api/books', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            bookId: bookId,
+            recipeId: selectedRecipe.id,
+            action: isRemoving ? 'remove' : 'add',
+            userId: targetUserId
+          })
+        })
+      ]);
+    } catch (_) {}
+
+    // 5. Global Event Dispatch
+    window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
+    window.dispatchEvent(new Event('zecratary_recipes_updated'));
+    window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+    window.dispatchEvent(new Event('storage'));
 
     const bookTitle = books.find(b => b.id === bookId)?.title || 'Cookbook';
     showToast(isRemoving ? `Removed from "${bookTitle}"` : `Added to "${bookTitle}"!`, 'success');
@@ -673,38 +809,99 @@ export default function RecipesPage() {
     } catch (_) {}
   };
 
+  // ----------------------------------------------------------------------
+  // Task 2: Robust "Add to Plan" with Full Dispatch to /planner
+  // ----------------------------------------------------------------------
   const handleSaveToCalendar = async () => {
     if (!selectedRecipe || !currentUser) return;
     try {
-      const localPlan = localStorage.getItem('zecratary_meal_plan');
-      const currentPlan = localPlan ? JSON.parse(localPlan) : [];
+      const targetUserId = (currentUser.id || currentUser.email || 'usr_admin_1').trim();
+      const createdBy = (currentUser.email || targetUserId).trim();
+      const creatorName = (currentUser.name || 'Chef').trim();
 
       const newPlanItem = {
-        id: 'plan_' + Date.now(),
-        userId: currentUser.id,
-        createdBy: currentUser.email,
-        creatorName: currentUser.name,
+        id: 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+        userId: targetUserId,
+        user_id: targetUserId,
+        createdBy,
+        created_by: createdBy,
+        creatorName,
         date: planDate,
         recipeId: selectedRecipe.id,
+        recipe_id: selectedRecipe.id,
         recipeName: selectedRecipe.title || selectedRecipe.name,
+        recipeTitle: selectedRecipe.title || selectedRecipe.name,
+        title: selectedRecipe.title || selectedRecipe.name,
+        name: selectedRecipe.title || selectedRecipe.name,
         image: selectedRecipe.imageUrl || selectedRecipe.image || '/recipes/images/default.jpg',
+        imageUrl: selectedRecipe.imageUrl || selectedRecipe.image || '/recipes/images/default.jpg',
+        image_url: selectedRecipe.imageUrl || selectedRecipe.image || '/recipes/images/default.jpg',
         mealType: planMealType,
-        time: planTime,
-        notes: planNotes,
-        isLeftover: false
+        meal_type: planMealType,
+        time: planTime || (planMealType === 'Breakfast' ? '08:00' : planMealType === 'Lunch' ? '12:30' : planMealType === 'Dinner' ? '19:00' : '15:00'),
+        servings: Number(selectedRecipe.servings || currentTotalServings || 4),
+        prepTimeMinutes: Number(selectedRecipe.prepTimeMinutes || selectedRecipe.prepTime || 15),
+        cookTimeMinutes: Number(selectedRecipe.cookTimeMinutes || selectedRecipe.cookTime || 25),
+        calories: Number(selectedRecipe.calories || 0),
+        notes: planNotes || '',
+        note: planNotes || '',
+        recipe: selectedRecipe,
+        ingredients: selectedRecipe.ingredients || [],
+        instructions: selectedRecipe.instructions || selectedRecipe.steps || [],
+        isLeftover: false,
+        createdAt: new Date().toISOString()
       };
 
-      const updatedPlan = [...currentPlan, newPlanItem];
-      localStorage.setItem('zecratary_meal_plan', JSON.stringify(updatedPlan));
-
-      await fetch('/api/planner', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: currentUser.id, meals: updatedPlan })
+      // 1. Synchronize across all Planner LocalStorage Keys
+      const plannerKeys = ['zecratary_planner', 'zecratary_meal_plan', 'planner_meals', 'meal_plan', 'zecratary_planner_meals'];
+      plannerKeys.forEach(key => {
+        try {
+          const raw = localStorage.getItem(key);
+          let list: any[] = [];
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw);
+              if (Array.isArray(parsed)) list = parsed;
+              else if (parsed && Array.isArray(parsed.meals)) list = parsed.meals;
+            } catch (_) {}
+          }
+          const filtered = list.filter((m: any) => m && m.id !== newPlanItem.id);
+          localStorage.setItem(key, JSON.stringify([...filtered, newPlanItem]));
+        } catch (_) {}
       });
 
+      // 2. Persist to PostgreSQL backend via /api/planner
+      await Promise.allSettled([
+        fetch('/api/planner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            userId: targetUserId,
+            user_id: targetUserId,
+            meal: newPlanItem,
+            meals: [newPlanItem],
+            ...newPlanItem
+          })
+        }),
+        fetch('/api/meal-plan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            userId: targetUserId,
+            user_id: targetUserId,
+            meal: newPlanItem,
+            meals: [newPlanItem],
+            ...newPlanItem
+          })
+        })
+      ]);
+
+      // 3. Dispatch Live Events to update /planner in real-time
       window.dispatchEvent(new Event('zecratary_planner_updated'));
+      window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
+      window.dispatchEvent(new Event('zecratary_planner_meals_updated'));
       window.dispatchEvent(new Event('storage'));
+
       setShowAddToPlanModal(false);
       showToast(t('mealScheduledToast', 'Recipe scheduled in your meal planner!'), 'success');
     } catch (_) {}
@@ -1080,7 +1277,7 @@ export default function RecipesPage() {
     }
   };
 
-  const assignedBook = books.find(b => b.id === selectedRecipe?.bookId);
+  const assignedBook = books.find(b => b.id === (selectedRecipe?.bookId || selectedRecipe?.book_id));
   const baseServings = selectedRecipe?.servings || 4;
   const currentTotalServings = baseServings * servingsMultiplier;
 
@@ -1503,6 +1700,7 @@ export default function RecipesPage() {
                   </span>
                 </div>
 
+                {/* Task 3: Clean Card Footer without JSON and Trash buttons */}
                 <div 
                   className="pt-2 border-t flex items-center justify-between gap-1 text-[11px]"
                   style={{ borderColor: 'var(--color-border)' }}
@@ -1510,7 +1708,7 @@ export default function RecipesPage() {
                   <button
                     type="button"
                     onClick={(e) => handleTogglePublic(e, recipe)}
-                    className="flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold transition cursor-pointer"
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-bold transition cursor-pointer"
                     style={recipe.isPublic ? {
                       backgroundColor: 'rgba(16, 185, 129, 0.15)',
                       borderColor: 'var(--color-emerald)',
@@ -1523,30 +1721,8 @@ export default function RecipesPage() {
                     title={recipe.isPublic ? t('publicMarketplace', 'Public Marketplace') : t('privateRecipe', 'Private Recipe')}
                   >
                     {recipe.isPublic ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
-                    <span>{recipe.isPublic ? t('publicMarketplace', 'Public') : t('privateRecipe', 'Private')}</span>
+                    <span>{recipe.isPublic ? t('publicMarketplace', 'Public Marketplace') : t('privateRecipe', 'Private Recipe')}</span>
                   </button>
-
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); handleExportJson(recipe); }}
-                      className="px-2 py-1 rounded-lg text-white font-bold text-[10px] flex items-center gap-1 shadow-xs transition hover:opacity-90 cursor-pointer"
-                      style={{ backgroundColor: 'var(--color-emerald)' }}
-                      title={t('exportJsonBtn', 'Export JSON')}
-                    >
-                      <FileJson className="h-3 w-3" />
-                      <span>JSON</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); handleDeleteRecipe(recipe.id); }}
-                      className="p-1.5 rounded-lg text-red-400 hover:text-red-500 hover:bg-red-500/10 transition cursor-pointer"
-                      title={t('deleteRecipe', 'Delete Recipe')}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
                 </div>
               </div>
             </div>
@@ -1682,7 +1858,7 @@ export default function RecipesPage() {
                     </div>
                   </div>
 
-                  {/* Top Action Row */}
+                  {/* Task 1: Top Action Row with Books Dropdown matching /books */}
                   <div className="px-5 grid grid-cols-3 gap-2.5">
                     <div className="relative">
                       <button
@@ -1706,25 +1882,26 @@ export default function RecipesPage() {
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setIsBookDropdownOpen(false)} />
                           <div 
-                            className="absolute left-0 top-full mt-2 w-64 border rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in"
+                            className="absolute left-0 top-full mt-2 w-72 border rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in"
                             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
                             onClick={(e) => e.stopPropagation()}
                           >
                             <div className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
                               <span>{t('selectCookbook', 'Select Cookbook')}</span>
-                              <Link className="hover:underline" style={{ color: 'var(--color-primary)' }} href="/books">
-                                {t('manage', 'Manage')}
+                              <Link className="hover:underline flex items-center gap-1 font-bold" style={{ color: 'var(--color-primary)' }} href="/books">
+                                <span>{t('manage', 'Manage')}</span>
+                                <ExternalLink className="h-3 w-3"/>
                               </Link>
                             </div>
 
-                            <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
+                            <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
                               {books.length === 0 ? (
-                                <div className="text-xs px-2.5 py-2" style={{ color: 'var(--color-text-secondary)' }}>
+                                <div className="text-xs px-2.5 py-3 text-center opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
                                   {t('noCookbooksAvailable', 'No cookbooks available')}
                                 </div>
                               ) : (
                                 books.map((b) => {
-                                  const isAssigned = selectedRecipe.bookId === b.id;
+                                  const isAssigned = (selectedRecipe.bookId === b.id || selectedRecipe.book_id === b.id);
                                   return (
                                     <button
                                       key={b.id}
@@ -1733,14 +1910,19 @@ export default function RecipesPage() {
                                         handleAssignToBook(b.id);
                                         setIsBookDropdownOpen(false);
                                       }}
-                                      className="w-full text-left px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition cursor-pointer"
+                                      className="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition cursor-pointer hover:bg-white/5"
                                       style={{
                                         backgroundColor: isAssigned ? 'rgba(224, 86, 56, 0.15)' : 'transparent',
                                         color: isAssigned ? 'var(--color-primary)' : 'var(--color-text)'
                                       }}
                                     >
-                                      <span className="truncate flex-1 pr-2">{b.title}</span>
-                                      {isAssigned && <Check className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-primary)' }}/>}
+                                      <div className="min-w-0 flex-1 pr-2">
+                                        <p className="truncate font-bold">{b.title}</p>
+                                        {b.description && (
+                                          <p className="text-[10px] opacity-60 truncate">{b.description}</p>
+                                        )}
+                                      </div>
+                                      {isAssigned && <Check className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }}/>}
                                     </button>
                                   );
                                 })
@@ -1751,6 +1933,7 @@ export default function RecipesPage() {
                       )}
                     </div>
 
+                    {/* Task 2: Add to Plan Button */}
                     <button
                       type="button"
                       onClick={() => setShowAddToPlanModal(true)}
@@ -1808,7 +1991,6 @@ export default function RecipesPage() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {/* RESTORED: Adjustable Timer Launcher (Opens 1-60 Min Modal) */}
                       <button
                         type="button"
                         onClick={handleOpenTimerModal}
@@ -2045,7 +2227,7 @@ export default function RecipesPage() {
 
                   <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
-                  {/* MODAL FOOTER: SOURCE AT BOTTOM RIGHT + DELETE & EXPORT */}
+                  {/* MODAL FOOTER: SOURCE AT BOTTOM RIGHT + DELETE & EXPORT (Retained In Modal) */}
                   <div className="px-5 flex flex-wrap items-center justify-between gap-3 text-xs">
                     <div className="flex items-center gap-2">
                       <button
@@ -2068,7 +2250,6 @@ export default function RecipesPage() {
                       </button>
                     </div>
 
-                    {/* Source anchored to Bottom Right */}
                     {selectedRecipe.sourceUrl && (
                       <div className="text-right">
                         <a
@@ -2622,9 +2803,7 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* ------------------------------------------------------------------ */}
-      {/* RESTORED: TIMER SETTINGS POPUP MODAL (Up to 60 Minutes)            */}
-      {/* ------------------------------------------------------------------ */}
+      {/* TIMER SETTINGS MODAL */}
       {isTimerModalOpen && (
         <div 
           onClick={() => setIsTimerModalOpen(false)}
@@ -2675,7 +2854,6 @@ export default function RecipesPage() {
               </p>
             </div>
 
-            {/* Minutes Display & Steppers */}
             <div 
               className="p-4 rounded-2xl border flex flex-col items-center justify-center gap-3 shadow-inner"
               style={{
@@ -2722,7 +2900,6 @@ export default function RecipesPage() {
                 </button>
               </div>
 
-              {/* Range slider (1 to 60) */}
               <input
                 type="range"
                 min={1}
@@ -2733,7 +2910,6 @@ export default function RecipesPage() {
               />
             </div>
 
-            {/* Quick Presets */}
             <div className="space-y-1.5">
               <span className="text-[11px] font-bold uppercase tracking-wider block" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('quickPresets', 'Quick Presets')}:
@@ -2761,7 +2937,6 @@ export default function RecipesPage() {
               </div>
             </div>
 
-            {/* Action Buttons */}
             <div className="flex justify-end gap-2.5 pt-2">
               <button
                 type="button"
@@ -2789,9 +2964,7 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* ------------------------------------------------------------------ */}
-      {/* RESTORED: FLOATING BOTTOM-RIGHT COUNTDOWN TIMER WIDGET             */}
-      {/* ------------------------------------------------------------------ */}
+      {/* FLOATING TIMER WIDGET */}
       {activeTimer && (
         <div
           className={`fixed bottom-5 right-5 z-[80] border rounded-2xl p-3.5 shadow-2xl flex items-center gap-3.5 transition-all duration-300 backdrop-blur-xl animate-in slide-in-from-bottom-5 ${
@@ -2806,7 +2979,6 @@ export default function RecipesPage() {
             color: 'var(--color-text)'
           }}
         >
-          {/* Pulsing Timer Icon or Bell */}
           <div 
             className="w-10 h-10 rounded-xl flex items-center justify-center shadow-md shrink-0 transition"
             style={{
@@ -2821,7 +2993,6 @@ export default function RecipesPage() {
             )}
           </div>
 
-          {/* Time & Recipe Meta */}
           <div className="space-y-0.5 pr-1">
             <div className="flex items-center gap-2">
               <span className="text-xl font-black tracking-tight font-mono tabular-nums" style={{ color: activeTimer.remainingSeconds === 0 ? '#ef4444' : 'var(--color-text)' }}>
@@ -2839,7 +3010,6 @@ export default function RecipesPage() {
             </p>
           </div>
 
-          {/* Controls: Pause/Resume & Dismiss/Reset */}
           <div className="flex items-center gap-1.5 pl-1 border-l" style={{ borderColor: 'var(--color-border)' }}>
             {activeTimer.remainingSeconds > 0 && (
               <button
@@ -2874,7 +3044,7 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* SUB-MODAL 1: ADD TO PLAN / CALENDAR MODAL */}
+      {/* SUB-MODAL 1: ADD TO PLAN / CALENDAR MODAL (Task 2) */}
       {showAddToPlanModal && selectedRecipe && (
         <div 
           onClick={() => setShowAddToPlanModal(false)}
@@ -3214,7 +3384,6 @@ export default function RecipesPage() {
               </div>
             </div>
 
-            {/* Step 1: Drag & Drop Cover Image */}
             <div className="space-y-2">
               <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
                 {t('dragDropImageLabel', 'Drag & Drop recipe image here')}
@@ -3272,7 +3441,6 @@ export default function RecipesPage() {
               )}
             </div>
 
-            {/* Step 2: Upload Recipe JSON File Field */}
             <div className="space-y-2">
               <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
                 {t('uploadJsonBtn', 'Upload JSON File')}
@@ -3332,7 +3500,6 @@ export default function RecipesPage() {
               </div>
             </div>
 
-            {/* Step 3: Imported Recipe Preview Card */}
             {importedRecipeData && (
               <div 
                 className="p-4 rounded-2xl border space-y-2 text-xs"
@@ -3360,7 +3527,6 @@ export default function RecipesPage() {
               </div>
             )}
 
-            {/* Modal Actions */}
             <div className="flex justify-end gap-3 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
               <button
                 type="button"
