@@ -1,5 +1,11 @@
 {
   "id": "rcp_imp_mumomireosxd",
+  "ownership": {
+    "userId": "usr_admin_1",
+    "createdBy": "admin@zecratary.com",
+    "creatorName": "System Administrator",
+    "creatorEmail": "admin@zecratary.com"
+  },
   "owner": {
     "id": "usr_admin_1",
     "name": "System Administrator",
@@ -9,19 +15,19 @@
   "ownerName": "System Administrator",
   "ownerEmail": "admin@zecratary.com",
   "userId": "usr_admin_1",
-  "userEmail": "admin@zecratary.com",
   "createdBy": "admin@zecratary.com",
   "creatorName": "System Administrator",
-  "isPublic": false,
-  "visibility": "private",
+  "creatorEmail": "admin@zecratary.com",
+  "isPublic": true,
+  "visibility": "public",
   "title": "Coquillettes au Jambon - French Macaroni and Cheese with Ham",
   "description": "Recipe Video above. A stovetop mac & cheese, that's what this is really! Without the hassle of baking it! This dish was a big part of my childhood diet and even now but somehow never got sick of it. Who wouldn't? Pasta, cheese sauce and ham. A great comfort meal, done fast and done right. Enjoy!",
-  "prepMinutes": 15,
-  "cookMinutes": 25,
-  "servings": 5,
   "recipeType": "Breakfast",
-  "mealType": "Breakfast",
+  "category": "Breakfast",
   "cuisine": "French",
+  "servings": 5,
+  "prepTimeMinutes": 15,
+  "cookTimeMinutes": 25,
   "ingredients": [
     "500g / 1 lb elbow pasta / macaroni (, but any similar size pasta would work )",
     "1 tsp cooking salt / kosher salt (, for pasta water, half for table salt)",
@@ -47,17 +53,30 @@
     "Combine - Add drained pasta and stir well until fully coated, the sauce will thicken slightly and cling to the macaroni. Add more pasta water if the sauce gets too thick.",
     "Serve immediately while hot and creamy. I like to grind extra black pepper on top just before eating. Enjoy!"
   ],
-  "nutrition": {},
-  "tags": [
-    "Breakfast"
+  "directions": [
+    "Cook pasta per packet directions, scoop out 1 cup of water just before draining. In the same pot, melt butter, cook flour 2 min. Whisk in milk. Add salt, pepper and nutmeg, stir in cheese until melted. Stir in ham, then 1/2 cup pasta cooking water. Toss with pasta until coated, serve.",
+    "Cook pasta - Bring a large pot of water and salt to the boil. Cook pasta according to packet instructions. I always like to give a few stirs at the beginning so they don't stick to each other.",
+    "Reserve 1 cup pasta cooking water, then drain and give the pasta brief rinse under cold water. Set aside and keep the pot for the sauce.",
+    "Make roux - Using the pasta pot, melt the butter over medium heat. Add flour and whisk for 2 minutes. At first it will look like thick and pasty then it will loosen to become a smooth, glossy paste. Make sure to use the whisk to get into the corners of the pot and don’t let it brown, reduce heat if needed.",
+    "Adding milk - Add half of the hot milk to the roux while whisking vigorously, it will thicken very quickly. Once smooth, slowly pour in the remaining milk while continuing to whisk. Keep whisking for 30 seconds to 1 minute until the sauce is smooth, with no lumps. It should be thick enough that you can draw a path with a spatula through the middle, holding its shape briefly before slowly sinking back. (Note 4)",
+    "Season - Add salt, pepper and nutmeg. Stir to combine.",
+    "Add cheese and ham - Stir in Gruyère cheese and whisk until fully melted. You just made a Mornay sauce! Then stir in the ham with a wooden spoon.",
+    "Finish sauce - Pour in 1/2 cup of the reserved pasta cooking water and stir until silky. Bring back to a simmer. It will be quite runny, it will thicken when the pasta is added.",
+    "Combine - Add drained pasta and stir well until fully coated, the sauce will thicken slightly and cling to the macaroni. Add more pasta water if the sauce gets too thick.",
+    "Serve immediately while hot and creamy. I like to grind extra black pepper on top just before eating. Enjoy!"
   ],
-  "image": "/recipes/images/scraped_1790686697546_t4s9s.webp",
+  "nutrition": {},
   "imageUrl": "/recipes/images/scraped_1790686697546_t4s9s.webp",
+  "image": "/recipes/images/scraped_1790686697546_t4s9s.webp",
   "sourceUrl": "https://www.recipetineats.com/coquillettes-au-jambon-french-macaroni-and-cheese-with-ham/",
   "isFavorite": false,
   "isCooked": false,
   "rating": 5,
+  "note": "",
   "bookId": null,
+  "tags": [
+    "Breakfast"
+  ],
   "createdAt": "2026-10-03T09:19:34.315Z",
-  "updatedAt": "2026-10-25T18:53:23.025Z"
+  "updatedAt": "2026-10-26T12:33:28.026Z"
 }

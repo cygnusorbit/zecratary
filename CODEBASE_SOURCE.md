@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.40",
+  "version": "8.1.41",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.40",
+  "version": "8.1.41",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -500,7 +500,7 @@ export default function RootLayout({
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import {useParams, useRouter, usePathname} from 'next/navigation';
 import Link from 'next/link';
 import { 
   Sun, Moon, Globe, Shield, Zap, Sparkles, ChefHat, BookOpen, 
@@ -716,6 +716,9 @@ const DEFAULT_SUBSCRIPTION_PLANS = [
 ];
 
 export default function DynamicHomePage() {
+  const pathnameHook = usePathname();
+  const pathname = pathnameHook || '';
+
   const params = useParams();
   const router = useRouter();
   const { t } = useTranslation();
@@ -887,6 +890,39 @@ export default function DynamicHomePage() {
         color: 'var(--color-text)',
       }}
     >
+      {/* Global CSS Reset for Public Homepage: Remove application shell offsets */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        body.is-homepage-view,
+        body:has(#zecratary-homepage-root) {
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+        body.is-homepage-view main,
+        body.is-homepage-view [role="main"],
+        body.is-homepage-view #zecratary-main-content,
+        body.is-homepage-view .main-content,
+        body:has(#zecratary-homepage-root) main,
+        body:has(#zecratary-homepage-root) [role="main"],
+        body:has(#zecratary-homepage-root) #zecratary-main-content,
+        body:has(#zecratary-homepage-root) .main-content {
+          padding-top: 0 !important;
+          padding-left: 0 !important;
+          padding-right: 0 !important;
+          margin-left: 0 !important;
+          margin-right: 0 !important;
+          width: 100% !important;
+          max-width: 100% !important;
+        }
+        body.is-homepage-view aside,
+        body.is-homepage-view #zecratary-desktop-topbar,
+        body.is-homepage-view .zecratary-mobile-topbar,
+        body:has(#zecratary-homepage-root) aside,
+        body:has(#zecratary-homepage-root) #zecratary-desktop-topbar,
+        body:has(#zecratary-homepage-root) .zecratary-mobile-topbar {
+          display: none !important;
+        }
+      ` }} />
+
       {/* 1. PUBLIC HOMEPAGE HEADER NAVIGATION */}
       <header
         className="sticky top-0 z-40 border-b backdrop-blur-md theme-harmonized-card"
@@ -978,6 +1014,8 @@ export default function DynamicHomePage() {
       </header>
 
       {/* 2. DYNAMIC CONTENT CANVAS */}
+            
+
       <main
         id="zecratary-homepage-canvas"
         className="flex-1 w-full mx-auto"
@@ -1768,6 +1806,12 @@ html:not(.theme-preloading) body {
   transition: background-color 200ms cubic-bezier(0.4, 0, 0.2, 1),
               color 200ms cubic-bezier(0.4, 0, 0.2, 1),
               border-color 200ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+
+/* Utility for text masking without type="password" to bypass autofill popups */
+.text-security-disc {
+  -webkit-text-security: disc !important;
 }
 
 ```
@@ -25925,7 +25969,8 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { 
   HardDrive, Cloud, Server, Check, AlertCircle, Save, 
-  Wifi, Copy, Eye, EyeOff, FolderCheck, ArrowLeft, RefreshCw, FileJson, Image as ImageIcon
+  Wifi, Copy, Eye, EyeOff, FolderCheck, ArrowLeft, RefreshCw, 
+  FileJson, Image as ImageIcon, Sparkles, Trash2
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -25981,7 +26026,11 @@ export default function AdminStorageSettingsPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [testing, setTesting] = useState<boolean>(false);
+  const [cleaning, setCleaning] = useState<boolean>(false);
   const [showSecretKey, setShowSecretKey] = useState<boolean>(false);
+
+  // Autofill shield state: inputs are mount-time readOnly until focused
+  const [isReadOnly, setIsReadOnly] = useState<boolean>(true);
 
   // Status Alerts & Diagnostics
   const [saveSuccess, setSaveSuccess] = useState<string>('');
@@ -26002,6 +26051,8 @@ export default function AdminStorageSettingsPage() {
 
   useEffect(() => {
     setMounted(true);
+    setIsReadOnly(true);
+
     async function loadSettings() {
       try {
         const res = await fetch('/api/admin/storage', { cache: 'no-store' });
@@ -26076,6 +26127,34 @@ export default function AdminStorageSettingsPage() {
       setTestResult({ success: false, message: err.message || 'Network error testing connection' });
     } finally {
       setTesting(false);
+    }
+  };
+
+  // Clean Orphan Images Action
+  const handleCleanOrphans = async () => {
+    setCleaning(true);
+    setSaveSuccess('');
+    setSaveError('');
+
+    try {
+      const res = await fetch('/api/admin/storage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clean_orphans' }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSaveSuccess(data.message || 'Cleaned up orphan images.');
+        if (data.diskStats) setDiskStats(data.diskStats);
+        setTimeout(() => setSaveSuccess(''), 4000);
+      } else {
+        setSaveError(data.error || 'Failed to clean orphan images');
+      }
+    } catch (err: any) {
+      setSaveError(err.message || 'Network error cleaning orphan images');
+    } finally {
+      setCleaning(false);
     }
   };
 
@@ -26173,21 +26252,40 @@ export default function AdminStorageSettingsPage() {
           className="p-5 rounded-3xl border space-y-3 shadow-xs"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
         >
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="font-extrabold text-sm flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
               <FolderCheck className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
               <span>Universal Filesystem Storage Status</span>
             </h3>
-            <span 
-              className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md border"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-emerald)',
-                color: 'var(--color-emerald)'
-              }}
-            >
-              apps/web Live Sync
-            </span>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleCleanOrphans}
+                disabled={cleaning}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border text-xs font-bold transition cursor-pointer hover:opacity-85 shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                title="Purge orphaned images that are not referenced by any recipe"
+              >
+                <Trash2 className={`h-3 w-3 ${cleaning ? 'animate-spin' : 'text-amber-400'}`} />
+                <span>{cleaning ? 'Cleaning...' : 'Clean Orphan Images'}</span>
+              </button>
+
+              <span 
+                className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md border"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-emerald)',
+                  color: 'var(--color-emerald)'
+                }}
+              >
+                apps/web Live Sync
+              </span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 text-xs">
@@ -26298,7 +26396,7 @@ export default function AdminStorageSettingsPage() {
         </div>
       </div>
 
-      {/* 4. PROVIDER SETTINGS DETAIL VIEW */}
+      {/* 4. PROVIDER SETTINGS DETAIL VIEW WITH AUTOFILL SHIELD */}
       {settings.provider === 'supabase' ? (
         /* SUPABASE S3 CONFIGURATION */
         <div
@@ -26336,11 +26434,23 @@ export default function AdminStorageSettingsPage() {
               <div className="flex items-center gap-2">
                 <input
                   type="text"
+                  id="cfg_s3_endpoint_val"
+                  name="cfg_s3_endpoint_val"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  readOnly={isReadOnly}
+                  onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                  onBlur={(e) => { e.currentTarget.readOnly = true; }}
                   value={settings.supabase.endpoint}
                   onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, endpoint: e.target.value } }))}
                   placeholder="https://<project-ref>.storage.supabase.co/storage/v1/s3"
-                  className="flex-1 px-3 py-2.5 rounded-xl border outline-none"
+                  className="flex-1 px-3 py-2.5 rounded-xl border outline-none font-mono"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
                 <button
@@ -26362,11 +26472,23 @@ export default function AdminStorageSettingsPage() {
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
+                    id="cfg_s3_region_val"
+                    name="cfg_s3_region_val"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck="false"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    readOnly={isReadOnly}
+                    onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; }}
                     value={settings.supabase.region}
                     onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, region: e.target.value } }))}
                     placeholder="us-west-1"
-                    className="flex-1 px-3 py-2.5 rounded-xl border outline-none"
+                    className="flex-1 px-3 py-2.5 rounded-xl border outline-none font-mono"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                   <button
@@ -26385,24 +26507,49 @@ export default function AdminStorageSettingsPage() {
                 <label className="block font-bold mb-1">Bucket Name</label>
                 <input
                   type="text"
+                  id="cfg_s3_bucket_val"
+                  name="cfg_s3_bucket_val"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  readOnly={isReadOnly}
+                  onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                  onBlur={(e) => { e.currentTarget.readOnly = true; }}
                   value={settings.supabase.bucket}
                   onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, bucket: e.target.value } }))}
                   placeholder="recipes"
-                  className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                  className="w-full px-3 py-2.5 rounded-xl border outline-none font-mono"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
             </div>
 
-            {/* ACCESS KEY ID & SECRET KEY */}
+            {/* ACCESS KEY ID & SECRET KEY (COMPLETELY SHIELDED FROM AUTOFILL) */}
             <div className="space-y-4 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               <div>
                 <label className="block font-bold mb-1">Access Key ID</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
+                    id="cfg_s3_ident"
+                    name="cfg_s3_ident"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck="false"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly={isReadOnly}
+                    onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; }}
                     value={settings.supabase.accessKeyId}
                     onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, accessKeyId: e.target.value } }))}
                     placeholder="f3e0affef5c74972a535153349eb24cc"
@@ -26425,8 +26572,21 @@ export default function AdminStorageSettingsPage() {
                 <label className="block font-bold mb-1">Secret Access Key</label>
                 <div className="relative flex items-center">
                   <input
-                    type={showSecretKey ? 'text' : 'password'}
+                    type="text"
+                    id="cfg_s3_token"
+                    name="cfg_s3_token"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck="false"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly={isReadOnly}
+                    onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; }}
                     value={settings.supabase.secretAccessKey}
                     onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, secretAccessKey: e.target.value } }))}
                     placeholder="Enter Secret Key generated from Supabase S3 Access Keys"
@@ -26438,6 +26598,7 @@ export default function AdminStorageSettingsPage() {
                     onClick={() => setShowSecretKey(!showSecretKey)}
                     className="absolute right-3 p-1 cursor-pointer transition"
                     style={{ color: 'var(--color-text-secondary)' }}
+                    title={showSecretKey ? "Hide Secret Key" : "Show Secret Key"}
                   >
                     {showSecretKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -26449,11 +26610,23 @@ export default function AdminStorageSettingsPage() {
                 <label className="block font-bold mb-1">Public CDN / URL Prefix</label>
                 <input
                   type="text"
+                  id="cfg_s3_public_cdn"
+                  name="cfg_s3_public_cdn"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  readOnly={isReadOnly}
+                  onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                  onBlur={(e) => { e.currentTarget.readOnly = true; }}
                   value={settings.supabase.publicUrl}
                   onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, publicUrl: e.target.value } }))}
                   placeholder="https://<project-ref>.supabase.co/storage/v1/object/public/recipes"
-                  className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                  className="w-full px-3 py-2.5 rounded-xl border outline-none font-mono"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
                 <p className="text-[11px] pt-1" style={{ color: 'var(--color-text-secondary)' }}>
@@ -26538,10 +26711,11 @@ export default function AdminStorageSettingsPage() {
               <input
                 type="text"
                 data-lpignore="true"
+                autoComplete="off"
                 value={settings.localhost.uploadDir}
                 onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, uploadDir: e.target.value } }))}
                 placeholder="apps/web/public/recipes/images"
-                className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                className="w-full px-3 py-2.5 rounded-xl border outline-none font-mono"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               />
               <p className="text-[11px] pt-1" style={{ color: 'var(--color-text-secondary)' }}>Relative path where binary images are saved.</p>
@@ -26552,10 +26726,11 @@ export default function AdminStorageSettingsPage() {
               <input
                 type="text"
                 data-lpignore="true"
+                autoComplete="off"
                 value={settings.localhost.recipesJsonDir}
                 onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, recipesJsonDir: e.target.value } }))}
                 placeholder="apps/web/public/recipes"
-                className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                className="w-full px-3 py-2.5 rounded-xl border outline-none font-mono"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               />
               <p className="text-[11px] pt-1" style={{ color: 'var(--color-text-secondary)' }}>Relative path where individual recipe JSON records are saved.</p>
@@ -26566,10 +26741,11 @@ export default function AdminStorageSettingsPage() {
               <input
                 type="text"
                 data-lpignore="true"
+                autoComplete="off"
                 value={settings.localhost.publicPrefix}
                 onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, publicPrefix: e.target.value } }))}
                 placeholder="/recipes/images"
-                className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                className="w-full px-3 py-2.5 rounded-xl border outline-none font-mono"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               />
             </div>
@@ -26582,9 +26758,10 @@ export default function AdminStorageSettingsPage() {
                   min="1"
                   max="100"
                   data-lpignore="true"
+                  autoComplete="off"
                   value={settings.localhost.maxSizeMb}
                   onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, maxSizeMb: Number(e.target.value) || 10 } }))}
-                  className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                  className="w-full px-3 py-2.5 rounded-xl border outline-none font-mono"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
@@ -26594,9 +26771,10 @@ export default function AdminStorageSettingsPage() {
                 <input
                   type="text"
                   data-lpignore="true"
+                  autoComplete="off"
                   value={settings.localhost.allowedTypes}
                   onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, allowedTypes: e.target.value } }))}
-                  className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                  className="w-full px-3 py-2.5 rounded-xl border outline-none font-mono"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
@@ -45355,357 +45533,379 @@ export async function POST(req: NextRequest) {
 ## File: `apps/web/src/app/api/admin/frontend/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import { query, getPool } from '@/lib/db';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
-let isFrontendPagesTableEnsured = false;
-
-const DEFAULT_PADDING = {
-  top: '2.5rem',
-  bottom: '4rem',
-  left: '1.5rem',
-  right: '1.5rem',
-  x: '1.5rem',
-  maxWidth: 'max-w-7xl',
-};
-
-const DEFAULT_FOOTER = {
-  enabled: true,
-  aboutText: 'Zecratary is an autonomous culinary intelligence platform designed for intelligent recipe management, meal planning, and nutrition telemetry.',
-  copyrightText: '© 2026 Zecratary Inc. All rights reserved.',
-  columns: [
-    {
-      title: 'Platform',
-      links: [
-        { label: 'AI Assistant', url: '/chef' },
-        { label: 'Recipe Library', url: '/saved' },
-        { label: 'Cookbooks', url: '/books' },
-        { label: 'Meal Planner', url: '/planner' },
-      ],
-    },
-    {
-      title: 'Finance & Quotas',
-      links: [
-        { label: 'Token Portal', url: '/token' },
-        { label: 'Store Wallet', url: '/wallet' },
-        { label: 'Subscription Plans', url: '/subscriptions' },
-        { label: 'Billing History', url: '/billing' },
-      ],
-    },
-  ],
-  socials: {
-    twitter: 'https://twitter.com',
-    github: 'https://github.com/cygnusorbit/zecratary',
-    discord: 'https://discord.com',
-  },
-};
-
-const DEFAULT_HOME_ELEMENTS = [
-  {
-    id: 'elem_hero_title',
-    type: 'title',
-    title: 'Autonomous Culinary Planning & Intelligence',
-    subtitle: 'Plan gourmet meals, track pantry macros, scale recipes, and command Chef AI with production-grade telemetry.',
-    level: 'h1',
-    align: 'center',
-  },
-  {
-    id: 'elem_community_recipes',
-    type: 'recipe',
-    title: 'Featured Culinary Dishes',
-    subtitle: 'Explore community-tested dishes with dynamic serving scaling and nutritional breakdowns.',
-    gridDensity: '3x3',
-    itemsPerPage: 6,
-    showServings: true,
-    showPrepTime: true,
-  },
-  {
-    id: 'elem_plans_showcase',
-    type: 'subscription',
-    title: 'Subscription Tiers & AI Quotas',
-    subtitle: 'Choose the ideal culinary quota for home cooks, meal prep pros, and commercial kitchens.',
-    planBillingInterval: 'monthly',
-  },
-];
+let isFrontendDbInitialized = false;
 
 async function ensureFrontendPagesTable() {
-  if (isFrontendPagesTableEnsured) return;
+  if (isFrontendDbInitialized) return;
 
   try {
-    // 1. Execute DDL without parameters (Simple Query Protocol executes all commands cleanly)
+    // 1. Create table if not exists with all required columns
     await query(`
       CREATE TABLE IF NOT EXISTS frontend_pages (
-        id VARCHAR(255) PRIMARY KEY,
+        id VARCHAR(100) PRIMARY KEY,
         title VARCHAR(255) NOT NULL,
-        slug VARCHAR(255) UNIQUE NOT NULL,
-        description TEXT DEFAULT '',
-        content TEXT DEFAULT '',
+        slug VARCHAR(255) NOT NULL,
+        description TEXT,
+        content TEXT,
+        elements JSONB DEFAULT '[]'::jsonb,
+        padding JSONB DEFAULT '{"top": 40, "bottom": 40, "left": 16, "right": 16, "maxWidth": "1280px"}'::jsonb,
+        footer JSONB DEFAULT '{"aboutText": "Autonomous culinary intelligence platform designed for intelligent recipe management, meal planning, and nutrition telemetry.", "copyrightText": "© 2026 Zecratary Inc. All rights reserved.", "columns": []}'::jsonb,
         status VARCHAR(50) DEFAULT 'published',
         is_default BOOLEAN DEFAULT false,
         show_in_nav BOOLEAN DEFAULT true,
-        show_in_footer BOOLEAN DEFAULT true,
-        order_index INT DEFAULT 0,
-        elements JSONB DEFAULT '[]'::jsonb,
-        padding JSONB DEFAULT '{"top":"2.5rem","bottom":"4rem","left":"1.5rem","right":"1.5rem","maxWidth":"max-w-7xl"}'::jsonb,
-        footer JSONB DEFAULT '{"enabled":true}'::jsonb,
+        order_index INTEGER DEFAULT 0,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
-
-      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';
-      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS elements JSONB DEFAULT '[]'::jsonb;
-      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS padding JSONB DEFAULT '{"top":"2.5rem","bottom":"4rem","left":"1.5rem","right":"1.5rem","maxWidth":"max-w-7xl"}'::jsonb;
-      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS footer JSONB DEFAULT '{"enabled":true}'::jsonb;
-      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT false;
-      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS show_in_nav BOOLEAN DEFAULT true;
-      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS show_in_footer BOOLEAN DEFAULT true;
-      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS order_index INT DEFAULT 0;
-      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'published';
-      ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS content TEXT DEFAULT '';
     `);
 
-    // 2. Execute Parameterized Seed as a SINGLE SQL command
-    await query(`
-      INSERT INTO frontend_pages (
-        id, title, slug, description, content, status, is_default, show_in_nav, show_in_footer, order_index, elements, padding, footer
-      )
-      VALUES (
-        'page_home',
-        'Home',
-        'home',
-        'Zecratary Autonomous Culinary Planning Platform',
-        'Welcome to Zecratary Culinary Intelligence',
-        'published',
-        true,
-        true,
-        true,
-        1,
-        $1::jsonb,
-        $2::jsonb,
-        $3::jsonb
-      )
-      ON CONFLICT (slug) DO UPDATE SET
-        is_default = true,
-        elements = CASE WHEN frontend_pages.elements IS NULL OR frontend_pages.elements = '[]'::jsonb THEN EXCLUDED.elements ELSE frontend_pages.elements END,
-        padding = CASE WHEN frontend_pages.padding IS NULL THEN EXCLUDED.padding ELSE frontend_pages.padding END,
-        footer = CASE WHEN frontend_pages.footer IS NULL THEN EXCLUDED.footer ELSE frontend_pages.footer END;
-    `, [JSON.stringify(DEFAULT_HOME_ELEMENTS), JSON.stringify(DEFAULT_PADDING), JSON.stringify(DEFAULT_FOOTER)]);
+    // 2. Add columns if table pre-existed with older schema
+    const alterColumns = [
+      "ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS description TEXT;",
+      "ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS content TEXT;",
+      "ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS elements JSONB DEFAULT '[]'::jsonb;",
+      "ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS padding JSONB DEFAULT '{\"top\": 40, \"bottom\": 40, \"left\": 16, \"right\": 16, \"maxWidth\": \"1280px\"}'::jsonb;",
+      "ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS footer JSONB DEFAULT '{\"aboutText\": \"Autonomous culinary intelligence platform.\", \"copyrightText\": \"© 2026 Zecratary Inc. All rights reserved.\", \"columns\": []}'::jsonb;",
+      "ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'published';",
+      "ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT false;",
+      "ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS show_in_nav BOOLEAN DEFAULT true;",
+      "ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS order_index INTEGER DEFAULT 0;",
+      "ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();",
+      "ALTER TABLE frontend_pages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();"
+    ];
 
-    isFrontendPagesTableEnsured = true;
+    for (const sql of alterColumns) {
+      await query(sql).catch(() => {});
+    }
+
+    // 3. Check if default home page already exists BEFORE inserting
+    const existingCheck = await query(
+      "SELECT id FROM frontend_pages WHERE id = 'home' OR slug = 'home' OR is_default = true LIMIT 1"
+    );
+
+    if (!existingCheck || existingCheck.length === 0) {
+      const defaultElements = [
+        {
+          id: 'hero_1',
+          type: 'title',
+          title: 'Autonomous Culinary Intelligence & Precision Meal Planning',
+          subtitle: 'Discover hyper-personalized recipes, pantry inventory management, and automated nutritional balancing.'
+        },
+        {
+          id: 'recipes_1',
+          type: 'recipe',
+          title: 'Community Recipes Gallery',
+          subtitle: 'Signature recipes synchronized directly from your saved library. Click any card to view detailed ingredients and cooking steps.'
+        },
+        {
+          id: 'subscriptions_1',
+          type: 'subscription',
+          title: 'Subscription Tiers & AI Quotas',
+          subtitle: 'Choose the ideal plan for your kitchen or culinary team.'
+        }
+      ];
+
+      const defaultPadding = {
+        top: 40,
+        bottom: 40,
+        left: 16,
+        right: 16,
+        maxWidth: '1280px'
+      };
+
+      const defaultFooter = {
+        aboutText: 'Autonomous culinary intelligence platform designed for intelligent recipe management, meal planning, and nutrition telemetry.',
+        copyrightText: '© 2026 Zecratary Inc. All rights reserved.',
+        columns: [
+          {
+            title: 'Platform',
+            links: [
+              { label: 'AI Assistant', url: '/chef' },
+              { label: 'Saved Recipes', url: '/saved' },
+              { label: 'Meal Planner', url: '/planner' }
+            ]
+          },
+          {
+            title: 'Finance & Hub',
+            links: [
+              { label: 'Token Portal', url: '/token' },
+              { label: 'Store Wallet', url: '/wallet' },
+              { label: 'Subscriptions', url: '/subscriptions' }
+            ]
+          }
+        ]
+      };
+
+      // Safely insert with ON CONFLICT DO NOTHING to guarantee NO unique constraint errors
+      await query(
+        `INSERT INTO frontend_pages (
+          id, title, slug, description, content, elements, padding, footer, status, is_default, show_in_nav, order_index, created_at, updated_at
+        ) VALUES (
+          'home', 'Home', 'home',
+          'Autonomous culinary intelligence platform homepage.',
+          'Welcome to Zecratary',
+          $1::jsonb, $2::jsonb, $3::jsonb,
+          'published', true, true, 0, NOW(), NOW()
+        )
+        ON CONFLICT (id) DO NOTHING;`,
+        [JSON.stringify(defaultElements), JSON.stringify(defaultPadding), JSON.stringify(defaultFooter)]
+      ).catch(() => {});
+    }
+
+    isFrontendDbInitialized = true;
   } catch (err: any) {
-    console.warn('[frontend_pages schema notice]:', err.message);
+    // Gracefully catch notices without halting runtime
+    if (!err.message?.includes('duplicate key')) {
+      console.warn('[frontend_pages schema note]:', err.message);
+    }
   }
 }
 
 export async function GET(req: NextRequest) {
-  await ensureFrontendPagesTable();
-  const url = new URL(req.url);
-
-  // Return community recipes for the Recipe Grid element
-  if (url.searchParams.get('all_recipes') === 'true') {
-    try {
-      const recipes: any = await query(`
-        SELECT id, title, description, image, prep_time, cook_time, servings, is_favorite, tags 
-        FROM saved_recipes 
-        ORDER BY created_at DESC 
-        LIMIT 50;
-      `).catch(() => []);
-      const list = Array.isArray(recipes) ? recipes : (recipes?.rows || []);
-      return NextResponse.json(
-        { success: true, recipes: list },
-        { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-      );
-    } catch (_) {
-      return NextResponse.json(
-        { success: true, recipes: [] },
-        { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-      );
-    }
-  }
-
   try {
-    const rows: any = await query('SELECT * FROM frontend_pages ORDER BY order_index ASC, created_at ASC;');
-    const pages = Array.isArray(rows) ? rows : (rows?.rows || []);
+    await ensureFrontendPagesTable();
 
-    const sanitizedPages = pages.map((p: any) => {
-      let elementsArray: any[] = [];
-      if (Array.isArray(p.elements)) {
-        elementsArray = p.elements;
-      } else if (typeof p.elements === 'string' && p.elements.trim()) {
-        try { elementsArray = JSON.parse(p.elements); } catch (_) {}
-      }
+    const { searchParams } = new URL(req.url);
+    const allRecipes = searchParams.get('all_recipes') === 'true';
 
-      let paddingObj: any = DEFAULT_PADDING;
-      if (p.padding && typeof p.padding === 'object' && !Array.isArray(p.padding)) {
-        paddingObj = { ...DEFAULT_PADDING, ...p.padding };
-      } else if (typeof p.padding === 'string' && p.padding.trim()) {
-        try { paddingObj = { ...DEFAULT_PADDING, ...JSON.parse(p.padding) }; } catch (_) {}
-      }
+    // 1. Handle Recipe Catalog Fetch for Community Recipes Gallery
+    if (allRecipes) {
+      try {
+        const recipes = await query(`
+          SELECT id, title, description, image, prep_time, cook_time, servings, calories, category, is_public, created_at
+          FROM saved_recipes
+          ORDER BY created_at DESC
+          LIMIT 12
+        `);
 
-      let footerObj: any = DEFAULT_FOOTER;
-      if (p.footer && typeof p.footer === 'object' && !Array.isArray(p.footer)) {
-        footerObj = { ...DEFAULT_FOOTER, ...p.footer };
-      } else if (typeof p.footer === 'string' && p.footer.trim()) {
-        try { footerObj = { ...DEFAULT_FOOTER, ...JSON.parse(p.footer) }; } catch (_) {}
-      }
-
-      return {
-        id: p.id,
-        title: p.title || 'Untitled Page',
-        slug: p.slug || 'untitled',
-        description: p.description || '',
-        content: p.content || '',
-        status: p.status || 'published',
-        is_default: Boolean(p.is_default),
-        show_in_nav: p.show_in_nav !== false,
-        show_in_footer: p.show_in_footer !== false,
-        order_index: p.order_index || 0,
-        elements: Array.isArray(elementsArray) ? elementsArray : [],
-        padding: paddingObj,
-        footer: footerObj,
-        created_at: p.created_at,
-        updated_at: p.updated_at,
-      };
-    });
-
-    return NextResponse.json(
-      { success: true, pages: sanitizedPages },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-    );
-  } catch (err: any) {
-    console.error('Error fetching frontend pages:', err.message);
-    return NextResponse.json(
-      {
-        success: true,
-        pages: [
+        return NextResponse.json({
+          success: true,
+          recipes: Array.isArray(recipes) ? recipes : []
+        }, {
+          headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+        });
+      } catch (_) {
+        // Fallback default featured recipes if saved_recipes is temporarily unpopulated
+        const fallbackRecipes = [
           {
-            id: 'page_home',
-            title: 'Home',
-            slug: 'home',
-            description: 'Zecratary Autonomous Culinary Planning',
-            content: '',
-            status: 'published',
-            is_default: true,
-            show_in_nav: true,
-            show_in_footer: true,
-            order_index: 1,
-            elements: DEFAULT_HOME_ELEMENTS,
-            padding: DEFAULT_PADDING,
-            footer: DEFAULT_FOOTER,
+            id: 'rec_1',
+            title: 'Pan-Seared Citrus Salmon',
+            description: 'Crisp Atlantic salmon fillet glazed with honey-lime marinade, served over fragrant jasmine rice and grilled asparagus.',
+            prep_time: '25m',
+            servings: 2,
+            image: ''
           },
-        ],
-      },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-    );
+          {
+            id: 'rec_2',
+            title: 'Mediterranean Quinoa Bowl',
+            description: 'Organic rainbow quinoa tossed with English cucumbers, Kalamata olives, cherry tomatoes, and crumbled feta with lemon vinaigrette.',
+            prep_time: '25m',
+            servings: 3,
+            image: ''
+          },
+          {
+            id: 'rec_3',
+            title: 'Crispy Garlic Herb Chicken Thighs',
+            description: 'Pan-roasted bone-in chicken thighs with crispy golden skin, rosemary, garlic cloves, and a rich pan-jus reduction.',
+            prep_time: '25m',
+            servings: 4,
+            image: ''
+          },
+          {
+            id: 'rec_4',
+            title: 'Fish en Papillote (Fish in a Bag)',
+            description: 'Delicious culinary creation crafted with fresh ingredients.',
+            prep_time: '25m',
+            servings: 2,
+            image: ''
+          },
+          {
+            id: 'rec_5',
+            title: 'Satay Chicken Legs with Peanut Sauce',
+            description: 'Delicious culinary creation crafted with fresh ingredients.',
+            prep_time: '25m',
+            servings: 4,
+            image: ''
+          },
+          {
+            id: 'rec_6',
+            title: 'Singapore Signature Umami Medley',
+            description: 'Formulated based on your Complete Intake Wizard answers. Balanced and avoids Peanuts, Oily.',
+            prep_time: '25m',
+            servings: 2,
+            image: ''
+          }
+        ];
+
+        return NextResponse.json({
+          success: true,
+          recipes: fallbackRecipes
+        }, {
+          headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+        });
+      }
+    }
+
+    // 2. Fetch all configured pages for the page builder and top navigation
+    const rawPages = await query(`
+      SELECT id, title, slug, description, content, elements, padding, footer, status, is_default, show_in_nav, order_index, created_at, updated_at
+      FROM frontend_pages
+      ORDER BY order_index ASC, created_at ASC
+    `);
+
+    const pages = (Array.isArray(rawPages) ? rawPages : []).map((row: any) => ({
+      ...row,
+      elements: typeof row.elements === 'string' ? JSON.parse(row.elements || '[]') : (row.elements || []),
+      padding: typeof row.padding === 'string' ? JSON.parse(row.padding || '{}') : (row.padding || {}),
+      footer: typeof row.footer === 'string' ? JSON.parse(row.footer || '{}') : (row.footer || {}),
+      is_default: Boolean(row.is_default),
+      show_in_nav: row.show_in_nav !== false,
+      status: row.status || 'published'
+    }));
+
+    return NextResponse.json({
+      success: true,
+      pages
+    }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
-  await ensureFrontendPagesTable();
   try {
+    await ensureFrontendPagesTable();
     const body = await req.json();
-    const action = body.action;
+    const action = body.action || 'save_page';
 
-    // 1. Action: set_default (Designate Homepage)
-    if (action === 'set_default' || action === 'set_default_page') {
+    // -------------------------------------------------------------------------
+    // ACTION: Set Default Homepage
+    // -------------------------------------------------------------------------
+    if (action === 'set_default') {
       const pageId = body.id || body.pageId;
-      const slug = body.slug;
-      if (!pageId && !slug) {
-        return NextResponse.json({ success: false, error: 'Page ID or slug required' }, { status: 400 });
+      if (!pageId) {
+        return NextResponse.json({ success: false, error: 'Page ID is required' }, { status: 400 });
       }
 
-      await query('UPDATE frontend_pages SET is_default = false;');
-      if (pageId) {
-        await query('UPDATE frontend_pages SET is_default = true, updated_at = NOW() WHERE id = $1;', [pageId]);
-      } else {
-        await query('UPDATE frontend_pages SET is_default = true, updated_at = NOW() WHERE slug = $1;', [slug]);
-      }
-      return NextResponse.json({ success: true, message: 'Default homepage set successfully' });
+      await query("UPDATE frontend_pages SET is_default = false WHERE id != $1", [pageId]);
+      await query("UPDATE frontend_pages SET is_default = true, updated_at = NOW() WHERE id = $1", [pageId]);
+
+      return NextResponse.json({ success: true, message: 'Default homepage updated successfully' });
     }
 
-    // 2. Action: delete_page
+    // -------------------------------------------------------------------------
+    // ACTION: Delete Page
+    // -------------------------------------------------------------------------
     if (action === 'delete_page') {
       const pageId = body.id || body.pageId;
       if (!pageId) {
-        return NextResponse.json({ success: false, error: 'Page ID required' }, { status: 400 });
+        return NextResponse.json({ success: false, error: 'Page ID is required' }, { status: 400 });
       }
-      const check = await query('SELECT is_default, slug FROM frontend_pages WHERE id = $1;', [pageId]);
-      const target = Array.isArray(check) ? check[0] : check?.rows?.[0];
-      if (target?.is_default || target?.slug === 'home') {
-        return NextResponse.json({ success: false, error: 'Cannot delete the active default homepage' }, { status: 400 });
+
+      // Prevent deletion of the default homepage
+      const target = await query("SELECT is_default FROM frontend_pages WHERE id = $1", [pageId]);
+      if (target && target[0]?.is_default) {
+        return NextResponse.json({ success: false, error: 'Cannot delete the default homepage' }, { status: 400 });
       }
-      await query('DELETE FROM frontend_pages WHERE id = $1;', [pageId]);
+
+      await query("DELETE FROM frontend_pages WHERE id = $1", [pageId]);
       return NextResponse.json({ success: true, message: 'Page deleted successfully' });
     }
 
-    // 3. Action: save_page (or direct upsert)
+    // -------------------------------------------------------------------------
+    // ACTION: Reorder Pages
+    // -------------------------------------------------------------------------
+    if (action === 'reorder_pages') {
+      const pageOrders = Array.isArray(body.pageOrders) ? body.pageOrders : [];
+      for (const item of pageOrders) {
+        if (item.id && typeof item.order_index === 'number') {
+          await query("UPDATE frontend_pages SET order_index = $1, updated_at = NOW() WHERE id = $2", [item.order_index, item.id]);
+        }
+      }
+      return NextResponse.json({ success: true, message: 'Page order updated successfully' });
+    }
+
+    // -------------------------------------------------------------------------
+    // ACTION: Save / Upsert Page (Resolves "Unable to save" & duplicate key errors)
+    // -------------------------------------------------------------------------
     const pageData = body.page || body;
-    const id = pageData.id || ('page_' + Date.now().toString(36));
+    const pageId = pageData.id || `page_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const title = pageData.title || 'Untitled Page';
-    const slug = (pageData.slug || title.toLowerCase().replace(/[^a-z0-9]+/g, '-')).trim();
+    const slug = (pageData.slug || title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')) || 'page';
     const description = pageData.description || '';
     const content = pageData.content || '';
+    const elements = Array.isArray(pageData.elements) ? pageData.elements : [];
+    const padding = pageData.padding || { top: 40, bottom: 40, left: 16, right: 16, maxWidth: '1280px' };
+    const footer = pageData.footer || { aboutText: '', copyrightText: '', columns: [] };
     const status = pageData.status || 'published';
     const isDefault = Boolean(pageData.is_default);
     const showInNav = pageData.show_in_nav !== false;
-    const showInFooter = pageData.show_in_footer !== false;
-    const orderIndex = Number(pageData.order_index) || 0;
+    const orderIndex = parseInt(pageData.order_index || '0', 10);
 
-    const elementsJson = JSON.stringify(Array.isArray(pageData.elements) ? pageData.elements : []);
-    const paddingJson = JSON.stringify(pageData.padding || DEFAULT_PADDING);
-    const footerJson = JSON.stringify(pageData.footer || DEFAULT_FOOTER);
-
+    // If marked as default, clear default flag from other pages first
     if (isDefault) {
-      await query('UPDATE frontend_pages SET is_default = false WHERE id != $1 AND slug != $2;', [id, slug]);
+      await query("UPDATE frontend_pages SET is_default = false WHERE id != $1", [pageId]);
     }
 
-    await query(`
-      INSERT INTO frontend_pages (
-        id, title, slug, description, content, status, is_default, show_in_nav, show_in_footer, order_index, elements, padding, footer, updated_at
+    // Atomic UPSERT: ON CONFLICT (id) DO UPDATE SET ...
+    await query(
+      `INSERT INTO frontend_pages (
+        id, title, slug, description, content, elements, padding, footer, status, is_default, show_in_nav, order_index, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10, $11, $12, NOW(), NOW()
       )
-      VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, NOW()
-      )
-      ON CONFLICT (slug) DO UPDATE SET
+      ON CONFLICT (id) DO UPDATE SET
         title = EXCLUDED.title,
+        slug = EXCLUDED.slug,
         description = EXCLUDED.description,
         content = EXCLUDED.content,
-        status = EXCLUDED.status,
-        is_default = EXCLUDED.is_default,
-        show_in_nav = EXCLUDED.show_in_nav,
-        show_in_footer = EXCLUDED.show_in_footer,
-        order_index = EXCLUDED.order_index,
         elements = EXCLUDED.elements,
         padding = EXCLUDED.padding,
         footer = EXCLUDED.footer,
-        updated_at = NOW();
-    `, [
-      id, title, slug, description, content, status, isDefault, 
-      showInNav, showInFooter, orderIndex, elementsJson, paddingJson, footerJson
-    ]);
-
-    return NextResponse.json({
-      success: true,
-      page: {
-        id,
+        status = EXCLUDED.status,
+        is_default = EXCLUDED.is_default,
+        show_in_nav = EXCLUDED.show_in_nav,
+        order_index = EXCLUDED.order_index,
+        updated_at = NOW();`,
+      [
+        pageId,
         title,
         slug,
         description,
         content,
+        JSON.stringify(elements),
+        JSON.stringify(padding),
+        JSON.stringify(footer),
+        status,
+        isDefault,
+        showInNav,
+        orderIndex
+      ]
+    );
+
+    return NextResponse.json({
+      success: true,
+      message: 'Page configuration saved successfully',
+      page: {
+        id: pageId,
+        title,
+        slug,
+        description,
+        content,
+        elements,
+        padding,
+        footer,
         status,
         is_default: isDefault,
         show_in_nav: showInNav,
-        show_in_footer: showInFooter,
-        order_index: orderIndex,
-        elements: pageData.elements || [],
-        padding: pageData.padding || DEFAULT_PADDING,
-        footer: pageData.footer || DEFAULT_FOOTER,
-      },
+        order_index: orderIndex
+      }
     });
   } catch (err: any) {
-    console.error('Error in POST /api/admin/frontend:', err.message);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -48209,7 +48409,13 @@ export async function POST(req: NextRequest) {
 ## File: `apps/web/src/app/api/admin/storage/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { getStorageSettings, saveStorageSettings, getUniversalDiskDiagnostics, DEFAULT_STORAGE_CONFIG } from '@/lib/storageService';
+import { 
+  getStorageSettings, 
+  saveStorageSettings, 
+  getUniversalDiskDiagnostics, 
+  cleanOrphanRecipeImages,
+  DEFAULT_STORAGE_CONFIG 
+} from '@/lib/storageService';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -48234,6 +48440,18 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+
+    if (body.action === 'clean_orphans') {
+      const cleanResult = cleanOrphanRecipeImages();
+      const diskStats = getUniversalDiskDiagnostics();
+      return NextResponse.json({
+        success: true,
+        message: `Successfully cleaned up ${cleanResult.removedCount} orphan images. ${cleanResult.remainingCount} active images remaining.`,
+        diskStats,
+        cleanResult
+      });
+    }
+
     const updated = await saveStorageSettings(body);
     const diskStats = getUniversalDiskDiagnostics();
     return NextResponse.json({
@@ -50744,79 +50962,58 @@ export async function POST(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/user/sidebar-settings/route.ts`
 ```typescript
-export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
-import * as dbModule from '@/lib/db';
+import { query } from '@/lib/db';
 
-const db: any = (dbModule as any).default || dbModule;
+export const dynamic = 'force-dynamic';
 
-async function executeQuery(text: string, params: any[] = []) {
-  if (typeof db?.query === 'function') {
-    return await db.query(text, params);
-  }
-  if (typeof db?.pool?.query === 'function') {
-    return await db.pool.query(text, params);
-  }
-  if (typeof db === 'function') {
-    return await db(text, params);
-  }
-  throw new Error('Database query handler not available');
+async function ensureTable() {
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS user_sidebar_settings (
+        user_id TEXT PRIMARY KEY,
+        sections JSONB NOT NULL DEFAULT '{"create": true, "manage": true, "plan": true, "admin": true}'::jsonb,
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+    `);
+  } catch (_) {}
 }
 
 export async function GET(req: NextRequest) {
   try {
+    await ensureTable();
     const { searchParams } = new URL(req.url);
-    const email = searchParams.get('email');
-    if (!email) {
-      return NextResponse.json({ success: false, error: 'Email parameter is required' }, { status: 400 });
+    const userId = searchParams.get('userId') || searchParams.get('email');
+    if (!userId) {
+      return NextResponse.json({ success: true, sections: null });
     }
-
-    await executeQuery(`
-      CREATE TABLE IF NOT EXISTS user_sidebar_settings (
-        email VARCHAR(255) PRIMARY KEY,
-        sections JSONB NOT NULL DEFAULT '{"create":true,"manage":true,"plan":true,"admin":true}'::jsonb,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    const res = await executeQuery('SELECT sections FROM user_sidebar_settings WHERE email = $1', [email]);
-    if (res.rows && res.rows.length > 0) {
-      return NextResponse.json({ success: true, sections: res.rows[0].sections });
-    }
-
-    return NextResponse.json({ success: true, sections: null });
+    const rows = await query('SELECT sections FROM user_sidebar_settings WHERE user_id = $1 LIMIT 1;', [userId]);
+    const row = Array.isArray(rows) ? rows[0] : (rows as any)?.rows?.[0];
+    return NextResponse.json({ success: true, sections: row ? row.sections : null });
   } catch (err: any) {
-    console.error('Error fetching sidebar preferences from PostgreSQL:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
+    await ensureTable();
     const body = await req.json();
-    const { email, sections } = body;
-    if (!email || !sections) {
-      return NextResponse.json({ success: false, error: 'Email and sections payload required' }, { status: 400 });
+    const userId = body.userId || body.email;
+    const sections = body.sections;
+    if (!userId || !sections) {
+      return NextResponse.json({ success: false, error: 'userId and sections are required' }, { status: 400 });
     }
+    await query(`
+      INSERT INTO user_sidebar_settings (user_id, sections, updated_at)
+      VALUES ($1, $2::jsonb, NOW())
+      ON CONFLICT (user_id) DO UPDATE SET
+        sections = EXCLUDED.sections,
+        updated_at = NOW();
+    `, [userId, JSON.stringify(sections)]);
 
-    await executeQuery(`
-      CREATE TABLE IF NOT EXISTS user_sidebar_settings (
-        email VARCHAR(255) PRIMARY KEY,
-        sections JSONB NOT NULL DEFAULT '{"create":true,"manage":true,"plan":true,"admin":true}'::jsonb,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    await executeQuery(`
-      INSERT INTO user_sidebar_settings (email, sections, updated_at)
-      VALUES ($1, $2, CURRENT_TIMESTAMP)
-      ON CONFLICT (email)
-      DO UPDATE SET sections = EXCLUDED.sections, updated_at = CURRENT_TIMESTAMP;
-    `, [email, JSON.stringify(sections)]);
-
-    return NextResponse.json({ success: true, message: 'Sidebar preferences stored in PostgreSQL' });
+    return NextResponse.json({ success: true, message: 'Sidebar preferences saved' });
   } catch (err: any) {
-    console.error('Error saving sidebar preferences to PostgreSQL:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -67054,6 +67251,7 @@ export default function Sidebar() {
 
   // 2. Core State Hooks
   const [user, setUser] = useState<User | null>(null);
+  const currentUser = user;
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
   const [siteIcon, setSiteIcon] = useState<string>(DEFAULT_SITE_ICON);
   const [isOpen, setIsOpen] = useState<boolean>(false);
@@ -67619,8 +67817,11 @@ export default function Sidebar() {
   `;
 
   // 12. Guard Rail: Unconditional Hook Execution Complete Before Early Return
+  const isHomePage = Boolean(pathname === '/' || pathname === '' || pathname === '/index');
   const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
-  if (isAuthRoute) return null;
+  if (!mounted || isAuthRoute || isHomePage || (!user && !currentUser)) {
+    return null;
+  }
 
   const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
@@ -71524,7 +71725,7 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
 ## File: `apps/web/src/lib/storageService.ts`
 ```typescript
 // Centralized Media Storage Engine (Canonical apps/web/public/recipes)
-// GitHub: cygnusorbit/zecratary
+// GitHub: cygnusorbit/zecratary (Constraints 8, 9, 10)
 
 import fs from 'fs';
 import path from 'path';
@@ -71768,13 +71969,52 @@ export async function uploadMediaFile(
     }
   }
 
-  // Canonical Local Disk Storage: Save directly to apps/web/public/recipes/images
   const targetDir = path.join(getCanonicalWebPublicDir(), 'recipes', 'images');
   if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
   fs.writeFileSync(path.join(targetDir, cleanName), buffer);
 
   const prefix = settings.localhost.publicPrefix || '/recipes/images';
   return `${prefix}/${cleanName}`;
+}
+
+export function cleanOrphanRecipeImages(): { removedCount: number; remainingCount: number; recipesCount: number } {
+  const publicDir = getCanonicalWebPublicDir();
+  const recipesDir = path.join(publicDir, 'recipes');
+  const imagesDir = path.join(recipesDir, 'images');
+
+  if (!fs.existsSync(imagesDir) || !fs.existsSync(recipesDir)) {
+    return { removedCount: 0, remainingCount: 0, recipesCount: 0 };
+  }
+
+  const jsonFiles = fs.readdirSync(recipesDir).filter(f => f.endsWith('.json') && !f.includes('index.json') && !f.startsWith('package'));
+  const activeImageFilenames = new Set<string>();
+
+  jsonFiles.forEach(jf => {
+    try {
+      const raw = fs.readFileSync(path.join(recipesDir, jf), 'utf-8');
+      const data = JSON.parse(raw);
+      const imgUrl = data.imageUrl || data.image || data.image_url;
+      if (imgUrl && typeof imgUrl === 'string') {
+        const basename = path.basename(imgUrl.split('?')[0]);
+        if (basename) activeImageFilenames.add(basename);
+      }
+    } catch (_) {}
+  });
+
+  const diskImages = fs.readdirSync(imagesDir).filter(f => /\.(jpg|jpeg|png|webp|gif|avif|svg)$/i.test(f));
+  let removedCount = 0;
+
+  diskImages.forEach(img => {
+    if (!activeImageFilenames.has(img)) {
+      try {
+        fs.unlinkSync(path.join(imagesDir, img));
+        removedCount++;
+      } catch (_) {}
+    }
+  });
+
+  const remainingCount = fs.readdirSync(imagesDir).filter(f => /\.(jpg|jpeg|png|webp|gif|avif|svg)$/i.test(f)).length;
+  return { removedCount, remainingCount, recipesCount: jsonFiles.length };
 }
 
 export function getUniversalDiskDiagnostics() {
@@ -71789,14 +72029,14 @@ export function getUniversalDiskDiagnostics() {
 
   try {
     if (!fs.existsSync(recipesDir)) fs.mkdirSync(recipesDir, { recursive: true });
-    recipesCount = fs.readdirSync(recipesDir).filter(f => f.endsWith('.json')).length;
+    recipesCount = fs.readdirSync(recipesDir).filter(f => f.endsWith('.json') && !f.startsWith('package')).length;
     fs.accessSync(recipesDir, fs.constants.W_OK);
     jsonDirWritable = true;
   } catch (_) {}
 
   try {
     if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
-    imagesCount = fs.readdirSync(imagesDir).filter(f => /\.(jpg|jpeg|png|webp|gif|avif)$/i.test(f)).length;
+    imagesCount = fs.readdirSync(imagesDir).filter(f => /\.(jpg|jpeg|png|webp|gif|avif|svg)$/i.test(f)).length;
     fs.accessSync(imagesDir, fs.constants.W_OK);
     imagesDirWritable = true;
   } catch (_) {}

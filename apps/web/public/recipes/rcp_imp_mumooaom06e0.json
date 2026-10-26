@@ -1,5 +1,11 @@
 {
   "id": "rcp_imp_mumooaom06e0",
+  "ownership": {
+    "userId": "usr_admin_1",
+    "createdBy": "admin@zecratary.com",
+    "creatorName": "System Administrator",
+    "creatorEmail": "admin@zecratary.com"
+  },
   "owner": {
     "id": "usr_admin_1",
     "name": "System Administrator",
@@ -9,19 +15,19 @@
   "ownerName": "System Administrator",
   "ownerEmail": "admin@zecratary.com",
   "userId": "usr_admin_1",
-  "userEmail": "admin@zecratary.com",
   "createdBy": "admin@zecratary.com",
   "creatorName": "System Administrator",
-  "isPublic": false,
-  "visibility": "private",
+  "creatorEmail": "admin@zecratary.com",
+  "isPublic": true,
+  "visibility": "public",
   "title": "Polish Cabbage Rolls (Golabki)",
   "description": "Recipe video above. Here is a recipe for traditional Polish stuffed Cabbage Rolls (Gołąbki). Made with a savoury pork and rice filling wrapped in tender cabbage leaves then simmered in tomato sauce, they are beautifully soft and succulent inside. It's pure hearty, homey, Polish comfort food!I know the recipe looks long, but don’t be intimidated - there’s nothing technically difficult here. The rolls are surprisingly easy to make (easier than burritos, Nagi declares!) and hold together well. And if yours don't look perfect, it doesn't matter. This is home cooking, not Michelin-star fine dining - and they’ll taste just as good!",
-  "prepMinutes": 15,
-  "cookMinutes": 25,
-  "servings": 5,
   "recipeType": "Breakfast",
-  "mealType": "Breakfast",
+  "category": "Breakfast",
   "cuisine": "polish",
+  "servings": 5,
+  "prepTimeMinutes": 15,
+  "cookTimeMinutes": 25,
   "ingredients": [
     "1 head savoy cabbage or green cabbage (, ~1.5kg / 3lbs (Note 1))",
     "1 tbsp cooking salt / kosher salt (, for cooking water (half for table salt, +50% for flakes))",
@@ -59,17 +65,33 @@
     "Add rolls - Place the cabbage rolls seam side down into the sauce. Dip a brush into the sauce in the pan and brush some on top of each roll, just enough to give the surface a thin coating.",
     "Warm cabbage rolls - Once the sauce starts simmering around the edges of the cabbage, turn the heat down to medium, cover with a lid and let the cabbage rolls warm through for 5 minutes. Remove the lid, scatter with parsley and serve."
   ],
-  "nutrition": {},
-  "tags": [
-    "Breakfast"
+  "directions": [
+    "Trim, core and boil cabbage 10 min. Peel 10 leaves, pat dry, trim ribs to flatten. Chop remaining cabbage. Mix stuffing, roll into cabbage rolls. Cook in chicken stock 25 min, remove, reduce stock to 1 1/2 cups. Add tomato sauce ingredients, simmer to reduce 5 min, put rolls back in to reheat 5 min. Serve.",
+    "Core - Peel and discard the 3 or 4 big outer leaves from cabbage (too thick and usually scruffy). Remove the core by cutting a cone shaped piece around it using a small sharp knife. Insert it next to the stem on an angle towards the centre (8cm / 3\" deep), cut a cone shape around the core and lift it out. (See video, it's helpful). Goal - You can see the cabbage layers inside the hole, rather than the core. (Note 4)",
+    "Cook cabbage - Bring 5 litres (5 quarts) of water to a boil in a large pot. Add salt and carefully place the cabbage in, core side down. Bring the water back to a boil, turn it down to a simmer, cover with a lid and cook for 10 minutes. Remove the cabbage (use a spider or slotted spoon) and place on a tray.Safety tip: If you’re not confident lifting the cabbage out of such a large volume of hot water, carefully move the pot to the sink first. The lower position makes it easier and safer to remove cabbage out. (See FAQ for freezing method).",
+    "Peel leaves - Let the cabbage cool for 10 minutes or until it can be handled. Carefully peel off the first 10 leaves of the cabbage. Try not to tear them though if they doing a bit on the edges, that's ok. You don't want holes in the centre though as the filling will escape.The leaves should be just cooked enough that they are pliable and don't break when bent. If there are uncooked patches, just dunk those leaves briefly back into the pot - it will only take 30 seconds or so.",
+    "Trim leaves - Lay one leaf flat on a tea towel so the round part of the thick rib (stem) is facing up. Pat dry well, then using a sharp knife, cut off the thick part of the rib so it is flush with the rest of the leaf, so it’s easier to roll. Repeat with the others leaves and set aside.",
+    "Finely chop the rest of the cabbage (~5mm/0.2\"), like dicing an onion. Squeeze out excess water using your hands (just whatever comes out), and set aside in a bowl.",
+    "Make filling - Grate the onion using a box grater into a large bowl. Add the panko and mix well. Let it soak for 1 minute. Add all the remaining ingredients, plus 3 tightly packed cups of the chopped cabbage (300g/10oz). Mix well with your hands until combined.",
+    "Divide the stuffing into 10 equal parts (1 portion = 1 heaped 1/2 cup) and set aside.",
+    "Roll - Lay one cabbage leaf flat on a board, with the outside side facing down and the stem towards you. Shape one portion of the stuffing into a 8.5cm / 3.4\" long cylinder and place it on the lower third of the cabbage leaf. Start rolling from the bottom, folding in the sides when you're halfway, then finish rolling up tightly, finished seam side down. See video at X. Repeat with remaining rolls.",
+    "Cook rolls - Pour 1 cup of chicken stock into a large (30cm / 12\") deep pan. Place the rolls in the pan seam sides down, they should fit tightly. Pour over remaining chicken stock. Bring to a simmer on medium high then turn it down slightly to medium to a gentle simmer, cover with a lid and cook for 25 minutes. (The internal temperature should be at least 71°C / 160°F). Carefully remove the rolls using a slotted spoon onto a tray and set aside.",
+    "Sauce - Reduce the chicken stock left in the pan on high heat down to 1 1/2 cups (~ 7 minutes). Add passata, tomato paste, salt, pepper and sugar. Stir to combine, turn the heat down to medium/medium high so it's bubbling gently and reduce for 5 minutes, stirring every now and then, until the sauce thickens into a thin tomato pasta sauce consistency. Stir in butter until melted.",
+    "Add rolls - Place the cabbage rolls seam side down into the sauce. Dip a brush into the sauce in the pan and brush some on top of each roll, just enough to give the surface a thin coating.",
+    "Warm cabbage rolls - Once the sauce starts simmering around the edges of the cabbage, turn the heat down to medium, cover with a lid and let the cabbage rolls warm through for 5 minutes. Remove the lid, scatter with parsley and serve."
   ],
-  "image": "/recipes/images/scraped_1790686780402_9su3z.webp",
+  "nutrition": {},
   "imageUrl": "/recipes/images/scraped_1790686780402_9su3z.webp",
+  "image": "/recipes/images/scraped_1790686780402_9su3z.webp",
   "sourceUrl": "https://www.recipetineats.com/polish-cabbage-rolls-golabki-recipe/",
   "isFavorite": false,
   "isCooked": false,
   "rating": 5,
+  "note": "",
   "bookId": null,
+  "tags": [
+    "Breakfast"
+  ],
   "createdAt": "2026-10-03T09:19:34.314Z",
-  "updatedAt": "2026-10-25T18:53:23.027Z"
+  "updatedAt": "2026-10-26T12:33:38.496Z"
 }

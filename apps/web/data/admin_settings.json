@@ -3971,7 +3971,7 @@
     ],
     "recommendedRecipeUrls": []
   },
-  "updatedAt": "2026-10-26T08:56:05.697Z",
+  "updatedAt": "2026-10-26T12:14:06.066Z",
   "storage_settings": {
     "provider": "localhost",
     "localhost": {
@@ -3990,5 +3990,46 @@
       "bucket": "recipes",
       "publicUrl": "https://tnhrkjtujdfgvwhsuuxb.supabase.co/storage/v1/object/public/recipes"
     }
+  },
+  "tokenSettings": {
+    "tokenName": "Foodie Token",
+    "tokenSymbol": "💎",
+    "startingBalance": 100,
+    "isEnabled": true,
+    "importUrlCost": 5,
+    "importTextCost": 2,
+    "importPhotoCost": 10,
+    "aiChefCost": 2,
+    "mealPlannerCost": 5,
+    "macroAnalysisCost": 3,
+    "packages": [
+      {
+        "id": "pkg_starter",
+        "name": "Starter Spark",
+        "tokenAmount": 250,
+        "priceDollars": 4.99,
+        "badge": "Popular",
+        "bonusTokens": 0,
+        "isPopular": true
+      },
+      {
+        "id": "pkg_chef",
+        "name": "Culinary Master",
+        "tokenAmount": 1000,
+        "priceDollars": 14.99,
+        "badge": "Best Value",
+        "bonusTokens": 150,
+        "isPopular": false
+      },
+      {
+        "id": "pkg_executive",
+        "name": "Kitchen Enterprise",
+        "tokenAmount": 5000,
+        "priceDollars": 49.99,
+        "badge": "VIP",
+        "bonusTokens": 1000,
+        "isPopular": false
+      }
+    ]
   }
 }
