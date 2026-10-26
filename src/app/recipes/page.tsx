@@ -10,7 +10,8 @@ import {
   ChevronLeft, ChevronRight, FileJson, Upload, X, Volume2, 
   Play, Pause, RotateCcw, Share2, Lock, Globe, HardDrive, 
   Cloud, RefreshCw, Tag, ExternalLink, Calendar, ShoppingCart, 
-  BookOpen, GripVertical, ArrowUp, ArrowDown
+  BookOpen, GripVertical, ArrowUp, ArrowDown, BookmarkPlus, 
+  ChevronDown, Check, Star, Type, ImagePlus, CheckSquare, Utensils, Save
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -41,6 +42,11 @@ const RECIPE_TYPES = [
   'Side Dish', 'Dessert', 'Snacks', 'Beverages', 'Soup', 'Salad'
 ];
 
+const DEFAULT_CATEGORIES = [
+  'Produce', 'Meat & Seafood', 'Dairy & Eggs', 'Pantry Staples', 
+  'Spices & Seasonings', 'Canned Goods', 'Grains & Pasta', 'Condiments & Sauces', 'Other'
+];
+
 function decodeHtmlEntities(str: string): string {
   if (!str) return '';
   return str
@@ -65,6 +71,7 @@ export default function RecipesPage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [recipes, setRecipes] = useState<any[]>([]);
   const [books, setBooks] = useState<any[]>([]);
+  const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
   const [loading, setLoading] = useState(true);
   const isSelfUpdatingRef = useRef(false);
 
@@ -87,17 +94,39 @@ export default function RecipesPage() {
   const [gridMode, setGridMode] = useState<GridMode>('3x3');
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Recipe Details Modal State
+  // Authentic Recipe Details Modal State
   const [selectedRecipe, setSelectedRecipe] = useState<any | null>(null);
-  const [currentServings, setCurrentServings] = useState(4);
+  const [servingsMultiplier, setServingsMultiplier] = useState(1);
   const [fontSizeScale, setFontSizeScale] = useState(100);
   const [completedSteps, setCompletedSteps] = useState<number[]>([]);
-  const [recipeNotes, setRecipeNotes] = useState('');
+  const [noteText, setNoteText] = useState('');
+  const [isNoteOpen, setIsNoteOpen] = useState(false);
+  const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
 
-  // Kitchen Timer Widget State
-  const [activeTimer, setActiveTimer] = useState<{ running: boolean; remainingSeconds: number; initialSeconds: number } | null>(null);
+  // Full-Featured In-Place Recipe Edit Studio Modal
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTab, setEditTab] = useState<'info' | 'ingredients' | 'steps'>('info');
+  const [editForm, setEditForm] = useState<any>({
+    title: '', description: '', recipeType: 'Main Dish', sourceUrl: '',
+    servings: 4, prepTimeMinutes: 30, cookTimeMinutes: 10, imageUrl: '',
+    ingredients: [], instructions: []
+  });
+  const [isReorderingIngredients, setIsReorderingIngredients] = useState(false);
+  const [isReorderingSteps, setIsReorderingSteps] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
 
-  // Import Recipe Modal State
+  // Sub-Modals (Add to Plan & Shopping List)
+  const todayDateStr = new Date().toISOString().split('T')[0];
+  const [showAddToPlanModal, setShowAddToPlanModal] = useState(false);
+  const [planDate, setPlanDate] = useState(todayDateStr);
+  const [planMealType, setPlanMealType] = useState('Dinner');
+  const [planTime, setPlanTime] = useState('');
+  const [planNotes, setPlanNotes] = useState('');
+
+  const [isShoppingModalOpen, setIsShoppingModalOpen] = useState(false);
+  const [shoppingModalIngredients, setShoppingModalIngredients] = useState<any[]>([]);
+
+  // Task 4: Interactive Import Recipe Modal State
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importImageFile, setImportImageFile] = useState<File | null>(null);
   const [importImagePreview, setImportImagePreview] = useState<string>('');
@@ -109,6 +138,9 @@ export default function RecipesPage() {
   const [isDraggingJson, setIsDraggingJson] = useState(false);
   const importImageInputRef = useRef<HTMLInputElement | null>(null);
   const importJsonInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Web Audio Kitchen Timer Widget
+  const [activeTimer, setActiveTimer] = useState<{ running: boolean; remainingSeconds: number; initialSeconds: number } | null>(null);
 
   // Toast Notification State
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
@@ -184,10 +216,11 @@ export default function RecipesPage() {
 
     try {
       const targetUserId = (user.id || user.email || 'usr_admin_1').trim();
-      const [savedRes, recipesRes, booksRes] = await Promise.allSettled([
+      const [savedRes, recipesRes, booksRes, catRes] = await Promise.allSettled([
         fetch(`/api/saved-recipes?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' }),
         fetch(`/api/recipes?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' }),
-        fetch(`/api/books?t=${Date.now()}`, { cache: 'no-store' })
+        fetch(`/api/books?t=${Date.now()}`, { cache: 'no-store' }),
+        fetch(`/api/admin/ingredient-categories?t=${Date.now()}`, { cache: 'no-store' })
       ]);
 
       let combined: any[] = [];
@@ -205,8 +238,13 @@ export default function RecipesPage() {
         const bData = await booksRes.value.json();
         setBooks(Array.isArray(bData) ? bData : bData.books || []);
       }
+      if (catRes.status === 'fulfilled' && catRes.value.ok) {
+        const cData = await catRes.value.json();
+        const cList = Array.isArray(cData) ? cData : cData.categories || [];
+        if (cList.length > 0) setCategories(cList.map((c: any) => typeof c === 'string' ? c : c.name || c.label));
+      }
 
-      // Check LocalStorage Fallback Hydration
+      // LocalStorage Fallback Hydration
       const storageKeys = ['zecratary_recipes', 'zecratary_saved_recipes', 'saved_recipes'];
       storageKeys.forEach(k => {
         try {
@@ -233,7 +271,9 @@ export default function RecipesPage() {
             isFavorite: Boolean(item.isFavorite ?? item.is_favorite),
             isCooked: Boolean(item.isCooked ?? item.is_cooked),
             isPublic: Boolean(item.isPublic ?? item.is_public),
-            servings: Number(item.servings) || 4
+            servings: Number(item.servings) || 4,
+            rating: Number(item.rating) || 5,
+            note: item.note || item.notes || ''
           });
         }
       }
@@ -349,7 +389,7 @@ export default function RecipesPage() {
         const q = search.toLowerCase();
         const matchesTitle = (r.title || '').toLowerCase().includes(q);
         const matchesDesc = (r.description || '').toLowerCase().includes(q);
-        const matchesNotes = (r.notes || '').toLowerCase().includes(q);
+        const matchesNotes = (r.note || r.notes || '').toLowerCase().includes(q);
         const matchesIng = Array.isArray(r.ingredients) && r.ingredients.some((ing: any) => {
           const name = typeof ing === 'string' ? ing : ing.name || ing.item;
           return (name || '').toLowerCase().includes(q);
@@ -461,6 +501,195 @@ export default function RecipesPage() {
     } catch (_) {}
   };
 
+  const handleAssignToBook = async (bookId: string) => {
+    if (!selectedRecipe) return;
+    const isRemoving = selectedRecipe.bookId === bookId;
+    const targetBookId = isRemoving ? null : bookId;
+    const updatedRecipe = { ...selectedRecipe, bookId: targetBookId };
+    setSelectedRecipe(updatedRecipe);
+
+    setRecipes(prev => prev.map(r => r.id === selectedRecipe.id ? updatedRecipe : r));
+
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedRecipe.id, bookId: targetBookId, book_id: targetBookId })
+      });
+    } catch (_) {}
+
+    const bookTitle = books.find(b => b.id === bookId)?.title || 'Cookbook';
+    showToast(isRemoving ? `Removed from "${bookTitle}"` : `Added to "${bookTitle}"!`, 'success');
+  };
+
+  const updateSelectedRecipeState = async (key: string, val: any) => {
+    if (!selectedRecipe) return;
+    const updatedRec = { ...selectedRecipe, [key]: val };
+    setSelectedRecipe(updatedRec);
+    setRecipes(prev => prev.map(r => r.id === updatedRec.id ? updatedRec : r));
+
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedRecipe.id, [key]: val })
+      });
+    } catch (_) {}
+  };
+
+  const handleSaveToCalendar = async () => {
+    if (!selectedRecipe || !currentUser) return;
+    try {
+      const localPlan = localStorage.getItem('zecratary_meal_plan');
+      const currentPlan = localPlan ? JSON.parse(localPlan) : [];
+
+      const newPlanItem = {
+        id: 'plan_' + Date.now(),
+        userId: currentUser.id,
+        createdBy: currentUser.email,
+        creatorName: currentUser.name,
+        date: planDate,
+        recipeId: selectedRecipe.id,
+        recipeName: selectedRecipe.title || selectedRecipe.name,
+        image: selectedRecipe.imageUrl || selectedRecipe.image || '/recipes/images/default.jpg',
+        mealType: planMealType,
+        time: planTime,
+        notes: planNotes,
+        isLeftover: false
+      };
+
+      const updatedPlan = [...currentPlan, newPlanItem];
+      localStorage.setItem('zecratary_meal_plan', JSON.stringify(updatedPlan));
+
+      await fetch('/api/planner', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUser.id, meals: updatedPlan })
+      });
+
+      window.dispatchEvent(new Event('zecratary_planner_updated'));
+      window.dispatchEvent(new Event('storage'));
+      setShowAddToPlanModal(false);
+      showToast(t('mealScheduledToast', 'Recipe scheduled in your meal planner!'), 'success');
+    } catch (_) {}
+  };
+
+  const handleOpenShoppingModal = () => {
+    if (!selectedRecipe) return;
+    const defaultCat = categories[0] || 'Produce';
+    const baseServings = selectedRecipe.servings || 4;
+    const totalServings = baseServings * servingsMultiplier;
+
+    const items = (selectedRecipe.ingredients || []).map((ing: any, idx: number) => {
+      const rawAmt = typeof ing === 'string' ? '' : ing.amount || ing.quantity || '';
+      const scaledAmt = calculateScaledAmount(rawAmt, baseServings, totalServings);
+      return {
+        id: 'shop_item_' + idx,
+        selected: true,
+        amount: scaledAmt,
+        unit: typeof ing === 'string' ? '' : ing.unit || '',
+        name: typeof ing === 'string' ? ing : ing.item || ing.name || '',
+        category: typeof ing === 'string' ? defaultCat : ing.category || defaultCat
+      };
+    });
+    setShoppingModalIngredients(items);
+    setIsShoppingModalOpen(true);
+  };
+
+  const handleConfirmAddToShoppingList = () => {
+    const selectedItems = shoppingModalIngredients.filter(i => i.selected);
+    if (selectedItems.length === 0) return;
+    const local = localStorage.getItem('zecratary_shopping') || localStorage.getItem('zecratary_shopping_list');
+    const current = local ? JSON.parse(local) : [];
+    const formatted = selectedItems.map(i => ({
+      id: 's_' + Date.now() + Math.random(),
+      userId: currentUser?.id,
+      createdBy: currentUser?.email,
+      creatorName: currentUser?.name,
+      name: i.name,
+      amount: i.amount || '1',
+      unit: i.unit || 'unit',
+      category: i.category,
+      checked: false
+    }));
+    const updated = [...formatted, ...current];
+    localStorage.setItem('zecratary_shopping', JSON.stringify(updated));
+    localStorage.setItem('zecratary_shopping_list', JSON.stringify(updated));
+    setIsShoppingModalOpen(false);
+    showToast(t('addedToShoppingListToast', 'Ingredients added to your shopping list!'), 'success');
+  };
+
+  // Recipe Edit Studio Open & Handlers
+  const handleOpenEdit = () => {
+    if (!selectedRecipe) return;
+    const defaultCat = categories[0] || 'Produce';
+    const rawIngs = selectedRecipe.ingredients || [];
+    setEditForm({
+      title: selectedRecipe.title || selectedRecipe.name || '',
+      description: selectedRecipe.description || '',
+      recipeType: selectedRecipe.recipeType || selectedRecipe.tags?.[0] || 'Main Dish',
+      sourceUrl: selectedRecipe.sourceUrl || selectedRecipe.source_url || '',
+      servings: selectedRecipe.servings || 4,
+      prepTimeMinutes: selectedRecipe.prepTimeMinutes || selectedRecipe.prepTime || 30,
+      cookTimeMinutes: selectedRecipe.cookTimeMinutes || selectedRecipe.cookTime || 10,
+      imageUrl: selectedRecipe.imageUrl || selectedRecipe.image || '',
+      ingredients: rawIngs.length > 0
+        ? rawIngs.map((ing: any) => ({
+            amount: typeof ing === 'string' ? '' : ing.amount || ing.quantity || '',
+            unit: typeof ing === 'string' ? '' : ing.unit || '',
+            item: typeof ing === 'string' ? ing : ing.item || ing.name || '',
+            category: typeof ing === 'string' ? defaultCat : ing.category || defaultCat
+          }))
+        : [{ amount: '', unit: '', item: '', category: defaultCat }],
+      instructions: selectedRecipe.instructions && selectedRecipe.instructions.length > 0
+        ? [...selectedRecipe.instructions]
+        : selectedRecipe.steps && selectedRecipe.steps.length > 0
+          ? [...selectedRecipe.steps]
+          : ['']
+    });
+    setEditTab('info');
+    setIsReorderingIngredients(false);
+    setIsReorderingSteps(false);
+    setIsEditing(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editForm.title.trim()) {
+      showToast(t('enterRecipeTitleAlert', 'Please enter a recipe title before saving.'), 'error');
+      setEditTab('info');
+      return;
+    }
+
+    const updatedRec = {
+      ...selectedRecipe,
+      ...editForm,
+      title: editForm.title.trim(),
+      recipeType: editForm.recipeType,
+      category: editForm.recipeType,
+      tags: [editForm.recipeType]
+    };
+
+    setSelectedRecipe(updatedRec);
+    setRecipes(prev => prev.map(r => r.id === updatedRec.id ? updatedRec : r));
+    setIsEditing(false);
+
+    try {
+      await Promise.allSettled([
+        fetch('/api/recipes/saved', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedRec)
+        }),
+        fetch('/api/recipes', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedRec)
+        })
+      ]);
+      showToast(t('saveChanges', 'Recipe updated successfully!'), 'success');
+    } catch (_) {}
+  };
+
   const handleExportJson = (recipe: any) => {
     try {
       const exportData = {
@@ -516,8 +745,7 @@ export default function RecipesPage() {
     }
   };
 
-  const handleDeleteRecipe = async (e: React.MouseEvent, recipeId: string) => {
-    e.stopPropagation();
+  const handleDeleteRecipe = async (recipeId: string) => {
     if (!confirm(t('confirmDeleteRecipe', 'Are you sure you want to delete this recipe?'))) return;
 
     setRecipes(prev => prev.filter(r => r.id !== recipeId));
@@ -716,6 +944,10 @@ export default function RecipesPage() {
     }
   };
 
+  const assignedBook = books.find(b => b.id === selectedRecipe?.bookId);
+  const baseServings = selectedRecipe?.servings || 4;
+  const currentTotalServings = baseServings * servingsMultiplier;
+
   return (
     <div 
       id="zecratary-recipes-canvas"
@@ -767,53 +999,45 @@ export default function RecipesPage() {
           </p>
         </div>
 
-        {/* Action Cluster: Precise 3x3, 4x4, 5x5 Grid Switcher + Import/Create */}
+        {/* Action Cluster: Exact 3x3, 4x4, 5x5 Grid Switcher + Import/Create */}
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* Grid Density Switcher with Exact Proportional Grid Icons */}
           <div 
             role="group"
             aria-label="Grid layout density switcher"
             className="flex items-center p-1 rounded-xl border shadow-xs"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
           >
-            {/* 3x3 Density Toggle Button (9 cells) */}
             <button
               type="button"
               onClick={() => changeGridMode('3x3')}
               className="p-1.5 rounded-lg transition cursor-pointer"
               style={gridMode === '3x3' ? { backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' } : { color: 'var(--color-text-secondary)' }}
               title={t('grid3x3', '3x3 Grid (9 per page)')}
-              aria-label={t('grid3x3', '3x3 Grid (9 per page)')}
             >
               <IconGrid3x3 className="h-4 w-4" />
             </button>
 
-            {/* 4x4 Density Toggle Button (16 cells) */}
             <button
               type="button"
               onClick={() => changeGridMode('4x4')}
               className="p-1.5 rounded-lg transition cursor-pointer"
               style={gridMode === '4x4' ? { backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' } : { color: 'var(--color-text-secondary)' }}
               title={t('grid4x4', '4x4 Grid (16 per page)')}
-              aria-label={t('grid4x4', '4x4 Grid (16 per page)')}
             >
               <IconGrid4x4 className="h-4 w-4" />
             </button>
 
-            {/* 5x5 Density Toggle Button (25 cells) */}
             <button
               type="button"
               onClick={() => changeGridMode('5x5')}
               className="p-1.5 rounded-lg transition cursor-pointer"
               style={gridMode === '5x5' ? { backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' } : { color: 'var(--color-text-secondary)' }}
               title={t('grid5x5', '5x5 Grid (25 per page)')}
-              aria-label={t('grid5x5', '5x5 Grid (25 per page)')}
             >
               <IconGrid5x5 className="h-4 w-4" />
             </button>
           </div>
 
-          {/* Import Recipe Modal Trigger Button */}
           <button
             type="button"
             onClick={() => setIsImportModalOpen(true)}
@@ -828,7 +1052,6 @@ export default function RecipesPage() {
             <span>{t('importRecipe', 'Import Recipe')}</span>
           </button>
 
-          {/* Create Recipe Button (Linking to /manual) */}
           <Link
             href="/manual"
             className="px-4 py-2 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 transition cursor-pointer shadow-md hover:opacity-90"
@@ -1070,9 +1293,11 @@ export default function RecipesPage() {
               key={recipe.id}
               onClick={() => {
                 setSelectedRecipe(recipe);
-                setCurrentServings(recipe.servings || 4);
+                setServingsMultiplier(1);
                 setCompletedSteps([]);
-                setRecipeNotes(recipe.notes || '');
+                setNoteText(recipe.note || recipe.notes || '');
+                setIsBookDropdownOpen(false);
+                setIsEditing(false);
               }}
               className="group rounded-3xl overflow-hidden border transition-all duration-200 hover:-translate-y-1 shadow-md hover:shadow-xl cursor-pointer flex flex-col"
               style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -1179,7 +1404,7 @@ export default function RecipesPage() {
 
                     <button
                       type="button"
-                      onClick={(e) => handleDeleteRecipe(e, recipe.id)}
+                      onClick={(e) => { e.stopPropagation(); handleDeleteRecipe(recipe.id); }}
                       className="p-1.5 rounded-lg text-red-400 hover:text-red-500 hover:bg-red-500/10 transition cursor-pointer"
                       title={t('deleteRecipe', 'Delete Recipe')}
                     >
@@ -1252,7 +1477,1355 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* Import Recipe Modal */}
+      {/* ------------------------------------------------------------------ */}
+      {/* RESTORED 100% AUTHENTIC RECIPE DETAILS & IN-PLACE EDIT MODAL       */}
+      {/* ------------------------------------------------------------------ */}
+      {selectedRecipe && (
+        <div 
+          onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer animate-in fade-in"
+        >
+          <div 
+            role="region"
+            data-lpignore="true"
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative cursor-default transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
+              className="absolute top-4 right-4 z-30 p-2 bg-black/70 hover:bg-black text-white rounded-xl border border-white/20 transition cursor-pointer"
+            >
+              <X className="h-5 w-5"/>
+            </button>
+
+            <div className="overflow-y-auto flex-1">
+              {!isEditing ? (
+                /* AUTHENTIC RECIPE DETAILS VIEW */
+                <div className="space-y-5 pb-6">
+                  {/* Hero Banner */}
+                  <div className="relative h-64 sm:h-72 w-full overflow-hidden flex flex-col justify-end p-5" style={{ backgroundColor: 'var(--color-inner-dark)' }}>
+                    <img
+                      src={selectedRecipe.imageUrl || selectedRecipe.image || '/recipes/images/default.jpg'}
+                      alt={selectedRecipe.title || selectedRecipe.name}
+                      referrerPolicy="no-referrer"
+                      className="absolute inset-0 w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/60 to-transparent" />
+
+                    <div className="relative z-10 space-y-3">
+                      <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
+                        {selectedRecipe.title || selectedRecipe.name}
+                      </h2>
+
+                      <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                        <span className="bg-black/60 border border-white/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5">
+                          <Clock className="h-3.5 w-3.5 text-slate-300"/> Cook: {selectedRecipe.cookTimeMinutes || selectedRecipe.cookTime || 10}m
+                        </span>
+                        <span className="bg-black/60 border border-white/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5">
+                          <Clock className="h-3.5 w-3.5 text-slate-300"/> Prep: {selectedRecipe.prepTimeMinutes || selectedRecipe.prepTime || 30}m
+                        </span>
+                        <span className="bg-black/60 border border-white/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5">
+                          <Utensils className="h-3.5 w-3.5 text-slate-300"/> {selectedRecipe.tags?.[0] || selectedRecipe.recipeType || 'Main Dish'}
+                        </span>
+                        
+                        <button
+                          type="button"
+                          onClick={(e) => handleToggleFavorite(e, selectedRecipe)}
+                          className="ml-auto w-8 h-8 bg-white/95 rounded-full flex items-center justify-center shadow cursor-pointer transition transform hover:scale-105"
+                          title={t('filterFavorites', 'Favorites')}
+                        >
+                          <Heart className={`h-4 w-4 ${selectedRecipe.isFavorite ? 'fill-[#E05638] text-[#E05638]' : 'text-slate-400'}`}/>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Top Action Row */}
+                  <div className="px-5 grid grid-cols-3 gap-2.5">
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setIsBookDropdownOpen(!isBookDropdownOpen)}
+                        className="w-full border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                        style={{
+                          backgroundColor: assignedBook ? 'rgba(224, 86, 56, 0.15)' : 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                      >
+                        <BookmarkPlus className="h-4 w-4 shrink-0"/>
+                        <span className="truncate">
+                          {assignedBook ? assignedBook.title : t('addToBook', 'Add to Book')}
+                        </span>
+                        <ChevronDown className="h-3 w-3 shrink-0 opacity-70 ml-0.5"/>
+                      </button>
+
+                      {isBookDropdownOpen && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setIsBookDropdownOpen(false)} />
+                          <div 
+                            className="absolute left-0 top-full mt-2 w-64 border rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in"
+                            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
+                              <span>{t('selectCookbook', 'Select Cookbook')}</span>
+                              <Link className="hover:underline" style={{ color: 'var(--color-primary)' }} href="/books">
+                                {t('manage', 'Manage')}
+                              </Link>
+                            </div>
+
+                            <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
+                              {books.length === 0 ? (
+                                <div className="text-xs px-2.5 py-2" style={{ color: 'var(--color-text-secondary)' }}>
+                                  {t('noCookbooksAvailable', 'No cookbooks available')}
+                                </div>
+                              ) : (
+                                books.map((b) => {
+                                  const isAssigned = selectedRecipe.bookId === b.id;
+                                  return (
+                                    <button
+                                      key={b.id}
+                                      type="button"
+                                      onClick={() => {
+                                        handleAssignToBook(b.id);
+                                        setIsBookDropdownOpen(false);
+                                      }}
+                                      className="w-full text-left px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition cursor-pointer"
+                                      style={{
+                                        backgroundColor: isAssigned ? 'rgba(224, 86, 56, 0.15)' : 'transparent',
+                                        color: isAssigned ? 'var(--color-primary)' : 'var(--color-text)'
+                                      }}
+                                    >
+                                      <span className="truncate flex-1 pr-2">{b.title}</span>
+                                      {isAssigned && <Check className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-primary)' }}/>}
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowAddToPlanModal(true)}
+                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-primary)'
+                      }}
+                    >
+                      <Calendar className="h-4 w-4"/> {t('addToPlan', 'Add to Plan')}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleOpenShoppingModal}
+                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
+                        color: 'var(--color-primary)'
+                      }}
+                    >
+                      <ShoppingCart className="h-4 w-4"/> {t('shoppingList', 'Shopping List')}
+                    </button>
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* Servings Stepper & Tools */}
+                  <div className="px-5 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                        <Users className="h-4 w-4"/> {t('servings', 'Servings')}
+                      </span>
+                      <div className="flex items-center border rounded-lg overflow-hidden" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                        <button
+                          type="button"
+                          onClick={() => setServingsMultiplier(Math.max(1, servingsMultiplier - 1))}
+                          className="px-2.5 py-1 font-bold cursor-pointer transition hover:bg-white/10"
+                        >
+                          -
+                        </button>
+                        <span className="px-3 py-1 text-xs font-bold min-w-[32px] text-center font-mono" style={{ color: 'var(--color-text)' }}>
+                          {currentTotalServings}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setServingsMultiplier(servingsMultiplier + 1)}
+                          className="px-2.5 py-1 font-bold cursor-pointer transition hover:bg-white/10"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setActiveTimer({ running: true, remainingSeconds: (selectedRecipe.cookTimeMinutes || 15) * 60, initialSeconds: (selectedRecipe.cookTimeMinutes || 15) * 60 })}
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)', backgroundColor: 'var(--color-inner-dark)' }}
+                      >
+                        <Volume2 className="h-3.5 w-3.5"/> {t('timer', 'Timer')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleOpenEdit}
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)', backgroundColor: 'var(--color-inner-dark)' }}
+                      >
+                        <Edit3 className="h-3.5 w-3.5"/> {t('edit', 'Edit')}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(window.location.href);
+                          showToast('Recipe link copied to clipboard!', 'success');
+                        }}
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)', backgroundColor: 'var(--color-inner-dark)' }}
+                      >
+                        <Share2 className="h-3.5 w-3.5"/> {t('share', 'Share')}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Active Floating Timer (if running) */}
+                  {activeTimer && (
+                    <div 
+                      className="mx-5 p-3 rounded-2xl border flex items-center justify-between gap-3 animate-in fade-in"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <div className="flex items-center gap-2 font-mono text-sm font-black" style={{ color: 'var(--color-text)' }}>
+                        <Volume2 className="h-4 w-4 animate-pulse" style={{ color: 'var(--color-primary)' }} />
+                        <span>
+                          {String(Math.floor(activeTimer.remainingSeconds / 60)).padStart(2, '0')}:
+                          {String(activeTimer.remainingSeconds % 60).padStart(2, '0')}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setActiveTimer({ ...activeTimer, running: !activeTimer.running })}
+                          className="p-1 rounded-lg border text-xs font-bold"
+                          style={{ borderColor: 'var(--color-border)' }}
+                        >
+                          {activeTimer.running ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTimer(null)}
+                          className="p-1 rounded-lg border text-xs font-bold text-red-400"
+                          style={{ borderColor: 'var(--color-border)' }}
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Description */}
+                  {selectedRecipe.description && (
+                    <div className="px-5 text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                      {selectedRecipe.description}
+                    </div>
+                  )}
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* Cooked Status / Star Rating / Note */}
+                  <div className="px-5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={(e) => handleToggleCooked(e, selectedRecipe)}
+                        className="flex items-center gap-2.5 text-base font-extrabold group cursor-pointer select-none transition"
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        <span>
+                          {selectedRecipe.isCooked ? t('cooked', 'Cooked') : t('markAsCooked', 'Mark as Cooked')}
+                        </span>
+                        
+                        <span className={`w-5 h-5 rounded-full flex items-center justify-center transition shadow-sm ${
+                          selectedRecipe.isCooked 
+                            ? 'bg-emerald-500 text-white' 
+                            : 'border border-slate-600 bg-transparent text-transparent'
+                        }`}>
+                          {selectedRecipe.isCooked && <Check className="h-3.5 w-3.5 stroke-[3]"/>}
+                        </span>
+                      </button>
+
+                      <div className="flex items-center gap-1">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <Star
+                            key={star}
+                            onClick={() => updateSelectedRecipeState('rating', star)}
+                            className={`h-5 w-5 cursor-pointer transition ${
+                              (selectedRecipe.rating || 0) >= star
+                                ? 'fill-amber-400 text-amber-400'
+                                : 'text-slate-600 hover:text-slate-400'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsNoteOpen(!isNoteOpen)}
+                        className="flex items-center gap-1.5 text-xs font-medium transition cursor-pointer"
+                        style={{ color: 'var(--color-text-secondary)' }}
+                      >
+                        <Edit3 className="h-3.5 w-3.5"/>
+                        <span className="italic">{t('addANote', 'Add a note')}</span>
+                      </button>
+
+                      {isNoteOpen && (
+                        <div className="flex gap-2 animate-in fade-in">
+                          <input
+                            type="text"
+                            placeholder="Add notes..."
+                            value={noteText}
+                            onChange={(e) => setNoteText(e.target.value)}
+                            className="flex-1 border rounded-xl px-3 py-2 text-xs outline-none"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateSelectedRecipeState('note', noteText);
+                              setIsNoteOpen(false);
+                            }}
+                            className="text-white font-bold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                          >
+                            Save
+                          </button>
+                        </div>
+                      )}
+                      {selectedRecipe.note && !isNoteOpen && (
+                        <p className="text-xs italic font-medium" style={{ color: 'var(--color-primary)' }}>
+                          Note: "{selectedRecipe.note}"
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* INGREDIENTS SECTION */}
+                  <div className="px-5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>
+                        {t('ingredients', 'Ingredients')}
+                      </h3>
+                      
+                      <div className="flex items-center border rounded-lg overflow-hidden text-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                        <div className="px-2.5 py-1 border-r flex items-center justify-center" style={{ borderColor: 'var(--color-border)' }}>
+                          <Type className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setFontSizeScale(Math.max(60, fontSizeScale - 10))}
+                          className="px-2.5 py-1 font-bold cursor-pointer hover:bg-white/10"
+                        >
+                          -
+                        </button>
+                        <span className="px-2.5 py-1 font-bold min-w-[42px] text-center font-mono" style={{ color: 'var(--color-text)' }}>
+                          {fontSizeScale}%
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setFontSizeScale(Math.min(140, fontSizeScale + 10))}
+                          className="px-2.5 py-1 font-bold cursor-pointer hover:bg-white/10"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2.5" style={{ fontSize: `${fontSizeScale}%` }}>
+                      {Array.isArray(selectedRecipe.ingredients) && selectedRecipe.ingredients.map((ing: any, idx: number) => {
+                        const rawAmt = typeof ing === 'string' ? '' : ing.amount || ing.quantity || '';
+                        const scaledAmt = calculateScaledAmount(rawAmt, baseServings, currentTotalServings);
+                        const unit = typeof ing === 'string' ? '' : ing.unit || '';
+                        const name = typeof ing === 'string' ? ing : ing.item || ing.name || '';
+                        return (
+                          <div key={idx} className="flex items-start gap-2.5 leading-snug">
+                            <span className="w-2 h-2 rounded-full inline-block shrink-0 mt-1.5" style={{ backgroundColor: 'var(--color-primary)' }} />
+                            <span style={{ color: 'var(--color-text)' }}>
+                              {(scaledAmt !== '' || unit) && (
+                                <strong className="font-semibold">
+                                  {scaledAmt} {unit && unit !== 'Unit' ? unit : ''}{' '}
+                                </strong>
+                              )}
+                              <span>{name}</span>
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* INSTRUCTIONS SECTION */}
+                  <div className="px-5 space-y-4">
+                    <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>
+                      {t('instructions', 'Instructions')}
+                    </h3>
+                    
+                    <div className="space-y-3.5" style={{ fontSize: `${fontSizeScale}%` }}>
+                      {Array.isArray(selectedRecipe.instructions || selectedRecipe.steps) && (selectedRecipe.instructions || selectedRecipe.steps).map((step: any, idx: number) => {
+                        const stepText = typeof step === 'string' ? step : step.text || step.step || '';
+                        const isDone = completedSteps.includes(idx);
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => {
+                              if (completedSteps.includes(idx)) {
+                                setCompletedSteps(completedSteps.filter(i => i !== idx));
+                              } else {
+                                setCompletedSteps([...completedSteps, idx]);
+                              }
+                            }}
+                            className={`flex items-start gap-3 p-3 rounded-2xl border cursor-pointer transition select-none ${
+                              isDone ? 'opacity-50' : 'hover:scale-[1.005]'
+                            }`}
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: isDone ? 'var(--color-emerald)' : 'var(--color-border)'
+                            }}
+                          >
+                            <div 
+                              className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 mt-0.5 transition ${
+                                isDone ? 'text-white' : 'bg-transparent'
+                              }`}
+                              style={{
+                                borderColor: 'var(--color-primary)',
+                                backgroundColor: isDone ? 'var(--color-primary)' : 'transparent'
+                              }}
+                            >
+                              {isDone && <Check className="h-3 w-3 stroke-[3]"/>}
+                            </div>
+
+                            <span className="font-extrabold shrink-0 text-sm" style={{ color: 'var(--color-primary)' }}>
+                              {idx + 1}.
+                            </span>
+
+                            <span className={`leading-relaxed flex-1 ${isDone ? 'line-through opacity-60' : ''}`} style={{ color: 'var(--color-text)' }}>
+                              {stepText}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
+
+                  {/* MODAL FOOTER: SOURCE AT BOTTOM RIGHT + DELETE & EXPORT */}
+                  <div className="px-5 flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteRecipe(selectedRecipe.id)}
+                        className="border border-red-500/40 text-red-400 px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 hover:bg-red-950/30 cursor-pointer transition"
+                      >
+                        <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipe', 'Delete Recipe')}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleExportJson(selectedRecipe)}
+                        className="px-3.5 py-2 rounded-xl text-white font-bold flex items-center gap-1.5 shadow-xs transition hover:opacity-90 cursor-pointer"
+                        style={{ backgroundColor: 'var(--color-emerald)' }}
+                        title={t('exportJsonBtn', 'Export JSON')}
+                      >
+                        <FileJson className="h-3.5 w-3.5" />
+                        <span>{t('exportJsonBtn', 'Export JSON')}</span>
+                      </button>
+                    </div>
+
+                    {/* Source anchored to Bottom Right */}
+                    {selectedRecipe.sourceUrl && (
+                      <div className="text-right">
+                        <a
+                          href={selectedRecipe.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-bold text-xs inline-flex items-center gap-1 hover:underline"
+                          style={{ color: 'var(--color-primary)' }}
+                        >
+                          <span>Visit {(() => {
+                            try { return new URL(selectedRecipe.sourceUrl).hostname.replace('www.', ''); } catch { return 'source'; }
+                          })()}</span>
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                /* AUTHENTIC 3-TAB IN-PLACE RECIPE EDIT STUDIO */
+                <div className="p-6 space-y-6">
+                  <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                    <h3 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                      <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('editRecipe', 'Edit Recipe')}
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(false)}
+                      className="p-1 rounded-lg hover:bg-white/10 transition cursor-pointer"
+                    >
+                      <X className="h-5 w-5"/>
+                    </button>
+                  </div>
+
+                  <div className="flex p-1.5 rounded-2xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                    {[
+                      { id: 'info', label: t('basicInfo', 'Basic Info') },
+                      { id: 'ingredients', label: t('ingredients', 'Ingredients') },
+                      { id: 'steps', label: t('instructions', 'Steps') }
+                    ].map((tab) => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setEditTab(tab.id as any)}
+                        className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer ${
+                          editTab === tab.id
+                            ? 'text-white shadow-md border border-[var(--color-border)]'
+                            : 'opacity-70 hover:opacity-100'
+                        }`}
+                        style={{
+                          backgroundColor: editTab === tab.id ? 'var(--color-card)' : 'transparent',
+                          color: editTab === tab.id ? 'var(--color-primary)' : 'var(--color-text)'
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* TAB 1: BASIC INFO */}
+                  {editTab === 'info' && (
+                    <div className="space-y-5 animate-in fade-in text-xs">
+                      <div className="space-y-1.5">
+                        <label className="block font-bold uppercase tracking-wider text-[11px]" style={{ color: 'var(--color-primary)' }}>
+                          Photo
+                        </label>
+                        <label 
+                          className="border-2 border-dashed rounded-2xl h-44 flex flex-col items-center justify-center cursor-pointer transition relative overflow-hidden group"
+                          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                        >
+                          {editForm.imageUrl ? (
+                            <>
+                              <img
+                                src={editForm.imageUrl}
+                                alt="Recipe Preview"
+                                className="absolute inset-0 w-full h-full object-cover"
+                              />
+                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+                                <span className="text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5" style={{ backgroundColor: 'var(--color-card)' }}>
+                                  <ImagePlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('changePhoto', 'Change Photo')}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setEditForm({ ...editForm, imageUrl: '' });
+                                  }}
+                                  className="border border-red-500/50 text-red-400 text-xs font-bold px-3 py-1.5 rounded-xl hover:bg-red-900 cursor-pointer"
+                                  style={{ backgroundColor: 'var(--color-inner-dark)' }}
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="text-center space-y-2">
+                              <ImagePlus className="h-8 w-8 mx-auto opacity-40 transition" style={{ color: 'var(--color-primary)' }}/>
+                              <span className="text-xs font-bold block" style={{ color: 'var(--color-text-secondary)' }}>{t('addAPhoto', 'Add a photo')}</span>
+                            </div>
+                          )}
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => setEditForm(prev => ({ ...prev, imageUrl: reader.result as string }));
+                                reader.readAsDataURL(file);
+                              }
+                            }} 
+                            className="hidden" 
+                          />
+                        </label>
+                      </div>
+
+                      <div>
+                        <label className="block font-bold uppercase tracking-wider text-[11px] mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                          Recipe Title
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={editForm.title}
+                          onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                          className="w-full border rounded-xl p-3 text-sm outline-none font-bold"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block font-bold uppercase tracking-wider text-[11px] mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                          Description
+                        </label>
+                        <textarea
+                          rows={3}
+                          value={editForm.description}
+                          onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                          className="w-full border rounded-xl p-3 text-xs outline-none resize-y leading-relaxed font-medium"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block font-bold uppercase tracking-wider text-[11px] mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                            Recipe Type
+                          </label>
+                          <select
+                            value={editForm.recipeType}
+                            onChange={(e) => setEditForm({ ...editForm, recipeType: e.target.value })}
+                            className="w-full border rounded-xl p-3 text-xs outline-none cursor-pointer font-bold"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                          >
+                            {RECIPE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block font-bold uppercase tracking-wider text-[11px] mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                            Servings
+                          </label>
+                          <input
+                            type="number"
+                            value={editForm.servings}
+                            onChange={(e) => setEditForm({ ...editForm, servings: parseInt(e.target.value) || 1 })}
+                            className="w-full border rounded-xl p-3 text-xs outline-none font-bold"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block font-bold uppercase tracking-wider text-[11px] mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                            Preparation Time (mins)
+                          </label>
+                          <input
+                            type="number"
+                            value={editForm.prepTimeMinutes}
+                            onChange={(e) => setEditForm({ ...editForm, prepTimeMinutes: parseInt(e.target.value) || 0 })}
+                            className="w-full border rounded-xl p-3 text-xs outline-none font-bold"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold uppercase tracking-wider text-[11px] mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                            Cooking Time (mins)
+                          </label>
+                          <input
+                            type="number"
+                            value={editForm.cookTimeMinutes}
+                            onChange={(e) => setEditForm({ ...editForm, cookTimeMinutes: parseInt(e.target.value) || 0 })}
+                            className="w-full border rounded-xl p-3 text-xs outline-none font-bold"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block font-bold uppercase tracking-wider text-[11px] mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                          Source URL
+                        </label>
+                        <input
+                          type="url"
+                          placeholder="https://example.com/recipe"
+                          value={editForm.sourceUrl}
+                          onChange={(e) => setEditForm({ ...editForm, sourceUrl: e.target.value })}
+                          className="w-full border rounded-xl p-3 text-xs outline-none font-medium"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        />
+                      </div>
+
+                      <div className="pt-4 border-t flex justify-end gap-3" style={{ borderColor: 'var(--color-border)' }}>
+                        <button
+                          type="button"
+                          onClick={() => setIsEditing(false)}
+                          className="px-5 py-2.5 rounded-xl border font-bold transition text-xs cursor-pointer"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text-secondary)'
+                          }}
+                        >
+                          {t('cancelBtn', 'Cancel')}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveEdit}
+                          className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg flex items-center gap-2 text-xs cursor-pointer hover:opacity-90"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                        >
+                          <Save className="h-4 w-4"/> {t('saveChanges', 'Save Changes')}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 2: INGREDIENTS */}
+                  {editTab === 'ingredients' && (
+                    <div className="border rounded-2xl p-5 space-y-4 animate-in fade-in text-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                      <div className="flex justify-between items-center">
+                        <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>{t('ingredients', 'Ingredients')}</h2>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsReorderingIngredients(!isReorderingIngredients)}
+                            className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
+                            style={{
+                              backgroundColor: isReorderingIngredients ? 'var(--color-emerald)' : 'var(--color-card)',
+                              borderColor: 'var(--color-border)',
+                              color: '#ffffff'
+                            }}
+                          >
+                            {isReorderingIngredients ? t('done', 'Done') : t('reorder', 'Reorder')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditForm({
+                              ...editForm,
+                              ingredients: [...editForm.ingredients, { amount: '', unit: '', item: '', category: categories[0] || 'Produce' }]
+                            })}
+                            className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs hover:opacity-90"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                          >
+                            <Plus className="h-3.5 w-3.5"/> {t('addIngredient', 'Add Ingredient')}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
+                        {editForm.ingredients.map((ing: any, idx: number) => (
+                          <div
+                            key={idx}
+                            draggable={isReorderingIngredients}
+                            onDragStart={() => setDraggedIndex(idx)}
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              if (draggedIndex === null || draggedIndex === idx) return;
+                              const list = [...editForm.ingredients];
+                              const item = list[draggedIndex];
+                              list.splice(draggedIndex, 1);
+                              list.splice(idx, 0, item);
+                              setEditForm({ ...editForm, ingredients: list });
+                              setDraggedIndex(idx);
+                            }}
+                            onDrop={() => setDraggedIndex(null)}
+                            className={`flex items-center gap-2 p-2.5 rounded-xl border transition ${
+                              isReorderingIngredients ? 'cursor-grab border-emerald-500' : ''
+                            }`}
+                            style={{
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            <input
+                              type="text"
+                              placeholder="Amt"
+                              value={ing.amount}
+                              onChange={(e) => {
+                                const list = [...editForm.ingredients];
+                                list[idx].amount = e.target.value;
+                                setEditForm({ ...editForm, ingredients: list });
+                              }}
+                              className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text)'
+                              }}
+                            />
+                            <input
+                              type="text"
+                              placeholder="Unit"
+                              value={ing.unit}
+                              onChange={(e) => {
+                                const list = [...editForm.ingredients];
+                                list[idx].unit = e.target.value;
+                                setEditForm({ ...editForm, ingredients: list });
+                              }}
+                              className="w-20 border rounded-lg p-2 text-center outline-none"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text)'
+                              }}
+                            />
+                            <input
+                              type="text"
+                              placeholder="Ingredient name..."
+                              value={ing.item}
+                              onChange={(e) => {
+                                const list = [...editForm.ingredients];
+                                list[idx].item = e.target.value;
+                                setEditForm({ ...editForm, ingredients: list });
+                              }}
+                              className="flex-1 bg-transparent border-none outline-none px-2 font-medium"
+                              style={{ color: 'var(--color-text)' }}
+                            />
+                            <select
+                              value={ing.category}
+                              onChange={(e) => {
+                                const list = [...editForm.ingredients];
+                                list[idx].category = e.target.value;
+                                setEditForm({ ...editForm, ingredients: list });
+                              }}
+                              className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer font-bold"
+                              style={{
+                                backgroundColor: 'var(--color-inner-dark)',
+                                borderColor: 'var(--color-border)',
+                                color: 'var(--color-text)'
+                              }}
+                            >
+                              {categories.map((cat) => (
+                                <option key={cat} value={cat}>{cat}</option>
+                              ))}
+                            </select>
+
+                            {isReorderingIngredients ? (
+                              <div className="p-2 cursor-grab text-emerald-400"><GripVertical className="h-4 w-4"/></div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setEditForm({
+                                  ...editForm,
+                                  ingredients: editForm.ingredients.filter((_: any, i: number) => i !== idx)
+                                })}
+                                className="p-2 text-red-400 hover:text-red-300 cursor-pointer"
+                              >
+                                <Trash2 className="h-4 w-4"/>
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex justify-between pt-3">
+                        <button
+                          type="button"
+                          onClick={() => setEditTab('info')}
+                          className="border font-bold px-5 py-2 rounded-xl text-xs transition cursor-pointer"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          ← Back
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditTab('steps')}
+                          className="text-white font-bold px-6 py-2 rounded-xl text-xs transition shadow-md cursor-pointer hover:opacity-90"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                        >
+                          Next: Steps →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 3: STEPS */}
+                  {editTab === 'steps' && (
+                    <div className="border rounded-2xl p-5 space-y-4 animate-in fade-in text-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                      <div className="flex justify-between items-center">
+                        <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>{t('instructions', 'Step-by-Step Instructions')}</h2>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsReorderingSteps(!isReorderingSteps)}
+                            className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
+                            style={{
+                              backgroundColor: isReorderingSteps ? 'var(--color-emerald)' : 'var(--color-card)',
+                              borderColor: 'var(--color-border)',
+                              color: '#ffffff'
+                            }}
+                          >
+                            {isReorderingSteps ? t('done', 'Done') : t('reorder', 'Reorder')}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditForm({
+                              ...editForm,
+                              instructions: [...editForm.instructions, '']
+                            })}
+                            className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs hover:opacity-90"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                          >
+                            <Plus className="h-3.5 w-3.5"/> {t('addStep', 'Add Step')}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+                        {editForm.instructions.map((step: string, idx: number) => (
+                          <div
+                            key={idx}
+                            draggable={isReorderingSteps}
+                            onDragStart={() => setDraggedIndex(idx)}
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              if (draggedIndex === null || draggedIndex === idx) return;
+                              const list = [...editForm.instructions];
+                              const item = list[draggedIndex];
+                              list.splice(draggedIndex, 1);
+                              list.splice(idx, 0, item);
+                              setEditForm({ ...editForm, instructions: list });
+                              setDraggedIndex(idx);
+                            }}
+                            onDrop={() => setDraggedIndex(null)}
+                            className={`flex items-start gap-3 p-3 rounded-xl border transition ${
+                              isReorderingSteps ? 'cursor-grab border-emerald-500' : ''
+                            }`}
+                            style={{
+                              backgroundColor: 'var(--color-card)',
+                              borderColor: 'var(--color-border)'
+                            }}
+                          >
+                            <span className="w-6 h-6 rounded-full font-bold flex items-center justify-center shrink-0 mt-1" style={{ backgroundColor: 'rgba(224, 86, 56, 0.2)', color: 'var(--color-primary)' }}>
+                              {idx + 1}
+                            </span>
+                            <textarea
+                              rows={2}
+                              placeholder={`Describe step ${idx + 1}...`}
+                              value={step}
+                              onChange={(e) => {
+                                const list = [...editForm.instructions];
+                                list[idx] = e.target.value;
+                                setEditForm({ ...editForm, instructions: list });
+                              }}
+                              className="flex-1 bg-transparent border-none outline-none resize-y font-medium text-xs"
+                              style={{ color: 'var(--color-text)' }}
+                            />
+
+                            {isReorderingSteps ? (
+                              <div className="p-2 cursor-grab mt-1 text-emerald-400"><GripVertical className="h-4 w-4"/></div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setEditForm({
+                                  ...editForm,
+                                  instructions: editForm.instructions.filter((_: any, i: number) => i !== idx)
+                                })}
+                                className="p-2 text-red-400 hover:text-red-300 h-fit cursor-pointer"
+                              >
+                                <Trash2 className="h-4 w-4"/>
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex justify-between pt-3">
+                        <button
+                          type="button"
+                          onClick={() => setEditTab('ingredients')}
+                          className="border font-bold px-5 py-2 rounded-xl text-xs transition cursor-pointer"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        >
+                          ← Back
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSaveEdit}
+                          className="text-white font-bold px-8 py-2.5 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer hover:opacity-90"
+                          style={{ backgroundColor: 'var(--color-primary)' }}
+                        >
+                          <Save className="h-4 w-4"/> {t('saveChanges', 'Save Changes')}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------------ */}
+      {/* SUB-MODAL 1: ADD TO PLAN / CALENDAR MODAL                          */}
+      {/* ------------------------------------------------------------------ */}
+      {showAddToPlanModal && selectedRecipe && (
+        <div 
+          onClick={() => setShowAddToPlanModal(false)}
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-[70] flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
+        >
+          <div 
+            role="region"
+            data-lpignore="true"
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <button 
+              type="button"
+              onClick={() => setShowAddToPlanModal(false)} 
+              className="absolute top-4 right-4 p-2 rounded-lg transition cursor-pointer"
+              style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text)' }}
+            >
+              <X className="h-4 w-4"/>
+            </button>
+
+            <div className="pr-6 space-y-1">
+              <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+                {t('addToCalendar', 'Add to Calendar')}
+              </h2>
+              <p className="text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
+                Schedule {selectedRecipe.title || selectedRecipe.name} in your meal plan
+              </p>
+            </div>
+
+            <div className="space-y-4 pt-1">
+              <div>
+                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                  {t('date', 'Date')}
+                </label>
+                <div className="relative flex items-center">
+                  <Calendar className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-primary)' }}/>
+                  <input
+                    type="date"
+                    required
+                    value={planDate}
+                    onChange={(e) => setPlanDate(e.target.value)}
+                    className="w-full border rounded-xl pl-10 pr-3 py-2.5 text-xs font-semibold outline-none cursor-pointer"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                  {t('mealType', 'Meal Type')}
+                </label>
+                <div className="relative flex items-center">
+                  <select
+                    value={planMealType}
+                    onChange={(e) => setPlanMealType(e.target.value)}
+                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none cursor-pointer appearance-none font-bold"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    <option value="Breakfast">Breakfast</option>
+                    <option value="Lunch">Lunch</option>
+                    <option value="Dinner">Dinner</option>
+                    <option value="Snack">Snack</option>
+                  </select>
+                  <ChevronDown className="h-4 w-4 absolute right-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                  {t('time', 'Time')}
+                </label>
+                <div className="relative flex items-center">
+                  <Clock className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
+                  <input
+                    type="time"
+                    value={planTime}
+                    onChange={(e) => setPlanTime(e.target.value)}
+                    className="w-full border rounded-xl px-10 py-2.5 text-xs outline-none font-bold"
+                    style={{
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                  {t('notes', 'Notes')}
+                </label>
+                <textarea
+                  value={planNotes}
+                  onChange={(e) => setPlanNotes(e.target.value)}
+                  placeholder="Add any notes or reminders..."
+                  rows={3}
+                  className="w-full border rounded-xl p-3 text-xs outline-none resize-none font-medium"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAddToPlanModal(false)}
+                  className="px-5 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text-secondary)'
+                  }}
+                >
+                  {t('cancelBtn', 'Cancel')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveToCalendar}
+                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer hover:opacity-90"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                >
+                  {t('addToCalendar', 'Add to Calendar')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------------ */}
+      {/* SUB-MODAL 2: SHOPPING LIST INGREDIENT PICKER MODAL                 */}
+      {/* ------------------------------------------------------------------ */}
+      {isShoppingModalOpen && (
+        <div 
+          onClick={() => setIsShoppingModalOpen(false)}
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-[60] flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer animate-in fade-in"
+        >
+          <div 
+            role="region"
+            data-lpignore="true"
+            onClick={(e) => e.stopPropagation()}
+            className="border rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl p-6 space-y-5 cursor-default transition-colors duration-200"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h3 className="text-lg font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <ShoppingCart className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('addToShoppingList', 'Add to Shopping List')}
+                </h3>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  Select or edit items to add directly to your list
+                </p>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setIsShoppingModalOpen(false)} 
+                className="hover:opacity-75 cursor-pointer"
+                style={{ color: 'var(--color-text-secondary)' }}
+              >
+                <X className="h-5 w-5"/>
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 space-y-3 pr-1 text-xs">
+              {shoppingModalIngredients.map((ing, idx) => (
+                <div 
+                  key={ing.id} 
+                  className="flex items-center gap-2 p-2.5 rounded-xl border"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)'
+                  }}
+                >
+                  <div
+                    onClick={() => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].selected = !updated[idx].selected;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className={`w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition ${
+                      ing.selected ? 'text-white' : 'border-slate-700 bg-slate-900'
+                    }`}
+                    style={{
+                      borderColor: ing.selected ? 'var(--color-primary)' : 'var(--color-border)',
+                      backgroundColor: ing.selected ? 'var(--color-primary)' : 'transparent'
+                    }}
+                  >
+                    {ing.selected && <CheckSquare className="h-3.5 w-3.5"/>}
+                  </div>
+
+                  <input
+                    type="text"
+                    value={ing.amount}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].amount = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    placeholder="Amt"
+                  />
+                  <input
+                    type="text"
+                    value={ing.unit}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].unit = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-20 border rounded-lg p-2 text-center outline-none"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                    placeholder="Unit"
+                  />
+                  <input
+                    type="text"
+                    value={ing.name}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].name = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="flex-1 bg-transparent border-none outline-none px-2 font-medium"
+                    style={{ color: 'var(--color-text)' }}
+                    placeholder="Ingredient name..."
+                  />
+                  <select
+                    value={ing.category}
+                    onChange={(e) => {
+                      const updated = [...shoppingModalIngredients];
+                      updated[idx].category = e.target.value;
+                      setShoppingModalIngredients(updated);
+                    }}
+                    className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer font-bold"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text)'
+                    }}
+                  >
+                    {categories.map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-3 border-t flex justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setIsShoppingModalOpen(false)}
+                className="px-4 py-2 rounded-xl border font-bold text-xs cursor-pointer"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-secondary)'
+                }}
+              >
+                {t('cancelBtn', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAddToShoppingList}
+                className="px-6 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md hover:opacity-90"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                <ShoppingCart className="h-3.5 w-3.5"/> {t('addSelectedToList', 'Add Selected to List')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------------ */}
+      {/* TASK 4: RECIPE IMPORT MODAL (JSON + D&D COVER IMAGE)               */}
+      {/* ------------------------------------------------------------------ */}
       {isImportModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
           <div 
@@ -1457,241 +3030,6 @@ export default function RecipesPage() {
                 <Upload className={`h-4 w-4 ${isImporting ? 'animate-spin' : ''}`} />
                 <span>{isImporting ? t('importingRecipe', 'Importing Recipe...') : t('importBtnAction', 'Import Recipe')}</span>
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Recipe Detail Full Modal with Kitchen Timer */}
-      {selectedRecipe && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
-          <div 
-            role="region"
-            data-lpignore="true"
-            className="w-full max-w-3xl rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl border max-h-[90vh] overflow-y-auto"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-          >
-            <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
-              <div>
-                <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md" style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-primary)' }}>
-                  {selectedRecipe.recipeType}
-                </span>
-                <h2 className="text-xl font-black mt-1" style={{ color: 'var(--color-text)' }}>
-                  {selectedRecipe.title}
-                </h2>
-              </div>
-              <button 
-                type="button" 
-                onClick={() => setSelectedRecipe(null)} 
-                className="p-2 rounded-xl text-gray-400 hover:text-white cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            {/* Synthesizer Kitchen Timer Widget */}
-            <div 
-              className="p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-            >
-              <div className="flex items-center gap-3">
-                <Volume2 className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
-                <div>
-                  <span className="text-[10px] uppercase font-bold opacity-80" style={{ color: 'var(--color-text-secondary)' }}>Kitchen Timer</span>
-                  <div className="text-lg font-mono font-black" style={{ color: 'var(--color-text)' }}>
-                    {activeTimer 
-                      ? `${String(Math.floor(activeTimer.remainingSeconds / 60)).padStart(2, '0')}:${String(activeTimer.remainingSeconds % 60).padStart(2, '0')}` 
-                      : '00:00'}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1.5 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setActiveTimer({ running: true, remainingSeconds: 60, initialSeconds: 60 })}
-                  className="px-2.5 py-1 rounded-lg border font-bold cursor-pointer"
-                  style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-card)' }}
-                >
-                  +1m
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTimer({ running: true, remainingSeconds: 300, initialSeconds: 300 })}
-                  className="px-2.5 py-1 rounded-lg border font-bold cursor-pointer"
-                  style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-card)' }}
-                >
-                  +5m
-                </button>
-                {activeTimer && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTimer({ ...activeTimer, running: !activeTimer.running })}
-                      className="p-1.5 rounded-lg border cursor-pointer"
-                      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-card)' }}
-                    >
-                      {activeTimer.running ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTimer(null)}
-                      className="p-1.5 rounded-lg border cursor-pointer text-red-400"
-                      style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-card)' }}
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Servings Stepper & Font Size Scaler */}
-            <div className="flex items-center justify-between text-xs font-bold">
-              <div className="flex items-center gap-2">
-                <span style={{ color: 'var(--color-text-secondary)' }}>Servings:</span>
-                <button
-                  type="button"
-                  onClick={() => setCurrentServings(prev => Math.max(1, prev - 1))}
-                  className="w-7 h-7 rounded-lg border flex items-center justify-center font-bold cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                >
-                  -
-                </button>
-                <span className="font-mono text-sm px-1" style={{ color: 'var(--color-primary)' }}>{currentServings}</span>
-                <button
-                  type="button"
-                  onClick={() => setCurrentServings(prev => prev + 1)}
-                  className="w-7 h-7 rounded-lg border flex items-center justify-center font-bold cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                >
-                  +
-                </button>
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setFontSizeScale(prev => Math.max(80, prev - 10))}
-                  className="px-2 py-1 rounded-lg border text-[11px] cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                >
-                  A-
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFontSizeScale(prev => Math.min(140, prev + 10))}
-                  className="px-2 py-1 rounded-lg border text-[11px] cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                >
-                  A+
-                </button>
-              </div>
-            </div>
-
-            {/* Ingredients Checklist */}
-            <div className="space-y-3" style={{ fontSize: `${fontSizeScale}%` }}>
-              <h3 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-                Ingredients
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                {Array.isArray(selectedRecipe.ingredients) && selectedRecipe.ingredients.map((ing: any, idx: number) => {
-                  const baseServ = selectedRecipe.servings || 4;
-                  const item = typeof ing === 'string' ? ing : ing.name || ing.item;
-                  const rawAmt = typeof ing === 'object' ? ing.amount || ing.quantity : '';
-                  const unit = typeof ing === 'object' ? ing.unit || '' : '';
-                  const scaled = rawAmt ? calculateScaledAmount(rawAmt, baseServ, currentServings) : '';
-
-                  return (
-                    <div 
-                      key={idx}
-                      className="p-2.5 rounded-xl border flex items-center gap-2"
-                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                    >
-                      <input type="checkbox" className="rounded cursor-pointer" />
-                      <span className="font-bold" style={{ color: 'var(--color-primary)' }}>
-                        {scaled} {unit}
-                      </span>
-                      <span className="font-medium" style={{ color: 'var(--color-text)' }}>
-                        {item}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Step-by-Step Instructions */}
-            <div className="space-y-3" style={{ fontSize: `${fontSizeScale}%` }}>
-              <h3 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-                Instructions
-              </h3>
-              <div className="space-y-2 text-xs">
-                {Array.isArray(selectedRecipe.instructions || selectedRecipe.steps) && (selectedRecipe.instructions || selectedRecipe.steps).map((step: any, idx: number) => {
-                  const stepText = typeof step === 'string' ? step : step.text || step.step || '';
-                  const isDone = completedSteps.includes(idx);
-                  return (
-                    <div 
-                      key={idx}
-                      onClick={() => setCompletedSteps(prev => isDone ? prev.filter(x => x !== idx) : [...prev, idx])}
-                      className="p-3 rounded-xl border flex items-start gap-3 cursor-pointer transition"
-                      style={{ 
-                        backgroundColor: 'var(--color-inner-dark)', 
-                        borderColor: isDone ? 'var(--color-emerald)' : 'var(--color-border)',
-                        opacity: isDone ? 0.6 : 1
-                      }}
-                    >
-                      <span 
-                        className="w-5 h-5 rounded-full font-bold flex items-center justify-center shrink-0 mt-0.5 text-[10px]"
-                        style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' }}
-                      >
-                        {idx + 1}
-                      </span>
-                      <p className={`flex-1 font-medium leading-relaxed ${isDone ? 'line-through' : ''}`} style={{ color: 'var(--color-text)' }}>
-                        {stepText}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Modal Footer Controls */}
-            <div 
-              className="pt-4 border-t flex flex-wrap items-center justify-between gap-2 text-xs"
-              style={{ borderColor: 'var(--color-border)' }}
-            >
-              {selectedRecipe.sourceUrl && (
-                <a
-                  href={selectedRecipe.sourceUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-1 font-bold text-emerald-400 hover:underline"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  <span>{t('viewOriginalSource', 'View Original Recipe Source ↗')}</span>
-                </a>
-              )}
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleExportJson(selectedRecipe)}
-                  className="px-3 py-1.5 rounded-xl text-white font-bold flex items-center gap-1 shadow-xs transition hover:opacity-90 cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-emerald)' }}
-                >
-                  <FileJson className="h-3.5 w-3.5" />
-                  <span>{t('exportJsonBtn', 'Export JSON')}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedRecipe(null)}
-                  className="px-4 py-1.5 rounded-xl border font-bold cursor-pointer"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                >
-                  {t('closeBtn', 'Close')}
-                </button>
-              </div>
             </div>
           </div>
         </div>
