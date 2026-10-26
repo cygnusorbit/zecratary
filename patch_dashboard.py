@@ -1,7 +1,7 @@
 import os
 import sys
 
-# 1. Deploy /api/dashboard/stats/route.ts
+# 1. Update /api/dashboard/stats/route.ts with isHighestPlan and grocery items count
 API_STATS_CODE = """import { NextRequest, NextResponse } from 'next/server';
 import pool from '@/lib/db';
 
@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
     walletBalance: 0,
     walletSymbol: '$',
     subscriptionPlan: 'taster',
+    isHighestPlan: false,
     upcomingMeal: null
   };
 
@@ -40,7 +41,8 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // 1. User Assets (Tokens, Wallet, Subscription)
+    // 1. User Assets & Subscription Plan
+    let userPlan = 'taster';
     try {
       const uRes = await db.query(
         `SELECT token_balance, wallet_balance, subscription_plan 
@@ -53,11 +55,33 @@ export async function GET(req: NextRequest) {
         const u = uRes.rows[0];
         fallbackData.tokenBalance = Number(u.token_balance) || 0;
         fallbackData.walletBalance = Number(u.wallet_balance) || 0;
-        fallbackData.subscriptionPlan = u.subscription_plan || 'taster';
+        userPlan = (u.subscription_plan || 'taster').toLowerCase();
+        fallbackData.subscriptionPlan = userPlan;
       }
     } catch (_) {}
 
-    // 2. Saved Recipes Count
+    // 2. Determine Highest Subscription Plan Tier
+    try {
+      const planRes = await db.query(
+        `SELECT slug, name, COALESCE(price, monthly_price, 0) as price_val, sort_order 
+         FROM subscription_plans 
+         WHERE is_active = true OR is_active IS NULL 
+         ORDER BY sort_order DESC, price_val DESC`
+      );
+      if (planRes.rows && planRes.rows.length > 0) {
+        const topPlanSlug = (planRes.rows[0].slug || '').toLowerCase();
+        const topPlanName = (planRes.rows[0].name || '').toLowerCase();
+        fallbackData.isHighestPlan = (userPlan === topPlanSlug || userPlan === topPlanName);
+      } else {
+        const topTiers = ['gourmet', 'enterprise', 'master_chef', 'master', 'pro_chef'];
+        fallbackData.isHighestPlan = topTiers.includes(userPlan);
+      }
+    } catch (_) {
+      const topTiers = ['gourmet', 'enterprise', 'master_chef', 'master', 'pro_chef'];
+      fallbackData.isHighestPlan = topTiers.includes(userPlan);
+    }
+
+    // 3. Saved Recipes Count
     try {
       const rRes = await db.query(
         `SELECT COUNT(*)::int AS count 
@@ -82,7 +106,7 @@ export async function GET(req: NextRequest) {
       } catch (_) {}
     }
 
-    // 3. Recipe Books / Categories
+    // 4. Recipe Books Count
     try {
       const bRes = await db.query(
         `SELECT COUNT(*)::int AS count 
@@ -105,7 +129,7 @@ export async function GET(req: NextRequest) {
       fallbackData.recipeBooksCount = 0;
     }
 
-    // 4. Pantry Stock & Expiring Items
+    // 5. Pantry Items & Expiring Soon
     try {
       const pRes = await db.query(
         `SELECT COUNT(*)::int AS total,
@@ -120,7 +144,7 @@ export async function GET(req: NextRequest) {
       }
     } catch (_) {}
 
-    // 5. Grocery Items (Unchecked)
+    // 6. Shopping List / Grocery Items (Unchecked)
     try {
       const gRes = await db.query(
         `SELECT COUNT(*)::int AS count 
@@ -133,7 +157,7 @@ export async function GET(req: NextRequest) {
       }
     } catch (_) {}
 
-    // 6. Upcoming Meal from Planner
+    // 7. Upcoming Meal from Planner
     try {
       const planRes = await db.query(
         `SELECT id, meal_type, recipe_name, title, meal_date, meal_time, image_url, notes 
@@ -167,7 +191,7 @@ export async function GET(req: NextRequest) {
 }
 """
 
-# 2. Deploy Refactored /dashboard/page.tsx
+# 2. Update apps/web/src/app/dashboard/page.tsx
 DASHBOARD_PAGE_CODE = """'use client';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -185,10 +209,9 @@ import {
   Package,
   ShoppingCart,
   DownloadCloud,
-  Coins,
-  Wallet,
   AlertCircle,
-  Flame
+  Flame,
+  Zap
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -207,22 +230,20 @@ export default function DashboardPage() {
   const { t } = useTranslation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   
-  // Dynamic PostgreSQL & Store Metrics
+  // Dynamic Metrics & Subscription Status
   const [recipesCount, setRecipesCount] = useState<number>(0);
   const [recipeBooksCount, setRecipeBooksCount] = useState<number>(0);
   const [pantryStockCount, setPantryStockCount] = useState<number>(0);
   const [groceryItemsCount, setGroceryItemsCount] = useState<number>(0);
   const [expiringPantryCount, setExpiringPantryCount] = useState<number>(0);
-  const [tokenBalance, setTokenBalance] = useState<number>(0);
-  const [walletBalance, setWalletBalance] = useState<number>(0);
-  const [walletSymbol, setWalletSymbol] = useState<string>('$');
   const [subscriptionPlan, setSubscriptionPlan] = useState<string>('taster');
+  const [isHighestPlan, setIsHighestPlan] = useState<boolean>(false);
   const [upcomingMeal, setUpcomingMeal] = useState<UpcomingMealData | null>(null);
   
   const [loading, setLoading] = useState<boolean>(false);
   const [refreshFeedback, setRefreshFeedback] = useState<boolean>(false);
 
-  // Day / Dark Mode Dynamic State
+  // Day / Dark Mode Dynamic Bindings
   const [isDayMode, setIsDayMode] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return (
@@ -237,9 +258,6 @@ export default function DashboardPage() {
     const mode = localStorage.getItem('zecratary_theme_mode');
     const isDay = mode === 'day' || mode === 'light' || document.documentElement.classList.contains('light');
     setIsDayMode(isDay);
-    try {
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
-    } catch (_) {}
   }, []);
 
   useEffect(() => {
@@ -257,11 +275,11 @@ export default function DashboardPage() {
     };
   }, [syncThemeMode]);
 
-  // Read LocalStorage Fallback for Offline / Instant First Render
+  // Client Offline Storage Fallback
   const computeLocalFallbackMetrics = useCallback((user: User | null) => {
     if (!user || typeof window === 'undefined') return;
 
-    // 1. Saved Recipes
+    // Saved Recipes
     let localRecipes: any[] = [];
     try {
       const raw = localStorage.getItem('zecratary_saved_recipes') || localStorage.getItem('zecratary_recipes');
@@ -282,7 +300,7 @@ export default function DashboardPage() {
       }
     } catch (_) {}
 
-    // 2. Recipe Books
+    // Recipe Books
     try {
       const booksRaw = localStorage.getItem('zecratary_recipe_books');
       if (booksRaw) {
@@ -299,7 +317,7 @@ export default function DashboardPage() {
       }
     } catch (_) {}
 
-    // 3. Pantry Stock
+    // Pantry Stock
     try {
       const pantryRaw = localStorage.getItem('zecratary_pantry_items') || localStorage.getItem('zecratary_pantry');
       if (pantryRaw) {
@@ -313,7 +331,7 @@ export default function DashboardPage() {
       }
     } catch (_) {}
 
-    // 4. Grocery Items
+    // Shopping List (Unchecked items)
     try {
       const shopRaw = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
       if (shopRaw) {
@@ -327,7 +345,13 @@ export default function DashboardPage() {
       }
     } catch (_) {}
 
-    // 5. Upcoming Meal
+    // Active Plan & Highest Tier Local Evaluation
+    const plan = (user.subscriptionPlan || (user as any).plan || 'taster').toLowerCase();
+    setSubscriptionPlan(plan);
+    const topTiers = ['gourmet', 'enterprise', 'master_chef', 'master', 'pro_chef'];
+    setIsHighestPlan(topTiers.includes(plan));
+
+    // Upcoming Meal
     try {
       const planRaw = localStorage.getItem('zecratary_meal_plan');
       const now = new Date();
@@ -375,7 +399,7 @@ export default function DashboardPage() {
     } catch (_) {}
   }, [t]);
 
-  // Primary Hydration from PostgreSQL Database
+  // Primary Hydration from Database
   const isFetchingRef = useRef(false);
   const fetchDashboardStats = useCallback(async (activeUser: User | null) => {
     if (!activeUser || isFetchingRef.current) return;
@@ -395,24 +419,26 @@ export default function DashboardPage() {
           setPantryStockCount(s.pantryStockCount ?? 0);
           setGroceryItemsCount(s.groceryItemsCount ?? 0);
           setExpiringPantryCount(s.expiringPantryCount ?? 0);
-          setTokenBalance(s.tokenBalance ?? 0);
-          setWalletBalance(s.walletBalance ?? 0);
-          if (s.walletSymbol) setWalletSymbol(s.walletSymbol);
           if (s.subscriptionPlan) setSubscriptionPlan(s.subscriptionPlan);
+          if (typeof s.isHighestPlan === 'boolean') {
+            setIsHighestPlan(s.isHighestPlan);
+          } else {
+            const topTiers = ['gourmet', 'enterprise', 'master_chef', 'master', 'pro_chef'];
+            setIsHighestPlan(topTiers.includes((s.subscriptionPlan || '').toLowerCase()));
+          }
           if (s.upcomingMeal) {
             setUpcomingMeal(s.upcomingMeal);
           }
         }
       }
     } catch (err) {
-      // Graceful fallback to client storage
       computeLocalFallbackMetrics(activeUser);
     } finally {
       isFetchingRef.current = false;
     }
   }, [computeLocalFallbackMetrics]);
 
-  // Manual Refresh Handler
+  // Manual Telemetry Refresh
   const handleManualRefresh = async () => {
     if (loading) return;
     setLoading(true);
@@ -430,13 +456,11 @@ export default function DashboardPage() {
     syncThemeMode();
     await fetchDashboardStats(activeUser);
 
-    // Broadcast synchronization signals
     window.dispatchEvent(new Event('zecratary_recipes_updated'));
     window.dispatchEvent(new Event('zecratary_planner_updated'));
     window.dispatchEvent(new Event('zecratary_pantry_updated'));
     window.dispatchEvent(new Event('zecratary_shopping_updated'));
-    window.dispatchEvent(new Event('zecratary_tokens_updated'));
-    window.dispatchEvent(new Event('zecratary_wallet_updated'));
+    window.dispatchEvent(new Event('zecratary_subscriptions_updated'));
 
     setTimeout(() => {
       setLoading(false);
@@ -445,7 +469,7 @@ export default function DashboardPage() {
     }, 400);
   };
 
-  // Lifecycle Initialization & External Sync Listeners
+  // Lifecycle Initialization & Event Synchronization
   useEffect(() => {
     document.title = `${t('dashboard') || 'Dashboard'} - Zecratary`;
     initAuthStorage();
@@ -479,8 +503,7 @@ export default function DashboardPage() {
     window.addEventListener('zecratary_meal_plan_updated', handleDebouncedSync);
     window.addEventListener('zecratary_pantry_updated', handleDebouncedSync);
     window.addEventListener('zecratary_shopping_updated', handleDebouncedSync);
-    window.addEventListener('zecratary_tokens_updated', handleDebouncedSync);
-    window.addEventListener('zecratary_wallet_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_subscriptions_updated', handleDebouncedSync);
     window.addEventListener('zecratary_users_updated', handleDebouncedSync);
 
     return () => {
@@ -492,8 +515,7 @@ export default function DashboardPage() {
       window.removeEventListener('zecratary_meal_plan_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_pantry_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_shopping_updated', handleDebouncedSync);
-      window.removeEventListener('zecratary_tokens_updated', handleDebouncedSync);
-      window.removeEventListener('zecratary_wallet_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_subscriptions_updated', handleDebouncedSync);
       window.removeEventListener('zecratary_users_updated', handleDebouncedSync);
     };
   }, [computeLocalFallbackMetrics, fetchDashboardStats, router, t]);
@@ -503,13 +525,13 @@ export default function DashboardPage() {
       <div className="min-h-[70vh] flex items-center justify-center">
         <div 
           className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
-          style={{ borderColor: 'var(--color-primary)', borderTopColor: 'transparent' }}
+          style={{ borderColor: 'var(--color-primary, #10b981)', borderTopColor: 'transparent' }}
         />
       </div>
     );
   }
 
-  // Dynamic Contrast Surfaces Harmonized with Day / Dark Mode
+  // Theme Variables
   const cCardBg = isDayMode ? '#ffffff' : 'var(--color-card, #0f172a)';
   const cInnerBg = isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)';
   const cBorder = isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)';
@@ -520,7 +542,7 @@ export default function DashboardPage() {
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-16 px-2 sm:px-4 transition-colors duration-200"
+      className="w-full space-y-6 pb-16 px-4 sm:px-6 md:px-8 lg:px-10 transition-colors duration-200"
       style={{ color: cText }}
     >
       {/* Top Heading & Telemetry Action Strip */}
@@ -531,11 +553,11 @@ export default function DashboardPage() {
             {t('dashboard') || 'Dashboard'}
           </h1>
           <p className="text-sm" style={{ color: cSubText }}>
-            {(t('dashboardWelcomePrefix') || 'Welcome back, {name}!').replace('{name}', currentUser.name)} {t('dashboardSubtitle') || 'Autonomous culinary planning and pantry tracking.'}
+            {t('dashboardSubtitle') || 'Autonomous culinary planning, smart pantry tracking, and recipe intelligence.'}
           </p>
         </div>
 
-        {/* REFRESH BUTTON & LIVE FEEDBACK */}
+        {/* Refresh Action with Live Feedback */}
         <div className="flex items-center gap-3">
           {refreshFeedback && (
             <span 
@@ -556,7 +578,7 @@ export default function DashboardPage() {
               borderColor: cBorder,
               color: cText
             }}
-            title="Reload live metrics from PostgreSQL"
+            title="Reload live telemetry from database"
           >
             <RefreshCw 
               className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} 
@@ -567,105 +589,108 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Live Digital Asset Status Strip (AI Tokens, Store Wallet, Plan Tier) */}
+      {/* Task 2: Welcome Box with Active Plan & Upgrade/Change Button */}
       <div 
-        className="p-3.5 rounded-2xl border shadow-sm flex flex-wrap items-center justify-between gap-4 text-xs transition-colors duration-200"
+        className="p-6 sm:p-8 rounded-3xl border shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-6 transition-colors duration-200"
         style={{
           backgroundColor: cCardBg,
           borderColor: cBorder
         }}
       >
-        <div className="flex flex-wrap items-center gap-4 sm:gap-6">
-          {/* AI Tokens Counter */}
-          <Link 
-            href="/token"
-            className="flex items-center gap-2 hover:opacity-80 transition group"
-            title="View AI Token Balance & Ledger"
-          >
-            <span className="p-1.5 rounded-lg border flex items-center justify-center" style={{ backgroundColor: cInnerBg, borderColor: cBorder }}>
-              <Coins className="h-4 w-4" style={{ color: cEmerald }} />
+        <div className="space-y-2 max-w-2xl">
+          <div className="flex items-center gap-2">
+            <span 
+              className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border shadow-xs"
+              style={{
+                backgroundColor: cInnerBg,
+                borderColor: cBorder,
+                color: cPrimary
+              }}
+            >
+              {currentUser.role?.toUpperCase() || 'MEMBER'}
             </span>
-            <div>
-              <span className="block text-[10px] font-bold uppercase tracking-wider" style={{ color: cSubText }}>
-                {t('tokens') || 'Tokens'}
-              </span>
-              <span className="font-extrabold text-sm" style={{ color: cEmerald }}>
-                {tokenBalance.toLocaleString()} 🪙
-              </span>
-            </div>
-          </Link>
-
-          {/* Store Wallet Credit */}
-          <Link 
-            href="/wallet"
-            className="flex items-center gap-2 hover:opacity-80 transition group"
-            title="View Store Wallet & Top Up"
-          >
-            <span className="p-1.5 rounded-lg border flex items-center justify-center" style={{ backgroundColor: cInnerBg, borderColor: cBorder }}>
-              <Wallet className="h-4 w-4" style={{ color: cPrimary }} />
-            </span>
-            <div>
-              <span className="block text-[10px] font-bold uppercase tracking-wider" style={{ color: cSubText }}>
-                {t('wallet') || 'Wallet'}
-              </span>
-              <span className="font-extrabold text-sm" style={{ color: cPrimary }}>
-                {walletSymbol}{walletBalance.toFixed(2)}
-              </span>
-            </div>
-          </Link>
-
-          {/* Active Membership Plan */}
-          <div className="hidden sm:flex items-center gap-2 border-l pl-4" style={{ borderColor: cBorder }}>
-            <div>
-              <span className="block text-[10px] font-bold uppercase tracking-wider" style={{ color: cSubText }}>
-                {t('plan') || 'Plan'}
-              </span>
-              <Link 
-                href="/subscriptions"
-                className="font-bold text-xs uppercase px-2 py-0.5 rounded-md border inline-block mt-0.5 hover:underline"
-                style={{
-                  backgroundColor: cInnerBg,
-                  borderColor: cBorder,
-                  color: cPrimary
-                }}
+            {isHighestPlan && (
+              <span 
+                className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border shadow-xs bg-amber-500/10 text-amber-500 border-amber-500/30 flex items-center gap-1"
               >
-                {subscriptionPlan}
-              </Link>
-            </div>
+                <Sparkles className="h-3 w-3" /> {t('highestTier') || 'VIP Highest Tier'}
+              </span>
+            )}
           </div>
+
+          <h2 className="text-2xl sm:text-3xl font-black tracking-tight" style={{ color: cText }}>
+            {(t('dashboardWelcomePrefix') || 'Welcome back, {name}!').replace('{name}', currentUser.name || currentUser.email || 'Chef')}
+          </h2>
+          <p className="text-xs sm:text-sm leading-relaxed" style={{ color: cSubText }}>
+            {t('welcomePlanDescription') || 'Your kitchen headquarters for automated meal scheduling, inventory management, and personalized culinary creations.'}
+          </p>
         </div>
 
-        {/* Quick Top-Up Action Pills */}
-        <div className="flex items-center gap-2">
-          <Link
-            href="/token"
-            className="px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
-            style={{
-              backgroundColor: cInnerBg,
-              borderColor: cBorder,
-              color: cEmerald
-            }}
-          >
-            <Coins className="h-3.5 w-3.5" />
-            <span>+ {t('topUpTokens') || 'Top Up Tokens'}</span>
-          </Link>
+        {/* Current User: Active Plan Card */}
+        <div 
+          role="presentation"
+          className="w-full md:w-auto p-4 sm:p-5 rounded-2xl border shadow-sm flex items-center justify-between sm:justify-start gap-4 sm:gap-6 transition-all duration-200 shrink-0"
+          style={{
+            backgroundColor: cInnerBg,
+            borderColor: cBorder
+          }}
+        >
+          <div className="space-y-1">
+            <span 
+              className="text-[10px] uppercase font-bold tracking-wider block"
+              style={{ color: cSubText }}
+            >
+              {t('currentUserActivePlan') || 'Current User: Active Plan'}
+            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-base sm:text-lg font-black tracking-tight uppercase" style={{ color: cEmerald }}>
+                {subscriptionPlan || 'Taster'}
+              </span>
+              <span 
+                className="text-[10px] font-bold px-2 py-0.5 rounded-md border"
+                style={{
+                  backgroundColor: cCardBg,
+                  borderColor: cBorder,
+                  color: isHighestPlan ? '#f59e0b' : cPrimary
+                }}
+              >
+                {isHighestPlan ? (t('highestPlan') || 'Highest Tier') : (t('active') || 'Active')}
+              </span>
+            </div>
+          </div>
 
-          <Link
-            href="/wallet"
-            className="px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shadow-sm"
-            style={{
-              backgroundColor: cInnerBg,
-              borderColor: cBorder,
-              color: cPrimary
-            }}
-          >
-            <Wallet className="h-3.5 w-3.5" />
-            <span>+ {t('addFunds') || 'Add Funds'}</span>
-          </Link>
+          {/* Upgrade or Change CTA Trigger */}
+          {isHighestPlan ? (
+            <Link
+              href="/subscriptions"
+              className="px-4 py-2.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shadow-sm hover:scale-[1.02] active:scale-95 cursor-pointer ml-auto md:ml-2"
+              style={{
+                backgroundColor: cCardBg,
+                borderColor: cBorder,
+                color: cText
+              }}
+              title="Change or manage active subscription plan"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+              <span>{t('changePlan') || 'Change'}</span>
+            </Link>
+          ) : (
+            <Link
+              href="/subscriptions"
+              className="px-4 py-2.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-md hover:scale-[1.02] active:scale-95 cursor-pointer text-white ml-auto md:ml-2"
+              style={{
+                backgroundColor: cPrimary
+              }}
+              title="Upgrade to unlocked premium plan"
+            >
+              <Zap className="h-3.5 w-3.5" />
+              <span>{t('upgradePlan') || 'Upgrade'}</span>
+            </Link>
+          )}
         </div>
       </div>
 
-      {/* Optional Proactive Alert: Pantry Items Expiring Soon */}
+      {/* Proactive Spoilage Notification */}
       {expiringPantryCount > 0 && (
         <div 
           className="p-3.5 px-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-sm animate-in fade-in transition duration-300"
@@ -690,7 +715,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Top 4 Stats Metric Cards with Dynamic CSS Theme Variables */}
+      {/* Task 3: 4-Way KPI Metric Cards with Shopping List */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Saved Recipes */}
         <Link 
@@ -777,7 +802,7 @@ export default function DashboardPage() {
           </div>
         </Link>
 
-        {/* Grocery Items */}
+        {/* Task 3 Replaced Card: Shopping List */}
         <Link 
           href="/shopping" 
           className="p-5 rounded-2xl block border transition shadow-sm group hover:scale-[1.01]"
@@ -791,22 +816,40 @@ export default function DashboardPage() {
               className="text-xs uppercase font-bold tracking-wider"
               style={{ color: cSubText }}
             >
-              {t('groceryItems') || 'Grocery Items'}
+              {t('shoppingList') || 'Shopping List'}
             </span>
             <ShoppingCart className="h-4 w-4 opacity-70 group-hover:scale-110 transition" style={{ color: cEmerald }} />
           </div>
-          <span 
-            className="text-3xl font-black mt-2 block"
-            style={{ color: cText }}
-          >
-            {loading ? '...' : groceryItemsCount}
-          </span>
+          <div className="flex items-baseline justify-between mt-2">
+            <span 
+              className="text-3xl font-black block"
+              style={{ color: cText }}
+            >
+              {loading ? '...' : groceryItemsCount}
+            </span>
+            {groceryItemsCount > 0 ? (
+              <span 
+                className="text-[10px] font-bold px-2 py-0.5 rounded-full border"
+                style={{
+                  backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.1)',
+                  borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.3)',
+                  color: cEmerald
+                }}
+              >
+                {groceryItemsCount} {t('itemsNeeded') || 'items to buy'}
+              </span>
+            ) : (
+              <span className="text-[10px] font-semibold opacity-60" style={{ color: cSubText }}>
+                {t('allPurchased') || 'All caught up'}
+              </span>
+            )}
+          </div>
         </Link>
       </div>
 
-      {/* Center 2-Column Section */}
+      {/* Center 2-Column Section: Upcoming Meal & Quick Actions */}
       <div className="grid md:grid-cols-2 gap-6">
-        {/* Upcoming Meal Card with Recipe Photo & Interactive Actions */}
+        {/* Upcoming Meal Card */}
         <div 
           className="p-6 rounded-2xl space-y-4 shadow-sm flex flex-col justify-between border transition-colors duration-200"
           style={{
@@ -818,12 +861,12 @@ export default function DashboardPage() {
             className="flex items-center justify-between border-b pb-3"
             style={{ borderColor: cBorder }}
           >
-            <h2 
+            <h3 
               className="text-base font-bold flex items-center gap-2"
               style={{ color: cText }}
             >
               <Calendar className="h-5 w-5" style={{ color: cPrimary }} /> {t('upcomingMeal') || 'Upcoming Meal'}
-            </h2>
+            </h3>
             <Link 
               href="/planner" 
               className="text-xs font-bold hover:underline flex items-center gap-1"
@@ -875,12 +918,12 @@ export default function DashboardPage() {
                       </span>
                     )}
                   </div>
-                  <h3 
+                  <h4 
                     className="font-bold text-base leading-tight mt-1 truncate"
                     style={{ color: cText }}
                   >
                     {upcomingMeal.title}
-                  </h3>
+                  </h4>
                   <span 
                     className="text-xs flex items-center gap-1 pt-0.5"
                     style={{ color: cSubText }}
@@ -935,7 +978,7 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Enhanced Quick Actions Card (4 High-Value Culinary Workflows) */}
+        {/* Quick Actions Card */}
         <div 
           className="p-6 rounded-2xl space-y-4 shadow-sm flex flex-col justify-between border transition-colors duration-200"
           style={{
@@ -947,12 +990,12 @@ export default function DashboardPage() {
             className="border-b pb-3 flex items-center justify-between"
             style={{ borderColor: cBorder }}
           >
-            <h2 
+            <h3 
               className="text-base font-bold flex items-center gap-2"
               style={{ color: cText }}
             >
               <ChefHat className="h-5 w-5" style={{ color: cEmerald }} /> {t('quickActions') || 'Quick Actions'}
-            </h2>
+            </h3>
             <span className="text-[11px] font-semibold" style={{ color: cSubText }}>
               {t('culinaryShortcuts') || 'Culinary Shortcuts'}
             </span>
@@ -1051,9 +1094,9 @@ export default function DashboardPage() {
 """
 
 def deploy():
-    print("🚀 Starting Dashboard Remediation & Enhancement Patch...")
+    print("🚀 Applying /dashboard remediation patch...")
     
-    # 1. Determine base path
+    # 1. Update API route
     has_apps_web = os.path.exists("apps/web")
     api_dir = "apps/web/src/app/api/dashboard/stats" if has_apps_web else "src/app/api/dashboard/stats"
     os.makedirs(api_dir, exist_ok=True)
@@ -1061,9 +1104,8 @@ def deploy():
     api_route_path = os.path.join(api_dir, "route.ts")
     with open(api_route_path, "w", encoding="utf-8") as f:
         f.write(API_STATS_CODE.strip() + "\n")
-    print(f"✅ Deployed PostgreSQL Dashboard Stats API: {api_route_path}")
+    print(f"✅ Deployed Dashboard Stats API: {api_route_path}")
 
-    # Also deploy to alternate path if root app directory exists
     if has_apps_web and os.path.exists("src/app/api"):
         alt_api_dir = "src/app/api/dashboard/stats"
         os.makedirs(alt_api_dir, exist_ok=True)
@@ -1071,7 +1113,7 @@ def deploy():
             f.write(API_STATS_CODE.strip() + "\n")
         print(f"✅ Synchronized secondary API route: {alt_api_dir}/route.ts")
 
-    # 2. Patch dashboard/page.tsx
+    # 2. Update dashboard/page.tsx targets
     targets = []
     for root, dirs, files in os.walk("."):
         if "node_modules" in root or ".next" in root:
@@ -1087,9 +1129,9 @@ def deploy():
     for target in targets:
         with open(target, "w", encoding="utf-8") as f:
             f.write(DASHBOARD_PAGE_CODE.strip() + "\n")
-        print(f"✅ Patched Dashboard View with Dynamic Theme & PostgreSQL sync: {target}")
+        print(f"✅ Patched Dashboard View (100% width, Active Plan Box, Shopping List KPI): {target}")
 
-    print("✨ Remediation Patch Applied Successfully!")
+    print("✨ Dashboard Patch Deployed Successfully!")
 
 if __name__ == "__main__":
     deploy()

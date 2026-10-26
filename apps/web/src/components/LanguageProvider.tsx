@@ -48,6 +48,18 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "activeAiModelBadge": "Active Model",
+    "activeAiModelTooltip": "Active AI Model: {model} ({provider})",
+    "chefWorkspaceAria": "AI Chef Workspace",
+    "chefHeaderAria": "Chef Navigation and Active AI Model Status",
+    "dietaryPillsAria": "Active Dietary and Allergy Preferences",
+    "chatConversationAria": "Recipe Conversation Stream",
+    "promptInputAria": "Culinary Prompt Input Bar",
+    "recipePreferencesAria": "Recipe Preferences Configuration",
+    "questionnaireChipsAria": "Questionnaire Topics and Quick Prompts",
+    "presetAnswersAria": "Preset Step Answers",
+    "mealPlanAria": "Generated Multi-Day Meal Plan",
+    "recommendedRecipeAria": "Final Recommended Recipe Card",
     "activePantryContextTooltip": "Active In-Stock Pantry Context",
     "curatedSourcesTooltip": "Curated Recipe Sources",
     "systemCapabilitiesChip": "✨ What can I do with Chef Foodie?",

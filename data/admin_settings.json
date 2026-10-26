@@ -2248,7 +2248,19 @@
       "couldNotSaveRecipe": "Could not save recipe.",
       "couldNotSchedulePlan": "Could not schedule meal plan.",
       "defaultCulinaryReply": "Here are personalized culinary recommendations based on your preferences.",
-      "wizardCompleteReply": "I have formulated your meal plan and signature recommended recipe based on your {topic} questionnaire!"
+      "wizardCompleteReply": "I have formulated your meal plan and signature recommended recipe based on your {topic} questionnaire!",
+      "activeAiModelBadge": "Active Model",
+      "activeAiModelTooltip": "Active AI Model: {model} ({provider})",
+      "chefWorkspaceAria": "AI Chef Workspace",
+      "chefHeaderAria": "Chef Navigation and Active AI Model Status",
+      "dietaryPillsAria": "Active Dietary and Allergy Preferences",
+      "chatConversationAria": "Recipe Conversation Stream",
+      "promptInputAria": "Culinary Prompt Input Bar",
+      "recipePreferencesAria": "Recipe Preferences Configuration",
+      "questionnaireChipsAria": "Questionnaire Topics and Quick Prompts",
+      "presetAnswersAria": "Preset Step Answers",
+      "mealPlanAria": "Generated Multi-Day Meal Plan",
+      "recommendedRecipeAria": "Final Recommended Recipe Card"
     },
     "th": {
       "storageTitle": "การกำหนดค่าพื้นที่จัดเก็บสื่อและรูปภาพ",
@@ -4216,7 +4228,19 @@
       "couldNotSaveRecipe": "ไม่สามารถบันทึกสูตรอาหารได้",
       "couldNotSchedulePlan": "ไม่สามารถบันทึกแผนมื้ออาหารลงตารางได้",
       "defaultCulinaryReply": "นี่คือคำแนะนำเมนูอาหารพิเศษที่ปรับแต่งตามความชอบของคุณ",
-      "wizardCompleteReply": "เชฟได้จัดทำแผนมื้ออาหารและสูตรเด็ดแนะนำตามแบบสอบถาม {topic} ให้คุณแล้ว!"
+      "wizardCompleteReply": "เชฟได้จัดทำแผนมื้ออาหารและสูตรเด็ดแนะนำตามแบบสอบถาม {topic} ให้คุณแล้ว!",
+      "activeAiModelBadge": "โมเดล AI ที่ใช้งาน",
+      "activeAiModelTooltip": "โมเดล AI ที่ใช้งาน: {model} ({provider})",
+      "chefWorkspaceAria": "พื้นที่ทำงานเชฟ AI",
+      "chefHeaderAria": "แถบควบคุมเชฟและสถานะโมเดล AI",
+      "dietaryPillsAria": "ตัวเลือกอาหารและสารก่อภูมิแพ้ที่ใช้งาน",
+      "chatConversationAria": "การสนทนาสูตรอาหารและแผนมื้ออาหาร",
+      "promptInputAria": "แถบป้อนข้อความสำหรับทำอาหาร",
+      "recipePreferencesAria": "ตั้งค่าความชอบด้านสูตรอาหาร",
+      "questionnaireChipsAria": "หัวข้อแบบสอบถามและคำถามแนะนำ",
+      "presetAnswersAria": "คำตอบสำเร็จรูป",
+      "mealPlanAria": "แผนมื้ออาหารที่สร้างขึ้น",
+      "recommendedRecipeAria": "สูตรอาหารแนะนำพิเศษ"
     },
     "es": {
       "storageTitle": "Configuración de Almacenamiento de Medios",
@@ -6184,7 +6208,19 @@
       "couldNotSaveRecipe": "No se pudo guardar la receta.",
       "couldNotSchedulePlan": "No se pudo programar el plan de comidas.",
       "defaultCulinaryReply": "Aquí tiene recomendaciones culinarias personalizadas según sus preferencias.",
-      "wizardCompleteReply": "¡He formulado su plan de comidas y receta recomendada según su cuestionario de {topic}!"
+      "wizardCompleteReply": "¡He formulado su plan de comidas y receta recomendada según su cuestionario de {topic}!",
+      "activeAiModelBadge": "Modelo Activo",
+      "activeAiModelTooltip": "Modelo de IA activo: {model} ({provider})",
+      "chefWorkspaceAria": "Área de trabajo del Chef IA",
+      "chefHeaderAria": "Controles de chef y estado del modelo de IA",
+      "dietaryPillsAria": "Preferencias dietéticas y alergias activas",
+      "chatConversationAria": "Flujo de conversación de recetas",
+      "promptInputAria": "Barra de entrada culinaria",
+      "recipePreferencesAria": "Configuración de preferencias de receta",
+      "questionnaireChipsAria": "Temas de cuestionarios y sugerencias",
+      "presetAnswersAria": "Respuestas rápidas",
+      "mealPlanAria": "Plan de comidas generado",
+      "recommendedRecipeAria": "Receta recomendada final"
     },
     "fr": {
       "storageTitle": "Configuration du Stockage des Médias",
@@ -8139,7 +8175,19 @@
       "couldNotSaveRecipe": "Impossible d'enregistrer la recette.",
       "couldNotSchedulePlan": "Impossible de planifier le plan de repas.",
       "defaultCulinaryReply": "Voici des recommandations culinaires personnalisées selon vos préférences.",
-      "wizardCompleteReply": "J'ai formulé votre plan de repas et votre recette recommandée selon votre questionnaire de {topic} !"
+      "wizardCompleteReply": "J'ai formulé votre plan de repas et votre recette recommandée selon votre questionnaire de {topic} !",
+      "activeAiModelBadge": "Modèle Actif",
+      "activeAiModelTooltip": "Modèle IA actif : {model} ({provider})",
+      "chefWorkspaceAria": "Espace de travail du Chef IA",
+      "chefHeaderAria": "Commandes du chef et état du modèle IA",
+      "dietaryPillsAria": "Préférences alimentaires et allergies actives",
+      "chatConversationAria": "Flux de conversation des recettes",
+      "promptInputAria": "Barre de saisie culinaire",
+      "recipePreferencesAria": "Configuration des préférences de recette",
+      "questionnaireChipsAria": "Thèmes de questionnaire et suggestions",
+      "presetAnswersAria": "Réponses prédéfinies",
+      "mealPlanAria": "Plan de repas généré",
+      "recommendedRecipeAria": "Recette finale recommandée"
     }
   }
 }

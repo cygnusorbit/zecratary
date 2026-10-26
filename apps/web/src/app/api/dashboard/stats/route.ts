@@ -1,160 +1,187 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+import pool from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const userId = searchParams.get('userId') || '';
+  const email = searchParams.get('email') || '';
+
+  const fallbackData = {
+    recipesCount: 0,
+    recipeBooksCount: 0,
+    pantryStockCount: 0,
+    groceryItemsCount: 0,
+    expiringPantryCount: 0,
+    tokenBalance: 0,
+    walletBalance: 0,
+    walletSymbol: '$',
+    subscriptionPlan: 'taster',
+    isHighestPlan: false,
+    upcomingMeal: null
+  };
+
+  if (!userId && !email) {
+    return NextResponse.json({ success: true, stats: fallbackData }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
+  }
+
   try {
-    const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId')?.trim() || 'usr_admin_1';
-    const email = searchParams.get('email')?.toLowerCase().trim() || '';
-
-    // 1. Saved Recipes Count
-    let savedRecipesCount = 0;
-    try {
-      const recRes: any = await query(`
-        SELECT COUNT(*) as count FROM saved_recipes 
-        WHERE user_id = $1 OR created_by = $1 OR user_id = 'usr_admin_1' OR user_id IS NULL;
-      `, [userId]);
-      const row = Array.isArray(recRes) ? recRes[0] : recRes?.rows?.[0];
-      savedRecipesCount = parseInt(row?.count || '0', 10);
-    } catch (_) {}
-
-    // 2. Scheduled Meals Count & Upcoming Meal
-    let scheduledMealsCount = 0;
-    let upcomingMeal: any = null;
-    try {
-      const planRes: any = await query(`
-        SELECT COUNT(*) as count FROM planner_meals 
-        WHERE user_id = $1 OR user_id = 'usr_admin_1' OR user_id IS NULL;
-      `, [userId]);
-      const row = Array.isArray(planRes) ? planRes[0] : planRes?.rows?.[0];
-      scheduledMealsCount = parseInt(row?.count || '0', 10);
-
-      const todayStr = new Date().toISOString().split('T')[0];
-      const nextMealRes: any = await query(`
-        SELECT * FROM planner_meals 
-        WHERE (user_id = $1 OR user_id = 'usr_admin_1' OR user_id IS NULL)
-          AND date >= $2
-        ORDER BY date ASC, time ASC LIMIT 1;
-      `, [userId, todayStr]);
-      const nextRow = Array.isArray(nextMealRes) ? nextMealRes[0] : nextMealRes?.rows?.[0];
-      if (nextRow) {
-        upcomingMeal = {
-          id: nextRow.id,
-          title: nextRow.title || 'Scheduled Dish',
-          mealType: nextRow.meal_type || 'Dinner',
-          date: nextRow.date,
-          time: nextRow.time || '19:00',
-          servings: Number(nextRow.servings || 2),
-          prepMinutes: Number(nextRow.prep_minutes || 15),
-          cookMinutes: Number(nextRow.cook_minutes || 25)
-        };
-      }
-    } catch (_) {}
-
-    // 3. Pantry Count & Expiring Items
-    let pantryCount = 0;
-    let expiringItemsCount = 0;
-    let expiringItemsList: string[] = [];
-    try {
-      const pRes: any = await query(`
-        SELECT * FROM pantry_items 
-        WHERE user_id = $1 OR created_by = $1 OR user_id = 'usr_admin_1' OR user_id IS NULL;
-      `, [userId]);
-      const pRows = Array.isArray(pRes) ? pRes : (pRes?.rows || []);
-      pantryCount = pRows.length;
-
-      const now = new Date();
-      now.setHours(0, 0, 0, 0);
-
-      pRows.forEach((item: any) => {
-        if (item.expiry_date) {
-          const [y, m, d] = item.expiry_date.split('-').map(Number);
-          if (y && m && d) {
-            const target = new Date(y, m - 1, d);
-            target.setHours(0, 0, 0, 0);
-            const diffDays = Math.ceil((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-            if (diffDays <= 3) {
-              expiringItemsCount++;
-              if (item.name) expiringItemsList.push(item.name);
-            }
-          }
-        }
+    const db = (pool as any).default || (pool as any).pool || pool;
+    if (!db || typeof db.query !== 'function') {
+      return NextResponse.json({ success: true, stats: fallbackData }, {
+        headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
       });
-    } catch (_) {}
+    }
 
-    // 4. Token & Wallet Balances
-    let tokenBalance = 100;
-    let walletBalance = 0.00;
-    let userPlan = 'Taster';
+    // 1. User Assets & Subscription Plan
+    let userPlan = 'taster';
     try {
-      const uRes: any = await query(`
-        SELECT token_balance, wallet_balance, subscription_plan FROM users 
-        WHERE id = $1 OR (email IS NOT NULL AND LOWER(email) = LOWER($2)) LIMIT 1;
-      `, [userId, email || userId]);
-      const uRow = Array.isArray(uRes) ? uRes[0] : uRes?.rows?.[0];
-      if (uRow) {
-        if (uRow.token_balance !== null && uRow.token_balance !== undefined) tokenBalance = Number(uRow.token_balance);
-        if (uRow.wallet_balance !== null && uRow.wallet_balance !== undefined) walletBalance = Number(uRow.wallet_balance);
-        if (uRow.subscription_plan) userPlan = uRow.subscription_plan;
+      const uRes = await db.query(
+        `SELECT token_balance, wallet_balance, subscription_plan 
+         FROM users 
+         WHERE id = $1 OR email = $2 
+         LIMIT 1`,
+        [userId, email]
+      );
+      if (uRes.rows && uRes.rows.length > 0) {
+        const u = uRes.rows[0];
+        fallbackData.tokenBalance = Number(u.token_balance) || 0;
+        fallbackData.walletBalance = Number(u.wallet_balance) || 0;
+        userPlan = (u.subscription_plan || 'taster').toLowerCase();
+        fallbackData.subscriptionPlan = userPlan;
       }
     } catch (_) {}
 
-    // 5. Recent 3 Recipes
-    let recentRecipes: any[] = [];
+    // 2. Determine Highest Subscription Plan Tier
     try {
-      const recListRes: any = await query(`
-        SELECT id, title, description, recipe_type, prep_time_minutes, cook_time_minutes, servings, calories, image_url, image 
-        FROM saved_recipes 
-        WHERE user_id = $1 OR created_by = $1 OR user_id = 'usr_admin_1' OR user_id IS NULL
-        ORDER BY created_at DESC LIMIT 3;
-      `, [userId]);
-      const rows = Array.isArray(recListRes) ? recListRes : (recListRes?.rows || []);
-      recentRecipes = rows.map((r: any) => ({
-        id: r.id,
-        title: r.title,
-        description: r.description,
-        recipeType: r.recipe_type || 'Main Dish',
-        prepTimeMinutes: Number(r.prep_time_minutes || 15),
-        cookTimeMinutes: Number(r.cook_time_minutes || 25),
-        servings: Number(r.servings || 2),
-        calories: Number(r.calories || 450),
-        imageUrl: r.image_url || r.image || '/uploads/recipes/default.jpg'
-      }));
+      const planRes = await db.query(
+        `SELECT slug, name, COALESCE(price, monthly_price, 0) as price_val, sort_order 
+         FROM subscription_plans 
+         WHERE is_active = true OR is_active IS NULL 
+         ORDER BY sort_order DESC, price_val DESC`
+      );
+      if (planRes.rows && planRes.rows.length > 0) {
+        const topPlanSlug = (planRes.rows[0].slug || '').toLowerCase();
+        const topPlanName = (planRes.rows[0].name || '').toLowerCase();
+        fallbackData.isHighestPlan = (userPlan === topPlanSlug || userPlan === topPlanName);
+      } else {
+        const topTiers = ['gourmet', 'enterprise', 'master_chef', 'master', 'pro_chef'];
+        fallbackData.isHighestPlan = topTiers.includes(userPlan);
+      }
+    } catch (_) {
+      const topTiers = ['gourmet', 'enterprise', 'master_chef', 'master', 'pro_chef'];
+      fallbackData.isHighestPlan = topTiers.includes(userPlan);
+    }
+
+    // 3. Saved Recipes Count
+    try {
+      const rRes = await db.query(
+        `SELECT COUNT(*)::int AS count 
+         FROM saved_recipes 
+         WHERE user_id = $1 OR created_by = $2`,
+        [userId, email]
+      );
+      if (rRes.rows && rRes.rows.length > 0) {
+        fallbackData.recipesCount = Number(rRes.rows[0].count) || 0;
+      }
+    } catch (_) {
+      try {
+        const altRRes = await db.query(
+          `SELECT COUNT(*)::int AS count 
+           FROM recipes 
+           WHERE user_id = $1 OR created_by = $2`,
+          [userId, email]
+        );
+        if (altRRes.rows && altRRes.rows.length > 0) {
+          fallbackData.recipesCount = Number(altRRes.rows[0].count) || 0;
+        }
+      } catch (_) {}
+    }
+
+    // 4. Recipe Books Count
+    try {
+      const bRes = await db.query(
+        `SELECT COUNT(*)::int AS count 
+         FROM recipe_books 
+         WHERE user_id = $1 OR created_by = $2`,
+        [userId, email]
+      );
+      if (bRes.rows && bRes.rows.length > 0 && Number(bRes.rows[0].count) > 0) {
+        fallbackData.recipeBooksCount = Number(bRes.rows[0].count);
+      } else {
+        const catRes = await db.query(
+          `SELECT COUNT(DISTINCT category)::int AS count 
+           FROM saved_recipes 
+           WHERE user_id = $1 OR created_by = $2`,
+          [userId, email]
+        );
+        fallbackData.recipeBooksCount = (catRes.rows && catRes.rows[0]) ? Number(catRes.rows[0].count) || 0 : 0;
+      }
+    } catch (_) {
+      fallbackData.recipeBooksCount = 0;
+    }
+
+    // 5. Pantry Items & Expiring Soon
+    try {
+      const pRes = await db.query(
+        `SELECT COUNT(*)::int AS total,
+                COUNT(CASE WHEN expiry_date IS NOT NULL AND expiry_date <= (CURRENT_DATE + INTERVAL '3 days') THEN 1 END)::int AS expiring
+         FROM pantry_items 
+         WHERE user_id = $1 OR created_by = $2`,
+        [userId, email]
+      );
+      if (pRes.rows && pRes.rows.length > 0) {
+        fallbackData.pantryStockCount = Number(pRes.rows[0].total) || 0;
+        fallbackData.expiringPantryCount = Number(pRes.rows[0].expiring) || 0;
+      }
     } catch (_) {}
 
-    return NextResponse.json({
-      success: true,
-      stats: {
-        savedRecipes: savedRecipesCount,
-        scheduledMeals: scheduledMealsCount,
-        pantryItems: pantryCount,
-        tokenBalance,
-        walletBalance,
-        userPlan,
-        expiringItemsCount,
-        expiringItemsList,
-        upcomingMeal,
-        recentRecipes
+    // 6. Shopping List / Grocery Items (Unchecked)
+    try {
+      const gRes = await db.query(
+        `SELECT COUNT(*)::int AS count 
+         FROM grocery_items 
+         WHERE (user_id = $1 OR created_by = $2) AND (checked IS FALSE OR checked IS NULL)`,
+        [userId, email]
+      );
+      if (gRes.rows && gRes.rows.length > 0) {
+        fallbackData.groceryItemsCount = Number(gRes.rows[0].count) || 0;
       }
-    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+    } catch (_) {}
+
+    // 7. Upcoming Meal from Planner
+    try {
+      const planRes = await db.query(
+        `SELECT id, meal_type, recipe_name, title, meal_date, meal_time, image_url, notes 
+         FROM planner_meals 
+         WHERE (user_id = $1 OR created_by = $2) AND meal_date >= CURRENT_DATE 
+         ORDER BY meal_date ASC, id ASC 
+         LIMIT 1`,
+        [userId, email]
+      );
+      if (planRes.rows && planRes.rows.length > 0) {
+        const m = planRes.rows[0];
+        fallbackData.upcomingMeal = {
+          mealType: (m.meal_type || 'Dinner').toUpperCase(),
+          title: m.recipe_name || m.title || 'Scheduled Dish',
+          timeOrTags: m.meal_time ? `${m.meal_time} • Scheduled` : '40 mins • Scheduled',
+          notes: m.notes || undefined,
+          imageUrl: m.image_url || undefined,
+          date: m.meal_date
+        } as any;
+      }
+    } catch (_) {}
+
+    return NextResponse.json({ success: true, stats: fallbackData }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+    });
   } catch (err: any) {
-    return NextResponse.json({
-      success: true,
-      stats: {
-        savedRecipes: 0,
-        scheduledMeals: 0,
-        pantryItems: 0,
-        tokenBalance: 100,
-        walletBalance: 0,
-        userPlan: 'Taster',
-        expiringItemsCount: 0,
-        expiringItemsList: [],
-        upcomingMeal: null,
-        recentRecipes: []
-      }
+    return NextResponse.json({ success: true, stats: fallbackData }, {
+      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
     });
   }
 }

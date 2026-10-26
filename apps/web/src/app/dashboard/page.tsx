@@ -1,395 +1,782 @@
-// @ts-nocheck
 'use client';
-
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ChefHat, Sparkles, BookOpen, Package, Calendar, Coins, Wallet, ArrowRight, Clock, Users, Flame, Plus, UploadCloud, Utensils, AlertTriangle, CheckCircle2, ChevronRight, Layers, ShieldCheck, RefreshCw, TrendingUp } from 'lucide-react';
-import DynamicTokenIcon from '@/components/DynamicTokenIcon';
+import { 
+  ChefHat, 
+  Calendar, 
+  Sparkles,
+  Clock,
+  Utensils,
+  ArrowRight,
+  RefreshCw,
+  CheckCircle2,
+  BookOpen,
+  Package,
+  ShoppingCart,
+  DownloadCloud,
+  AlertCircle,
+  Flame,
+  Zap
+} from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
+
+interface UpcomingMealData {
+  mealType: string;
+  title: string;
+  timeOrTags: string;
+  notes?: string;
+  imageUrl?: string;
+  date?: string;
+}
 
 export default function DashboardPage() {
   const router = useRouter();
   const { t } = useTranslation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  
+  // Dynamic Metrics & Subscription Status
+  const [recipesCount, setRecipesCount] = useState<number>(0);
+  const [recipeBooksCount, setRecipeBooksCount] = useState<number>(0);
+  const [pantryStockCount, setPantryStockCount] = useState<number>(0);
+  const [groceryItemsCount, setGroceryItemsCount] = useState<number>(0);
+  const [expiringPantryCount, setExpiringPantryCount] = useState<number>(0);
+  const [subscriptionPlan, setSubscriptionPlan] = useState<string>('taster');
+  const [isHighestPlan, setIsHighestPlan] = useState<boolean>(false);
+  const [upcomingMeal, setUpcomingMeal] = useState<UpcomingMealData | null>(null);
+  
+  const [loading, setLoading] = useState<boolean>(false);
+  const [refreshFeedback, setRefreshFeedback] = useState<boolean>(false);
 
-  // Live Stats aggregated from PostgreSQL
-  const [stats, setStats] = useState({
-    savedRecipes: 0,
-    scheduledMeals: 0,
-    pantryItems: 0,
-    tokenBalance: 50,
-    walletBalance: 0.00,
-    userPlan: 'Taster (Free)',
-    expiringItemsCount: 0,
-    expiringItemsList: [] as string[],
-    upcomingMeal: null as any,
-    recentRecipes: [] as any[]
+  // Day / Dark Mode Dynamic Bindings
+  const [isDayMode, setIsDayMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      document.documentElement.classList.contains('light') ||
+      localStorage.getItem('zecratary_theme_mode') === 'day' ||
+      localStorage.getItem('zecratary_theme_mode') === 'light'
+    );
   });
 
-  const [tokenSymbol, setTokenSymbol] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      try { return localStorage.getItem('zecratary_token_symbol') || '🪙'; } catch (_) {}
-    }
-    return '🪙';
-  });
-  const [tokenIcon, setTokenIcon] = useState<string>('');
-  const [walletCurrency, setWalletCurrency] = useState<string>('USD');
-  const [walletSymbol, setWalletSymbol] = useState<string>('$');
-
-  const loadDashboardData = useCallback(async (user: User | null) => {
-    const targetUserId = user?.id || 'usr_admin_1';
-    const targetEmail = user?.email || 'admin@zecratary.com';
-    setLoading(true);
-
-    try {
-      const [res, tokRes, walRes] = await Promise.allSettled([
-        fetch(`/api/dashboard/stats?userId=${encodeURIComponent(targetUserId)}&email=${encodeURIComponent(targetEmail)}&t=${Date.now()}`, { cache: 'no-store' }),
-        fetch(`/api/tokens?userId=${encodeURIComponent(targetUserId)}&email=${encodeURIComponent(targetEmail)}&t=${Date.now()}`, { cache: 'no-store' }),
-        fetch(`/api/wallet?userId=${encodeURIComponent(targetUserId)}&email=${encodeURIComponent(targetEmail)}&t=${Date.now()}`, { cache: 'no-store' })
-      ]);
-
-      if (res.status === 'fulfilled' && res.value.ok) {
-        const data = await res.value.json();
-        if (data.success && data.stats) {
-          setStats(data.stats);
-        }
-      }
-
-      if (tokRes.status === 'fulfilled' && tokRes.value.ok) {
-        const tData = await tokRes.value.json();
-        if (tData.tokenSymbol) setTokenSymbol(tData.tokenSymbol);
-        if (tData.tokenIcon) setTokenIcon(tData.tokenIcon);
-        const tb = Number(tData.balance ?? tData.tokenBalance ?? tData.token_balance);
-        if (!isNaN(tb)) {
-          setStats(prev => ({ ...prev, tokenBalance: tb }));
-        }
-      }
-
-      if (walRes.status === 'fulfilled' && walRes.value.ok) {
-        const wData = await walRes.value.json();
-        const wb = parseFloat(String(wData.wallet_balance ?? wData.walletBalance ?? wData.balance ?? 0));
-        if (!isNaN(wb)) {
-          setStats(prev => ({ ...prev, walletBalance: wb }));
-        }
-        if (wData.currency) setWalletCurrency(wData.currency);
-        if (wData.walletSymbol) setWalletSymbol(wData.walletSymbol);
-      }
-    } catch (e) {
-      console.warn('[DashboardPage] API load notice:', e);
-    } finally {
-      setLoading(false);
-    }
-
-    // LocalStorage Fallback for offline usage
-    if (typeof window !== 'undefined') {
-      try {
-        const rawRecipes = localStorage.getItem('zecratary_saved_recipes') || '[]';
-        const recList = JSON.parse(rawRecipes);
-        const rawPantry = localStorage.getItem('zecratary_pantry_items') || '[]';
-        const panList = JSON.parse(rawPantry);
-
-        setStats(prev => ({
-          ...prev,
-          savedRecipes: Array.isArray(recList) ? recList.length : prev.savedRecipes,
-          pantryItems: Array.isArray(panList) ? panList.length : prev.pantryItems,
-          recentRecipes: Array.isArray(recList) ? recList.slice(0, 3) : prev.recentRecipes
-        }));
-      } catch (_) {}
-    }
+  const syncThemeMode = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    const mode = localStorage.getItem('zecratary_theme_mode');
+    const isDay = mode === 'day' || mode === 'light' || document.documentElement.classList.contains('light');
+    setIsDayMode(isDay);
   }, []);
 
   useEffect(() => {
+    syncThemeMode();
+    window.addEventListener('zecratary_theme_mode_changed', syncThemeMode);
+    window.addEventListener('zecratary_theme_changed', syncThemeMode);
+    window.addEventListener('zecratary_theme_updated', syncThemeMode);
+    window.addEventListener('storage', syncThemeMode);
+
+    return () => {
+      window.removeEventListener('zecratary_theme_mode_changed', syncThemeMode);
+      window.removeEventListener('zecratary_theme_changed', syncThemeMode);
+      window.removeEventListener('zecratary_theme_updated', syncThemeMode);
+      window.removeEventListener('storage', syncThemeMode);
+    };
+  }, [syncThemeMode]);
+
+  // Client Offline Storage Fallback
+  const computeLocalFallbackMetrics = useCallback((user: User | null) => {
+    if (!user || typeof window === 'undefined') return;
+
+    // Saved Recipes
+    let localRecipes: any[] = [];
+    try {
+      const raw = localStorage.getItem('zecratary_saved_recipes') || localStorage.getItem('zecratary_recipes');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const seen = new Set<string>();
+          for (const item of parsed) {
+            const key = String(item.id || item.title || item.name || '').trim();
+            if (!key || seen.has(key)) continue;
+            if (item.userId === user.id || item.createdBy === user.email) {
+              seen.add(key);
+              localRecipes.push(item);
+            }
+          }
+          setRecipesCount(localRecipes.length);
+        }
+      }
+    } catch (_) {}
+
+    // Recipe Books
+    try {
+      const booksRaw = localStorage.getItem('zecratary_recipe_books');
+      if (booksRaw) {
+        const parsedBooks = JSON.parse(booksRaw);
+        if (Array.isArray(parsedBooks) && parsedBooks.length > 0) {
+          const userBooks = parsedBooks.filter((b: any) => 
+            b.userId === user.id || b.createdBy === user.email
+          );
+          setRecipeBooksCount(userBooks.length > 0 ? userBooks.length : 0);
+        }
+      } else if (localRecipes.length > 0) {
+        const categories = new Set(localRecipes.map((r: any) => r.category || r.recipeType || 'Main Dish'));
+        setRecipeBooksCount(categories.size);
+      }
+    } catch (_) {}
+
+    // Pantry Stock
+    try {
+      const pantryRaw = localStorage.getItem('zecratary_pantry_items') || localStorage.getItem('zecratary_pantry');
+      if (pantryRaw) {
+        const parsedPantry = JSON.parse(pantryRaw);
+        if (Array.isArray(parsedPantry)) {
+          const userPantry = parsedPantry.filter((p: any) => 
+            p.userId === user.id || p.createdBy === user.email
+          );
+          setPantryStockCount(userPantry.length);
+        }
+      }
+    } catch (_) {}
+
+    // Shopping List (Unchecked items)
+    try {
+      const shopRaw = localStorage.getItem('zecratary_shopping_list') || localStorage.getItem('zecratary_shopping');
+      if (shopRaw) {
+        const parsedShop = JSON.parse(shopRaw);
+        if (Array.isArray(parsedShop)) {
+          const userShop = parsedShop.filter((i: any) => 
+            (i.userId === user.id || i.createdBy === user.email) && !i.checked
+          );
+          setGroceryItemsCount(userShop.length);
+        }
+      }
+    } catch (_) {}
+
+    // Active Plan & Highest Tier Local Evaluation
+    const plan = (user.subscriptionPlan || (user as any).plan || 'taster').toLowerCase();
+    setSubscriptionPlan(plan);
+    const topTiers = ['gourmet', 'enterprise', 'master_chef', 'master', 'pro_chef'];
+    setIsHighestPlan(topTiers.includes(plan));
+
+    // Upcoming Meal
+    try {
+      const planRaw = localStorage.getItem('zecratary_meal_plan');
+      const now = new Date();
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+      if (planRaw) {
+        const parsedPlan = JSON.parse(planRaw);
+        if (Array.isArray(parsedPlan) && parsedPlan.length > 0) {
+          const userPlan = parsedPlan.filter((m: any) => 
+            m.userId === user.id || m.createdBy === user.email
+          );
+          if (userPlan.length > 0) {
+            const todayMeals = userPlan.filter((m: any) => m.date === todayStr);
+            const mealToDisplay = todayMeals.length > 0 ? todayMeals[0] : userPlan[0];
+            const mealTitle = mealToDisplay.recipeName || mealToDisplay.title || 'Planned Dish';
+
+            const matchingRecipe = localRecipes.find((r: any) => 
+              (r.title || r.name)?.toLowerCase() === mealTitle.toLowerCase()
+            );
+
+            setUpcomingMeal({
+              mealType: (mealToDisplay.mealType || 'Dinner').toUpperCase(),
+              title: mealTitle,
+              timeOrTags: mealToDisplay.time ? `${mealToDisplay.time} • ${t('scheduledLabel') || 'Scheduled'}` : `40 mins • ${t('scheduledLabel') || 'Scheduled'}`,
+              notes: mealToDisplay.notes,
+              imageUrl: mealToDisplay.imageUrl || mealToDisplay.image || matchingRecipe?.imageUrl || matchingRecipe?.image,
+              date: mealToDisplay.date
+            });
+            return;
+          }
+        }
+      }
+
+      if (localRecipes.length > 0) {
+        const first = localRecipes[0];
+        const prep = parseInt(first.prepTimeMinutes || first.prepTime) || 15;
+        const cook = parseInt(first.cookTimeMinutes || first.cookTime) || 20;
+        setUpcomingMeal({
+          mealType: (first.category || first.recipeType || 'Dinner').toUpperCase(),
+          title: first.title || first.name || 'Saved Dish',
+          timeOrTags: `${prep + cook} mins • ${first.tags?.[0] || t('favorite') || 'Favorite'}`,
+          imageUrl: first.imageUrl || first.image
+        });
+      }
+    } catch (_) {}
+  }, [t]);
+
+  // Primary Hydration from Database
+  const isFetchingRef = useRef(false);
+  const fetchDashboardStats = useCallback(async (activeUser: User | null) => {
+    if (!activeUser || isFetchingRef.current) return;
+    isFetchingRef.current = true;
+
+    try {
+      const res = await fetch(
+        `/api/dashboard/stats?userId=${encodeURIComponent(activeUser.id)}&email=${encodeURIComponent(activeUser.email)}&t=${Date.now()}`,
+        { cache: 'no-store' }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.stats) {
+          const s = data.stats;
+          setRecipesCount(s.recipesCount ?? 0);
+          setRecipeBooksCount(s.recipeBooksCount ?? 0);
+          setPantryStockCount(s.pantryStockCount ?? 0);
+          setGroceryItemsCount(s.groceryItemsCount ?? 0);
+          setExpiringPantryCount(s.expiringPantryCount ?? 0);
+          if (s.subscriptionPlan) setSubscriptionPlan(s.subscriptionPlan);
+          if (typeof s.isHighestPlan === 'boolean') {
+            setIsHighestPlan(s.isHighestPlan);
+          } else {
+            const topTiers = ['gourmet', 'enterprise', 'master_chef', 'master', 'pro_chef'];
+            setIsHighestPlan(topTiers.includes((s.subscriptionPlan || '').toLowerCase()));
+          }
+          if (s.upcomingMeal) {
+            setUpcomingMeal(s.upcomingMeal);
+          }
+        }
+      }
+    } catch (err) {
+      computeLocalFallbackMetrics(activeUser);
+    } finally {
+      isFetchingRef.current = false;
+    }
+  }, [computeLocalFallbackMetrics]);
+
+  // Manual Telemetry Refresh
+  const handleManualRefresh = async () => {
+    if (loading) return;
+    setLoading(true);
+    setRefreshFeedback(false);
+
+    initAuthStorage();
+    const activeUser = getCurrentUser();
+
+    if (!activeUser) {
+      router.replace('/login');
+      return;
+    }
+
+    setCurrentUser(activeUser);
+    syncThemeMode();
+    await fetchDashboardStats(activeUser);
+
+    window.dispatchEvent(new Event('zecratary_recipes_updated'));
+    window.dispatchEvent(new Event('zecratary_planner_updated'));
+    window.dispatchEvent(new Event('zecratary_pantry_updated'));
+    window.dispatchEvent(new Event('zecratary_shopping_updated'));
+    window.dispatchEvent(new Event('zecratary_subscriptions_updated'));
+
+    setTimeout(() => {
+      setLoading(false);
+      setRefreshFeedback(true);
+      setTimeout(() => setRefreshFeedback(false), 2500);
+    }, 400);
+  };
+
+  // Lifecycle Initialization & Event Synchronization
+  useEffect(() => {
+    document.title = `${t('dashboard') || 'Dashboard'} - Zecratary`;
     initAuthStorage();
     const user = getCurrentUser();
+
     if (!user) {
       router.replace('/login');
       return;
     }
-    setCurrentUser(user);
-    loadDashboardData(user);
 
-    const handleSync = () => {
-      const u = getCurrentUser();
-      if (u) {
-        setCurrentUser(u);
-        loadDashboardData(u);
-      }
+    setCurrentUser(user);
+    computeLocalFallbackMetrics(user);
+    fetchDashboardStats(user);
+
+    let debounceTimer: NodeJS.Timeout | null = null;
+    const handleDebouncedSync = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        const active = getCurrentUser();
+        if (active) {
+          setCurrentUser(active);
+          fetchDashboardStats(active);
+        }
+      }, 300);
     };
 
-    window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_recipes_updated', handleSync);
-    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
-    window.addEventListener('zecratary_pantry_updated', handleSync);
-    window.addEventListener('zecratary_planner_updated', handleSync);
-    window.addEventListener('zecratary_tokens_updated', handleSync);
-    window.addEventListener('zecratary_token_settings_updated', handleSync);
-    window.addEventListener('zecratary_wallet_updated', handleSync);
-    window.addEventListener('zecratary_languages_updated', handleSync);
-    window.addEventListener('zecratary_dictionary_updated', handleSync);
-    window.addEventListener('zecratary_locale_changed', handleSync);
-
-    let bc: BroadcastChannel | null = null;
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      try {
-        bc = new BroadcastChannel('zecratary_balance_channel');
-        bc.onmessage = () => { handleSync(); };
-      } catch (_) {}
-    }
+    window.addEventListener('storage', handleDebouncedSync);
+    window.addEventListener('zecratary_recipes_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_saved_recipes_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_planner_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_meal_plan_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_pantry_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_shopping_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_subscriptions_updated', handleDebouncedSync);
+    window.addEventListener('zecratary_users_updated', handleDebouncedSync);
 
     return () => {
-      window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_pantry_updated', handleSync);
-      window.removeEventListener('zecratary_planner_updated', handleSync);
-      window.removeEventListener('zecratary_tokens_updated', handleSync);
-      window.removeEventListener('zecratary_token_settings_updated', handleSync);
-      window.removeEventListener('zecratary_wallet_updated', handleSync);
-      window.removeEventListener('zecratary_languages_updated', handleSync);
-      window.removeEventListener('zecratary_dictionary_updated', handleSync);
-      window.removeEventListener('zecratary_locale_changed', handleSync);
-      if (bc) bc.close();
+      if (debounceTimer) clearTimeout(debounceTimer);
+      window.removeEventListener('storage', handleDebouncedSync);
+      window.removeEventListener('zecratary_recipes_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_saved_recipes_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_planner_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_meal_plan_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_pantry_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_shopping_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_subscriptions_updated', handleDebouncedSync);
+      window.removeEventListener('zecratary_users_updated', handleDebouncedSync);
     };
-  }, [loadDashboardData, router]);
+  }, [computeLocalFallbackMetrics, fetchDashboardStats, router, t]);
 
-  // Safe localized user welcome interpolation
-  const welcomeText = useMemo(() => {
-    const rawTemplate = t('dashboardWelcomePrefix', 'Welcome back, {name}!');
-    const displayName = currentUser?.name || currentUser?.email?.split('@')[0] || 'Chef';
-    return rawTemplate.replace('{name}', displayName);
-  }, [currentUser, t]);
+  if (!currentUser) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center">
+        <div 
+          className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
+          style={{ borderColor: 'var(--color-primary, #10b981)', borderTopColor: 'transparent' }}
+        />
+      </div>
+    );
+  }
+
+  // Theme Variables
+  const cCardBg = isDayMode ? '#ffffff' : 'var(--color-card, #0f172a)';
+  const cInnerBg = isDayMode ? '#f8fafc' : 'var(--color-inner-dark, #070b13)';
+  const cBorder = isDayMode ? '#e2e8f0' : 'var(--color-border, #1e293b)';
+  const cText = isDayMode ? '#0f172a' : 'var(--color-text, #f8fafc)';
+  const cSubText = isDayMode ? '#64748b' : 'var(--color-text-secondary, #94a3b8)';
+  const cPrimary = 'var(--color-primary, #10b981)';
+  const cEmerald = 'var(--color-emerald, #10b981)';
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
+      className="w-full space-y-6 pb-16 px-4 sm:px-6 md:px-8 lg:px-10 transition-colors duration-200"
+      style={{ color: cText }}
     >
-      {/* 1. Original Welcome Hero & Membership Telemetry Strip */}
-      <div 
-        className="p-6 sm:p-8 rounded-3xl border shadow-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 transition-colors duration-200 relative overflow-hidden"
-        style={{
-          backgroundColor: 'var(--color-card)',
-          borderColor: 'var(--color-border)'
-        }}
-      >
-        <div className="space-y-2 max-w-xl z-10">
-          <div className="flex items-center gap-2">
-            <span 
-              className="text-xs font-black uppercase tracking-wider px-3 py-1 rounded-full border shadow-xs"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-primary)',
-                color: 'var(--color-primary)'
-              }}
-            >
-              {t('activeMembership', 'Active Tier')}: {stats.userPlan || 'Taster'}
-            </span>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-            {welcomeText}
+      {/* Top Heading & Telemetry Action Strip */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-2">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: cPrimary }}>
+            <Flame className="h-6 w-6" style={{ color: cPrimary }} />
+            {t('dashboard') || 'Dashboard'}
           </h1>
-          <p className="text-xs sm:text-sm leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('dashboardSubtitle', 'Autonomous culinary planning, inventory tracking, and chef-grade recipes.')}
+          <p className="text-sm" style={{ color: cSubText }}>
+            {t('dashboardSubtitle') || 'Autonomous culinary planning, smart pantry tracking, and recipe intelligence.'}
           </p>
         </div>
 
-        {/* Fixed Spendable Asset Badges & Management Buttons (Balanced Layout - No Awkward Right Drift) */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 z-10 w-full lg:w-auto shrink-0">
-          {/* Tokens Box */}
-          <div 
-            className="p-3.5 rounded-2xl border shadow-xs flex items-center justify-between sm:justify-start gap-3 transition-colors duration-200"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <div 
-                className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-              >
-                <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={20} className="w-5 h-5" />
-              </div>
-              <div className="min-w-0">
-                <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70 truncate">
-                  {t('statsTokensRemaining', 'Tokens Remaining')}
-                </span>
-                <div className="text-base font-black font-mono flex items-center gap-1.5 leading-none mt-1">
-                  <span suppressHydrationWarning>{stats.tokenBalance.toLocaleString()}</span>
-                  <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="inline-block" />
-                </div>
-              </div>
-            </div>
-            <Link 
-              href="/token"
-              className="ml-2 text-[10px] font-bold px-2.5 py-1.5 rounded-xl text-white transition hover:opacity-90 shadow-xs shrink-0"
-              style={{ backgroundColor: 'var(--color-primary)' }}
+        {/* Refresh Action with Live Feedback */}
+        <div className="flex items-center gap-3">
+          {refreshFeedback && (
+            <span 
+              className="text-xs font-bold flex items-center gap-1.5 animate-in fade-in transition duration-300"
+              style={{ color: cEmerald }}
             >
-              {t('topUpTokens', 'Top Up')}
-            </Link>
-          </div>
+              <CheckCircle2 className="h-3.5 w-3.5" /> {t('refreshed') || 'Refreshed'}
+            </span>
+          )}
 
-          {/* Wallet Box */}
-          <div 
-            className="p-3.5 rounded-2xl border shadow-xs flex items-center justify-between sm:justify-start gap-3 transition-colors duration-200"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+          <button
+            type="button"
+            onClick={handleManualRefresh}
+            disabled={loading}
+            className="p-2.5 px-4 rounded-xl border transition flex items-center gap-2 text-xs font-bold cursor-pointer disabled:opacity-70 shadow-sm"
+            style={{
+              backgroundColor: cCardBg,
+              borderColor: cBorder,
+              color: cText
+            }}
+            title="Reload live telemetry from database"
           >
-            <div className="flex items-center gap-3 min-w-0">
-              <div 
-                className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-              >
-                <Wallet className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
-              </div>
-              <div className="min-w-0">
-                <span className="text-[10px] font-bold uppercase tracking-wider block opacity-70 truncate">
-                  {t('walletCredits', 'Wallet Balance')}
-                </span>
-                <div className="text-base font-black font-mono leading-none mt-1" style={{ color: 'var(--color-emerald)' }}>
-                  <span suppressHydrationWarning>{walletSymbol}{Number(stats.walletBalance || 0).toFixed(2)}</span>
-                </div>
-              </div>
-            </div>
-            <Link 
-              href="/wallet"
-              className="ml-2 text-[10px] font-bold px-2.5 py-1.5 rounded-xl border transition shadow-xs hover:opacity-80 shrink-0"
-              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-            >
-              {t('addFunds', 'Add Funds')}
-            </Link>
-          </div>
+            <RefreshCw 
+              className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} 
+              style={{ color: cEmerald }}
+            />
+            <span>{loading ? (t('refreshing') || 'Refreshing...') : (t('refresh') || 'Refresh')}</span>
+          </button>
         </div>
       </div>
 
-      {/* 2. Proactive Pantry Spoilage Warning Alert */}
-      {stats.expiringItemsCount > 0 && (
+      {/* Task 2: Welcome Box with Active Plan & Upgrade/Change Button */}
+      <div 
+        className="p-6 sm:p-8 rounded-3xl border shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-6 transition-colors duration-200"
+        style={{
+          backgroundColor: cCardBg,
+          borderColor: cBorder
+        }}
+      >
+        <div className="space-y-2 max-w-2xl">
+          <div className="flex items-center gap-2">
+            <span 
+              className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border shadow-xs"
+              style={{
+                backgroundColor: cInnerBg,
+                borderColor: cBorder,
+                color: cPrimary
+              }}
+            >
+              {currentUser.role?.toUpperCase() || 'MEMBER'}
+            </span>
+            {isHighestPlan && (
+              <span 
+                className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border shadow-xs bg-amber-500/10 text-amber-500 border-amber-500/30 flex items-center gap-1"
+              >
+                <Sparkles className="h-3 w-3" /> {t('highestTier') || 'VIP Highest Tier'}
+              </span>
+            )}
+          </div>
+
+          <h2 className="text-2xl sm:text-3xl font-black tracking-tight" style={{ color: cText }}>
+            {(t('dashboardWelcomePrefix') || 'Welcome back, {name}!').replace('{name}', currentUser.name || currentUser.email || 'Chef')}
+          </h2>
+          <p className="text-xs sm:text-sm leading-relaxed" style={{ color: cSubText }}>
+            {t('welcomePlanDescription') || 'Your kitchen headquarters for automated meal scheduling, inventory management, and personalized culinary creations.'}
+          </p>
+        </div>
+
+        {/* Current User: Active Plan Card */}
         <div 
-          className="p-4 rounded-3xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md animate-in fade-in transition"
+          role="presentation"
+          className="w-full md:w-auto p-4 sm:p-5 rounded-2xl border shadow-sm flex items-center justify-between sm:justify-start gap-4 sm:gap-6 transition-all duration-200 shrink-0"
           style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: '#f59e0b',
-            color: 'var(--color-text)'
+            backgroundColor: cInnerBg,
+            borderColor: cBorder
           }}
         >
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
-              <AlertTriangle className="h-5 w-5" />
-            </div>
-            <div>
-              <h4 className="font-extrabold text-xs uppercase tracking-wider text-amber-500">
-                {t('expiringPantryAlert', 'Pantry Spoilage Alert')}
-              </h4>
-              <p className="text-xs opacity-80 mt-0.5">
-                {(t('expiringPantryDesc', '{count} ingredient(s) are expiring soon in your pantry stock.'))
-                  .replace('{count}', String(stats.expiringItemsCount))}
-              </p>
+          <div className="space-y-1">
+            <span 
+              className="text-[10px] uppercase font-bold tracking-wider block"
+              style={{ color: cSubText }}
+            >
+              {t('currentUserActivePlan') || 'Current User: Active Plan'}
+            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-base sm:text-lg font-black tracking-tight uppercase" style={{ color: cEmerald }}>
+                {subscriptionPlan || 'Taster'}
+              </span>
+              <span 
+                className="text-[10px] font-bold px-2 py-0.5 rounded-md border"
+                style={{
+                  backgroundColor: cCardBg,
+                  borderColor: cBorder,
+                  color: isHighestPlan ? '#f59e0b' : cPrimary
+                }}
+              >
+                {isHighestPlan ? (t('highestPlan') || 'Highest Tier') : (t('active') || 'Active')}
+              </span>
             </div>
           </div>
 
-          <Link
-            href={`/chef?prompt=${encodeURIComponent(`Cook a delicious recipe with these expiring pantry ingredients: ${stats.expiringItemsList.slice(0, 4).join(', ')}`)}`}
-            className="px-4 py-2 rounded-xl text-xs font-bold text-white transition shadow-sm hover:opacity-90 inline-flex items-center justify-center gap-1.5 shrink-0"
-            style={{ backgroundColor: 'var(--color-primary)' }}
+          {/* Upgrade or Change CTA Trigger */}
+          {isHighestPlan ? (
+            <Link
+              href="/subscriptions"
+              className="px-4 py-2.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shadow-sm hover:scale-[1.02] active:scale-95 cursor-pointer ml-auto md:ml-2"
+              style={{
+                backgroundColor: cCardBg,
+                borderColor: cBorder,
+                color: cText
+              }}
+              title="Change or manage active subscription plan"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+              <span>{t('changePlan') || 'Change'}</span>
+            </Link>
+          ) : (
+            <Link
+              href="/subscriptions"
+              className="px-4 py-2.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-md hover:scale-[1.02] active:scale-95 cursor-pointer text-white ml-auto md:ml-2"
+              style={{
+                backgroundColor: cPrimary
+              }}
+              title="Upgrade to unlocked premium plan"
+            >
+              <Zap className="h-3.5 w-3.5" />
+              <span>{t('upgradePlan') || 'Upgrade'}</span>
+            </Link>
+          )}
+        </div>
+      </div>
+
+      {/* Proactive Spoilage Notification */}
+      {expiringPantryCount > 0 && (
+        <div 
+          className="p-3.5 px-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-sm animate-in fade-in transition duration-300"
+          style={{
+            backgroundColor: isDayMode ? '#fffbeb' : 'rgba(245, 158, 11, 0.08)',
+            borderColor: isDayMode ? '#fde68a' : 'rgba(245, 158, 11, 0.25)',
+            color: isDayMode ? '#92400e' : '#fcd34d'
+          }}
+        >
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="h-4 w-4 shrink-0 text-amber-500" />
+            <span>
+              <strong>{expiringPantryCount} {t('pantryItems') || 'pantry item(s)'}</strong> {t('expiringWithin3Days') || 'are expiring within the next 3 days.'}
+            </span>
+          </div>
+          <Link 
+            href="/chef"
+            className="font-bold underline flex items-center gap-1 shrink-0 text-amber-600 hover:text-amber-700 dark:text-amber-400"
           >
-            <Sparkles className="h-3.5 w-3.5" />
-            <span>{t('cookExpiringAction', 'Cook with Chef AI')}</span>
+            {t('askChefToUseThem') || 'Cook with Chef AI'} <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>
       )}
 
-      {/* 3. Primary Metrics Grid (4-Way Live Counter with Dynamic Token Icon) */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: t('statsRecipes', 'Saved Recipes'), value: stats.savedRecipes, icon: BookOpen, href: '/recipes', color: 'var(--color-primary)' },
-          { label: t('statsMealPlans', 'Scheduled Meals'), value: stats.scheduledMeals, icon: Calendar, href: '/planner', color: '#0ea5e9' },
-          { label: t('statsPantryItems', 'Pantry in Stock'), value: stats.pantryItems, icon: Package, href: '/pantry', color: 'var(--color-emerald)' },
-          { 
-            label: t('statsTokensRemaining', 'Tokens Remaining'), 
-            value: stats.tokenBalance, 
-            href: '/token',
-            isToken: true
-          }
-        ].map((stat, idx) => (
-          <Link
-            key={idx}
-            href={stat.href}
-            className="p-5 rounded-3xl border shadow-xs hover:shadow-md transition cursor-pointer flex flex-col justify-between space-y-3 group"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+      {/* Task 3: 4-Way KPI Metric Cards with Shopping List */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Saved Recipes */}
+        <Link 
+          href="/saved" 
+          className="p-5 rounded-2xl block border transition shadow-sm group hover:scale-[1.01]"
+          style={{
+            backgroundColor: cCardBg,
+            borderColor: cBorder
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <span 
+              className="text-xs uppercase font-bold tracking-wider"
+              style={{ color: cSubText }}
+            >
+              {t('savedRecipes') || 'Saved Recipes'}
+            </span>
+            <BookOpen className="h-4 w-4 opacity-70 group-hover:scale-110 transition" style={{ color: cPrimary }} />
+          </div>
+          <span 
+            className="text-3xl font-black mt-2 block"
+            style={{ color: cPrimary }}
           >
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold opacity-75">{stat.label}</span>
-              <div className="p-2 rounded-xl transition group-hover:scale-110" style={{ backgroundColor: 'var(--color-inner-dark)' }}>
-                {stat.isToken ? (
-                  <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4" />
-                ) : (
-                  <stat.icon className="h-4 w-4" style={{ color: stat.color }} />
-                )}
-              </div>
-            </div>
-            <div className="text-2xl font-black font-mono">
-              {loading ? '—' : stat.value.toLocaleString()}
-            </div>
-          </Link>
-        ))}
+            {loading ? '...' : recipesCount}
+          </span>
+        </Link>
+
+        {/* Recipe Books */}
+        <Link 
+          href="/books" 
+          className="p-5 rounded-2xl block border transition shadow-sm group hover:scale-[1.01]"
+          style={{
+            backgroundColor: cCardBg,
+            borderColor: cBorder
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <span 
+              className="text-xs uppercase font-bold tracking-wider"
+              style={{ color: cSubText }}
+            >
+              {t('books') || 'Recipe Books'}
+            </span>
+            <Utensils className="h-4 w-4 opacity-70 group-hover:scale-110 transition" style={{ color: cEmerald }} />
+          </div>
+          <span 
+            className="text-3xl font-black mt-2 block"
+            style={{ color: cEmerald }}
+          >
+            {loading ? '...' : recipeBooksCount}
+          </span>
+        </Link>
+
+        {/* Pantry Stock */}
+        <Link 
+          href="/pantry" 
+          className="p-5 rounded-2xl block border transition shadow-sm group hover:scale-[1.01]"
+          style={{
+            backgroundColor: cCardBg,
+            borderColor: cBorder
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <span 
+              className="text-xs uppercase font-bold tracking-wider"
+              style={{ color: cSubText }}
+            >
+              {t('pantryStock') || 'Pantry Stock'}
+            </span>
+            <Package className="h-4 w-4 opacity-70 group-hover:scale-110 transition" style={{ color: cPrimary }} />
+          </div>
+          <div className="flex items-baseline justify-between mt-2">
+            <span 
+              className="text-3xl font-black block"
+              style={{ color: cText }}
+            >
+              {loading ? '...' : pantryStockCount}
+            </span>
+            {expiringPantryCount > 0 && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                {expiringPantryCount} {t('expiringSoon') || 'expiring'}
+              </span>
+            )}
+          </div>
+        </Link>
+
+        {/* Task 3 Replaced Card: Shopping List */}
+        <Link 
+          href="/shopping" 
+          className="p-5 rounded-2xl block border transition shadow-sm group hover:scale-[1.01]"
+          style={{
+            backgroundColor: cCardBg,
+            borderColor: cBorder
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <span 
+              className="text-xs uppercase font-bold tracking-wider"
+              style={{ color: cSubText }}
+            >
+              {t('shoppingList') || 'Shopping List'}
+            </span>
+            <ShoppingCart className="h-4 w-4 opacity-70 group-hover:scale-110 transition" style={{ color: cEmerald }} />
+          </div>
+          <div className="flex items-baseline justify-between mt-2">
+            <span 
+              className="text-3xl font-black block"
+              style={{ color: cText }}
+            >
+              {loading ? '...' : groceryItemsCount}
+            </span>
+            {groceryItemsCount > 0 ? (
+              <span 
+                className="text-[10px] font-bold px-2 py-0.5 rounded-full border"
+                style={{
+                  backgroundColor: isDayMode ? '#ecfdf5' : 'rgba(16, 185, 129, 0.1)',
+                  borderColor: isDayMode ? '#a7f3d0' : 'rgba(16, 185, 129, 0.3)',
+                  color: cEmerald
+                }}
+              >
+                {groceryItemsCount} {t('itemsNeeded') || 'items to buy'}
+              </span>
+            ) : (
+              <span className="text-[10px] font-semibold opacity-60" style={{ color: cSubText }}>
+                {t('allPurchased') || 'All caught up'}
+              </span>
+            )}
+          </div>
+        </Link>
       </div>
 
-      {/* 4. Upcoming Scheduled Meal & Quick Actions Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Upcoming Scheduled Meal Card (1 Col) */}
+      {/* Center 2-Column Section: Upcoming Meal & Quick Actions */}
+      <div className="grid md:grid-cols-2 gap-6">
+        {/* Upcoming Meal Card */}
         <div 
-          className="p-6 rounded-3xl border shadow-sm space-y-4 flex flex-col justify-between"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          className="p-6 rounded-2xl space-y-4 shadow-sm flex flex-col justify-between border transition-colors duration-200"
+          style={{
+            backgroundColor: cCardBg,
+            borderColor: cBorder
+          }}
         >
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-wider text-[var(--color-primary)]">
-                {t('upcomingMeal', 'Upcoming Scheduled Meal')}
-              </span>
-              <Calendar className="h-4 w-4 opacity-50" />
-            </div>
+          <div 
+            className="flex items-center justify-between border-b pb-3"
+            style={{ borderColor: cBorder }}
+          >
+            <h3 
+              className="text-base font-bold flex items-center gap-2"
+              style={{ color: cText }}
+            >
+              <Calendar className="h-5 w-5" style={{ color: cPrimary }} /> {t('upcomingMeal') || 'Upcoming Meal'}
+            </h3>
+            <Link 
+              href="/planner" 
+              className="text-xs font-bold hover:underline flex items-center gap-1"
+              style={{ color: cPrimary }}
+            >
+              {t('viewPlanner') || 'View Planner'} <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
 
-            {stats.upcomingMeal ? (
-              <div className="space-y-3 pt-2">
-                <div className="p-4 rounded-2xl border space-y-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border text-emerald-400" style={{ borderColor: 'var(--color-border)' }}>
-                    {stats.upcomingMeal.mealType} • {stats.upcomingMeal.date}
-                  </span>
-                  <h3 className="font-extrabold text-base leading-snug">
-                    {stats.upcomingMeal.title}
-                  </h3>
-                  <div className="flex items-center gap-3 text-xs opacity-75 pt-1">
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3 w-3 text-emerald-400" />
-                      {(stats.upcomingMeal.prepMinutes || 15) + (stats.upcomingMeal.cookMinutes || 25)}m
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Users className="h-3 w-3" />
-                      {stats.upcomingMeal.servings || 2}
-                    </span>
+          <div className="flex-1 flex flex-col justify-center my-2">
+            {upcomingMeal ? (
+              <div 
+                className="p-4 rounded-xl border flex items-center gap-4 shadow-inner transition-colors duration-200"
+                style={{
+                  backgroundColor: cInnerBg,
+                  borderColor: cBorder
+                }}
+              >
+                {upcomingMeal.imageUrl ? (
+                  <img
+                    src={upcomingMeal.imageUrl}
+                    alt={upcomingMeal.title}
+                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover border shrink-0 shadow-md"
+                    style={{ borderColor: cBorder }}
+                  />
+                ) : (
+                  <div 
+                    className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl border shrink-0 flex items-center justify-center opacity-70"
+                    style={{ 
+                      borderColor: cBorder,
+                      backgroundColor: cCardBg
+                    }}
+                  >
+                    <Utensils className="h-6 w-6 opacity-70" />
                   </div>
-                </div>
+                )}
 
-                <Link
-                  href="/planner"
-                  className="w-full py-2.5 rounded-xl border text-xs font-bold text-center block transition hover:opacity-80"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
-                >
-                  {t('startCooking', 'View Recipe')}
-                </Link>
+                <div className="space-y-1 flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span 
+                      className="text-xs font-bold uppercase tracking-wide flex items-center gap-1.5"
+                      style={{ color: cEmerald }}
+                    >
+                      <Utensils className="h-3 w-3" /> {(t('todayMealPrefix') || 'Today • {mealType}').replace('{mealType}', upcomingMeal.mealType)}
+                    </span>
+                    {upcomingMeal.date && (
+                      <span className="text-[10px] font-semibold opacity-70" style={{ color: cSubText }}>
+                        {upcomingMeal.date}
+                      </span>
+                    )}
+                  </div>
+                  <h4 
+                    className="font-bold text-base leading-tight mt-1 truncate"
+                    style={{ color: cText }}
+                  >
+                    {upcomingMeal.title}
+                  </h4>
+                  <span 
+                    className="text-xs flex items-center gap-1 pt-0.5"
+                    style={{ color: cSubText }}
+                  >
+                    <Clock className="h-3.5 w-3.5" /> {upcomingMeal.timeOrTags}
+                  </span>
+                  {upcomingMeal.notes && (
+                    <p 
+                      className="text-xs italic mt-1 opacity-80 line-clamp-1"
+                      style={{ color: cSubText }}
+                    >
+                      "{upcomingMeal.notes}"
+                    </p>
+                  )}
+                </div>
               </div>
             ) : (
-              <div className="py-8 text-center space-y-3">
-                <Utensils className="h-8 w-8 mx-auto opacity-30" />
-                <p className="text-xs opacity-70">
-                  {t('noUpcomingMeal', 'No meals scheduled for today.')}
-                </p>
-                <div className="flex justify-center gap-2 pt-1">
-                  <Link
-                    href="/planner"
-                    className="px-4 py-2 rounded-xl text-xs font-bold text-white transition shadow hover:opacity-90"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
+              <div 
+                className="p-5 rounded-xl border flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-center sm:text-left"
+                style={{
+                  backgroundColor: cInnerBg,
+                  borderColor: cBorder,
+                  color: cSubText
+                }}
+              >
+                <div>
+                  <span className="font-semibold block text-sm" style={{ color: cText }}>
+                    {t('noMealsScheduledToday') || 'No meals scheduled for today.'}
+                  </span>
+                  <span className="text-[11px] block mt-0.5">
+                    {t('keepKitchenOrganized') || 'Keep your kitchen on track with a planned meal.'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Link 
+                    href="/planner" 
+                    className="px-3 py-1.5 rounded-lg border font-bold hover:underline transition"
+                    style={{ backgroundColor: cCardBg, borderColor: cBorder, color: cPrimary }}
                   >
-                    {t('scheduleNow', 'Plan on Calendar')}
+                    {t('planMeal') || 'Plan Meal'}
+                  </Link>
+                  <Link 
+                    href="/chef" 
+                    className="px-3 py-1.5 rounded-lg border font-bold hover:underline transition"
+                    style={{ backgroundColor: cCardBg, borderColor: cBorder, color: cEmerald }}
+                  >
+                    {t('askChefAi') || 'Ask Chef AI'}
                   </Link>
                 </div>
               </div>
@@ -397,111 +784,115 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Quick Culinary Actions Suite (2 Cols) */}
+        {/* Quick Actions Card */}
         <div 
-          className="lg:col-span-2 p-6 rounded-3xl border shadow-sm space-y-4"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          className="p-6 rounded-2xl space-y-4 shadow-sm flex flex-col justify-between border transition-colors duration-200"
+          style={{
+            backgroundColor: cCardBg,
+            borderColor: cBorder
+          }}
         >
-          <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-            <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
-              {t('quickActions', 'Quick Culinary Actions')}
-            </h3>
-            <Sparkles className="h-4 w-4 opacity-50" />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-            {[
-              { title: t('askChefAction', 'Ask Chef AI'), desc: t('askChefDesc', 'Formulate custom recipes & plans'), icon: ChefHat, href: '/chef', color: 'var(--color-primary)' },
-              { title: t('importAction', 'Import Recipe'), desc: t('importDesc', 'From web URL, text, or photos'), icon: UploadCloud, href: '/import', color: '#0ea5e9' },
-              { title: t('createAction', 'Create Recipe'), desc: t('createDesc', 'Handmade recipe entry'), icon: Plus, href: '/manual', color: 'var(--color-emerald)' },
-              { title: t('planAction', 'Plan Meals'), desc: t('planDesc', 'Schedule your weekly calendar'), icon: Calendar, href: '/planner', color: '#f59e0b' },
-            ].map((act, i) => (
-              <Link
-                key={i}
-                href={act.href}
-                className="p-4 rounded-2xl border transition shadow-xs hover:shadow-md flex items-start gap-3.5 group cursor-pointer"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              >
-                <div className="p-3 rounded-xl border shrink-0 transition group-hover:scale-105" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
-                  <act.icon className="h-5 w-5" style={{ color: act.color }} />
-                </div>
-                <div className="min-w-0 space-y-0.5">
-                  <h4 className="font-bold text-xs flex items-center gap-1 group-hover:text-[var(--color-primary)] transition">
-                    <span>{act.title}</span>
-                    <ArrowRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition transform group-hover:translate-x-0.5" />
-                  </h4>
-                  <p className="text-[11px] opacity-70 line-clamp-1">
-                    {act.desc}
-                  </p>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* 5. Recent Recipe Creations Showcase */}
-      <div 
-        className="p-6 rounded-3xl border shadow-sm space-y-4"
-        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-      >
-        <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-          <div>
-            <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-text)' }}>
-              {t('recentRecipes', 'Recent Recipe Creations')}
-            </h3>
-          </div>
-          <Link
-            href="/recipes"
-            className="text-xs font-bold flex items-center gap-1 text-[var(--color-primary)] hover:underline"
+          <div 
+            className="border-b pb-3 flex items-center justify-between"
+            style={{ borderColor: cBorder }}
           >
-            <span>{t('viewAllRecipes', 'View All')}</span>
-            <ChevronRight className="h-3.5 w-3.5" />
-          </Link>
-        </div>
+            <h3 
+              className="text-base font-bold flex items-center gap-2"
+              style={{ color: cText }}
+            >
+              <ChefHat className="h-5 w-5" style={{ color: cEmerald }} /> {t('quickActions') || 'Quick Actions'}
+            </h3>
+            <span className="text-[11px] font-semibold" style={{ color: cSubText }}>
+              {t('culinaryShortcuts') || 'Culinary Shortcuts'}
+            </span>
+          </div>
 
-        {stats.recentRecipes.length === 0 ? (
-          <div className="py-12 text-center text-xs opacity-60">
-            {t('noRecentRecipes', 'No saved recipes yet. Create or import your first recipe!')}
+          <div className="grid grid-cols-2 gap-3 text-xs font-bold my-auto">
+            {/* Ask Chef AI */}
+            <Link 
+              href="/chef" 
+              className="p-3.5 rounded-xl flex items-center gap-2.5 transition group border shadow-sm hover:scale-[1.01]"
+              style={{
+                backgroundColor: cInnerBg,
+                borderColor: cBorder,
+                color: cText
+              }}
+            >
+              <div className="p-2 rounded-lg border shrink-0" style={{ backgroundColor: cCardBg, borderColor: cBorder }}>
+                <ChefHat className="h-4 w-4 group-hover:scale-110 transition" style={{ color: cEmerald }} />
+              </div>
+              <div className="truncate text-left">
+                <span className="block font-bold">{t('askChefAi') || 'Ask Chef AI'}</span>
+                <span className="text-[10px] block opacity-70 font-normal" style={{ color: cSubText }}>
+                  {t('smartRecipes') || 'Smart Recipes'}
+                </span>
+              </div>
+            </Link>
+
+            {/* Import Recipe */}
+            <Link 
+              href="/import" 
+              className="p-3.5 rounded-xl flex items-center gap-2.5 transition group border shadow-sm hover:scale-[1.01]"
+              style={{
+                backgroundColor: cInnerBg,
+                borderColor: cBorder,
+                color: cText
+              }}
+            >
+              <div className="p-2 rounded-lg border shrink-0" style={{ backgroundColor: cCardBg, borderColor: cBorder }}>
+                <DownloadCloud className="h-4 w-4 group-hover:scale-110 transition" style={{ color: cPrimary }} />
+              </div>
+              <div className="truncate text-left">
+                <span className="block font-bold">{t('importRecipe') || 'Import Recipe'}</span>
+                <span className="text-[10px] block opacity-70 font-normal" style={{ color: cSubText }}>
+                  {t('urlOrText') || 'URL or Photo'}
+                </span>
+              </div>
+            </Link>
+
+            {/* Create Recipe Manually */}
+            <Link 
+              href="/manual" 
+              className="p-3.5 rounded-xl flex items-center gap-2.5 transition group border shadow-sm hover:scale-[1.01]"
+              style={{
+                backgroundColor: cInnerBg,
+                borderColor: cBorder,
+                color: cText
+              }}
+            >
+              <div className="p-2 rounded-lg border shrink-0" style={{ backgroundColor: cCardBg, borderColor: cBorder }}>
+                <Sparkles className="h-4 w-4 group-hover:scale-110 transition" style={{ color: cPrimary }} />
+              </div>
+              <div className="truncate text-left">
+                <span className="block font-bold">{t('createRecipe') || 'Create Recipe'}</span>
+                <span className="text-[10px] block opacity-70 font-normal" style={{ color: cSubText }}>
+                  {t('manualEntry') || 'Manual Entry'}
+                </span>
+              </div>
+            </Link>
+
+            {/* Meal Planner */}
+            <Link 
+              href="/planner" 
+              className="p-3.5 rounded-xl flex items-center gap-2.5 transition group border shadow-sm hover:scale-[1.01]"
+              style={{
+                backgroundColor: cInnerBg,
+                borderColor: cBorder,
+                color: cText
+              }}
+            >
+              <div className="p-2 rounded-lg border shrink-0" style={{ backgroundColor: cCardBg, borderColor: cBorder }}>
+                <Calendar className="h-4 w-4 group-hover:scale-110 transition" style={{ color: cEmerald }} />
+              </div>
+              <div className="truncate text-left">
+                <span className="block font-bold">{t('mealPlanner') || 'Meal Planner'}</span>
+                <span className="text-[10px] block opacity-70 font-normal" style={{ color: cSubText }}>
+                  {t('weeklyCalendar') || 'Weekly Schedule'}
+                </span>
+              </div>
+            </Link>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {stats.recentRecipes.map((rec) => (
-              <Link
-                key={rec.id}
-                href="/recipes"
-                className="border rounded-2xl overflow-hidden shadow-xs hover:shadow-md transition flex flex-col justify-between group"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              >
-                <div className="relative h-32 w-full overflow-hidden">
-                  <img src={rec.imageUrl} alt={rec.title} className="w-full h-full object-cover transition group-hover:scale-105" />
-                  <span className="absolute bottom-2 left-2 px-2 py-0.5 rounded-full text-[9px] font-bold bg-black/60 text-white backdrop-blur-md">
-                    {rec.recipeType}
-                  </span>
-                </div>
-                <div className="p-3.5 space-y-1">
-                  <h4 className="font-extrabold text-xs line-clamp-1 group-hover:text-[var(--color-primary)] transition">
-                    {rec.title}
-                  </h4>
-                  <div className="flex items-center gap-3 text-[10px] opacity-75">
-                    <span className="flex items-center gap-1">
-                      <Clock className="h-3 w-3 text-emerald-400" />
-                      {rec.prepTimeMinutes + rec.cookTimeMinutes}m
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Users className="h-3 w-3" />
-                      {rec.servings}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Flame className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
-                      {rec.calories} kcal
-                    </span>
-                  </div>
-                </div>
-              </Link>
-            ))}
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );
