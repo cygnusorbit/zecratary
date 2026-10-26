@@ -1,417 +1,186 @@
-'use client';
 // @ts-nocheck
+'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { 
-  Link2, FileText, Image as ImageIcon, Sparkles, AlertCircle, 
-  CheckCircle2, Upload, X, Coins, ShieldAlert, Globe, 
-  Cpu, ArrowRight, RefreshCw, AlertTriangle
+  Globe, FileText, Image as ImageIcon, Sparkles, UploadCloud, 
+  ArrowRight, CheckCircle2, AlertCircle, RefreshCw, Layers, 
+  Clock, Users, ChefHat, Eye, RotateCcw, ShieldCheck, Zap
 } from 'lucide-react';
-import { getCurrentUser } from '@/lib/auth';
-import { persistSavedRecipe } from '@/lib/recipeSync';
 import { useTranslation } from '@/components/LanguageProvider';
-import TokenPurchaseModal from '@/components/TokenPurchaseModal';
-
-const DEFAULT_RECIPE_TYPES = [
-  'Main Dish', 'Breakfast', 'Lunch', 'Dinner', 'Appetizer', 
-  'Side Dish', 'Dessert', 'Snacks', 'Beverages', 'Soup', 'Salad'
-];
 
 function decodeHtmlEntities(str: string): string {
   if (!str) return '';
   return str
-    .replace(/<[^>]*>/g, '')
-    .replace(/&quot;/g, '"')
-    .replace(/&#0*39;/g, "'")
-    .replace(/&apos;/g, "'")
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&deg;/g, '°')
-    .replace(/&#0*8211;/g, '–')
-    .replace(/&#0*8212;/g, '—')
-    .replace(/&ndash;/g, '–')
-    .replace(/&mdash;/g, '—');
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ');
 }
 
-export default function ImportPage() {
+export default function ImportRecipePage() {
   const router = useRouter();
   const { t } = useTranslation();
-  
-  const [activeTab, setActiveTab] = useState<'url' | 'text' | 'image'>('url');
-  const [recipeTypes, setRecipeTypes] = useState<string[]>(DEFAULT_RECIPE_TYPES);
 
-  // Form States (Autofill Safe)
-  const [url, setUrl] = useState('');
-  const [textTitle, setTextTitle] = useState('');
-  const [textCategory, setTextCategory] = useState('Main Dish');
-  const [rawText, setRawText] = useState('');
-  
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
-  const [previewUrls, setPreviewUrls] = useState<string[]>([]);
-  const [isDragging, setIsDragging] = useState(false);
+  // Active Tab: 'url' | 'text' | 'photo'
+  const [activeTab, setActiveTab] = useState<'url' | 'text' | 'photo'>('url');
+
+  // Form Inputs
+  const [urlInput, setUrlInput] = useState('');
+  const [textInput, setTextInput] = useState('');
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string>('');
+  const [photoUrlInput, setPhotoUrlInput] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('');
+
+  // Taxonomy & Settings
+  const [recipeCategories, setRecipeCategories] = useState<string[]>([
+    'Breakfast', 'Lunch', 'Dinner', 'Dessert', 'Baking', 'Beverage', 'Snack'
+  ]);
+
+  // Token Telemetry State
+  const [tokenName, setTokenName] = useState('Tokens');
+  const [tokenSymbol, setTokenSymbol] = useState('🪙');
+  const [isTokenEnabled, setIsTokenEnabled] = useState(true);
+  const [userTokenBalance, setUserTokenBalance] = useState<number>(100);
+  const [costs, setCosts] = useState({
+    url: 5,
+    text: 3,
+    photo: 8
+  });
+
+  // Processing & Extracted State
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [extractedRecipe, setExtractedRecipe] = useState<any | null>(null);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Token & AI Settings Telemetry
-  const [tokenBalance, setTokenBalance] = useState<number>(0);
-  const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
-  const [tokenName, setTokenName] = useState<string>('Foodie Token');
-  const [isTokenEnabled, setIsTokenEnabled] = useState<boolean>(true);
-  const [tokenCosts, setTokenCosts] = useState<{ url: number; text: number; photo: number }>({
-    url: 2,
-    text: 1,
-    photo: 3
-  });
-  const [tokenPackages, setTokenPackages] = useState<any[]>([]);
-  const [isTokenPurchaseOpen, setIsTokenPurchaseOpen] = useState(false);
-
-  // Synchronized dynamically from /admin/ai-settings
-  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.5-flash');
-  const [activeAiProvider, setActiveAiProvider] = useState<string>('gemini');
-  const [enableWebSearch, setEnableWebSearch] = useState<boolean>(true);
-  const [strictDietEnforcement, setStrictDietEnforcement] = useState<boolean>(false);
-  const [filterWordsList, setFilterWordsList] = useState<string[]>([]);
-
-  const [loading, setLoading] = useState(false);
-  const [fetchingTelemetry, setFetchingTelemetry] = useState(true);
-  const [status, setStatus] = useState<{ type: 'success' | 'error' | 'warning'; msg: string } | null>(null);
-
-  const fetchTokenAndAiTelemetry = useCallback(async () => {
-    try {
-      const user = getCurrentUser();
-      const params = new URLSearchParams();
-      if (user?.id) params.set('userId', user.id);
-      if (user?.email) params.set('email', user.email);
-      const queryParam = params.toString() ? `?${params.toString()}` : '';
-
-      // 1. Authoritative synchronization with /admin/ai-settings via /api/admin/settings
-      try {
-        const aiRes = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
-        if (aiRes.ok) {
-          const aiData = await aiRes.json();
-          const s = aiData.settings || aiData;
-          const chef = aiData.chefAiSettings || s.chefAiSettings || s.aiSettings || {};
-          const resolvedModel = aiData.aiModel || chef.model || s.aiModel || s.model;
-          const resolvedProvider = aiData.aiProvider || chef.provider || s.aiProvider || 'gemini';
-
-          if (resolvedModel) {
-            setActiveAiModel(resolvedModel.replace(/^models\//, ''));
-          }
-          if (resolvedProvider) {
-            setActiveAiProvider(resolvedProvider);
-          }
-          if (chef.enableWebSearch !== undefined) {
-            setEnableWebSearch(Boolean(chef.enableWebSearch));
-          } else if (s.enableWebSearch !== undefined) {
-            setEnableWebSearch(Boolean(s.enableWebSearch));
-          }
-          if (chef.strictDietEnforcement !== undefined) {
-            setStrictDietEnforcement(Boolean(chef.strictDietEnforcement));
-          }
-          if (Array.isArray(chef.filterWordsList)) {
-            setFilterWordsList(chef.filterWordsList.filter(Boolean));
-          }
-        }
-      } catch (_) {}
-
-      // 2. Fetch user balance & fallback telemetry
-      try {
-        const res = await fetch(`/api/tokens${queryParam}${queryParam ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.success) {
-            setTokenBalance(Number(data.balance ?? 0));
-            if (data.tokenSymbol) setTokenSymbol(data.tokenSymbol);
-            if (data.tokenName) setTokenName(data.tokenName);
-            if (data.isEnabled !== undefined) setIsTokenEnabled(Boolean(data.isEnabled));
-            if (data.costs) {
-              setTokenCosts({
-                url: Number(data.costs.importUrl ?? 2),
-                text: Number(data.costs.importText ?? 1),
-                photo: Number(data.costs.importPhoto ?? 3)
-              });
-            }
-            if (Array.isArray(data.packages) && data.packages.length > 0) {
-              setTokenPackages(data.packages);
-            }
-          }
-        }
-      } catch (_) {}
-
-      // 3. Direct synchronization with /admin/token-setting endpoint
-      try {
-        let adminRes = await fetch(`/api/admin/token-setting?t=${Date.now()}`, { cache: 'no-store' });
-        if (!adminRes.ok) {
-          adminRes = await fetch(`/api/admin/token-settings?t=${Date.now()}`, { cache: 'no-store' });
-        }
-        if (adminRes.ok) {
-          const adminData = await adminRes.json();
-          const s = adminData.settings || adminData;
-          if (s) {
-            if (s.tokenSymbol) setTokenSymbol(s.tokenSymbol);
-            if (s.tokenName) setTokenName(s.tokenName);
-            if (s.isEnabled !== undefined) setIsTokenEnabled(Boolean(s.isEnabled));
-            setTokenCosts({
-              url: Number(s.importUrlCost ?? 2),
-              text: Number(s.importTextCost ?? 1),
-              photo: Number(s.importPhotoCost ?? 3)
-            });
-            if (Array.isArray(s.packages) && s.packages.length > 0) {
-              setTokenPackages(s.packages);
-            }
-          }
-        }
-      } catch (_) {}
-    } catch (err) {
-      console.warn('Failed to load token and AI telemetry on /import:', err);
-    } finally {
-      setFetchingTelemetry(false);
-    }
-  }, []);
-
-  const fetchRecipeTypes = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/recipe-type', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        const types = Array.isArray(data) 
-          ? data 
-          : Array.isArray(data?.types) 
-            ? data.types 
-            : Array.isArray(data?.recipeTypes) 
-              ? data.recipeTypes 
-              : [];
-        if (types.length > 0) {
-          const names = types.map((item: any) => 
-            typeof item === 'string' ? item : item.name || item.title || item.label
-          ).filter(Boolean);
-          if (names.length > 0) {
-            setRecipeTypes(names);
-            setTextCategory(prev => names.includes(prev) ? prev : names[0]);
-            return;
-          }
-        }
-      }
-    } catch (_) {}
-
-    try {
-      const stored = localStorage.getItem('zecratary_recipe_types') || 
-                     localStorage.getItem('zecratary_recipe_categories');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const names = parsed.map((item: any) => 
-            typeof item === 'string' ? item : item.name || item.title || item.label
-          ).filter(Boolean);
-          if (names.length > 0) {
-            setRecipeTypes(names);
-            setTextCategory(prev => names.includes(prev) ? prev : names[0]);
-            return;
-          }
-        }
-      }
-    } catch (_) {}
-
-    setRecipeTypes(DEFAULT_RECIPE_TYPES);
-  }, []);
-
-  // Cleanup object URLs on unmount to prevent memory leaks
+  // Clean up object URLs to prevent browser memory leaks
   useEffect(() => {
     return () => {
-      previewUrls.forEach(url => URL.revokeObjectURL(url));
+      if (imagePreviewUrl && imagePreviewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(imagePreviewUrl);
+      }
     };
-  }, [previewUrls]);
+  }, [imagePreviewUrl]);
 
-  useEffect(() => {
-    document.title = `${t('importRecipeTitle', 'AI Recipe Importer')} - Zecratary`;
-    fetchRecipeTypes();
-    fetchTokenAndAiTelemetry();
-
-    const handleUpdates = () => {
-      fetchTokenAndAiTelemetry();
-      fetchRecipeTypes();
-    };
-
-    window.addEventListener('zecratary_theme_mode_changed', handleUpdates);
-    window.addEventListener('zecratary_token_settings_updated', handleUpdates);
-    window.addEventListener('zecratary_tokens_updated', handleUpdates);
-    window.addEventListener('zecratary_plans_updated', handleUpdates);
-    window.addEventListener('zecratary_users_updated', handleUpdates);
-    window.addEventListener('zecratary_admin_settings_updated', handleUpdates);
-    window.addEventListener('zecratary_settings_updated', handleUpdates);
-    window.addEventListener('zecratary_engine_config_updated', handleUpdates);
-    window.addEventListener('zecratary_languages_updated', handleUpdates);
-    window.addEventListener('zecratary_dictionary_updated', handleUpdates);
-    window.addEventListener('zecratary_locale_changed', handleUpdates);
-    window.addEventListener('storage', handleUpdates);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', handleUpdates);
-      window.removeEventListener('zecratary_token_settings_updated', handleUpdates);
-      window.removeEventListener('zecratary_tokens_updated', handleUpdates);
-      window.removeEventListener('zecratary_plans_updated', handleUpdates);
-      window.removeEventListener('zecratary_users_updated', handleUpdates);
-      window.removeEventListener('zecratary_admin_settings_updated', handleUpdates);
-      window.removeEventListener('zecratary_settings_updated', handleUpdates);
-      window.removeEventListener('zecratary_engine_config_updated', handleUpdates);
-      window.removeEventListener('zecratary_languages_updated', handleUpdates);
-      window.removeEventListener('zecratary_dictionary_updated', handleUpdates);
-      window.removeEventListener('zecratary_locale_changed', handleUpdates);
-      window.removeEventListener('storage', handleUpdates);
-    };
-  }, [fetchTokenAndAiTelemetry, fetchRecipeTypes, t]);
-
-  const handlePostImportSuccess = async (recipeData: any, consumedTokens: number, newBalance?: number) => {
-    const user = getCurrentUser();
-    const targetUserId = (user?.id || user?.email || 'usr_admin_1').trim();
-    const createdBy = (user?.email || targetUserId).trim();
-    const creatorName = (user?.name || 'Chef').trim();
-
-    if (typeof newBalance === 'number') {
-      setTokenBalance(newBalance);
-    } else if (consumedTokens > 0) {
-      setTokenBalance(prev => Math.max(0, prev - consumedTokens));
-    }
-
-    const cleanCategory = recipeData.recipeType || recipeData.category || textCategory || 'Main Dish';
-    const rawImage = recipeData.image || recipeData.imageUrl || recipeData.image_url || '/uploads/recipes/default.jpg';
-    let localhostImage = rawImage;
-
-    // Ensure scraped remote cover image is saved to localhost disk
-    if (rawImage && (rawImage.startsWith('http://') || rawImage.startsWith('https://'))) {
-      try {
-        const dlRes = await fetch('/api/recipes/save-remote-image', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageUrl: rawImage })
-        });
-        const dlData = await dlRes.json();
-        if (dlData.success && (dlData.localPath || dlData.localUrl)) {
-          localhostImage = dlData.localPath || dlData.localUrl;
-        }
-      } catch (_) {}
-    }
-
-    const steps = Array.isArray(recipeData.instructions) && recipeData.instructions.length > 0
-      ? recipeData.instructions
-      : Array.isArray(recipeData.directions) && recipeData.directions.length > 0
-        ? recipeData.directions
-        : ['Follow standard chef cooking guidelines for this dish.'];
-
-    const normalizedRecipe = {
-      ...recipeData,
-      id: recipeData.id || ('recipe_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)),
-      title: decodeHtmlEntities(recipeData.title || textTitle || 'Imported Recipe'),
-      name: decodeHtmlEntities(recipeData.title || textTitle || 'Imported Recipe'),
-      description: recipeData.description || '',
-      userId: targetUserId,
-      user_id: targetUserId,
-      createdBy: createdBy,
-      created_by: createdBy,
-      creatorName: creatorName,
-      creator_name: creatorName,
-      category: cleanCategory,
-      recipeType: cleanCategory,
-      recipe_type: cleanCategory,
-      imageUrl: localhostImage,
-      image: localhostImage,
-      image_url: localhostImage,
-      ingredients: Array.isArray(recipeData.ingredients) ? recipeData.ingredients : [],
-      instructions: steps,
-      directions: steps,
-      steps: steps,
-      prepTime: String(recipeData.prepTime || recipeData.prepTimeMinutes || '15 mins'),
-      cookTime: String(recipeData.cookTime || recipeData.cookTimeMinutes || '25 mins'),
-      servings: Number(recipeData.servings) || 4,
-      sourceUrl: recipeData.sourceUrl || recipeData.source_url || url || '',
-      source_url: recipeData.sourceUrl || recipeData.source_url || url || '',
-      isFavorite: false,
-      rating: 0
-    };
-
-    // Dual-route persistence across PostgreSQL endpoints
+  // Load Token Settings and AI Telemetry dynamically
+  const fetchTelemetry = useCallback(async () => {
     try {
-      await Promise.allSettled([
-        persistSavedRecipe(targetUserId, normalizedRecipe, { createdBy, creatorName }),
-        fetch('/api/saved-recipes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(normalizedRecipe)
-        }),
-        fetch('/api/recipes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(normalizedRecipe)
-        })
+      const [tokenRes, adminTokenRes, catRes] = await Promise.all([
+        fetch(`/api/tokens?t=${Date.now()}`, { cache: 'no-store' }).catch(() => null),
+        fetch(`/api/admin/token-setting?t=${Date.now()}`, { cache: 'no-store' }).catch(() => null),
+        fetch(`/api/admin/recipe-type?t=${Date.now()}`, { cache: 'no-store' }).catch(() => null)
       ]);
-    } catch (_) {}
 
-    // Synchronize to localStorage for instantaneous client response
-    const storageKeys = ['zecratary_recipes', 'zecratary_saved_recipes', 'saved_recipes'];
-    storageKeys.forEach((key) => {
-      try {
-        const raw = localStorage.getItem(key);
-        const currentList = raw ? JSON.parse(raw) : [];
-        const filtered = Array.isArray(currentList)
-          ? currentList.filter((r: any) => (r.id !== normalizedRecipe.id && (r.title || r.name)?.toLowerCase() !== normalizedRecipe.title?.toLowerCase()))
-          : [];
-        localStorage.setItem(key, JSON.stringify([normalizedRecipe, ...filtered]));
-      } catch (_) {}
+      if (tokenRes && tokenRes.ok) {
+        const data = await tokenRes.json();
+        if (typeof data.balance === 'number') setUserTokenBalance(data.balance);
+        if (data.tokenName) setTokenName(data.tokenName);
+        if (data.tokenSymbol) setTokenSymbol(data.tokenSymbol);
+      }
+
+      if (adminTokenRes && adminTokenRes.ok) {
+        const aData = await adminTokenRes.json();
+        const settings = aData.settings || aData;
+        if (typeof settings.isEnabled === 'boolean') {
+          setIsTokenEnabled(settings.isEnabled);
+        }
+        if (settings.tokenName) setTokenName(settings.tokenName);
+        if (settings.tokenSymbol) setTokenSymbol(settings.tokenSymbol);
+        setCosts({
+          url: Number(settings.importUrlCost ?? settings.import_url_cost ?? 5),
+          text: Number(settings.importTextCost ?? settings.import_text_cost ?? 3),
+          photo: Number(settings.importPhotoCost ?? settings.import_photo_cost ?? 8)
+        });
+      }
+
+      if (catRes && catRes.ok) {
+        const cData = await catRes.json();
+        const list = Array.isArray(cData) ? cData : (cData.recipeTypes || cData.types || []);
+        if (list.length > 0) {
+          setRecipeCategories(list.map((c: any) => typeof c === 'string' ? c : (c.name || c.label)));
+        }
+      }
+    } catch (err) {
+      console.warn('Telemetry load notice:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTelemetry();
+
+    const handleExternalUpdates = () => fetchTelemetry();
+    window.addEventListener('zecratary_token_settings_updated', handleExternalUpdates);
+    window.addEventListener('zecratary_tokens_updated', handleExternalUpdates);
+    window.addEventListener('zecratary_locale_changed', handleExternalUpdates);
+    window.addEventListener('zecratary_dictionary_updated', handleExternalUpdates);
+
+    return () => {
+      window.removeEventListener('zecratary_token_settings_updated', handleExternalUpdates);
+      window.removeEventListener('zecratary_tokens_updated', handleExternalUpdates);
+      window.removeEventListener('zecratary_locale_changed', handleExternalUpdates);
+      window.removeEventListener('zecratary_dictionary_updated', handleExternalUpdates);
+    };
+  }, [fetchTelemetry]);
+
+  // Compute Active Cost
+  const currentCost = !isTokenEnabled ? 0 : costs[activeTab];
+
+  // Helper: Convert File to Base64
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = error => reject(error);
+      reader.readAsDataURL(file);
     });
-
-    window.dispatchEvent(new Event('zecratary_recipes_updated'));
-    window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
-    window.dispatchEvent(new Event('zecratary_tokens_updated'));
-    window.dispatchEvent(new Event('zecratary_users_updated'));
-    window.dispatchEvent(new Event('storage'));
-
-    const deductionMsg = consumedTokens > 0
-      ? ` -${consumedTokens} ${tokenSymbol} ${t('deductedToast', 'deducted. Redirecting to Saved Recipes...')}`
-      : ` ${t('redirectingToSaved', 'Redirecting to Saved Recipes...')}`;
-
-    setStatus({
-      type: 'success',
-      msg: `${t('importSuccessToast', 'Successfully imported')} "${normalizedRecipe.title}"!${deductionMsg}`
-    });
-
-    setTimeout(() => {
-      router.push('/recipes');
-    }, 850);
   };
 
+  // Image Selection Handler
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (imagePreviewUrl && imagePreviewUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(imagePreviewUrl);
+      }
+      setImageFile(file);
+      setImagePreviewUrl(URL.createObjectURL(file));
+      setToast(null);
+    }
+  };
+
+  // Handle URL Import
   const handleUrlImport = async () => {
-    let cleanUrl = url.trim();
-    if (!cleanUrl) return;
-
-    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
-      cleanUrl = `https://${cleanUrl}`;
-    }
-
-    if (!enableWebSearch) {
-      setStatus({
-        type: 'warning',
-        msg: t('webSearchDisabledWarning', 'Web URL imports are currently disabled by the administrator in AI Settings.')
-      });
+    let cleanUrl = urlInput.trim();
+    if (!cleanUrl) {
+      setToast({ type: 'error', message: t('invalidUrl', 'Please enter a valid website URL.') });
       return;
     }
 
-    const cost = isTokenEnabled ? tokenCosts.url : 0;
-    if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
-      setStatus({
+    if (!/^https?:\/\//i.test(cleanUrl)) {
+      cleanUrl = 'https://' + cleanUrl;
+      setUrlInput(cleanUrl);
+    }
+
+    if (isTokenEnabled && userTokenBalance < currentCost) {
+      setToast({
         type: 'error',
-        msg: `${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}.`
+        message: t('insufficientTokensMsg', 'You need at least {cost} {symbol} to perform this import.')
+          .replace('{cost}', String(currentCost))
+          .replace('{symbol}', tokenSymbol)
       });
-      setIsTokenPurchaseOpen(true);
       return;
     }
 
-    setLoading(true);
-    setStatus(null);
+    setIsExtracting(true);
+    setToast(null);
 
-    const user = getCurrentUser();
     try {
       const res = await fetch('/api/ai/import', {
         method: 'POST',
@@ -419,287 +188,296 @@ export default function ImportPage() {
         body: JSON.stringify({
           type: 'url',
           url: cleanUrl,
-          userId: user?.id || user?.email || 'usr_admin_1',
-          userEmail: user?.email,
-          userName: user?.name,
-          category: textCategory,
-          model: activeAiModel,
-          provider: activeAiProvider
+          category: selectedCategory || undefined
         })
       });
 
       const data = await res.json();
       if (!res.ok || !data.success) {
-        if (data.insufficientTokens) {
-          setIsTokenPurchaseOpen(true);
-        }
-        throw new Error(data.error || t('failedToExtractUrl', 'Failed to extract recipe from URL.'));
+        throw new Error(data.error || t('importFailed', 'Failed to import recipe. Please verify your input and try again.'));
       }
 
-      await handlePostImportSuccess(data.recipe, data.consumedSystemTokens ?? cost, data.remainingBalance);
+      setExtractedRecipe(data.recipe);
+      if (typeof data.remainingBalance === 'number') {
+        setUserTokenBalance(data.remainingBalance);
+      } else if (isTokenEnabled && currentCost > 0) {
+        setUserTokenBalance(prev => Math.max(0, prev - currentCost));
+      }
+
+      setToast({ type: 'success', message: t('importSuccess', 'Recipe imported successfully!') });
     } catch (err: any) {
-      setStatus({ type: 'error', msg: err.message || t('networkError', 'Network error during URL import.') });
-      setLoading(false);
+      setToast({ type: 'error', message: err.message || t('importFailed', 'Failed to import recipe.') });
+    } finally {
+      setIsExtracting(false);
     }
   };
 
+  // Handle Text Import
   const handleTextImport = async () => {
-    if (!rawText.trim()) return;
-
-    const cost = isTokenEnabled ? tokenCosts.text : 0;
-    if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
-      setStatus({
-        type: 'error',
-        msg: `${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}.`
-      });
-      setIsTokenPurchaseOpen(true);
+    const cleanText = textInput.trim();
+    if (!cleanText) {
+      setToast({ type: 'error', message: t('emptyText', 'Please paste some recipe text or ingredients.') });
       return;
     }
 
-    setLoading(true);
-    setStatus(null);
+    if (isTokenEnabled && userTokenBalance < currentCost) {
+      setToast({
+        type: 'error',
+        message: t('insufficientTokensMsg', 'You need at least {cost} {symbol} to perform this import.')
+          .replace('{cost}', String(currentCost))
+          .replace('{symbol}', tokenSymbol)
+      });
+      return;
+    }
 
-    const user = getCurrentUser();
+    setIsExtracting(true);
+    setToast(null);
+
     try {
       const res = await fetch('/api/ai/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'text',
-          text: rawText.trim(),
-          title: textTitle.trim(),
-          category: textCategory,
-          userId: user?.id || user?.email || 'usr_admin_1',
-          userEmail: user?.email,
-          userName: user?.name,
-          model: activeAiModel,
-          provider: activeAiProvider
+          text: cleanText,
+          category: selectedCategory || undefined
         })
       });
 
       const data = await res.json();
       if (!res.ok || !data.success) {
-        if (data.insufficientTokens) {
-          setIsTokenPurchaseOpen(true);
-        }
-        throw new Error(data.error || t('failedToParseText', 'Failed to parse recipe text.'));
+        throw new Error(data.error || t('importFailed', 'Failed to import recipe. Please verify your input and try again.'));
       }
 
-      await handlePostImportSuccess(data.recipe, data.consumedSystemTokens ?? cost, data.remainingBalance);
+      setExtractedRecipe(data.recipe);
+      if (typeof data.remainingBalance === 'number') {
+        setUserTokenBalance(data.remainingBalance);
+      } else if (isTokenEnabled && currentCost > 0) {
+        setUserTokenBalance(prev => Math.max(0, prev - currentCost));
+      }
+
+      setToast({ type: 'success', message: t('importSuccess', 'Recipe imported successfully!') });
     } catch (err: any) {
-      setStatus({ type: 'error', msg: err.message || t('networkError', 'Network error during text import.') });
-      setLoading(false);
+      setToast({ type: 'error', message: err.message || t('importFailed', 'Failed to import recipe.') });
+    } finally {
+      setIsExtracting(false);
     }
   };
 
-  const handleFilesAdded = (files: FileList | File[]) => {
-    const validFiles: File[] = [];
-    for (let i = 0; i < files.length; i++) {
-      if (files[i].type.startsWith('image/')) validFiles.push(files[i]);
-    }
-    if (validFiles.length === 0) return;
-    const merged = [...selectedFiles, ...validFiles].slice(0, 5);
-    setSelectedFiles(merged);
-    previewUrls.forEach(url => URL.revokeObjectURL(url));
-    setPreviewUrls(merged.map(f => URL.createObjectURL(f)));
-  };
-
-  const removeFile = (index: number) => {
-    if (previewUrls[index]) {
-      URL.revokeObjectURL(previewUrls[index]);
-    }
-    const updatedFiles = selectedFiles.filter((_, idx) => idx !== index);
-    setSelectedFiles(updatedFiles);
-    setPreviewUrls(previewUrls.filter((_, idx) => idx !== index));
-  };
-
+  // Handle Image OCR Import
   const handleImageImport = async () => {
-    if (selectedFiles.length === 0) return;
-
-    const cost = isTokenEnabled ? tokenCosts.photo : 0;
-    if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
-      setStatus({
-        type: 'error',
-        msg: `${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}.`
-      });
-      setIsTokenPurchaseOpen(true);
+    if (!imageFile && !photoUrlInput.trim()) {
+      setToast({ type: 'error', message: t('noImageSelected', 'Please select an image file or enter an image URL.') });
       return;
     }
 
-    setLoading(true);
-    setStatus(null);
+    if (isTokenEnabled && userTokenBalance < currentCost) {
+      setToast({
+        type: 'error',
+        message: t('insufficientTokensMsg', 'You need at least {cost} {symbol} to perform this import.')
+          .replace('{cost}', String(currentCost))
+          .replace('{symbol}', tokenSymbol)
+      });
+      return;
+    }
 
-    const user = getCurrentUser();
+    setIsExtracting(true);
+    setToast(null);
+
     try {
-      const primaryFile = selectedFiles[0];
-      const formData = new FormData();
-      formData.append('file', primaryFile);
+      let imagePayload: string = photoUrlInput.trim();
 
-      let localPhotoPath = '';
-      try {
-        const uploadRes = await fetch('/api/recipes/upload', {
-          method: 'POST',
-          body: formData
-        });
-        if (uploadRes.ok) {
-          const uploadData = await uploadRes.json();
-          if (uploadData?.url) localPhotoPath = uploadData.url;
+      if (imageFile) {
+        try {
+          const formData = new FormData();
+          formData.append('file', imageFile);
+          const uploadRes = await fetch('/api/recipes/upload', {
+            method: 'POST',
+            body: formData
+          });
+          if (uploadRes.ok) {
+            const uData = await uploadRes.json();
+            imagePayload = uData.url || uData.imageUrl || '';
+          }
+        } catch (_) {}
+
+        if (!imagePayload) {
+          imagePayload = await fileToBase64(imageFile);
         }
-      } catch (_) {}
-
-      // Convert file to Base64 data URL for direct Vision OCR ingestion
-      let base64Data = '';
-      try {
-        base64Data = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve((reader.result as string) || '');
-          reader.onerror = () => resolve('');
-          reader.readAsDataURL(primaryFile);
-        });
-      } catch (_) {}
+      }
 
       const res = await fetch('/api/ai/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'photo',
-          image: localPhotoPath || base64Data,
-          base64: base64Data,
-          title: primaryFile.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' '),
-          category: textCategory,
-          userId: user?.id || user?.email || 'usr_admin_1',
-          userEmail: user?.email,
-          userName: user?.name,
-          model: activeAiModel,
-          provider: activeAiProvider
+          imageUrl: imagePayload,
+          category: selectedCategory || undefined
         })
       });
 
       const data = await res.json();
       if (!res.ok || !data.success) {
-        if (data.insufficientTokens) {
-          setIsTokenPurchaseOpen(true);
-        }
-        throw new Error(data.error || t('failedToProcessPhoto', 'Failed to process recipe image.'));
+        throw new Error(data.error || t('importFailed', 'Failed to import recipe. Please verify your input and try again.'));
       }
 
-      await handlePostImportSuccess(data.recipe, data.consumedSystemTokens ?? cost, data.remainingBalance);
+      setExtractedRecipe(data.recipe);
+      if (typeof data.remainingBalance === 'number') {
+        setUserTokenBalance(data.remainingBalance);
+      } else if (isTokenEnabled && currentCost > 0) {
+        setUserTokenBalance(prev => Math.max(0, prev - currentCost));
+      }
+
+      setToast({ type: 'success', message: t('importSuccess', 'Recipe imported successfully!') });
     } catch (err: any) {
-      setStatus({ type: 'error', msg: err.message || t('imageAnalysisFailed', 'Image analysis failed.') });
-      setLoading(false);
+      setToast({ type: 'error', message: err.message || t('importFailed', 'Failed to import recipe.') });
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  // Save Extracted Recipe to PostgreSQL & Saved Recipes
+  const handleSaveRecipe = async () => {
+    if (!extractedRecipe) return;
+
+    setIsSaving(true);
+    try {
+      const normalizedRecipe = {
+        title: decodeHtmlEntities(extractedRecipe.title || 'Imported Recipe'),
+        description: decodeHtmlEntities(extractedRecipe.description || ''),
+        ingredients: Array.isArray(extractedRecipe.ingredients) 
+          ? extractedRecipe.ingredients.map((i: any) => typeof i === 'string' ? decodeHtmlEntities(i) : i)
+          : [],
+        instructions: Array.isArray(extractedRecipe.instructions)
+          ? extractedRecipe.instructions.map((step: any) => typeof step === 'string' ? decodeHtmlEntities(step) : step)
+          : (extractedRecipe.directions || []),
+        prepTime: Number(extractedRecipe.prepTime || extractedRecipe.prep_time || 15),
+        cookTime: Number(extractedRecipe.cookTime || extractedRecipe.cook_time || 25),
+        servings: Number(extractedRecipe.servings || 4),
+        recipeType: selectedCategory || extractedRecipe.recipeType || extractedRecipe.recipe_type || 'Dinner',
+        imageUrl: extractedRecipe.imageUrl || extractedRecipe.image_url || imagePreviewUrl || photoUrlInput || '/uploads/recipes/default.jpg',
+        sourceUrl: urlInput.trim() || undefined,
+        createdAt: new Date().toISOString()
+      };
+
+      const [saveRes] = await Promise.all([
+        fetch('/api/recipes/saved', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(normalizedRecipe)
+        }).catch(() => null),
+        fetch('/api/recipes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(normalizedRecipe)
+        }).catch(() => null)
+      ]);
+
+      setToast({
+        type: 'success',
+        message: t('savedSuccessRedirect', 'Recipe saved! Redirecting to Saved Recipes...')
+      });
+
+      setTimeout(() => {
+        router.push('/saved');
+      }, 900);
+    } catch (err: any) {
+      setToast({
+        type: 'error',
+        message: err.message || 'Error saving recipe to database.'
+      });
+      setIsSaving(false);
     }
   };
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
+      className="w-full max-w-full px-4 sm:px-6 md:px-8 lg:px-12 xl:px-16 space-y-6 pb-24 font-sans transition-colors duration-200 box-border"
       style={{ color: 'var(--color-text)' }}
     >
-      {/* Header with Live Token Wallet & Synced AI Status */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+      {/* Top Header Toolbar */}
+      <div 
+        className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-5"
+        style={{ borderColor: 'var(--color-border)' }}
+      >
         <div>
-          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-            <Sparkles className="h-6 w-6" /> {t('importRecipeTitle', 'AI Recipe Importer')}
+          <h1 
+            className="text-2xl sm:text-3xl font-black tracking-tight flex items-center gap-3"
+            style={{ color: 'var(--color-primary)' }}
+          >
+            <Sparkles className="h-7 w-7" /> {t('importPageTitle', 'Import Recipe')}
           </h1>
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('importRecipeSubtitle', 'Import recipes from websites, text notes, or photos and save directly to your recipe library.')}
+          <p className="text-xs sm:text-sm mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('importPageSubtitle', 'Extract ingredients, measurements, and cooking instructions from any URL, text, or food photograph.')}
           </p>
         </div>
 
-        {/* Live Status & Wallet Widget */}
+        {/* Status Telemetry Badges */}
         <div className="flex flex-wrap items-center gap-2.5">
           <div 
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl border text-xs font-bold shadow-sm"
             style={{ 
               backgroundColor: 'var(--color-inner-dark)', 
               borderColor: 'var(--color-border)', 
               color: 'var(--color-text)' 
             }}
-            title={t('activeModelConfiguredTooltip', 'Active Model configured dynamically in /admin/ai-settings')}
           >
-            <Cpu className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-            <span className="font-mono">{activeAiModel}</span>
+            <ShieldCheck className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
+            <span>{t('aiModelTelemetry', 'AI Neural OCR Active')}</span>
           </div>
 
-          {!isTokenEnabled && (
-            <div 
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider"
-              style={{ 
-                backgroundColor: 'var(--color-inner-dark)', 
-                borderColor: 'var(--color-emerald)',
-                color: 'var(--color-emerald)'
-              }}
-              title={t('tokenFreeModeTooltip', 'Token consumption is currently bypassed (Free Mode) in /admin/token-setting')}
-            >
-              <Sparkles className="h-3 w-3" />
-              <span>{t('tokenFreeModeBadge', 'Free Token Mode')}</span>
-            </div>
-          )}
-
-          {strictDietEnforcement && (
-            <div 
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
-              title={`Strict Dietary Policy active with ${filterWordsList.length} filter terms.`}
-            >
-              <ShieldAlert className="h-3 w-3" />
-              <span>{t('strictFiltersBadge', 'Strict Filters Active')}</span>
-            </div>
-          )}
-
           <div 
-            className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl border shadow-sm"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold shadow-sm"
+            style={{ 
+              backgroundColor: 'var(--color-inner-dark)', 
+              borderColor: 'var(--color-border)', 
+              color: 'var(--color-text)' 
+            }}
           >
-            <Coins className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-            <div className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
-              {tokenBalance} <span style={{ color: 'var(--color-primary)' }}>{tokenSymbol}</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsTokenPurchaseOpen(true)}
-              className="ml-1 text-[10px] font-extrabold px-2 py-0.5 rounded-lg text-white transition hover:opacity-90 cursor-pointer shadow-xs"
-              style={{ backgroundColor: 'var(--color-primary)' }}
-            >
-              {t('topUpBtn', 'Top Up')}
-            </button>
+            <Zap className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+            <span>
+              {!isTokenEnabled 
+                ? t('freeTokenMode', 'Free Token Mode') 
+                : `${t('tokensRequired', 'Tokens Required')}: ${currentCost} ${tokenSymbol}`}
+            </span>
           </div>
         </div>
       </div>
 
-      {/* Main Container Card (Form-Free Container, Constraint 9) */}
+      {/* Main Accessible Form-Free Container (Constraint 9) */}
       <div 
         role="region"
+        aria-label="Recipe Import Workspace"
         data-lpignore="true"
-        className="rounded-3xl p-6 space-y-6 shadow-xl border transition-colors duration-200"
+        className="w-full rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl border transition-colors duration-200 box-border"
         style={{
           backgroundColor: 'var(--color-card)',
           borderColor: 'var(--color-border)'
         }}
       >
-        {/* Method Tab Bar with Token Cost Pills */}
+        {/* Navigation Tabs Bar */}
         <div 
-          className="flex p-1.5 rounded-2xl border transition-colors duration-200"
+          className="flex flex-col sm:flex-row p-1.5 rounded-2xl border transition-colors duration-200 gap-1.5"
           style={{
             backgroundColor: 'var(--color-inner-dark)',
             borderColor: 'var(--color-border)'
           }}
         >
           {[
-            { id: 'url', label: t('urlTab', 'Web URL'), icon: Link2, cost: tokenCosts.url },
-            { id: 'text', label: t('textTab', 'Recipe Text'), icon: FileText, cost: tokenCosts.text },
-            { id: 'image', label: t('imageTab', 'Photo / OCR'), icon: ImageIcon, cost: tokenCosts.photo },
+            { id: 'url', label: t('tabUrl', 'Website URL'), icon: Globe, cost: costs.url },
+            { id: 'text', label: t('tabText', 'Paste Text'), icon: FileText, cost: costs.text },
+            { id: 'photo', label: t('tabPhoto', 'Photo / OCR'), icon: ImageIcon, cost: costs.photo }
           ].map((tab) => {
             const isActive = activeTab === tab.id;
             return (
               <button
-                key={tab.id}
+                key={`tab-${tab.id}`}
                 type="button"
                 onClick={() => {
                   setActiveTab(tab.id as any);
-                  setStatus(null);
+                  setToast(null);
                 }}
-                className="flex-1 py-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
+                className="flex-1 py-3 px-4 text-xs sm:text-sm font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
                 style={isActive ? {
                   backgroundColor: 'var(--color-card)',
                   color: 'var(--color-primary)',
@@ -713,124 +491,67 @@ export default function ImportPage() {
                 <tab.icon className="h-4 w-4" />
                 <span>{tab.label}</span>
                 <span 
-                  className="ml-1 text-[10px] font-mono px-2 py-0.5 rounded-full border"
-                  style={{
-                    backgroundColor: isActive ? 'var(--color-inner-dark)' : 'var(--color-card)',
+                  className="px-2 py-0.5 rounded-full text-[10px] font-mono border ml-1"
+                  style={{ 
+                    backgroundColor: isActive ? 'var(--color-inner-dark)' : 'transparent',
                     borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
+                    color: 'var(--color-text-secondary)'
                   }}
                 >
-                  {isTokenEnabled && tab.cost > 0 ? `${tab.cost} ${tokenSymbol}` : t('freeBadge', 'Free')}
+                  {!isTokenEnabled ? t('costFree', 'Free') : `${tab.cost} ${tokenSymbol}`}
                 </span>
               </button>
             );
           })}
         </div>
 
-        {/* Dietary Restriction Guidance Banner */}
-        {strictDietEnforcement && filterWordsList.length > 0 && (
-          <div 
-            className="p-3 border rounded-2xl text-[11px] flex items-center justify-between"
-            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+        {/* Category Selector Pill Row */}
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <span className="text-xs font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('categoryLabel', 'Recipe Category / Type')}:
+          </span>
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="px-3 py-1.5 rounded-xl border text-xs font-bold outline-none cursor-pointer"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
           >
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }} />
-              <span>
-                <strong>{t('dietNoticeTitle', 'AI Dietary Restrictions Enforced')}:</strong> {t('dietNoticeDesc', 'Recipes containing avoid terms')} ({filterWordsList.slice(0, 4).join(', ')}{filterWordsList.length > 4 ? '...' : ''}) {t('willBeBlocked', 'will be automatically blocked.')}
-              </span>
-            </div>
-          </div>
-        )}
+            <option value="">{t('selectCategory', 'Select Category (Optional)')}</option>
+            {recipeCategories.map((cat) => (
+              <option key={`cat-opt-${cat}`} value={cat}>{cat}</option>
+            ))}
+          </select>
+        </div>
 
-        {/* TAB 1: URL IMPORT */}
+        {/* TAB 1: WEBSITE URL IMPORT */}
         {activeTab === 'url' && (
-          <div className="space-y-4">
-            {!enableWebSearch && (
-              <div 
-                className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2"
-                style={{ 
-                  backgroundColor: 'var(--color-inner-dark)', 
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-primary)'
-                }}
-              >
-                <AlertTriangle className="h-4 w-4 shrink-0" />
-                <span>{t('webSearchDisabledWarning', 'Web URL imports are currently disabled by the administrator in AI Settings.')}</span>
-              </div>
-            )}
-
+          <div className="space-y-4 pt-2">
             <div>
-              <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                {t('recipeWebUrlLabel', 'Recipe Web URL *')}
+              <label className="block text-xs font-bold mb-2" style={{ color: 'var(--color-text)' }}>
+                {t('urlInputLabel', 'Recipe Web Address')}
               </label>
-              <input
-                type="url"
-                autoComplete="off"
-                data-lpignore="true"
-                data-form-type="other"
-                spellCheck="false"
-                disabled={!enableWebSearch}
-                placeholder={t('recipeWebUrlPlaceholder', 'https://www.recipetineats.com/... or food blog URL')}
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleUrlImport();
-                  }
-                }}
-                className="w-full border rounded-xl px-4 py-3.5 text-sm outline-none transition font-medium disabled:opacity-50"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-                onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-              />
-            </div>
-
-            <button
-              type="button"
-              onClick={() => handleUrlImport()}
-              disabled={loading || !url.trim() || !enableWebSearch}
-              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50 hover:opacity-90"
-              style={{ backgroundColor: 'var(--color-primary)' }}
-            >
-              <Sparkles className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              {loading 
-                ? t('downloadingPhotoParsingSteps', 'Parsing recipe & deducting tokens...') 
-                : isTokenEnabled && tokenCosts.url > 0
-                  ? `${t('importRecipeBtn', 'Import Recipe')} (${tokenCosts.url} ${tokenSymbol})`
-                  : `${t('importRecipeBtn', 'Import Recipe')} (${t('freeBadge', 'Free')})`}
-            </button>
-          </div>
-        )}
-
-        {/* TAB 2: TEXT IMPORT */}
-        {activeTab === 'text' && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  {t('recipeTitleLabel', 'Recipe Title (Optional)')}
-                </label>
+              <div className="relative">
+                <Globe className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--color-text-secondary)' }} />
                 <input
                   type="text"
                   autoComplete="off"
                   data-lpignore="true"
                   data-form-type="other"
-                  spellCheck="false"
-                  placeholder={t('recipeTitlePlaceholder', 'e.g. Homemade Apple Cake')}
-                  value={textTitle}
-                  onChange={(e) => setTextTitle(e.target.value)}
+                  spellCheck={false}
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      handleTextImport();
+                      handleUrlImport();
                     }
                   }}
-                  className="w-full border rounded-xl px-4 py-3 text-sm outline-none font-medium"
+                  placeholder={t('urlInputPlaceholder', 'Paste recipe URL (e.g. https://www.allrecipes.com/recipe/...)')}
+                  className="w-full pl-11 pr-4 py-3 rounded-2xl border text-xs sm:text-sm outline-none font-sans transition"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
@@ -840,49 +561,51 @@ export default function ImportPage() {
                   onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
               </div>
-              <div>
-                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  {t('categoryLabel', 'Category (Recipe Type)')}
-                </label>
-                <select
-                  value={textCategory}
-                  onChange={(e) => setTextCategory(e.target.value)}
-                  className="w-full border rounded-xl px-4 py-3 text-sm outline-none cursor-pointer font-bold"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  {recipeTypes.map(c => (
-                    <option key={c} value={c} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
             </div>
 
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={handleUrlImport}
+                disabled={isExtracting || !urlInput.trim()}
+                className={`w-full sm:w-auto px-6 py-3 rounded-2xl text-xs sm:text-sm font-bold text-white shadow-lg transition flex items-center justify-center gap-2 cursor-pointer ${
+                  isExtracting || !urlInput.trim() ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90'
+                }`}
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {isExtracting ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <span>{t('urlImporting', 'Scraping & Parsing Recipe...')}</span>
+                  </>
+                ) : (
+                  <>
+                    <span>{t('urlImportBtn', 'Extract Recipe from URL')}</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: RAW TEXT IMPORT */}
+        {activeTab === 'text' && (
+          <div className="space-y-4 pt-2">
             <div>
-              <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                {t('pasteIngredientsSteps', 'Paste Ingredients & Steps *')}
+              <label className="block text-xs font-bold mb-2" style={{ color: 'var(--color-text)' }}>
+                {t('textInputLabel', 'Recipe Text or Notes')}
               </label>
               <textarea
+                rows={8}
                 autoComplete="off"
                 data-lpignore="true"
                 data-form-type="other"
-                spellCheck="false"
-                rows={7}
-                placeholder={t('pasteRecipeContentPlaceholder', 'Paste ingredients and cooking steps here... (Ctrl+Enter to Import)')}
-                value={rawText}
-                onChange={(e) => setRawText(e.target.value)}
-                onKeyDown={(e) => {
-                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                    e.preventDefault();
-                    handleTextImport();
-                  }
-                }}
-                className="w-full border rounded-xl p-4 text-xs outline-none resize-none font-mono"
+                spellCheck={false}
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+                placeholder={t('textInputPlaceholder', 'Paste ingredients, steps, or handwritten recipe notes here...')}
+                className="w-full p-4 rounded-2xl border text-xs sm:text-sm outline-none font-sans transition"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -893,168 +616,307 @@ export default function ImportPage() {
               />
             </div>
 
-            <button
-              type="button"
-              onClick={() => handleTextImport()}
-              disabled={loading || !rawText.trim()}
-              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50 hover:opacity-90"
-              style={{ backgroundColor: 'var(--color-primary)' }}
-            >
-              <Sparkles className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              {loading 
-                ? t('processingSavingRecipe', 'Processing & saving recipe...') 
-                : isTokenEnabled && tokenCosts.text > 0
-                  ? `${t('saveAndImportRecipe', 'Save & Import Recipe')} (${tokenCosts.text} ${tokenSymbol})`
-                  : `${t('saveAndImportRecipe', 'Save & Import Recipe')} (${t('freeBadge', 'Free')})`}
-            </button>
-          </div>
-        )}
-
-        {/* TAB 3: IMAGE / PHOTO OCR IMPORT */}
-        {activeTab === 'image' && (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-bold mb-2" style={{ color: 'var(--color-text)' }}>
-                {t('recipeImagesMax5', 'Recipe Images (up to 5)')}
-              </label>
-
-              <div
-                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(true); }}
-                onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}
-                onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); if (e.dataTransfer.files) handleFilesAdded(e.dataTransfer.files); }}
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed rounded-2xl py-12 px-6 flex flex-col items-center justify-center text-center cursor-pointer transition relative"
-                style={{
-                  borderColor: isDragging ? 'var(--color-primary)' : 'var(--color-border)',
-                  backgroundColor: 'var(--color-inner-dark)'
-                }}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/png, image/jpeg, image/webp"
-                  multiple
-                  onChange={(e) => e.target.files && handleFilesAdded(e.target.files)}
-                  className="hidden"
-                />
-                <div className="w-14 h-14 rounded-full flex items-center justify-center mb-3">
-                  <Upload className="h-10 w-10 stroke-[2.2]" style={{ color: 'var(--color-primary)' }} />
-                </div>
-                <p className="text-xs sm:text-sm font-semibold tracking-wide" style={{ color: 'var(--color-text)' }}>
-                  <span style={{ color: 'var(--color-primary)' }} className="font-bold">
-                    {t('clickToUpload', 'Click to upload')}
-                  </span>{' '}
-                  <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('orDragAndDrop', 'or drag and drop')}
-                  </span>
-                </p>
-                <p className="text-[11px] font-medium mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                  {t('pngJpgWebpMax5', 'PNG, JPG, or WEBP (Cookbook captures or food photos)')}
-                </p>
-              </div>
-            </div>
-
-            {previewUrls.length > 0 && (
-              <div className="space-y-1.5">
-                <div className="text-[11px] font-bold" style={{ color: 'var(--color-text)' }}>
-                  {t('selectedPhotos', 'Selected Photos')} ({previewUrls.length}/5):
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                  {previewUrls.map((previewUrl, idx) => (
-                    <div
-                      key={idx}
-                      className="relative h-24 rounded-xl overflow-hidden border group shadow"
-                      style={{
-                        borderColor: 'var(--color-border)',
-                        backgroundColor: 'var(--color-inner-dark)'
-                      }}
-                    >
-                      <img src={previewUrl} alt={`Upload ${idx + 1}`} className="w-full h-full object-cover" />
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); removeFile(idx); }}
-                        className="absolute top-1 right-1 p-1 bg-black/70 hover:bg-black text-white rounded-full transition cursor-pointer"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={() => handleImageImport()}
-              disabled={loading || selectedFiles.length === 0}
-              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50 hover:opacity-90"
-              style={{ backgroundColor: 'var(--color-primary)' }}
-            >
-              <Upload className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-              {loading 
-                ? t('aiSearchingRecipeImporting', 'AI OCR analyzing & importing...') 
-                : isTokenEnabled && tokenCosts.photo > 0
-                  ? `${t('importRecipeFromImages', 'Import Recipe from Images')} (${tokenCosts.photo} ${tokenSymbol})`
-                  : `${t('importRecipeFromImages', 'Import Recipe from Images')} (${t('freeBadge', 'Free')})`}
-            </button>
-          </div>
-        )}
-
-        {/* Notifications & Status Banner */}
-        {status && (
-          <div
-            className="p-4 rounded-2xl border text-xs font-semibold flex items-center justify-between gap-2 animate-in fade-in"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: status.type === 'success' 
-                ? 'var(--color-emerald)' 
-                : status.type === 'warning' 
-                  ? 'var(--color-border)' 
-                  : 'rgba(239, 68, 68, 0.4)',
-              color: status.type === 'success' ? 'var(--color-emerald)' : status.type === 'warning' ? '#f59e0b' : '#ef4444'
-            }}
-          >
-            <div className="flex items-center gap-2">
-              {status.type === 'success' ? (
-                <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} />
-              ) : status.type === 'warning' ? (
-                <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
-              ) : (
-                <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
-              )}
-              <span>{status.msg}</span>
-            </div>
-
-            {status.msg.toLowerCase().includes('insufficient') && (
+            <div className="flex justify-end pt-2">
               <button
                 type="button"
-                onClick={() => setIsTokenPurchaseOpen(true)}
-                className="px-3 py-1 rounded-xl font-bold text-[11px] text-white shrink-0 cursor-pointer shadow-sm hover:opacity-90"
+                onClick={handleTextImport}
+                disabled={isExtracting || !textInput.trim()}
+                className={`w-full sm:w-auto px-6 py-3 rounded-2xl text-xs sm:text-sm font-bold text-white shadow-lg transition flex items-center justify-center gap-2 cursor-pointer ${
+                  isExtracting || !textInput.trim() ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90'
+                }`}
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
-                {t('buyTokensNowBtn', 'Buy Tokens')}
+                {isExtracting ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <span>{t('textImporting', 'Extracting Recipe Structure...')}</span>
+                  </>
+                ) : (
+                  <>
+                    <span>{t('textImportBtn', 'Parse Recipe Text')}</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: PHOTO / OCR IMPORT */}
+        {activeTab === 'photo' && (
+          <div className="space-y-4 pt-2">
+            <label className="block text-xs font-bold mb-1" style={{ color: 'var(--color-text)' }}>
+              {t('photoUploadLabel', 'Upload Recipe Photo or Cookbook Page')}
+            </label>
+
+            {/* Drag & Drop Area */}
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="border-2 border-dashed rounded-3xl p-6 sm:p-10 flex flex-col items-center justify-center text-center cursor-pointer transition hover:opacity-85"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)'
+              }}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleImageChange}
+              />
+
+              {imagePreviewUrl ? (
+                <div className="space-y-3">
+                  <img
+                    src={imagePreviewUrl}
+                    alt="Recipe Upload"
+                    className="max-h-56 mx-auto rounded-2xl object-cover shadow-md border"
+                    style={{ borderColor: 'var(--color-border)' }}
+                  />
+                  <p className="text-xs font-bold" style={{ color: 'var(--color-primary)' }}>
+                    {t('changePhotoBtn', 'Change Photo')} ({imageFile?.name})
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div 
+                    className="h-12 w-12 rounded-2xl flex items-center justify-center mx-auto border"
+                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                  >
+                    <UploadCloud className="h-6 w-6" style={{ color: 'var(--color-primary)' }} />
+                  </div>
+                  <p className="text-xs sm:text-sm font-bold" style={{ color: 'var(--color-text)' }}>
+                    {t('photoUploadDrop', 'Click or drag & drop recipe image here')}
+                  </p>
+                  <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('photoUploadFormats', 'Supports JPG, PNG, WEBP, or HEIC (up to 10MB)')}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Direct Image URL fallback */}
+            <div>
+              <input
+                type="text"
+                autoComplete="off"
+                data-lpignore="true"
+                data-form-type="other"
+                spellCheck={false}
+                value={photoUrlInput}
+                onChange={(e) => setPhotoUrlInput(e.target.value)}
+                placeholder={t('photoUrlPlaceholder', 'Or enter an image URL directly...')}
+                className="w-full px-4 py-2.5 rounded-2xl border text-xs outline-none transition"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              />
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={handleImageImport}
+                disabled={isExtracting || (!imageFile && !photoUrlInput.trim())}
+                className={`w-full sm:w-auto px-6 py-3 rounded-2xl text-xs sm:text-sm font-bold text-white shadow-lg transition flex items-center justify-center gap-2 cursor-pointer ${
+                  isExtracting || (!imageFile && !photoUrlInput.trim()) ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90'
+                }`}
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {isExtracting ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <span>{t('photoImporting', 'Analyzing Image with AI OCR...')}</span>
+                  </>
+                ) : (
+                  <>
+                    <span>{t('photoImportBtn', 'Extract Recipe from Image')}</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Toast Feedback Notification Banner */}
+        {toast && (
+          <div
+            className="p-4 rounded-2xl border text-xs sm:text-sm font-semibold flex items-center gap-2.5 animate-in fade-in"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: toast.type === 'success' ? 'var(--color-emerald)' : 'rgba(239, 68, 68, 0.4)',
+              color: toast.type === 'success' ? 'var(--color-emerald)' : '#ef4444'
+            }}
+          >
+            {toast.type === 'success' ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} />
+            ) : (
+              <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
             )}
+            <span>{toast.message}</span>
+          </div>
+        )}
+
+        {/* EXTRACTED RECIPE PREVIEW CARD */}
+        {extractedRecipe && (
+          <div 
+            className="pt-6 border-t space-y-6 animate-in fade-in"
+            style={{ borderColor: 'var(--color-border)' }}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <Eye className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+                  {t('previewRecipeTitle', 'Extracted Recipe Preview')}
+                </h3>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('editBeforeSaving', 'Review and adjust ingredients or steps before saving')}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setExtractedRecipe(null);
+                    setToast(null);
+                  }}
+                  className="px-3.5 py-2 rounded-xl border text-xs font-bold transition hover:opacity-80 flex items-center gap-1.5 cursor-pointer"
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>{t('resetBtn', 'Start Over')}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSaveRecipe}
+                  disabled={isSaving}
+                  className="px-5 py-2.5 rounded-xl text-xs font-bold text-white shadow-lg transition hover:opacity-90 flex items-center gap-2 cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-primary)' }}
+                >
+                  {isSaving ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      <span>{t('savingRecipe', 'Saving to Database...')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="h-4 w-4" />
+                      <span>{t('saveToLibraryBtn', 'Save to My Recipes')}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Extracted Details Master Card */}
+            <div 
+              className="p-6 rounded-3xl border space-y-5"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="flex flex-col md:flex-row gap-6">
+                {extractedRecipe.imageUrl && (
+                  <img
+                    src={extractedRecipe.imageUrl}
+                    alt={extractedRecipe.title || 'Recipe'}
+                    className="w-full md:w-56 h-44 object-cover rounded-2xl border shadow-sm"
+                    style={{ borderColor: 'var(--color-border)' }}
+                  />
+                )}
+
+                <div className="flex-1 space-y-3">
+                  <h2 className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>
+                    {decodeHtmlEntities(extractedRecipe.title || 'Untitled Recipe')}
+                  </h2>
+                  <p className="text-xs line-clamp-3 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                    {decodeHtmlEntities(extractedRecipe.description || 'No description provided.')}
+                  </p>
+
+                  <div className="flex flex-wrap gap-2.5 pt-1">
+                    <span 
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-xl border text-[11px] font-bold"
+                      style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                    >
+                      <Clock className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
+                      {t('prepTimeLabel', 'Prep Time')}: {extractedRecipe.prepTime || extractedRecipe.prep_time || 15} {t('minutesShort', 'min')}
+                    </span>
+
+                    <span 
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-xl border text-[11px] font-bold"
+                      style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                    >
+                      <Clock className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
+                      {t('cookTimeLabel', 'Cook Time')}: {extractedRecipe.cookTime || extractedRecipe.cook_time || 25} {t('minutesShort', 'min')}
+                    </span>
+
+                    <span 
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-xl border text-[11px] font-bold"
+                      style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                    >
+                      <Users className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
+                      {extractedRecipe.servings || 4} {t('servingsUnit', 'servings')}
+                    </span>
+
+                    <span 
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-xl border text-[11px] font-bold"
+                      style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                    >
+                      <Layers className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
+                      {selectedCategory || extractedRecipe.recipeType || extractedRecipe.recipe_type || 'Dinner'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Ingredients & Instructions Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                <div 
+                  className="p-5 rounded-2xl border space-y-3"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  <h4 className="text-xs font-black uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+                    <ChefHat className="h-4 w-4" /> {t('ingredientsTitle', 'Ingredients')}
+                  </h4>
+                  <ul className="space-y-1.5 text-xs">
+                    {(extractedRecipe.ingredients || []).map((ing: any, iIdx: number) => (
+                      <li key={`ing-${iIdx}`} className="flex items-start gap-2">
+                        <span className="font-bold" style={{ color: 'var(--color-primary)' }}>•</span>
+                        <span style={{ color: 'var(--color-text)' }}>{decodeHtmlEntities(typeof ing === 'string' ? ing : ing.name || ing.original)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div 
+                  className="p-5 rounded-2xl border space-y-3"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+                >
+                  <h4 className="text-xs font-black uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+                    <Layers className="h-4 w-4" /> {t('instructionsTitle', 'Instructions & Steps')}
+                  </h4>
+                  <ol className="space-y-2 text-xs">
+                    {(extractedRecipe.instructions || extractedRecipe.directions || []).map((step: any, sIdx: number) => (
+                      <li key={`step-${sIdx}`} className="flex items-start gap-2">
+                        <span className="font-bold shrink-0 font-mono" style={{ color: 'var(--color-primary)' }}>{sIdx + 1}.</span>
+                        <span style={{ color: 'var(--color-text)' }}>{decodeHtmlEntities(typeof step === 'string' ? step : step.step || step.instruction)}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>
-
-      {/* Token Purchase Modal Component */}
-      <TokenPurchaseModal
-        isOpen={isTokenPurchaseOpen}
-        onClose={() => setIsTokenPurchaseOpen(false)}
-        userId={getCurrentUser()?.id || getCurrentUser()?.email || 'usr_admin_1'}
-        userEmail={getCurrentUser()?.email}
-        tokenSymbol={tokenSymbol}
-        packages={tokenPackages}
-        onPurchased={(newBal) => {
-          setTokenBalance(newBal);
-          setStatus({
-            type: 'success',
-            msg: `${t('tokensAddedSuccess', 'Tokens added successfully!')} ${t('newBalance', 'New Balance')}: ${newBal} ${tokenSymbol}`
-          });
-        }}
-      />
     </div>
   );
 }
