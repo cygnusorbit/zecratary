@@ -201,9 +201,9 @@
   "storage_settings": {
     "provider": "localhost",
     "localhost": {
-      "uploadDir": "public/recipes/images",
+      "uploadDir": "apps/web/public/recipes/images",
       "publicPrefix": "/recipes/images",
-      "recipesJsonDir": "public/recipes",
+      "recipesJsonDir": "apps/web/public/recipes",
       "maxSizeMb": 10,
       "allowedTypes": "image/jpeg, image/png, image/webp, image/gif, image/avif"
     },

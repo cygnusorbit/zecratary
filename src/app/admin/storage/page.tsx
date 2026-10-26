@@ -4,7 +4,8 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { 
   HardDrive, Cloud, Server, Check, AlertCircle, Save, 
-  Wifi, Copy, Eye, EyeOff, FolderCheck, ArrowLeft, RefreshCw, FileJson, Image as ImageIcon
+  Wifi, Copy, Eye, EyeOff, FolderCheck, ArrowLeft, RefreshCw, 
+  FileJson, Image as ImageIcon, Sparkles, Trash2
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -60,7 +61,11 @@ export default function AdminStorageSettingsPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [testing, setTesting] = useState<boolean>(false);
+  const [cleaning, setCleaning] = useState<boolean>(false);
   const [showSecretKey, setShowSecretKey] = useState<boolean>(false);
+
+  // Autofill shield state: inputs are mount-time readOnly until focused
+  const [isReadOnly, setIsReadOnly] = useState<boolean>(true);
 
   // Status Alerts & Diagnostics
   const [saveSuccess, setSaveSuccess] = useState<string>('');
@@ -81,6 +86,8 @@ export default function AdminStorageSettingsPage() {
 
   useEffect(() => {
     setMounted(true);
+    setIsReadOnly(true);
+
     async function loadSettings() {
       try {
         const res = await fetch('/api/admin/storage', { cache: 'no-store' });
@@ -155,6 +162,34 @@ export default function AdminStorageSettingsPage() {
       setTestResult({ success: false, message: err.message || 'Network error testing connection' });
     } finally {
       setTesting(false);
+    }
+  };
+
+  // Clean Orphan Images Action
+  const handleCleanOrphans = async () => {
+    setCleaning(true);
+    setSaveSuccess('');
+    setSaveError('');
+
+    try {
+      const res = await fetch('/api/admin/storage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clean_orphans' }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSaveSuccess(data.message || 'Cleaned up orphan images.');
+        if (data.diskStats) setDiskStats(data.diskStats);
+        setTimeout(() => setSaveSuccess(''), 4000);
+      } else {
+        setSaveError(data.error || 'Failed to clean orphan images');
+      }
+    } catch (err: any) {
+      setSaveError(err.message || 'Network error cleaning orphan images');
+    } finally {
+      setCleaning(false);
     }
   };
 
@@ -252,21 +287,40 @@ export default function AdminStorageSettingsPage() {
           className="p-5 rounded-3xl border space-y-3 shadow-xs"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
         >
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="font-extrabold text-sm flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
               <FolderCheck className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
               <span>Universal Filesystem Storage Status</span>
             </h3>
-            <span 
-              className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md border"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-emerald)',
-                color: 'var(--color-emerald)'
-              }}
-            >
-              apps/web Live Sync
-            </span>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleCleanOrphans}
+                disabled={cleaning}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg border text-xs font-bold transition cursor-pointer hover:opacity-85 shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                title="Purge orphaned images that are not referenced by any recipe"
+              >
+                <Trash2 className={`h-3 w-3 ${cleaning ? 'animate-spin' : 'text-amber-400'}`} />
+                <span>{cleaning ? 'Cleaning...' : 'Clean Orphan Images'}</span>
+              </button>
+
+              <span 
+                className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md border"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-emerald)',
+                  color: 'var(--color-emerald)'
+                }}
+              >
+                apps/web Live Sync
+              </span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 text-xs">
@@ -377,7 +431,7 @@ export default function AdminStorageSettingsPage() {
         </div>
       </div>
 
-      {/* 4. PROVIDER SETTINGS DETAIL VIEW */}
+      {/* 4. PROVIDER SETTINGS DETAIL VIEW WITH AUTOFILL SHIELD */}
       {settings.provider === 'supabase' ? (
         /* SUPABASE S3 CONFIGURATION */
         <div
@@ -415,11 +469,23 @@ export default function AdminStorageSettingsPage() {
               <div className="flex items-center gap-2">
                 <input
                   type="text"
+                  id="cfg_s3_endpoint_val"
+                  name="cfg_s3_endpoint_val"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  readOnly={isReadOnly}
+                  onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                  onBlur={(e) => { e.currentTarget.readOnly = true; }}
                   value={settings.supabase.endpoint}
                   onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, endpoint: e.target.value } }))}
                   placeholder="https://<project-ref>.storage.supabase.co/storage/v1/s3"
-                  className="flex-1 px-3 py-2.5 rounded-xl border outline-none"
+                  className="flex-1 px-3 py-2.5 rounded-xl border outline-none font-mono"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
                 <button
@@ -441,11 +507,23 @@ export default function AdminStorageSettingsPage() {
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
+                    id="cfg_s3_region_val"
+                    name="cfg_s3_region_val"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck="false"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    readOnly={isReadOnly}
+                    onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; }}
                     value={settings.supabase.region}
                     onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, region: e.target.value } }))}
                     placeholder="us-west-1"
-                    className="flex-1 px-3 py-2.5 rounded-xl border outline-none"
+                    className="flex-1 px-3 py-2.5 rounded-xl border outline-none font-mono"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                   <button
@@ -464,24 +542,49 @@ export default function AdminStorageSettingsPage() {
                 <label className="block font-bold mb-1">Bucket Name</label>
                 <input
                   type="text"
+                  id="cfg_s3_bucket_val"
+                  name="cfg_s3_bucket_val"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  readOnly={isReadOnly}
+                  onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                  onBlur={(e) => { e.currentTarget.readOnly = true; }}
                   value={settings.supabase.bucket}
                   onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, bucket: e.target.value } }))}
                   placeholder="recipes"
-                  className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                  className="w-full px-3 py-2.5 rounded-xl border outline-none font-mono"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
             </div>
 
-            {/* ACCESS KEY ID & SECRET KEY */}
+            {/* ACCESS KEY ID & SECRET KEY (COMPLETELY SHIELDED FROM AUTOFILL) */}
             <div className="space-y-4 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               <div>
                 <label className="block font-bold mb-1">Access Key ID</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
+                    id="cfg_s3_ident"
+                    name="cfg_s3_ident"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck="false"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly={isReadOnly}
+                    onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; }}
                     value={settings.supabase.accessKeyId}
                     onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, accessKeyId: e.target.value } }))}
                     placeholder="f3e0affef5c74972a535153349eb24cc"
@@ -504,19 +607,38 @@ export default function AdminStorageSettingsPage() {
                 <label className="block font-bold mb-1">Secret Access Key</label>
                 <div className="relative flex items-center">
                   <input
-                    type={showSecretKey ? 'text' : 'password'}
+                    type="text"
+                    id="cfg_s3_token"
+                    name="cfg_s3_token"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck="false"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
+                    role="presentation"
+                    readOnly={isReadOnly}
+                    onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                    onBlur={(e) => { e.currentTarget.readOnly = true; }}
                     value={settings.supabase.secretAccessKey}
                     onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, secretAccessKey: e.target.value } }))}
                     placeholder="Enter Secret Key generated from Supabase S3 Access Keys"
                     className="w-full px-3 py-2.5 pr-10 rounded-xl border outline-none font-mono"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                    style={{ 
+                      backgroundColor: 'var(--color-inner-dark)', 
+                      borderColor: 'var(--color-border)', 
+                      color: 'var(--color-text)',
+                      WebkitTextSecurity: showSecretKey ? 'none' : 'disc'
+                    }}
                   />
                   <button
                     type="button"
                     onClick={() => setShowSecretKey(!showSecretKey)}
                     className="absolute right-3 p-1 cursor-pointer transition"
                     style={{ color: 'var(--color-text-secondary)' }}
+                    title={showSecretKey ? "Hide Secret Key" : "Show Secret Key"}
                   >
                     {showSecretKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
@@ -528,11 +650,23 @@ export default function AdminStorageSettingsPage() {
                 <label className="block font-bold mb-1">Public CDN / URL Prefix</label>
                 <input
                   type="text"
+                  id="cfg_s3_public_cdn"
+                  name="cfg_s3_public_cdn"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
+                  readOnly={isReadOnly}
+                  onFocus={(e) => { e.currentTarget.readOnly = false; }}
+                  onBlur={(e) => { e.currentTarget.readOnly = true; }}
                   value={settings.supabase.publicUrl}
                   onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, publicUrl: e.target.value } }))}
                   placeholder="https://<project-ref>.supabase.co/storage/v1/object/public/recipes"
-                  className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                  className="w-full px-3 py-2.5 rounded-xl border outline-none font-mono"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
                 <p className="text-[11px] pt-1" style={{ color: 'var(--color-text-secondary)' }}>
@@ -617,10 +751,11 @@ export default function AdminStorageSettingsPage() {
               <input
                 type="text"
                 data-lpignore="true"
+                autoComplete="off"
                 value={settings.localhost.uploadDir}
                 onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, uploadDir: e.target.value } }))}
                 placeholder="apps/web/public/recipes/images"
-                className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                className="w-full px-3 py-2.5 rounded-xl border outline-none font-mono"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               />
               <p className="text-[11px] pt-1" style={{ color: 'var(--color-text-secondary)' }}>Relative path where binary images are saved.</p>
@@ -631,10 +766,11 @@ export default function AdminStorageSettingsPage() {
               <input
                 type="text"
                 data-lpignore="true"
+                autoComplete="off"
                 value={settings.localhost.recipesJsonDir}
                 onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, recipesJsonDir: e.target.value } }))}
                 placeholder="apps/web/public/recipes"
-                className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                className="w-full px-3 py-2.5 rounded-xl border outline-none font-mono"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               />
               <p className="text-[11px] pt-1" style={{ color: 'var(--color-text-secondary)' }}>Relative path where individual recipe JSON records are saved.</p>
@@ -645,10 +781,11 @@ export default function AdminStorageSettingsPage() {
               <input
                 type="text"
                 data-lpignore="true"
+                autoComplete="off"
                 value={settings.localhost.publicPrefix}
                 onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, publicPrefix: e.target.value } }))}
                 placeholder="/recipes/images"
-                className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                className="w-full px-3 py-2.5 rounded-xl border outline-none font-mono"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               />
             </div>
@@ -661,9 +798,10 @@ export default function AdminStorageSettingsPage() {
                   min="1"
                   max="100"
                   data-lpignore="true"
+                  autoComplete="off"
                   value={settings.localhost.maxSizeMb}
                   onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, maxSizeMb: Number(e.target.value) || 10 } }))}
-                  className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                  className="w-full px-3 py-2.5 rounded-xl border outline-none font-mono"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
@@ -673,9 +811,10 @@ export default function AdminStorageSettingsPage() {
                 <input
                   type="text"
                   data-lpignore="true"
+                  autoComplete="off"
                   value={settings.localhost.allowedTypes}
                   onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, allowedTypes: e.target.value } }))}
-                  className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                  className="w-full px-3 py-2.5 rounded-xl border outline-none font-mono"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>

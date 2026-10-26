@@ -32,19 +32,20 @@
   "instructions": [
     "Pat chicken thighs completely dry and season with salt.",
     "Sear skin-side down over medium heat for 12 minutes until deeply crisp.",
-    "Flip, add garlic and rosemary, and roast until internal temp reaches 165°F."
+    "Flip, add garlic and rosemary, and roast until internal temp reaches 165\u00b0F."
   ],
   "nutrition": {},
   "tags": [
     "Main Dish"
   ],
-  "image": "https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=800&q=80",
-  "imageUrl": "https://images.unsplash.com/photo-1598515214211-89d3c73ae83b?auto=format&fit=crop&w=800&q=80",
+  "image": "/recipes/images/rec_crispy_chicken_thighs.jpg",
+  "imageUrl": "/recipes/images/rec_crispy_chicken_thighs.jpg",
   "sourceUrl": "https://recipetineats.com",
   "isFavorite": true,
   "isCooked": false,
   "rating": 5,
   "bookId": null,
   "createdAt": "2026-10-25T17:11:30.942Z",
-  "updatedAt": "2026-10-25T18:53:22.969Z"
+  "updatedAt": "2026-10-25T18:53:22.969Z",
+  "image_url": "/recipes/images/rec_crispy_chicken_thighs.jpg"
 }

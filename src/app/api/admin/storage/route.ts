@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getStorageSettings, saveStorageSettings, getUniversalDiskDiagnostics, DEFAULT_STORAGE_CONFIG } from '@/lib/storageService';
+import { 
+  getStorageSettings, 
+  saveStorageSettings, 
+  getUniversalDiskDiagnostics, 
+  cleanOrphanRecipeImages,
+  DEFAULT_STORAGE_CONFIG 
+} from '@/lib/storageService';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -24,6 +30,18 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+
+    if (body.action === 'clean_orphans') {
+      const cleanResult = cleanOrphanRecipeImages();
+      const diskStats = getUniversalDiskDiagnostics();
+      return NextResponse.json({
+        success: true,
+        message: `Successfully cleaned up ${cleanResult.removedCount} orphan images. ${cleanResult.remainingCount} active images remaining.`,
+        diskStats,
+        cleanResult
+      });
+    }
+
     const updated = await saveStorageSettings(body);
     const diskStats = getUniversalDiskDiagnostics();
     return NextResponse.json({

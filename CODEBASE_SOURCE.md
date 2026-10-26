@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.39",
+  "version": "8.1.40",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.39",
+  "version": "8.1.40",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -25925,7 +25925,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { 
   HardDrive, Cloud, Server, Check, AlertCircle, Save, 
-  Wifi, Copy, Eye, EyeOff, FolderCheck, Folder, ArrowLeft, RefreshCw, FileJson, Image as ImageIcon
+  Wifi, Copy, Eye, EyeOff, FolderCheck, ArrowLeft, RefreshCw, FileJson, Image as ImageIcon
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -25967,9 +25967,9 @@ const SUPABASE_RECOMMENDED = {
 };
 
 const LOCALHOST_RECOMMENDED = {
-  uploadDir: 'public/recipes/images',
+  uploadDir: 'apps/web/public/recipes/images',
   publicPrefix: '/recipes/images',
-  recipesJsonDir: 'public/recipes',
+  recipesJsonDir: 'apps/web/public/recipes',
   maxSizeMb: 10,
   allowedTypes: 'image/jpeg, image/png, image/webp, image/gif, image/avif',
 };
@@ -26111,7 +26111,7 @@ export default function AdminStorageSettingsPage() {
     return (
       <div className="py-20 text-center space-y-3">
         <div className="animate-spin h-8 w-8 rounded-full border-2 border-t-transparent mx-auto" style={{ borderColor: 'var(--color-primary)' }} />
-        <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Loading universal storage settings...</p>
+        <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Loading storage settings...</p>
       </div>
     );
   }
@@ -26137,7 +26137,7 @@ export default function AdminStorageSettingsPage() {
             <span>{t('storageSettingsTitle', 'Storage & Media Configuration')}</span>
           </h1>
           <p className="text-xs sm:text-sm pt-1" style={{ color: 'var(--color-text-secondary)' }}>
-            {t('storageSubtitle', 'Configure where recipe JSON files (/recipes) and image binaries (/recipes/images or Supabase) are ingested and stored.')}
+            {t('storageSubtitle', 'Configure where recipe JSON files (apps/web/public/recipes) and image binaries are ingested and stored.')}
           </p>
         </div>
 
@@ -26186,7 +26186,7 @@ export default function AdminStorageSettingsPage() {
                 color: 'var(--color-emerald)'
               }}
             >
-              Live Sync
+              apps/web Live Sync
             </span>
           </div>
 
@@ -26199,7 +26199,7 @@ export default function AdminStorageSettingsPage() {
                 <FileJson className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
                 <div>
                   <div className="font-bold">Recipe JSON Directory</div>
-                  <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>/recipes (*.json)</div>
+                  <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>apps/web/public/recipes (*.json)</div>
                 </div>
               </div>
               <div className="text-right">
@@ -26218,7 +26218,7 @@ export default function AdminStorageSettingsPage() {
                 <ImageIcon className="h-5 w-5" style={{ color: 'var(--color-emerald)' }} />
                 <div>
                   <div className="font-bold">Recipe Image Directory</div>
-                  <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>/recipes/images</div>
+                  <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>apps/web/public/recipes/images</div>
                 </div>
               </div>
               <div className="text-right">
@@ -26260,9 +26260,9 @@ export default function AdminStorageSettingsPage() {
               </span>
             </div>
             <div>
-              <h3 className="font-extrabold text-base">Localhost (/recipes/images)</h3>
+              <h3 className="font-extrabold text-base">Localhost (apps/web/public/recipes/images)</h3>
               <p className="text-xs pt-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                Stores images directly inside <code className="px-1.5 py-0.5 rounded bg-black/40">public/recipes/images</code> on your server filesystem with instantaneous streaming.
+                Stores images directly inside <code className="px-1.5 py-0.5 rounded bg-black/40">apps/web/public/recipes/images</code> with instantaneous static delivery.
               </p>
             </div>
           </div>
@@ -26291,7 +26291,7 @@ export default function AdminStorageSettingsPage() {
             <div>
               <h3 className="font-extrabold text-base">Supabase Storage (S3 Protocol)</h3>
               <p className="text-xs pt-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                Offloads images directly to your Supabase S3 bucket (<code className="px-1.5 py-0.5 rounded bg-black/40">recipes</code>). Ideal for cloud deployments to keep server disk lightweight.
+                Offloads images directly to your Supabase S3 bucket (<code className="px-1.5 py-0.5 rounded bg-black/40">recipes</code>). Keeps server disk lightweight.
               </p>
             </div>
           </div>
@@ -26315,7 +26315,7 @@ export default function AdminStorageSettingsPage() {
                 <span>Supabase S3 Configuration</span>
               </h2>
               <p className="text-xs pt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                Connect to your bucket using Supabase Storage via the S3 protocol. All recipe JSON records will still be saved to /recipes.
+                Connect to your bucket using Supabase Storage via the S3 protocol. All recipe JSON records are saved to apps/web/public/recipes.
               </p>
             </div>
 
@@ -26518,7 +26518,7 @@ export default function AdminStorageSettingsPage() {
                 <span>Localhost Server Disk Configuration</span>
               </h2>
               <p className="text-xs pt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                Store uploaded and scraped images directly inside your server public directory (/recipes/images).
+                Store uploaded and scraped images directly inside apps/web/public/recipes/images.
               </p>
             </div>
 
@@ -26540,7 +26540,7 @@ export default function AdminStorageSettingsPage() {
                 data-lpignore="true"
                 value={settings.localhost.uploadDir}
                 onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, uploadDir: e.target.value } }))}
-                placeholder="public/recipes/images"
+                placeholder="apps/web/public/recipes/images"
                 className="w-full px-3 py-2.5 rounded-xl border outline-none"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               />
@@ -26554,7 +26554,7 @@ export default function AdminStorageSettingsPage() {
                 data-lpignore="true"
                 value={settings.localhost.recipesJsonDir}
                 onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, recipesJsonDir: e.target.value } }))}
-                placeholder="public/recipes"
+                placeholder="apps/web/public/recipes"
                 className="w-full px-3 py-2.5 rounded-xl border outline-none"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               />
@@ -37243,7 +37243,7 @@ import {
   Grid3X3, Rows3, Globe, Lock, FileJson, Sparkles, Download
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
-import { syncUserSavedRecipes, persistSavedRecipe, deleteSavedRecipe } from '@/lib/recipeSync';
+import { persistSavedRecipe, deleteSavedRecipe } from '@/lib/recipeSync';
 import { getStoredCategories } from '@/lib/categories';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -37286,7 +37286,7 @@ const GRID_CONFIG: Record<GridMode, { colsClass: string; perPage: number; label:
 
 const isRecipeInBook = (rec: any, bookId: string): boolean => {
   if (!rec || !bookId) return false;
-  return rec.bookId === bookId || rec.book_id === bookId;
+  return Boolean(rec.bookId === bookId || rec.book_id === bookId);
 };
 
 export default function RecipesPage() {
@@ -37327,7 +37327,7 @@ export default function RecipesPage() {
   const [planTime, setPlanTime] = useState('19:00');
   const [planNotes, setPlanNotes] = useState('');
 
-  // Edit Mode & Form State
+  // Edit Mode & Form State (Includes isPublic Slide-Toggle)
   const [isEditing, setIsEditing] = useState(false);
   const [editTab, setEditTab] = useState<'info' | 'ingredients' | 'steps'>('info');
   const [editForm, setEditForm] = useState<any>({
@@ -37339,6 +37339,7 @@ export default function RecipesPage() {
     prepTimeMinutes: 30,
     cookTimeMinutes: 10,
     imageUrl: '',
+    isPublic: false,
     ingredients: [],
     instructions: []
   });
@@ -37382,7 +37383,7 @@ export default function RecipesPage() {
     return 'Main Dish';
   };
 
-  const getSafeHostname = (urlStr: string) => {
+  const getSafeHostname = (urlStr?: string | null): string => {
     if (!urlStr || typeof urlStr !== 'string') return 'source website';
     try {
       const normalized = urlStr.startsWith('http://') || urlStr.startsWith('https://') 
@@ -37394,24 +37395,24 @@ export default function RecipesPage() {
     }
   };
 
-  const getSafeHref = (urlStr: string) => {
-    if (!urlStr) return '#';
+  const getSafeHref = (urlStr?: string | null): string => {
+    if (!urlStr || typeof urlStr !== 'string') return '#';
     if (urlStr.startsWith('http://') || urlStr.startsWith('https://')) return urlStr;
     return `https://${urlStr}`;
   };
 
+  // Type-Safe Ownership Evaluation (Resolves TS2322)
   const isOwner = (rec: any): boolean => {
     if (!currentUser) return true;
     const uid = currentUser.id || 'usr_admin_1';
     const email = currentUser.email || '';
-    return (
-      rec.userId === uid ||
-      rec.user_id === uid ||
-      rec.ownerId === uid ||
-      rec.createdBy === uid ||
-      rec.createdBy === email ||
-      rec.created_by === email ||
-      rec.creatorEmail === email
+    const rUid = rec.userId || rec.user_id || rec.ownerId || rec.ownership?.userId;
+    const rEmail = rec.createdBy || rec.created_by || rec.creatorEmail || rec.ownerEmail || rec.ownership?.creatorEmail;
+
+    return Boolean(
+      rUid === uid ||
+      rEmail === uid ||
+      (Boolean(email) && (rUid === email || rEmail === email))
     );
   };
 
@@ -37423,9 +37424,12 @@ export default function RecipesPage() {
     try {
       setLoading(true);
       const queryParams = new URLSearchParams();
-      queryParams.set('userId', targetUserId);
-      if (targetEmail) queryParams.set('email', targetEmail);
-      if (tab === 'marketplace') queryParams.set('marketplace', 'true');
+      if (tab === 'marketplace') {
+        queryParams.set('marketplace', 'true');
+      } else {
+        queryParams.set('userId', targetUserId);
+        if (targetEmail) queryParams.set('email', targetEmail);
+      }
       queryParams.set('t', String(Date.now()));
 
       const res = await fetch(`/api/recipes/saved?${queryParams.toString()}`, { cache: 'no-store' });
@@ -37449,7 +37453,7 @@ export default function RecipesPage() {
           is_favorite: Boolean(r.is_favorite || r.isFavorite),
           isCooked: Boolean(r.is_cooked || r.isCooked),
           is_cooked: Boolean(r.is_cooked || r.isCooked),
-          rating: Number(r.rating) || 0,
+          rating: Number(r.rating) || 5,
           note: r.note || '',
           sourceUrl: r.source_url || r.sourceUrl || '',
           source_url: r.source_url || r.sourceUrl || '',
@@ -37469,14 +37473,6 @@ export default function RecipesPage() {
           if (Array.isArray(bData.books) && bData.books.length > 0) parsedBooks = bData.books;
         }
       } catch (_) {}
-
-      const localBooks = localStorage.getItem('zecratary_recipe_books') || localStorage.getItem('zecratary_cookbooks');
-      if (localBooks) {
-        try {
-          const parsed = JSON.parse(localBooks);
-          if (Array.isArray(parsed) && parsed.length > 0) parsedBooks = parsed;
-        } catch (_) {}
-      }
 
       setBooks(parsedBooks.map((b: any) => ({
         ...b,
@@ -37505,7 +37501,7 @@ export default function RecipesPage() {
   }, [applyGlobalTheme]);
 
   useEffect(() => {
-    document.title = `${t('savedRecipesTitle') || 'Saved Recipes'} - FoodiePrep`;
+    document.title = `${t('savedRecipesTitle') || 'Recipes'} - FoodiePrep`;
     initAuthStorage();
     const user = getCurrentUser();
     if (!user) {
@@ -37556,7 +37552,7 @@ export default function RecipesPage() {
       is_favorite: Boolean(r.isFavorite ?? r.is_favorite),
       isCooked: Boolean(r.isCooked ?? r.is_cooked),
       is_cooked: Boolean(r.isCooked ?? r.is_cooked),
-      rating: Number(r.rating) || 0,
+      rating: Number(r.rating) || 5,
       note: r.note || '',
       sourceUrl: r.sourceUrl || r.source_url || '',
       source_url: r.sourceUrl || r.source_url || ''
@@ -37571,20 +37567,14 @@ export default function RecipesPage() {
     }).catch((err) => {
       console.error('[RecipesPage] Error saving recipes:', err);
     });
-
-    const updatedBooks = books.map((b: any) => ({
-      ...b,
-      recipeCount: updatedWithId.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
-    }));
-    setBooks(updatedBooks);
   };
 
-  // Toggle Public / Private Sharing (Marketplace)
+  // Interactive Slide-Toggle for Public Marketplace
   const handleTogglePublic = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     const target = recipes.find(r => r.id === id);
     if (!target) return;
-    const newPub = !(target.isPublic || target.is_public);
+    const newPub = !Boolean(target.isPublic || target.is_public);
 
     const updated = recipes.map(r => r.id === id ? { ...r, isPublic: newPub, is_public: newPub } : r);
     setRecipes(updated);
@@ -37600,7 +37590,6 @@ export default function RecipesPage() {
         body: JSON.stringify({ id, isPublic: newPub, is_public: newPub })
       });
       window.dispatchEvent(new Event('zecratary_recipes_updated'));
-      alert(newPub ? '🌐 Recipe is now Public on Marketplace!' : '🔒 Recipe set to Private.');
     } catch (_) {}
   };
 
@@ -37644,7 +37633,7 @@ export default function RecipesPage() {
       sourceUrl: recipe.sourceUrl || recipe.source_url || '',
       isFavorite: Boolean(recipe.isFavorite ?? recipe.is_favorite),
       isCooked: Boolean(recipe.isCooked ?? recipe.is_cooked),
-      rating: Number(recipe.rating) || 0,
+      rating: Number(recipe.rating) || 5,
       note: recipe.note || '',
       tags: recipe.tags || []
     };
@@ -37687,7 +37676,7 @@ export default function RecipesPage() {
         body: JSON.stringify([cloned])
       });
       window.dispatchEvent(new Event('zecratary_recipes_updated'));
-      alert(`"${recipe.title}" copied to your Saved Recipes!`);
+      alert(`"${recipe.title}" copied to your Recipes!`);
     } catch (_) {}
   };
 
@@ -37937,6 +37926,7 @@ export default function RecipesPage() {
     setDraggedIndex(null);
   };
 
+  // Open Edit Mode
   const handleOpenEdit = () => {
     if (!selectedRecipe) return;
     const defaultCat = categories[0] || 'Produce';
@@ -37957,6 +37947,7 @@ export default function RecipesPage() {
       prepTimeMinutes: selectedRecipe.prepTimeMinutes || 30,
       cookTimeMinutes: selectedRecipe.cookTimeMinutes || 10,
       imageUrl: selectedRecipe.imageUrl || selectedRecipe.image || '',
+      isPublic: Boolean(selectedRecipe.isPublic ?? selectedRecipe.is_public ?? false),
       ingredients: rawIngredients.length > 0
         ? rawIngredients.map((ing: any) => ({
             amount: typeof ing === 'string' ? '' : ing.amount || ing.quantity || '',
@@ -37975,6 +37966,7 @@ export default function RecipesPage() {
     setIsEditing(true);
   };
 
+  // Save Edit Mode Changes
   const handleSaveEdit = () => {
     if (!editForm.title.trim()) {
       alert(t('enterRecipeTitleAlert') || 'Please enter a recipe title.');
@@ -37990,6 +37982,8 @@ export default function RecipesPage() {
       userId: currentUser?.id || selectedRecipe.userId || 'usr_admin_1',
       recipeType: cleanType,
       category: cleanType,
+      isPublic: Boolean(editForm.isPublic),
+      is_public: Boolean(editForm.isPublic),
       tags: [cleanType]
     };
 
@@ -38177,6 +38171,9 @@ export default function RecipesPage() {
       // Tab filtering
       if (activeTab === 'marketplace') {
         if (!(r.isPublic || r.is_public)) return false;
+      } else {
+        // In personal tab, only display recipes owned by current user
+        if (!isOwner(r)) return false;
       }
 
       if (filterFavorites && !r.isFavorite) return false;
@@ -38204,7 +38201,7 @@ export default function RecipesPage() {
 
       if (selectedRating !== 'All Ratings') {
         const minRating = parseInt(selectedRating);
-        if ((r.rating || 0) < minRating) return false;
+        if ((r.rating || 5) < minRating) return false;
       }
 
       if (selectedPrepTime !== 'All Prep Times') {
@@ -38250,7 +38247,7 @@ export default function RecipesPage() {
       <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
         <div>
           <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
-            {t('savedRecipesTitle') || 'Saved Recipes'}
+            {t('savedRecipesTitle') || 'Recipes'}
           </h1>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             {(t('savedRecipesSubtitle') || 'Your collection of recipes ({count})').replace('{count}', String(recipes.length))}
@@ -38641,7 +38638,7 @@ export default function RecipesPage() {
       {/* Grid */}
       {loading ? (
         <div className="text-xs py-12 text-center" style={{ color: 'var(--color-text-secondary)' }}>
-          {t('loadingRecipes') || 'Loading recipes...'}
+          {t('loadingRecipes') || 'Loading recipes from dedicated JSON files...'}
         </div>
       ) : paginatedRecipes.length === 0 ? (
         <div 
@@ -38655,7 +38652,7 @@ export default function RecipesPage() {
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             {activeTab === 'marketplace'
               ? 'Share your delicious creations to Marketplace so other home chefs can discover them!'
-              : 'Try importing or creating new recipes to build your flat file and database collection.'}
+              : 'Try importing or creating new recipes to build your flat file collection.'}
           </p>
         </div>
       ) : (
@@ -38692,23 +38689,36 @@ export default function RecipesPage() {
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                     />
                     
-                    {/* Card Action Badges: Public / Cooked / Favorite */}
+                    {/* Top Overlay: Slide-Toggle Switch & Card Action Buttons */}
                     <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
-                      {/* Marketplace Visibility Toggle (If Owner) */}
+                      {/* INTERACTIVE SLIDE-TOGGLE BUTTON FOR PUBLIC MARKETPLACE */}
                       {userOwns && (
-                        <button
-                          type="button"
-                          onClick={(e) => handleTogglePublic(e, r.id)}
-                          className="p-1.5 rounded-full backdrop-blur-md transition shadow-md cursor-pointer border"
+                        <div 
+                          className="flex items-center gap-1.5 px-2 py-1 rounded-full backdrop-blur-md border shadow-md"
                           style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: isPub ? 'var(--color-emerald)' : 'var(--color-border)',
-                            color: isPub ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
+                            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                            borderColor: isPub ? 'var(--color-emerald)' : 'rgba(255, 255, 255, 0.2)'
                           }}
-                          title={isPub ? 'Public on Marketplace (Click to Make Private)' : 'Private (Click to Share on Marketplace)'}
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          {isPub ? <Globe className="h-3.5 w-3.5 stroke-[2.5]" /> : <Lock className="h-3.5 w-3.5" />}
-                        </button>
+                          {isPub ? <Globe className="h-3 w-3 text-emerald-400" /> : <Lock className="h-3 w-3 text-slate-300" />}
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={isPub}
+                            onClick={(e) => handleTogglePublic(e, r.id)}
+                            className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-in-out ${
+                              isPub ? 'bg-emerald-500' : 'bg-slate-600'
+                            }`}
+                            title={isPub ? "Public on Marketplace (Click to Make Private)" : "Private (Click to Share on Marketplace)"}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition duration-200 ease-in-out ${
+                                isPub ? 'translate-x-3.5' : 'translate-x-0.5'
+                              }`}
+                            />
+                          </button>
+                        </div>
                       )}
 
                       <button
@@ -38996,20 +39006,48 @@ export default function RecipesPage() {
                           {recipeCategoryBadge}
                         </span>
 
-                        <span 
-                          className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 backdrop-blur-md"
-                          style={{
-                            backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                            borderColor: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : 'rgba(255,255,255,0.2)',
-                            color: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : '#ffffff'
-                          }}
-                        >
-                          {(selectedRecipe.isPublic || selectedRecipe.is_public) ? (
-                            <><Globe className="h-3 w-3" /> Public on Marketplace</>
-                          ) : (
-                            <><Lock className="h-3 w-3" /> Private (Only You)</>
-                          )}
-                        </span>
+                        {/* SLIDE-TOGGLE ON RECIPE DETAIL MODAL (VIEW MODE) */}
+                        {isOwner(selectedRecipe) ? (
+                          <div 
+                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full backdrop-blur-md border shadow-sm"
+                            style={{
+                              backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                              borderColor: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : 'rgba(255, 255, 255, 0.2)'
+                            }}
+                          >
+                            {(selectedRecipe.isPublic || selectedRecipe.is_public) ? <Globe className="h-3.5 w-3.5 text-emerald-400" /> : <Lock className="h-3.5 w-3.5 text-slate-300" />}
+                            <span className="text-[11px] font-bold text-white">
+                              {(selectedRecipe.isPublic || selectedRecipe.is_public) ? 'Marketplace' : 'Private'}
+                            </span>
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={Boolean(selectedRecipe.isPublic || selectedRecipe.is_public)}
+                              onClick={(e) => handleTogglePublic(e, selectedRecipe.id)}
+                              className={`relative inline-flex h-4 w-8 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-in-out ${
+                                (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'bg-emerald-500' : 'bg-slate-600'
+                              }`}
+                              title={(selectedRecipe.isPublic || selectedRecipe.is_public) ? "Public on Marketplace (Click to Make Private)" : "Private (Click to Share on Marketplace)"}
+                            >
+                              <span
+                                className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition duration-200 ease-in-out ${
+                                  (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'translate-x-4' : 'translate-x-0.5'
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        ) : (
+                          <span 
+                            className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 backdrop-blur-md"
+                            style={{
+                              backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                              borderColor: 'var(--color-emerald)',
+                              color: 'var(--color-emerald)'
+                            }}
+                          >
+                            <Globe className="h-3 w-3" /> Public on Marketplace
+                          </span>
+                        )}
                       </div>
 
                       <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
@@ -39023,21 +39061,6 @@ export default function RecipesPage() {
                         <span className="border text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/60 border-white/20">
                           <Clock className="h-3.5 w-3.5"/> {(t('prepTimePrefix') || 'Prep: {time} minutes').replace('{time}', String(selectedRecipe.prepTimeMinutes || 30))}
                         </span>
-
-                        {isOwner(selectedRecipe) && (
-                          <button
-                            type="button"
-                            onClick={(e) => handleTogglePublic(e, selectedRecipe.id)}
-                            className="px-3 py-1.5 rounded-full border font-bold text-xs transition flex items-center gap-1 cursor-pointer bg-black/60"
-                            style={{
-                              borderColor: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : 'rgba(255,255,255,0.3)',
-                              color: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : '#ffffff'
-                            }}
-                          >
-                            {(selectedRecipe.isPublic || selectedRecipe.is_public) ? <Globe className="h-3.5 w-3.5"/> : <Lock className="h-3.5 w-3.5"/>}
-                            <span>{(selectedRecipe.isPublic || selectedRecipe.is_public) ? 'Marketplace (Public)' : 'Make Public'}</span>
-                          </button>
-                        )}
                         
                         <button
                           type="button"
@@ -39290,8 +39313,8 @@ export default function RecipesPage() {
                             onClick={() => updateSelectedRecipeState('rating', star)}
                             className="h-5 w-5 cursor-pointer transition"
                             style={{
-                              color: (selectedRecipe.rating || 0) >= star ? 'var(--color-primary)' : 'var(--color-border)',
-                              fill: (selectedRecipe.rating || 0) >= star ? 'var(--color-primary)' : 'transparent'
+                              color: (selectedRecipe.rating || 5) >= star ? 'var(--color-primary)' : 'var(--color-border)',
+                              fill: (selectedRecipe.rating || 5) >= star ? 'var(--color-primary)' : 'transparent'
                             }}
                           />
                         ))}
@@ -39486,7 +39509,6 @@ export default function RecipesPage() {
                   {/* MODAL FOOTER */}
                   <div className="px-5 flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
                     <div className="flex items-center gap-2">
-                      {/* Green Export JSON Button */}
                       <button
                         type="button"
                         onClick={() => handleExportJson(selectedRecipe)}
@@ -39553,7 +39575,7 @@ export default function RecipesPage() {
                   </div>
                 </div>
               ) : (
-                /* EDIT RECIPE VIEW */
+                /* EDIT RECIPE VIEW (WITH SLIDE-TOGGLE SWITCH) */
                 <div className="p-6 space-y-6">
                   <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
                     <h3 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
@@ -39600,9 +39622,44 @@ export default function RecipesPage() {
                     ))}
                   </div>
 
-                  {/* TAB 1: BASIC INFO */}
+                  {/* TAB 1: BASIC INFO (WITH SLIDE-TOGGLE) */}
                   {editTab === 'info' && (
                     <div className="space-y-5 animate-in fade-in text-xs" data-lpignore="true">
+                      {/* SLIDE-TOGGLE SWITCH ROW FOR PUBLIC MARKETPLACE */}
+                      <div 
+                        className="flex items-center justify-between p-3.5 rounded-2xl border transition-colors shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: editForm.isPublic ? 'var(--color-emerald)' : 'var(--color-border)'
+                        }}
+                      >
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2 font-bold text-xs" style={{ color: 'var(--color-text)' }}>
+                            {editForm.isPublic ? <Globe className="h-4 w-4 text-emerald-400" /> : <Lock className="h-4 w-4 text-slate-400" />}
+                            <span>Show Recipe on Public Marketplace</span>
+                          </div>
+                          <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+                            When enabled, this recipe appears on Marketplace for other home chefs to discover.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={Boolean(editForm.isPublic)}
+                          onClick={() => setEditForm({ ...editForm, isPublic: !editForm.isPublic })}
+                          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
+                            editForm.isPublic ? 'bg-emerald-500' : 'bg-slate-700/70'
+                          }`}
+                          title={editForm.isPublic ? "Disable for Public" : "Enable for Public"}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out ${
+                              editForm.isPublic ? 'translate-x-5' : 'translate-x-0'
+                            }`}
+                          />
+                        </button>
+                      </div>
+
                       <div className="space-y-1.5">
                         <label 
                           className="block font-bold uppercase tracking-wider text-[11px]"
@@ -40445,31 +40502,40 @@ export default function RecipesPage() {
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { getRecipeJsonDir } from '@/lib/recipeFiles';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ filename: string }> }) {
+export async function GET(
+  req: NextRequest,
+  context: { params: Promise<{ filename: string }> }
+) {
   try {
-    const { filename } = await params;
+    const { filename } = await context.params;
     const safeName = path.basename(filename);
-    const searchDirs = [
-      path.join(process.cwd(), 'recipes', safeName),
-      path.join(process.cwd(), 'public', 'recipes', safeName),
-      path.join(process.cwd(), 'apps', 'web', 'recipes', safeName),
-      path.join(process.cwd(), 'apps', 'web', 'public', 'recipes', safeName)
-    ];
+    const primaryPath = path.join(getRecipeJsonDir(), safeName);
 
-    for (const filePath of searchDirs) {
-      if (fs.existsSync(filePath)) {
-        const data = fs.readFileSync(filePath, 'utf-8');
-        return new NextResponse(data, {
-          headers: {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'public, max-age=30, stale-while-revalidate=120'
-          }
-        });
-      }
+    if (fs.existsSync(primaryPath)) {
+      const data = fs.readFileSync(primaryPath, 'utf-8');
+      return new NextResponse(data, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'public, max-age=60, stale-while-revalidate=300'
+        }
+      });
     }
+
+    const fallbackPath = path.join(process.cwd(), 'public', 'recipes', safeName);
+    if (fs.existsSync(fallbackPath)) {
+      const data = fs.readFileSync(fallbackPath, 'utf-8');
+      return new NextResponse(data, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'public, max-age=60, stale-while-revalidate=300'
+        }
+      });
+    }
+
     return NextResponse.json({ error: 'Recipe JSON not found' }, { status: 404 });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
@@ -40483,36 +40549,41 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ file
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { getRecipeImageDir } from '@/lib/recipeFiles';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ filename: string }> }) {
+export async function GET(
+  req: NextRequest,
+  context: { params: Promise<{ filename: string }> }
+) {
   try {
-    const { filename } = await params;
+    const { filename } = await context.params;
     const safeName = path.basename(filename);
-    const searchDirs = [
-      path.join(process.cwd(), 'recipes', 'images', safeName),
-      path.join(process.cwd(), 'public', 'recipes', 'images', safeName),
-      path.join(process.cwd(), 'apps', 'web', 'recipes', 'images', safeName),
-      path.join(process.cwd(), 'apps', 'web', 'public', 'recipes', 'images', safeName)
-    ];
+    const primaryPath = path.join(getRecipeImageDir(), safeName);
 
-    for (const filePath of searchDirs) {
-      if (fs.existsSync(filePath)) {
-        const buffer = fs.readFileSync(filePath);
-        let contentType = 'image/jpeg';
-        if (safeName.endsWith('.png')) contentType = 'image/png';
-        else if (safeName.endsWith('.webp')) contentType = 'image/webp';
-        else if (safeName.endsWith('.svg')) contentType = 'image/svg+xml';
+    let foundPath = fs.existsSync(primaryPath) ? primaryPath : null;
 
-        return new NextResponse(buffer, {
-          headers: {
-            'Content-Type': contentType,
-            'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800'
-          }
-        });
-      }
+    if (!foundPath) {
+      const fallback = path.join(process.cwd(), 'public', 'recipes', 'images', safeName);
+      if (fs.existsSync(fallback)) foundPath = fallback;
     }
+
+    if (foundPath) {
+      const buffer = fs.readFileSync(foundPath);
+      let contentType = 'image/jpeg';
+      if (safeName.endsWith('.png')) contentType = 'image/png';
+      else if (safeName.endsWith('.webp')) contentType = 'image/webp';
+      else if (safeName.endsWith('.svg')) contentType = 'image/svg+xml';
+
+      return new NextResponse(buffer, {
+        headers: {
+          'Content-Type': contentType,
+          'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800'
+        }
+      });
+    }
+
     return NextResponse.json({ error: 'Image not found' }, { status: 404 });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
@@ -51548,141 +51619,46 @@ export async function DELETE(req: NextRequest) {
 ## File: `apps/web/src/app/api/recipes/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
 import {
   saveRecipeJsonFile,
-  saveRecipeImageLocally,
   loadAllRecipeJsonFiles,
-  updateRecipePublicVisibility,
   deleteRecipeJsonFile
 } from '@/lib/recipeFiles';
 
 export const dynamic = 'force-dynamic';
 
-async function ensureColumns() {
-  try {
-    await query(`
-      ALTER TABLE saved_recipes 
-      ADD COLUMN IF NOT EXISTS user_id TEXT,
-      ADD COLUMN IF NOT EXISTS created_by TEXT,
-      ADD COLUMN IF NOT EXISTS creator_name TEXT,
-      ADD COLUMN IF NOT EXISTS creator_email TEXT,
-      ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS rating NUMERIC DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '',
-      ADD COLUMN IF NOT EXISTS book_id TEXT,
-      ADD COLUMN IF NOT EXISTS source_url TEXT;
-
-      CREATE INDEX IF NOT EXISTS idx_saved_recipes_public ON saved_recipes(is_public);
-      CREATE INDEX IF NOT EXISTS idx_saved_recipes_user_owner ON saved_recipes(user_id, created_by);
-    `);
-  } catch (_) {}
-}
-
 export async function GET(req: NextRequest) {
   try {
-    await ensureColumns();
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId')?.trim();
     const email = searchParams.get('email')?.trim();
     const tab = searchParams.get('tab')?.trim();
     const isMarketplace = tab === 'marketplace' || searchParams.get('marketplace') === 'true';
 
-    let dbRows: any[] = [];
-    try {
-      let sql = 'SELECT * FROM saved_recipes';
-      const params: any[] = [];
-
-      if (isMarketplace) {
-        sql += ' WHERE is_public = TRUE';
-      } else if (userId || email) {
-        const conds: string[] = [];
-        if (userId) {
-          params.push(userId);
-          conds.push(`user_id = $${params.length} OR created_by = $${params.length}`);
-        }
-        if (email && email !== userId) {
-          params.push(email);
-          conds.push(`user_id = $${params.length} OR created_by = $${params.length}`);
-        }
-        sql += ` WHERE (${conds.join(' OR ')})`;
-      }
-
-      sql += ' ORDER BY created_at DESC';
-      dbRows = await query(sql, params);
-    } catch (_) {}
-
-    // Load recipes from disk JSON files in /recipes directory
+    // Single source of truth: Load all recipes directly from dedicated JSON files
     const diskRecipes = loadAllRecipeJsonFiles();
-    const recipeMap = new Map<string, any>();
 
-    // Index DB records
-    dbRows.forEach((r: any) => {
-      let ing = r.ingredients;
-      if (typeof ing === 'string') {
-        try { ing = JSON.parse(ing); } catch (_) { ing = []; }
-      }
-      let dir = r.directions || r.instructions;
-      if (typeof dir === 'string') {
-        try { dir = JSON.parse(dir); } catch (_) { dir = []; }
-      }
+    let filtered = diskRecipes;
 
-      const rec = {
-        ...r,
-        id: r.id,
-        userId: r.user_id || userId,
-        user_id: r.user_id || userId,
-        createdBy: r.created_by || r.user_id,
-        created_by: r.created_by || r.user_id,
-        creatorName: r.creator_name || 'Chef',
-        creatorEmail: r.creator_email || '',
-        ownerId: r.user_id || userId,
-        ownerName: r.creator_name || 'Chef',
-        ownerEmail: r.creator_email || '',
-        title: r.title || 'Untitled Recipe',
-        description: r.description || '',
-        recipeType: r.recipe_type || 'Main Dish',
-        category: r.recipe_type || 'Main Dish',
-        cuisine: r.cuisine || '',
-        prepTimeMinutes: Number(r.prep_time) || 15,
-        cookTimeMinutes: Number(r.cook_time) || 25,
-        servings: Number(r.servings) || 4,
-        difficulty: r.difficulty || 'Medium',
-        ingredients: Array.isArray(ing) ? ing : [],
-        instructions: Array.isArray(dir) ? dir : [],
-        directions: Array.isArray(dir) ? dir : [],
-        imageUrl: r.image_url || '/recipes/images/default.jpg',
-        image: r.image_url || '/recipes/images/default.jpg',
-        sourceUrl: r.source_url || '',
-        isPublic: Boolean(r.is_public),
-        is_public: Boolean(r.is_public),
-        isFavorite: Boolean(r.is_favorite),
-        isCooked: Boolean(r.is_cooked),
-        rating: Number(r.rating) || 0,
-        note: r.note || '',
-        bookId: r.book_id || null,
-        createdAt: r.created_at || new Date().toISOString()
-      };
-      recipeMap.set(r.id, rec);
-    });
-
-    // Merge disk JSON records from directory /recipes
-    diskRecipes.forEach(dr => {
-      if (isMarketplace && !dr.isPublic) return;
-      if (!isMarketplace && userId && dr.userId !== userId && dr.createdBy !== email && dr.createdBy !== userId) {
-        // If not marketplace, skip if belongs to another user
-        return;
-      }
-      if (!recipeMap.has(dr.id)) {
-        recipeMap.set(dr.id, dr);
-      }
-    });
+    if (isMarketplace) {
+      // Marketplace Tab: Show all recipes enabled for public
+      filtered = diskRecipes.filter(r => Boolean(r.isPublic || (r as any).is_public));
+    } else if (userId || email) {
+      // Personal Recipes Tab: Show recipes owned by the current user
+      filtered = diskRecipes.filter(r => {
+        const rUid = r.userId || (r as any).user_id || r.ownerId || r.ownership?.userId;
+        const rEmail = r.createdBy || (r as any).created_by || r.creatorEmail || r.ownerEmail || r.ownership?.creatorEmail;
+        return (
+          rUid === userId ||
+          rEmail === userId ||
+          (email && (rEmail === email || rUid === email))
+        );
+      });
+    }
 
     return NextResponse.json({
       success: true,
-      recipes: Array.from(recipeMap.values())
+      recipes: filtered
     }, {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
     });
@@ -51693,7 +51669,6 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureColumns();
     const body = await req.json();
     const items = Array.isArray(body) ? body : (body.recipes || [body.recipe || body]);
 
@@ -51705,10 +51680,6 @@ export async function POST(req: NextRequest) {
       const creatorEmail = (item.creatorEmail || item.creator_email || item.ownerEmail || '').trim();
       const id = item.id || `rcp_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
 
-      // 1. Save Image Locally to /recipes/images/
-      const localImage = await saveRecipeImageLocally(id, item.imageUrl || item.image || item.image_url);
-
-      // 2. Format and Save Standalone JSON file to directory /recipes/<id>.json
       const recipeRecord = {
         ...item,
         id,
@@ -51720,88 +51691,14 @@ export async function POST(req: NextRequest) {
         creator_name: creatorName,
         creatorEmail,
         creator_email: creatorEmail,
-        imageUrl: localImage,
-        image: localImage,
-        image_url: localImage,
-        isPublic: Boolean(item.isPublic ?? item.is_public)
+        isPublic: Boolean(item.isPublic ?? item.is_public ?? false)
       };
+
+      // Save to dedicated JSON file
       saveRecipeJsonFile(recipeRecord, { userId: targetUserId, createdBy, creatorName, creatorEmail });
-
-      // 3. Persist in Database (PostgreSQL & MySQL)
-      let ingredients = item.ingredients;
-      if (typeof ingredients === 'string') {
-        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = [ingredients]; }
-      }
-      if (!Array.isArray(ingredients)) ingredients = [];
-
-      let directions = item.instructions || item.directions;
-      if (typeof directions === 'string') {
-        try { directions = JSON.parse(directions); } catch (_) { directions = [directions]; }
-      }
-      if (!Array.isArray(directions)) directions = [];
-
-      await query(`
-        INSERT INTO saved_recipes (
-          id, user_id, created_by, creator_name, creator_email, title, description, recipe_type, cuisine, prep_time, cook_time,
-          servings, difficulty, ingredients, directions, image_url, is_public,
-          is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-          $11, $12, $13::jsonb, $14::jsonb, $15, $16,
-          $17, $18, $19, $20, $21, $22, NOW()
-        )
-        ON CONFLICT (id) DO UPDATE SET
-          user_id = EXCLUDED.user_id,
-          created_by = EXCLUDED.created_by,
-          creator_name = EXCLUDED.creator_name,
-          creator_email = EXCLUDED.creator_email,
-          title = EXCLUDED.title,
-          description = EXCLUDED.description,
-          recipe_type = EXCLUDED.recipe_type,
-          cuisine = EXCLUDED.cuisine,
-          prep_time = EXCLUDED.prep_time,
-          cook_time = EXCLUDED.cook_time,
-          servings = EXCLUDED.servings,
-          difficulty = EXCLUDED.difficulty,
-          ingredients = EXCLUDED.ingredients,
-          directions = EXCLUDED.directions,
-          image_url = EXCLUDED.image_url,
-          is_public = EXCLUDED.is_public,
-          is_favorite = EXCLUDED.is_favorite,
-          is_cooked = EXCLUDED.is_cooked,
-          rating = EXCLUDED.rating,
-          note = EXCLUDED.note,
-          book_id = EXCLUDED.book_id,
-          source_url = EXCLUDED.source_url,
-          updated_at = NOW();
-      `, [
-        id,
-        targetUserId,
-        createdBy,
-        creatorName,
-        creatorEmail,
-        item.title || item.name || 'Untitled Recipe',
-        item.description || '',
-        item.recipeType || item.category || 'Main Dish',
-        item.cuisine || '',
-        String(item.prepTimeMinutes || item.prepMinutes || 15),
-        String(item.cookTimeMinutes || item.cookMinutes || 25),
-        String(item.servings || 4),
-        item.difficulty || 'Medium',
-        JSON.stringify(ingredients),
-        JSON.stringify(directions),
-        localImage,
-        Boolean(item.isPublic ?? item.is_public),
-        Boolean(item.isFavorite ?? item.is_favorite),
-        Boolean(item.isCooked ?? item.is_cooked),
-        Number(item.rating) || 0,
-        item.note || '',
-        item.bookId || item.book_id || null,
-        item.sourceUrl || item.source_url || ''
-      ]);
     }
 
-    return NextResponse.json({ success: true, message: 'Saved to /recipes JSON file, /recipes/images, and Database.' });
+    return NextResponse.json({ success: true, message: 'Saved to dedicated recipe JSON files.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -51809,56 +51706,42 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    await ensureColumns();
     const body = await req.json();
     const { id, isPublic, is_public, isFavorite, is_favorite, isCooked, is_cooked, rating, note, bookId, book_id } = body;
 
     if (!id) return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
 
     const targetPublic = isPublic !== undefined ? isPublic : is_public;
-    if (targetPublic !== undefined) {
-      updateRecipePublicVisibility(id, Boolean(targetPublic));
+
+    // Load from dedicated JSON files
+    const diskRecipes = loadAllRecipeJsonFiles();
+    const target = diskRecipes.find(r => r.id === id);
+
+    if (target) {
+      if (targetPublic !== undefined) {
+        target.isPublic = Boolean(targetPublic);
+        target.visibility = targetPublic ? 'public' : 'private';
+      }
+      if (isFavorite !== undefined || is_favorite !== undefined) {
+        target.isFavorite = Boolean(isFavorite !== undefined ? isFavorite : is_favorite);
+      }
+      if (isCooked !== undefined || is_cooked !== undefined) {
+        target.isCooked = Boolean(isCooked !== undefined ? isCooked : is_cooked);
+      }
+      if (rating !== undefined) {
+        target.rating = Number(rating);
+      }
+      if (note !== undefined) {
+        target.note = String(note);
+      }
+      if (bookId !== undefined || book_id !== undefined) {
+        target.bookId = bookId !== undefined ? bookId : book_id;
+      }
+      target.updatedAt = new Date().toISOString();
+      saveRecipeJsonFile(target);
     }
 
-    const updates: string[] = [];
-    const params: any[] = [id];
-
-    if (targetPublic !== undefined) {
-      params.push(Boolean(targetPublic));
-      updates.push(`is_public = $${params.length}`);
-    }
-    if (isFavorite !== undefined || is_favorite !== undefined) {
-      params.push(Boolean(isFavorite !== undefined ? isFavorite : is_favorite));
-      updates.push(`is_favorite = $${params.length}`);
-    }
-    if (isCooked !== undefined || is_cooked !== undefined) {
-      params.push(Boolean(isCooked !== undefined ? isCooked : is_cooked));
-      updates.push(`is_cooked = $${params.length}`);
-    }
-    if (rating !== undefined) {
-      params.push(Number(rating));
-      updates.push(`rating = $${params.length}`);
-    }
-    if (note !== undefined) {
-      params.push(String(note));
-      updates.push(`note = $${params.length}`);
-    }
-    if (bookId !== undefined || book_id !== undefined) {
-      params.push(bookId !== undefined ? bookId : book_id);
-      updates.push(`book_id = $${params.length}`);
-    }
-
-    if (updates.length > 0) {
-      updates.push('updated_at = NOW()');
-      await query(`UPDATE saved_recipes SET ${updates.join(', ')} WHERE id = $1`, params);
-
-      try {
-        const rows = await query('SELECT * FROM saved_recipes WHERE id = $1', [id]);
-        if (rows.length > 0) saveRecipeJsonFile(rows[0]);
-      } catch (_) {}
-    }
-
-    return NextResponse.json({ success: true, message: 'Updated in Database and JSON file.' });
+    return NextResponse.json({ success: true, message: 'Updated in dedicated JSON file.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -51870,10 +51753,10 @@ export async function DELETE(req: NextRequest) {
     const id = searchParams.get('id');
     if (!id) return NextResponse.json({ success: false, error: 'Recipe ID required' }, { status: 400 });
 
-    await query('DELETE FROM saved_recipes WHERE id = $1', [id.trim()]);
+    // Delete dedicated JSON file from disk
     deleteRecipeJsonFile(id.trim());
 
-    return NextResponse.json({ success: true, message: 'Deleted from Database and /recipes JSON file.' });
+    return NextResponse.json({ success: true, message: 'Deleted from dedicated JSON files.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -51884,141 +51767,46 @@ export async function DELETE(req: NextRequest) {
 ## File: `apps/web/src/app/api/recipes/saved/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
 import {
   saveRecipeJsonFile,
-  saveRecipeImageLocally,
   loadAllRecipeJsonFiles,
-  updateRecipePublicVisibility,
   deleteRecipeJsonFile
 } from '@/lib/recipeFiles';
 
 export const dynamic = 'force-dynamic';
 
-async function ensureColumns() {
-  try {
-    await query(`
-      ALTER TABLE saved_recipes 
-      ADD COLUMN IF NOT EXISTS user_id TEXT,
-      ADD COLUMN IF NOT EXISTS created_by TEXT,
-      ADD COLUMN IF NOT EXISTS creator_name TEXT,
-      ADD COLUMN IF NOT EXISTS creator_email TEXT,
-      ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
-      ADD COLUMN IF NOT EXISTS rating NUMERIC DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS note TEXT DEFAULT '',
-      ADD COLUMN IF NOT EXISTS book_id TEXT,
-      ADD COLUMN IF NOT EXISTS source_url TEXT;
-
-      CREATE INDEX IF NOT EXISTS idx_saved_recipes_public ON saved_recipes(is_public);
-      CREATE INDEX IF NOT EXISTS idx_saved_recipes_user_owner ON saved_recipes(user_id, created_by);
-    `);
-  } catch (_) {}
-}
-
 export async function GET(req: NextRequest) {
   try {
-    await ensureColumns();
     const { searchParams } = new URL(req.url);
     const userId = searchParams.get('userId')?.trim();
     const email = searchParams.get('email')?.trim();
     const tab = searchParams.get('tab')?.trim();
     const isMarketplace = tab === 'marketplace' || searchParams.get('marketplace') === 'true';
 
-    let dbRows: any[] = [];
-    try {
-      let sql = 'SELECT * FROM saved_recipes';
-      const params: any[] = [];
-
-      if (isMarketplace) {
-        sql += ' WHERE is_public = TRUE';
-      } else if (userId || email) {
-        const conds: string[] = [];
-        if (userId) {
-          params.push(userId);
-          conds.push(`user_id = $${params.length} OR created_by = $${params.length}`);
-        }
-        if (email && email !== userId) {
-          params.push(email);
-          conds.push(`user_id = $${params.length} OR created_by = $${params.length}`);
-        }
-        sql += ` WHERE (${conds.join(' OR ')})`;
-      }
-
-      sql += ' ORDER BY created_at DESC';
-      dbRows = await query(sql, params);
-    } catch (_) {}
-
-    // Load recipes from disk JSON files in /recipes directory
+    // Single source of truth: Load all recipes directly from dedicated JSON files
     const diskRecipes = loadAllRecipeJsonFiles();
-    const recipeMap = new Map<string, any>();
 
-    // Index DB records
-    dbRows.forEach((r: any) => {
-      let ing = r.ingredients;
-      if (typeof ing === 'string') {
-        try { ing = JSON.parse(ing); } catch (_) { ing = []; }
-      }
-      let dir = r.directions || r.instructions;
-      if (typeof dir === 'string') {
-        try { dir = JSON.parse(dir); } catch (_) { dir = []; }
-      }
+    let filtered = diskRecipes;
 
-      const rec = {
-        ...r,
-        id: r.id,
-        userId: r.user_id || userId,
-        user_id: r.user_id || userId,
-        createdBy: r.created_by || r.user_id,
-        created_by: r.created_by || r.user_id,
-        creatorName: r.creator_name || 'Chef',
-        creatorEmail: r.creator_email || '',
-        ownerId: r.user_id || userId,
-        ownerName: r.creator_name || 'Chef',
-        ownerEmail: r.creator_email || '',
-        title: r.title || 'Untitled Recipe',
-        description: r.description || '',
-        recipeType: r.recipe_type || 'Main Dish',
-        category: r.recipe_type || 'Main Dish',
-        cuisine: r.cuisine || '',
-        prepTimeMinutes: Number(r.prep_time) || 15,
-        cookTimeMinutes: Number(r.cook_time) || 25,
-        servings: Number(r.servings) || 4,
-        difficulty: r.difficulty || 'Medium',
-        ingredients: Array.isArray(ing) ? ing : [],
-        instructions: Array.isArray(dir) ? dir : [],
-        directions: Array.isArray(dir) ? dir : [],
-        imageUrl: r.image_url || '/recipes/images/default.jpg',
-        image: r.image_url || '/recipes/images/default.jpg',
-        sourceUrl: r.source_url || '',
-        isPublic: Boolean(r.is_public),
-        is_public: Boolean(r.is_public),
-        isFavorite: Boolean(r.is_favorite),
-        isCooked: Boolean(r.is_cooked),
-        rating: Number(r.rating) || 0,
-        note: r.note || '',
-        bookId: r.book_id || null,
-        createdAt: r.created_at || new Date().toISOString()
-      };
-      recipeMap.set(r.id, rec);
-    });
-
-    // Merge disk JSON records from directory /recipes
-    diskRecipes.forEach(dr => {
-      if (isMarketplace && !dr.isPublic) return;
-      if (!isMarketplace && userId && dr.userId !== userId && dr.createdBy !== email && dr.createdBy !== userId) {
-        // If not marketplace, skip if belongs to another user
-        return;
-      }
-      if (!recipeMap.has(dr.id)) {
-        recipeMap.set(dr.id, dr);
-      }
-    });
+    if (isMarketplace) {
+      // Marketplace Tab: Show all recipes enabled for public
+      filtered = diskRecipes.filter(r => Boolean(r.isPublic || (r as any).is_public));
+    } else if (userId || email) {
+      // Personal Recipes Tab: Show recipes owned by the current user
+      filtered = diskRecipes.filter(r => {
+        const rUid = r.userId || (r as any).user_id || r.ownerId || r.ownership?.userId;
+        const rEmail = r.createdBy || (r as any).created_by || r.creatorEmail || r.ownerEmail || r.ownership?.creatorEmail;
+        return (
+          rUid === userId ||
+          rEmail === userId ||
+          (email && (rEmail === email || rUid === email))
+        );
+      });
+    }
 
     return NextResponse.json({
       success: true,
-      recipes: Array.from(recipeMap.values())
+      recipes: filtered
     }, {
       headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
     });
@@ -52029,7 +51817,6 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureColumns();
     const body = await req.json();
     const items = Array.isArray(body) ? body : (body.recipes || [body.recipe || body]);
 
@@ -52041,10 +51828,6 @@ export async function POST(req: NextRequest) {
       const creatorEmail = (item.creatorEmail || item.creator_email || item.ownerEmail || '').trim();
       const id = item.id || `rcp_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
 
-      // 1. Save Image Locally to /recipes/images/
-      const localImage = await saveRecipeImageLocally(id, item.imageUrl || item.image || item.image_url);
-
-      // 2. Format and Save Standalone JSON file to directory /recipes/<id>.json
       const recipeRecord = {
         ...item,
         id,
@@ -52056,88 +51839,14 @@ export async function POST(req: NextRequest) {
         creator_name: creatorName,
         creatorEmail,
         creator_email: creatorEmail,
-        imageUrl: localImage,
-        image: localImage,
-        image_url: localImage,
-        isPublic: Boolean(item.isPublic ?? item.is_public)
+        isPublic: Boolean(item.isPublic ?? item.is_public ?? false)
       };
+
+      // Save to dedicated JSON file
       saveRecipeJsonFile(recipeRecord, { userId: targetUserId, createdBy, creatorName, creatorEmail });
-
-      // 3. Persist in Database (PostgreSQL & MySQL)
-      let ingredients = item.ingredients;
-      if (typeof ingredients === 'string') {
-        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = [ingredients]; }
-      }
-      if (!Array.isArray(ingredients)) ingredients = [];
-
-      let directions = item.instructions || item.directions;
-      if (typeof directions === 'string') {
-        try { directions = JSON.parse(directions); } catch (_) { directions = [directions]; }
-      }
-      if (!Array.isArray(directions)) directions = [];
-
-      await query(`
-        INSERT INTO saved_recipes (
-          id, user_id, created_by, creator_name, creator_email, title, description, recipe_type, cuisine, prep_time, cook_time,
-          servings, difficulty, ingredients, directions, image_url, is_public,
-          is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
-        ) VALUES (
-          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-          $11, $12, $13::jsonb, $14::jsonb, $15, $16,
-          $17, $18, $19, $20, $21, $22, NOW()
-        )
-        ON CONFLICT (id) DO UPDATE SET
-          user_id = EXCLUDED.user_id,
-          created_by = EXCLUDED.created_by,
-          creator_name = EXCLUDED.creator_name,
-          creator_email = EXCLUDED.creator_email,
-          title = EXCLUDED.title,
-          description = EXCLUDED.description,
-          recipe_type = EXCLUDED.recipe_type,
-          cuisine = EXCLUDED.cuisine,
-          prep_time = EXCLUDED.prep_time,
-          cook_time = EXCLUDED.cook_time,
-          servings = EXCLUDED.servings,
-          difficulty = EXCLUDED.difficulty,
-          ingredients = EXCLUDED.ingredients,
-          directions = EXCLUDED.directions,
-          image_url = EXCLUDED.image_url,
-          is_public = EXCLUDED.is_public,
-          is_favorite = EXCLUDED.is_favorite,
-          is_cooked = EXCLUDED.is_cooked,
-          rating = EXCLUDED.rating,
-          note = EXCLUDED.note,
-          book_id = EXCLUDED.book_id,
-          source_url = EXCLUDED.source_url,
-          updated_at = NOW();
-      `, [
-        id,
-        targetUserId,
-        createdBy,
-        creatorName,
-        creatorEmail,
-        item.title || item.name || 'Untitled Recipe',
-        item.description || '',
-        item.recipeType || item.category || 'Main Dish',
-        item.cuisine || '',
-        String(item.prepTimeMinutes || item.prepMinutes || 15),
-        String(item.cookTimeMinutes || item.cookMinutes || 25),
-        String(item.servings || 4),
-        item.difficulty || 'Medium',
-        JSON.stringify(ingredients),
-        JSON.stringify(directions),
-        localImage,
-        Boolean(item.isPublic ?? item.is_public),
-        Boolean(item.isFavorite ?? item.is_favorite),
-        Boolean(item.isCooked ?? item.is_cooked),
-        Number(item.rating) || 0,
-        item.note || '',
-        item.bookId || item.book_id || null,
-        item.sourceUrl || item.source_url || ''
-      ]);
     }
 
-    return NextResponse.json({ success: true, message: 'Saved to /recipes JSON file, /recipes/images, and Database.' });
+    return NextResponse.json({ success: true, message: 'Saved to dedicated recipe JSON files.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -52145,56 +51854,42 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
-    await ensureColumns();
     const body = await req.json();
     const { id, isPublic, is_public, isFavorite, is_favorite, isCooked, is_cooked, rating, note, bookId, book_id } = body;
 
     if (!id) return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
 
     const targetPublic = isPublic !== undefined ? isPublic : is_public;
-    if (targetPublic !== undefined) {
-      updateRecipePublicVisibility(id, Boolean(targetPublic));
+
+    // Load from dedicated JSON files
+    const diskRecipes = loadAllRecipeJsonFiles();
+    const target = diskRecipes.find(r => r.id === id);
+
+    if (target) {
+      if (targetPublic !== undefined) {
+        target.isPublic = Boolean(targetPublic);
+        target.visibility = targetPublic ? 'public' : 'private';
+      }
+      if (isFavorite !== undefined || is_favorite !== undefined) {
+        target.isFavorite = Boolean(isFavorite !== undefined ? isFavorite : is_favorite);
+      }
+      if (isCooked !== undefined || is_cooked !== undefined) {
+        target.isCooked = Boolean(isCooked !== undefined ? isCooked : is_cooked);
+      }
+      if (rating !== undefined) {
+        target.rating = Number(rating);
+      }
+      if (note !== undefined) {
+        target.note = String(note);
+      }
+      if (bookId !== undefined || book_id !== undefined) {
+        target.bookId = bookId !== undefined ? bookId : book_id;
+      }
+      target.updatedAt = new Date().toISOString();
+      saveRecipeJsonFile(target);
     }
 
-    const updates: string[] = [];
-    const params: any[] = [id];
-
-    if (targetPublic !== undefined) {
-      params.push(Boolean(targetPublic));
-      updates.push(`is_public = $${params.length}`);
-    }
-    if (isFavorite !== undefined || is_favorite !== undefined) {
-      params.push(Boolean(isFavorite !== undefined ? isFavorite : is_favorite));
-      updates.push(`is_favorite = $${params.length}`);
-    }
-    if (isCooked !== undefined || is_cooked !== undefined) {
-      params.push(Boolean(isCooked !== undefined ? isCooked : is_cooked));
-      updates.push(`is_cooked = $${params.length}`);
-    }
-    if (rating !== undefined) {
-      params.push(Number(rating));
-      updates.push(`rating = $${params.length}`);
-    }
-    if (note !== undefined) {
-      params.push(String(note));
-      updates.push(`note = $${params.length}`);
-    }
-    if (bookId !== undefined || book_id !== undefined) {
-      params.push(bookId !== undefined ? bookId : book_id);
-      updates.push(`book_id = $${params.length}`);
-    }
-
-    if (updates.length > 0) {
-      updates.push('updated_at = NOW()');
-      await query(`UPDATE saved_recipes SET ${updates.join(', ')} WHERE id = $1`, params);
-
-      try {
-        const rows = await query('SELECT * FROM saved_recipes WHERE id = $1', [id]);
-        if (rows.length > 0) saveRecipeJsonFile(rows[0]);
-      } catch (_) {}
-    }
-
-    return NextResponse.json({ success: true, message: 'Updated in Database and JSON file.' });
+    return NextResponse.json({ success: true, message: 'Updated in dedicated JSON file.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -52206,10 +51901,10 @@ export async function DELETE(req: NextRequest) {
     const id = searchParams.get('id');
     if (!id) return NextResponse.json({ success: false, error: 'Recipe ID required' }, { status: 400 });
 
-    await query('DELETE FROM saved_recipes WHERE id = $1', [id.trim()]);
+    // Delete dedicated JSON file from disk
     deleteRecipeJsonFile(id.trim());
 
-    return NextResponse.json({ success: true, message: 'Deleted from Database and /recipes JSON file.' });
+    return NextResponse.json({ success: true, message: 'Deleted from dedicated JSON files.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -71828,7 +71523,7 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
 
 ## File: `apps/web/src/lib/storageService.ts`
 ```typescript
-// Centralized Media Storage Engine (Universal /recipes/images & Supabase S3)
+// Centralized Media Storage Engine (Canonical apps/web/public/recipes)
 // GitHub: cygnusorbit/zecratary
 
 import fs from 'fs';
@@ -71859,9 +71554,9 @@ export interface StorageConfig {
 export const DEFAULT_STORAGE_CONFIG: StorageConfig = {
   provider: 'localhost',
   localhost: {
-    uploadDir: 'public/recipes/images',
+    uploadDir: 'apps/web/public/recipes/images',
     publicPrefix: '/recipes/images',
-    recipesJsonDir: 'public/recipes',
+    recipesJsonDir: 'apps/web/public/recipes',
     maxSizeMb: 10,
     allowedTypes: 'image/jpeg, image/png, image/webp, image/gif, image/avif',
   },
@@ -71877,6 +71572,20 @@ export const DEFAULT_STORAGE_CONFIG: StorageConfig = {
 };
 
 let memoryStorageConfig: StorageConfig = { ...DEFAULT_STORAGE_CONFIG };
+
+export function getCanonicalWebPublicDir(): string {
+  const cwd = process.cwd();
+  if (fs.existsSync(path.join(cwd, 'public')) && (fs.existsSync(path.join(cwd, 'src', 'app')) || fs.existsSync(path.join(cwd, 'app')))) {
+    return path.join(cwd, 'public');
+  }
+  if (fs.existsSync(path.join(cwd, 'apps', 'web', 'public'))) {
+    return path.join(cwd, 'apps', 'web', 'public');
+  }
+  if (fs.existsSync(path.join(cwd, 'public'))) {
+    return path.join(cwd, 'public');
+  }
+  return path.join(cwd, 'apps', 'web', 'public');
+}
 
 export async function getStorageSettings(): Promise<StorageConfig> {
   try {
@@ -72055,33 +71764,23 @@ export async function uploadMediaFile(
     try {
       return await uploadToSupabaseS3(buffer, cleanName, contentType, settings.supabase);
     } catch (err: any) {
-      console.warn('[Storage] Supabase S3 failed, falling back to /recipes/images:', err.message);
+      console.warn('[Storage] Supabase S3 failed, falling back to apps/web/public/recipes/images:', err.message);
     }
   }
 
-  // Universal Localhost Disk Storage: Write to /recipes/images
-  const targetDirs = [
-    path.join(process.cwd(), 'recipes', 'images'),
-    path.join(process.cwd(), 'public', 'recipes', 'images'),
-    path.join(process.cwd(), 'apps', 'web', 'recipes', 'images'),
-    path.join(process.cwd(), 'apps', 'web', 'public', 'recipes', 'images'),
-  ];
-
-  for (const d of targetDirs) {
-    try {
-      if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
-      fs.writeFileSync(path.join(d, cleanName), buffer);
-    } catch (_) {}
-  }
+  // Canonical Local Disk Storage: Save directly to apps/web/public/recipes/images
+  const targetDir = path.join(getCanonicalWebPublicDir(), 'recipes', 'images');
+  if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
+  fs.writeFileSync(path.join(targetDir, cleanName), buffer);
 
   const prefix = settings.localhost.publicPrefix || '/recipes/images';
   return `${prefix}/${cleanName}`;
 }
 
 export function getUniversalDiskDiagnostics() {
-  const root = process.cwd();
-  const recipesDir = path.join(root, 'public', 'recipes');
-  const imagesDir = path.join(root, 'public', 'recipes', 'images');
+  const publicDir = getCanonicalWebPublicDir();
+  const recipesDir = path.join(publicDir, 'recipes');
+  const imagesDir = path.join(recipesDir, 'images');
 
   let recipesCount = 0;
   let imagesCount = 0;
@@ -72107,8 +71806,8 @@ export function getUniversalDiskDiagnostics() {
     imagesCount,
     jsonDirWritable,
     imagesDirWritable,
-    jsonDirPath: 'public/recipes',
-    imagesDirPath: 'public/recipes/images',
+    jsonDirPath: 'apps/web/public/recipes',
+    imagesDirPath: 'apps/web/public/recipes/images',
   };
 }
 
@@ -73473,17 +73172,21 @@ import fs from 'fs';
 import path from 'path';
 import { getStorageSettings, uploadToSupabaseS3 } from '@/lib/storageService';
 
-export interface RecipeOwnership {
-  userId: string;
-  createdBy: string;
-  creatorName: string;
-  creatorEmail: string;
+export interface RecipeOwner {
+  id: string;
+  name: string;
+  email: string;
 }
 
-export interface FullRecipeRecord {
+export interface StoredRecipe {
   id: string;
-  ownership: RecipeOwnership;
-  owner: { id: string; name: string; email: string };
+  ownership: {
+    userId: string;
+    createdBy: string;
+    creatorName: string;
+    creatorEmail: string;
+  };
+  owner: RecipeOwner;
   ownerId: string;
   ownerName: string;
   ownerEmail: string;
@@ -73518,37 +73221,44 @@ export interface FullRecipeRecord {
   updatedAt: string;
 }
 
-const getRecipeDirs = (): string[] => {
-  const root = process.cwd();
-  return [
-    path.join(root, 'recipes'),
-    path.join(root, 'public', 'recipes'),
-    path.join(root, 'apps', 'web', 'recipes'),
-    path.join(root, 'apps', 'web', 'public', 'recipes')
-  ];
-};
+// Resolves canonical apps/web/public directory across monorepo layouts
+export function getCanonicalWebPublicDir(): string {
+  const cwd = process.cwd();
+  // If running inside apps/web
+  if (fs.existsSync(path.join(cwd, 'public')) && (fs.existsSync(path.join(cwd, 'src', 'app')) || fs.existsSync(path.join(cwd, 'app')))) {
+    return path.join(cwd, 'public');
+  }
+  // If running from workspace root
+  if (fs.existsSync(path.join(cwd, 'apps', 'web', 'public'))) {
+    return path.join(cwd, 'apps', 'web', 'public');
+  }
+  if (fs.existsSync(path.join(cwd, 'public'))) {
+    return path.join(cwd, 'public');
+  }
+  return path.join(cwd, 'apps', 'web', 'public');
+}
 
-const getImageDirs = (): string[] => {
-  const root = process.cwd();
-  return [
-    path.join(root, 'recipes', 'images'),
-    path.join(root, 'public', 'recipes', 'images'),
-    path.join(root, 'apps', 'web', 'recipes', 'images'),
-    path.join(root, 'apps', 'web', 'public', 'recipes', 'images')
-  ];
-};
+export function getRecipeJsonDir(): string {
+  const dir = path.join(getCanonicalWebPublicDir(), 'recipes');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+export function getRecipeImageDir(): string {
+  const dir = path.join(getRecipeJsonDir(), 'images');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
 
 export async function saveRecipeImageLocally(recipeId: string, imageInput?: string): Promise<string> {
   if (!imageInput || typeof imageInput !== 'string') return '/recipes/images/default.jpg';
-  
-  // If already hosted on Supabase or local /recipes/images
   if (imageInput.includes('.supabase.co/storage/v1/object/public/')) return imageInput;
   if (imageInput.startsWith('/recipes/images/')) return imageInput;
 
   const safeId = recipeId.replace(/[^a-zA-Z0-9_-]/g, '_');
   const settings = await getStorageSettings();
 
-  // 1. Check if Supabase S3 is active
+  // 1. Supabase S3 Storage Provider
   if (settings.provider === 'supabase' && settings.supabase.enabled && settings.supabase.secretAccessKey) {
     try {
       let buffer: Buffer | null = null;
@@ -73583,13 +73293,12 @@ export async function saveRecipeImageLocally(recipeId: string, imageInput?: stri
         return cloudUrl;
       }
     } catch (err: any) {
-      console.warn('[recipeFiles] Supabase upload error, falling back to disk:', err.message);
+      console.warn('[recipeFiles] Supabase upload failed, falling back to disk:', err.message);
     }
   }
 
-  // 2. Localhost Disk Fallback to /recipes/images/
-  const targetDirs = getImageDirs();
-  targetDirs.forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+  // 2. Canonical Local Disk Storage: Save directly to apps/web/public/recipes/images
+  const targetDir = getRecipeImageDir();
 
   if (imageInput.startsWith('data:image/')) {
     try {
@@ -73597,10 +73306,7 @@ export async function saveRecipeImageLocally(recipeId: string, imageInput?: stri
       if (match) {
         const ext = match[1] === 'jpeg' ? 'jpg' : match[1];
         const filename = `${safeId}_${Date.now()}.${ext}`;
-        const buffer = Buffer.from(match[2], 'base64');
-        targetDirs.forEach(d => {
-          try { fs.writeFileSync(path.join(d, filename), buffer); } catch (_) {}
-        });
+        fs.writeFileSync(path.join(targetDir, filename), Buffer.from(match[2], 'base64'));
         return `/recipes/images/${filename}`;
       }
     } catch (_) {}
@@ -73621,11 +73327,8 @@ export async function saveRecipeImageLocally(recipeId: string, imageInput?: stri
         else if (contentType.includes('webp')) ext = 'webp';
 
         const filename = `${safeId}_${Date.now()}.${ext}`;
-        const arrayBuf = await res.arrayBuffer();
-        const buffer = Buffer.from(arrayBuf);
-        targetDirs.forEach(d => {
-          try { fs.writeFileSync(path.join(d, filename), buffer); } catch (_) {}
-        });
+        const buffer = Buffer.from(await res.arrayBuffer());
+        fs.writeFileSync(path.join(targetDir, filename), buffer);
         return `/recipes/images/${filename}`;
       }
     } catch (_) {}
@@ -73634,7 +73337,7 @@ export async function saveRecipeImageLocally(recipeId: string, imageInput?: stri
   return imageInput;
 }
 
-export function saveRecipeJsonFile(recipe: any, ownerInfo?: Partial<RecipeOwnership>): FullRecipeRecord {
+export function saveRecipeJsonFile(recipe: any, ownerInfo?: any): StoredRecipe {
   const id = recipe.id || `rcp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
   const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
 
@@ -73656,7 +73359,7 @@ export function saveRecipeJsonFile(recipe: any, ownerInfo?: Partial<RecipeOwners
   }
   if (!Array.isArray(rawInstructions)) rawInstructions = [];
 
-  const record: FullRecipeRecord = {
+  const record: StoredRecipe = {
     id,
     ownership: { userId, createdBy, creatorName, creatorEmail },
     owner: { id: userId, name: creatorName, email: creatorEmail },
@@ -73686,7 +73389,7 @@ export function saveRecipeJsonFile(recipe: any, ownerInfo?: Partial<RecipeOwners
     sourceUrl: recipe.sourceUrl || recipe.source_url || '',
     isFavorite: Boolean(recipe.isFavorite ?? recipe.is_favorite),
     isCooked: Boolean(recipe.isCooked ?? recipe.is_cooked),
-    rating: Number(recipe.rating) || 0,
+    rating: Number(recipe.rating) || 5,
     note: recipe.note || '',
     bookId: recipe.bookId || recipe.book_id || null,
     tags: Array.isArray(recipe.tags) ? recipe.tags : [recipe.recipeType || 'Main Dish'],
@@ -73694,33 +73397,39 @@ export function saveRecipeJsonFile(recipe: any, ownerInfo?: Partial<RecipeOwners
     updatedAt: new Date().toISOString()
   };
 
-  const jsonStr = JSON.stringify(record, null, 2);
-  const targetDirs = getRecipeDirs();
-  targetDirs.forEach(d => {
-    try {
-      if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
-      fs.writeFileSync(path.join(d, `${safeId}.json`), jsonStr, 'utf-8');
-    } catch (_) {}
-  });
+  // Save to canonical apps/web/public/recipes/<id>.json
+  const targetDir = getRecipeJsonDir();
+  const filePath = path.join(targetDir, `${safeId}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(record, null, 2), 'utf-8');
 
   return record;
 }
 
-export function loadAllRecipeJsonFiles(): FullRecipeRecord[] {
-  const map = new Map<string, FullRecipeRecord>();
-  const targetDirs = getRecipeDirs();
+export function loadAllRecipeJsonFiles(): StoredRecipe[] {
+  const map = new Map<string, StoredRecipe>();
+  const primaryDir = getRecipeJsonDir();
+  const searchDirs = [primaryDir];
 
-  targetDirs.forEach(d => {
+  // Also read from legacy directory if files still exist
+  const root = process.cwd();
+  const legacyDir = path.join(root, 'public', 'recipes');
+  if (fs.existsSync(legacyDir) && path.resolve(legacyDir) !== path.resolve(primaryDir)) {
+    searchDirs.push(legacyDir);
+  }
+
+  searchDirs.forEach(dir => {
     try {
-      if (fs.existsSync(d)) {
-        const files = fs.readdirSync(d).filter(f => f.endsWith('.json') && !f.includes('index.json'));
+      if (fs.existsSync(dir)) {
+        const files = fs.readdirSync(dir).filter(f => f.endsWith('.json') && !f.includes('index.json') && !f.startsWith('package'));
         files.forEach(f => {
           try {
-            const raw = fs.readFileSync(path.join(d, f), 'utf-8');
+            const raw = fs.readFileSync(path.join(dir, f), 'utf-8');
             const data = JSON.parse(raw);
             if (data && (data.id || data.title)) {
               const id = data.id || f.replace('.json', '');
-              map.set(id, { ...data, id });
+              if (!map.has(id)) {
+                map.set(id, { ...data, id });
+              }
             }
           } catch (_) {}
         });
@@ -73733,34 +73442,31 @@ export function loadAllRecipeJsonFiles(): FullRecipeRecord[] {
 
 export function updateRecipePublicVisibility(id: string, isPublic: boolean): boolean {
   const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const targetDirs = getRecipeDirs();
+  const targetDir = getRecipeJsonDir();
+  const filePath = path.join(targetDir, `${safeId}.json`);
   let updated = false;
 
-  targetDirs.forEach(d => {
-    try {
-      const fp = path.join(d, `${safeId}.json`);
-      if (fs.existsSync(fp)) {
-        const data = JSON.parse(fs.readFileSync(fp, 'utf-8'));
-        data.isPublic = isPublic;
-        data.visibility = isPublic ? 'public' : 'private';
-        data.updatedAt = new Date().toISOString();
-        fs.writeFileSync(fp, JSON.stringify(data, null, 2), 'utf-8');
-        updated = true;
-      }
-    } catch (_) {}
-  });
+  try {
+    if (fs.existsSync(filePath)) {
+      const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      data.isPublic = isPublic;
+      data.visibility = isPublic ? 'public' : 'private';
+      data.updatedAt = new Date().toISOString();
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+      updated = true;
+    }
+  } catch (_) {}
 
   return updated;
 }
 
 export function deleteRecipeJsonFile(id: string): void {
   const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
-  getRecipeDirs().forEach(d => {
-    try {
-      const fp = path.join(d, `${safeId}.json`);
-      if (fs.existsSync(fp)) fs.unlinkSync(fp);
-    } catch (_) {}
-  });
+  const targetDir = getRecipeJsonDir();
+  const filePath = path.join(targetDir, `${safeId}.json`);
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch (_) {}
 }
 
 ```

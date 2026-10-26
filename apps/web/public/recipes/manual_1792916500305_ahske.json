@@ -40,13 +40,14 @@
   "tags": [
     "Breakfast"
   ],
-  "image": "/recipes/images/upload-1792916482953-z4phmg.png",
-  "imageUrl": "/recipes/images/upload-1792916482953-z4phmg.png",
+  "image": "/recipes/images/manual_1792916500305_ahske.jpg",
+  "imageUrl": "/recipes/images/manual_1792916500305_ahske.jpg",
   "sourceUrl": "",
   "isFavorite": false,
   "isCooked": false,
   "rating": 5,
   "bookId": "book_mvnffcie_yf49",
   "createdAt": "2026-10-25T18:53:04.514Z",
-  "updatedAt": "2026-10-25T18:53:22.955Z"
+  "updatedAt": "2026-10-25T18:53:22.955Z",
+  "image_url": "/recipes/images/manual_1792916500305_ahske.jpg"
 }
