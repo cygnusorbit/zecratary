@@ -3,7 +3,7 @@ import { query } from '@/lib/db';
 import { recordTokenUsage } from '@/lib/tokenUsage';
 import { getTokenSettings, deductUserTokens } from '@/lib/tokenService';
 import { scrapeRecipeFromUrl } from '@/lib/recipeScraper';
-import { downloadAndSaveImage, downloadAndSaveScrapedImage } from '@/lib/imageDownloader';
+import { downloadAndSaveScrapedImage } from '@/lib/imageDownloader';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +15,7 @@ async function getAdminApiKeyAndModel(requestedModel?: string) {
   let filterWordsList: string[] = [];
 
   try {
-    const sRows = await query('SELECT * FROM admin_settings ORDER BY updated_at DESC LIMIT 1;');
+    const sRows: any = await query('SELECT * FROM admin_settings ORDER BY updated_at DESC LIMIT 1;');
     if (sRows && sRows.length > 0) {
       const row = sRows[0];
       const chef = row.chef_ai_settings || {};
@@ -31,7 +31,7 @@ async function getAdminApiKeyAndModel(requestedModel?: string) {
 
   if (!geminiApiKey) {
     try {
-      const kRes = await query("SELECT key_value FROM admin_api_keys WHERE env_key IN ('GEMINI_API_KEY', 'GOOGLE_API_KEY') LIMIT 1;");
+      const kRes: any = await query("SELECT key_value FROM admin_api_keys WHERE env_key IN ('GEMINI_API_KEY', 'GOOGLE_API_KEY') LIMIT 1;");
       if (kRes && kRes.length > 0 && kRes[0].key_value) {
         geminiApiKey = kRes[0].key_value;
       }
@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
     const inputContent = (body.url || body.text || body.image || body.base64 || '').trim();
     const recipeTitleInput = (body.title || '').trim();
     const selectedCategory = body.category || 'Main Dish';
+    const isPublic = Boolean(body.isPublic ?? body.is_public ?? false);
 
     let userId = body.userId;
     let userEmail = body.userEmail || body.email;
@@ -87,7 +88,7 @@ export async function POST(req: NextRequest) {
     let parsedDescription = '';
     let ingredientsList: string[] = [];
     let directionsList: string[] = [];
-    let parsedImageUrl = '/recipes/images/default.jpg';
+    let parsedImageUrl = '/uploads/recipes/default.jpg';
     let prepTime = '15 mins';
     let cookTime = '25 mins';
     let servings = 4;
@@ -96,34 +97,38 @@ export async function POST(req: NextRequest) {
     let promptTokens = 150;
     let completionTokens = 200;
 
-    // 1. URL IMPORT
     if (type === 'url') {
       try {
         const scraped = await scrapeRecipeFromUrl(inputContent);
-        parsedTitle = scraped?.title || recipeTitleInput || 'Imported Recipe';
-        parsedDescription = scraped?.description || `Imported from ${inputContent}`;
-        ingredientsList = Array.isArray(scraped?.ingredients) ? scraped.ingredients : [];
-        directionsList = Array.isArray(scraped?.directions) && scraped.directions.length > 0
-          ? scraped.directions
-          : (Array.isArray(scraped?.instructions) ? scraped.instructions : []);
-        parsedImageUrl = scraped?.imageUrl || scraped?.image || '/recipes/images/default.jpg';
-        prepTime = scraped?.prepTime || prepTime;
-        cookTime = scraped?.cookTime || cookTime;
-        servings = Number(scraped?.servings) || 4;
-        cuisine = scraped?.cuisine || cuisine;
-        nutrition = scraped?.nutrition || nutrition;
+        if (!scraped) {
+          throw new Error('Target website blocked scraper or contains no structured recipe data.');
+        }
+
+        const s: any = scraped;
+        parsedTitle = s.title || recipeTitleInput || 'Imported Recipe';
+        parsedDescription = s.description || `Imported from ${inputContent}`;
+        ingredientsList = Array.isArray(s.ingredients) ? s.ingredients : [];
+        directionsList = Array.isArray(s.directions) && s.directions.length > 0
+          ? s.directions
+          : (Array.isArray(s.instructions) && s.instructions.length > 0
+              ? s.instructions
+              : (Array.isArray(s.steps) ? s.steps : []));
+        parsedImageUrl = s.imageUrl || s.image || '/uploads/recipes/default.jpg';
+        prepTime = s.prepTime || prepTime;
+        cookTime = s.cookTime || cookTime;
+        servings = Number(s.servings) || 4;
+        cuisine = s.cuisine || cuisine;
+        nutrition = s.nutrition || nutrition;
 
         promptTokens = Math.max(140, Math.ceil((inputContent.length + 800) / 4));
-        completionTokens = Math.max(180, Math.ceil(directionsList.join(' ').length / 4));
+        completionTokens = Math.max(180, Math.ceil((directionsList.join(' ') || '').length / 4));
       } catch (err: any) {
         return NextResponse.json({
           success: false,
           error: `Failed to scrape recipe: ${err.message || 'Target website blocked scraper or contains no recipe markup.'}`
         }, { status: 422 });
       }
-    } 
-    // 2. IMAGE / PHOTO OCR IMPORT (AI VISION)
-    else if (type === 'photo' || type === 'image') {
+    } else if (type === 'photo' || type === 'image') {
       parsedTitle = recipeTitleInput || 'Scanned Recipe';
       let visionSucceeded = false;
 
@@ -214,10 +219,8 @@ Return ONLY valid JSON matching this schema:
         ];
       }
 
-      parsedImageUrl = inputContent.startsWith('/uploads/') ? inputContent : '/recipes/images/default.jpg';
-    } 
-    // 3. RAW TEXT RECIPE IMPORT (AI PARSER)
-    else {
+      parsedImageUrl = inputContent.startsWith('/uploads/') ? inputContent : '/uploads/recipes/default.jpg';
+    } else {
       let aiParsed = false;
       if (geminiApiKey) {
         try {
@@ -291,7 +294,7 @@ Return ONLY valid JSON matching this schema:
 
     if (parsedImageUrl && /^https?:\/\//i.test(parsedImageUrl)) {
       try {
-        const localImg = await downloadAndSaveImage(parsedImageUrl, 'scraped');
+        const localImg = await downloadAndSaveScrapedImage(parsedImageUrl, 'scraped');
         if (localImg) parsedImageUrl = localImg;
       } catch (_) {}
     }
@@ -315,7 +318,7 @@ Return ONLY valid JSON matching this schema:
 
     let deduction: any = { success: true, deducted: 0, currentBalance: 0 };
     if (tokenSettings.isEnabled && importCost > 0) {
-      deduction = await deductUserTokens({
+      deduction = await (deductUserTokens as any)({
         userId,
         userEmail,
         cost: importCost,
@@ -367,6 +370,8 @@ Return ONLY valid JSON matching this schema:
       sourceUrl: type === 'url' ? inputContent : '',
       source_url: type === 'url' ? inputContent : '',
       isFavorite: false,
+      is_public: isPublic,
+      isPublic: isPublic,
       rating: 0
     };
 
@@ -387,6 +392,7 @@ Return ONLY valid JSON matching this schema:
           ingredients = EXCLUDED.ingredients,
           directions = EXCLUDED.directions,
           image_url = EXCLUDED.image_url,
+          is_public = EXCLUDED.is_public,
           updated_at = NOW();
       `, [
         recipeId, userId || null, userEmail || 'user', body.userName || 'You', userEmail || 'user',
@@ -394,7 +400,7 @@ Return ONLY valid JSON matching this schema:
         parsedRecipe.prepTime, parsedRecipe.cookTime, String(parsedRecipe.servings), parsedRecipe.difficulty,
         JSON.stringify(parsedRecipe.ingredients), JSON.stringify(parsedRecipe.directions),
         JSON.stringify(parsedRecipe.nutrition), JSON.stringify(parsedRecipe.tags),
-        parsedRecipe.imageUrl, parsedRecipe.sourceUrl, false
+        parsedRecipe.imageUrl, parsedRecipe.sourceUrl, isPublic
       ]);
     } catch (dbErr) {
       console.error('[AI Import] PostgreSQL persistence notice:', dbErr);
