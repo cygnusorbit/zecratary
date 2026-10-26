@@ -199,12 +199,13 @@
     "stripeWebhookVerified": false
   },
   "storage_settings": {
-    "provider": "supabase",
+    "provider": "localhost",
     "localhost": {
-      "uploadDir": "public/uploads/recipes",
-      "publicPrefix": "/uploads/recipes",
+      "uploadDir": "public/recipes/images",
+      "publicPrefix": "/recipes/images",
+      "recipesJsonDir": "public/recipes",
       "maxSizeMb": 10,
-      "allowedTypes": "image/jpeg, image/png, image/webp, image/gif"
+      "allowedTypes": "image/jpeg, image/png, image/webp, image/gif, image/avif"
     },
     "supabase": {
       "enabled": true,

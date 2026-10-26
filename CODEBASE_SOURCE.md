@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.37",
+  "version": "8.1.38",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.37",
+  "version": "8.1.38",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -25920,844 +25920,690 @@ export default function AdminLanguagePage() {
 ## File: `apps/web/src/app/admin/storage/page.tsx`
 ```typescript
 'use client';
-// @ts-nocheck
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { 
-  HardDrive, Server, Cloud, CheckCircle2, AlertCircle, Save, 
-  RefreshCw, Check, Eye, EyeOff, Globe, Zap, Sliders, ShieldCheck, 
-  Terminal, ExternalLink, Code2, AlertTriangle, Activity, 
-  FolderCheck, Sparkles, Database, Layers, ArrowRight
+  HardDrive, Cloud, Server, Check, AlertCircle, Save, 
+  Wifi, Copy, Eye, EyeOff, FolderCheck, Folder, ArrowLeft, RefreshCw, FileJson, Image as ImageIcon
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
-export interface LocalhostStorageConfig {
-  uploadPath: string;
-  publicServingUrl: string;
-  maxFileSizeMb: number;
+interface DiskStats {
+  recipesCount: number;
+  imagesCount: number;
+  jsonDirWritable: boolean;
+  imagesDirWritable: boolean;
+  jsonDirPath: string;
+  imagesDirPath: string;
 }
 
-export interface SupabaseStorageConfig {
-  endpoint: string;
-  region: string;
-  accessKeyId: string;
-  secretAccessKey: string;
-  bucketName: string;
-  publicUrlPrefix: string;
-  maxFileSizeMb: number;
-}
-
-export interface StorageSettings {
+interface StorageSettingsState {
   provider: 'localhost' | 'supabase';
-  localhost: LocalhostStorageConfig;
-  supabase: SupabaseStorageConfig;
-  allowedFormats: string[];
-  isConnected?: boolean;
+  localhost: {
+    uploadDir: string;
+    publicPrefix: string;
+    recipesJsonDir: string;
+    maxSizeMb: number;
+    allowedTypes?: string;
+  };
+  supabase: {
+    enabled: boolean;
+    endpoint: string;
+    region: string;
+    accessKeyId: string;
+    secretAccessKey: string;
+    bucket: string;
+    publicUrl: string;
+  };
 }
 
-const DEFAULT_STORAGE_SETTINGS: StorageSettings = {
-  provider: 'localhost',
-  localhost: {
-    uploadPath: 'public/uploads/recipes',
-    publicServingUrl: '/uploads/recipes',
-    maxFileSizeMb: 10
-  },
-  supabase: {
-    endpoint: 'https://tnhrkjtujdfgvwhsuuxb.storage.supabase.co/storage/v1/s3',
-    region: 'us-west-1',
-    accessKeyId: 'f3e0affef5c74972a535153349eb24cc',
-    secretAccessKey: '',
-    bucketName: 'recipes',
-    publicUrlPrefix: 'https://tnhrkjtujdfgvwhsuuxb.supabase.co/storage/v1/object/public/recipes',
-    maxFileSizeMb: 25
-  },
-  allowedFormats: ['jpg', 'jpeg', 'png', 'webp', 'svg'],
-  isConnected: false
+const SUPABASE_RECOMMENDED = {
+  endpoint: 'https://tnhrkjtujdfgvwhsuuxb.storage.supabase.co/storage/v1/s3',
+  region: 'us-west-1',
+  accessKeyId: 'f3e0affef5c74972a535153349eb24cc',
+  bucket: 'recipes',
+  publicUrl: 'https://tnhrkjtujdfgvwhsuuxb.supabase.co/storage/v1/object/public/recipes',
 };
 
-export default function AdminStoragePage() {
-  const { t, locale } = useTranslation();
+const LOCALHOST_RECOMMENDED = {
+  uploadDir: 'public/recipes/images',
+  publicPrefix: '/recipes/images',
+  recipesJsonDir: 'public/recipes',
+  maxSizeMb: 10,
+  allowedTypes: 'image/jpeg, image/png, image/webp, image/gif, image/avif',
+};
 
-  const tr = useCallback((key: string, fallback: string): string => {
-    if (typeof t === 'function') {
-      const val = t(key);
-      if (val && val !== key) return val;
-    }
-    return fallback;
-  }, [t]);
+export default function AdminStorageSettingsPage() {
+  const { t } = useTranslation();
 
-  const [settings, setSettings] = useState<StorageSettings>(DEFAULT_STORAGE_SETTINGS);
+  const [mounted, setMounted] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
-  const [testingConnection, setTestingConnection] = useState<boolean>(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; msg: string } | null>(null);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
+  const [testing, setTesting] = useState<boolean>(false);
   const [showSecretKey, setShowSecretKey] = useState<boolean>(false);
 
-  const isFetchingRef = useRef<boolean>(false);
-  const isSavingRef = useRef<boolean>(false);
+  // Status Alerts & Diagnostics
+  const [saveSuccess, setSaveSuccess] = useState<string>('');
+  const [saveError, setSaveError] = useState<string>('');
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [copiedField, setCopiedField] = useState<string>('');
+  const [diskStats, setDiskStats] = useState<DiskStats | null>(null);
 
-  const showToast = (type: 'success' | 'error', msg: string) => {
-    setFeedback({ type, msg });
-    setTimeout(() => setFeedback(null), 4500);
-  };
-
-  // Load Storage Configurations from API / Database
-  const loadStorageSettings = useCallback(async () => {
-    if (isFetchingRef.current || isSavingRef.current) return;
-    isFetchingRef.current = true;
-    setLoading(true);
-
-    try {
-      const res = await fetch('/api/admin/storage?t=' + Date.now(), { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.storageSettings || data.settings) {
-          const loaded = data.storageSettings || data.settings;
-          setSettings(prev => ({
-            ...prev,
-            ...loaded,
-            localhost: { ...prev.localhost, ...(loaded.localhost || {}) },
-            supabase: { ...prev.supabase, ...(loaded.supabase || {}) },
-            allowedFormats: Array.isArray(loaded.allowedFormats) ? loaded.allowedFormats : prev.allowedFormats
-          }));
-        }
-      }
-    } catch (err) {
-      console.warn('[Storage Settings] Using local configuration defaults:', err);
-    } finally {
-      setLoading(false);
-      isFetchingRef.current = false;
-    }
-  }, []);
+  const [settings, setSettings] = useState<StorageSettingsState>({
+    provider: 'localhost',
+    localhost: LOCALHOST_RECOMMENDED,
+    supabase: {
+      enabled: true,
+      ...SUPABASE_RECOMMENDED,
+      secretAccessKey: '',
+    },
+  });
 
   useEffect(() => {
-    document.title = `${tr('storageTitle', 'Media & Asset Storage Configuration')} - Admin`;
-    loadStorageSettings();
-
-    const handleSync = () => loadStorageSettings();
-    window.addEventListener('zecratary_storage_updated', handleSync);
-    window.addEventListener('zecratary_admin_settings_updated', handleSync);
-    window.addEventListener('zecratary_languages_updated', handleSync);
-    window.addEventListener('zecratary_dictionary_updated', handleSync);
-    window.addEventListener('zecratary_locale_changed', handleSync);
-
-    return () => {
-      window.removeEventListener('zecratary_storage_updated', handleSync);
-      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
-      window.removeEventListener('zecratary_languages_updated', handleSync);
-      window.removeEventListener('zecratary_dictionary_updated', handleSync);
-      window.removeEventListener('zecratary_locale_changed', handleSync);
-    };
-  }, [loadStorageSettings, tr]);
-
-  // Save Settings to PostgreSQL & JSON store
-  const handleSaveSettings = async () => {
-    if (saving || isSavingRef.current) return;
-    setSaving(true);
-    isSavingRef.current = true;
-    setFeedback(null);
-
-    try {
-      const res = await fetch('/api/admin/storage', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storageSettings: settings })
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.success) {
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new Event('zecratary_storage_updated'));
-          window.dispatchEvent(new Event('zecratary_admin_settings_updated'));
-          localStorage.setItem('zecratary_storage_updated_at', Date.now().toString());
+    setMounted(true);
+    async function loadSettings() {
+      try {
+        const res = await fetch('/api/admin/storage', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.settings) {
+            setSettings(prev => ({
+              ...prev,
+              ...data.settings,
+              localhost: { ...prev.localhost, ...(data.settings.localhost || {}) },
+              supabase: { ...prev.supabase, ...(data.settings.supabase || {}) },
+            }));
+          }
+          if (data.diskStats) {
+            setDiskStats(data.diskStats);
+          }
         }
-        showToast('success', tr('storageSaveSuccess', 'Storage settings saved and synchronized with PostgreSQL & MySQL!'));
-      } else {
-        throw new Error(data.error || 'Failed to save storage settings.');
+      } catch (_) {} finally {
+        setLoading(false);
       }
-    } catch (err: any) {
-      showToast('error', err.message || tr('storageSaveError', 'Failed to save storage settings. Please try again.'));
-    } finally {
-      setSaving(false);
-      setTimeout(() => { isSavingRef.current = false; }, 300);
     }
+    loadSettings();
+  }, []);
+
+  const handleCopy = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(''), 2000);
   };
 
-  // Test S3 Connection to Supabase Bucket
-  const handleTestS3Connection = async () => {
-    if (testingConnection) return;
-    const secretKey = settings.supabase.secretAccessKey?.trim();
+  const handleLoadRecommendedSupabase = () => {
+    setSettings(prev => ({
+      ...prev,
+      supabase: {
+        ...prev.supabase,
+        endpoint: SUPABASE_RECOMMENDED.endpoint,
+        region: SUPABASE_RECOMMENDED.region,
+        accessKeyId: SUPABASE_RECOMMENDED.accessKeyId,
+        bucket: SUPABASE_RECOMMENDED.bucket,
+        publicUrl: SUPABASE_RECOMMENDED.publicUrl,
+      },
+    }));
+  };
 
-    if (!secretKey) {
-      setTestResult({
-        success: false,
-        msg: tr('storageEnterSecretKeyToTest', 'Please enter your Secret Access Key before testing the connection.')
-      });
-      return;
-    }
+  const handleLoadRecommendedLocalhost = () => {
+    setSettings(prev => ({
+      ...prev,
+      localhost: { ...LOCALHOST_RECOMMENDED },
+    }));
+  };
 
-    setTestingConnection(true);
+  // Test Supabase S3 Connection
+  const handleTestConnection = async () => {
+    setTesting(true);
     setTestResult(null);
+    setSaveError('');
 
     try {
       const res = await fetch('/api/admin/storage/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings.supabase)
+        body: JSON.stringify(settings.supabase),
       });
 
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json();
       if (res.ok && data.success) {
-        setTestResult({
-          success: true,
-          msg: tr('storageTestSuccess', 'Successfully connected to Supabase S3! Bucket "{bucket}" is reachable and ready.').replace('{bucket}', settings.supabase.bucketName)
-        });
-        setSettings(prev => ({ ...prev, isConnected: true }));
+        setTestResult({ success: true, message: data.message });
       } else {
-        setTestResult({
-          success: false,
-          msg: tr('storageTestFailed', 'Connection failed: {error}').replace('{error}', data.error || 'Could not verify S3 bucket.')
-        });
-        setSettings(prev => ({ ...prev, isConnected: false }));
+        setTestResult({ success: false, message: data.error || 'Connection failed' });
       }
     } catch (err: any) {
-      setTestResult({
-        success: false,
-        msg: tr('storageTestFailed', 'Connection failed: {error}').replace('{error}', err.message || 'Network timeout.')
-      });
-      setSettings(prev => ({ ...prev, isConnected: false }));
+      setTestResult({ success: false, message: err.message || 'Network error testing connection' });
     } finally {
-      setTestingConnection(false);
+      setTesting(false);
     }
   };
 
-  const handleApplyRecommendedSupabase = () => {
-    setSettings(prev => ({
-      ...prev,
-      provider: 'supabase',
-      supabase: {
-        ...prev.supabase,
-        endpoint: 'https://tnhrkjtujdfgvwhsuuxb.storage.supabase.co/storage/v1/s3',
-        region: 'us-west-1',
-        accessKeyId: 'f3e0affef5c74972a535153349eb24cc',
-        bucketName: 'recipes',
-        publicUrlPrefix: 'https://tnhrkjtujdfgvwhsuuxb.supabase.co/storage/v1/object/public/recipes',
-        maxFileSizeMb: 25
+  // Save Settings to PostgreSQL
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveSuccess('');
+    setSaveError('');
+
+    try {
+      const res = await fetch('/api/admin/storage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSaveSuccess(t('storageSettingsSaved', 'Universal storage settings saved successfully to PostgreSQL.'));
+        if (data.diskStats) setDiskStats(data.diskStats);
+        setTimeout(() => setSaveSuccess(''), 4000);
+      } else {
+        setSaveError(data.error || 'Failed to save storage settings');
       }
-    }));
-    showToast('success', tr('storagePresetRecommended', 'Applied Supabase recommended settings.'));
+    } catch (err: any) {
+      setSaveError(err.message || 'Server error occurred while saving.');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleApplyRecommendedLocalhost = () => {
-    setSettings(prev => ({
-      ...prev,
-      provider: 'localhost',
-      localhost: {
-        uploadPath: 'public/uploads/recipes',
-        publicServingUrl: '/uploads/recipes',
-        maxFileSizeMb: 10
-      }
-    }));
-    showToast('success', tr('storagePresetLocalhost', 'Applied Localhost recommended settings.'));
-  };
-
-  const handleResetDefaults = () => {
-    setSettings(DEFAULT_STORAGE_SETTINGS);
-    setTestResult(null);
-    showToast('success', 'Reset storage parameters to initial defaults.');
-  };
+  if (!mounted || loading) {
+    return (
+      <div className="py-20 text-center space-y-3">
+        <div className="animate-spin h-8 w-8 rounded-full border-2 border-t-transparent mx-auto" style={{ borderColor: 'var(--color-primary)' }} />
+        <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>Loading universal storage settings...</p>
+      </div>
+    );
+  }
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      className="max-w-5xl mx-auto space-y-8 w-full min-w-0 transition-colors duration-200" 
       style={{ color: 'var(--color-text)' }}
     >
-      {/* 1. Header & Quick Actions */}
-      <div 
-        className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" 
-        style={{ borderColor: 'var(--color-border)' }}
-      >
+      {/* 1. TOP HEADER & ACTION BAR */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
         <div>
-          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-            <HardDrive className="h-6 w-6" style={{ color: 'var(--color-primary)' }} />
-            {tr('storageTitle', 'Media & Asset Storage Configuration')}
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+            <Link href="/admin" className="hover:underline flex items-center gap-1">
+              <ArrowLeft className="h-3 w-3" />
+              <span>{t('adminDashboard', 'Admin')}</span>
+            </Link>
+            <span>/</span>
+            <span>{t('storage', 'Storage')}</span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-black tracking-tight pt-1 flex items-center gap-2.5">
+            <HardDrive className="h-7 w-7" style={{ color: 'var(--color-primary)' }} />
+            <span>{t('storageSettingsTitle', 'Storage & Media Configuration')}</span>
           </h1>
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {tr('storageSubtitle', 'Configure storage destinations for recipe scrapers, user uploads, AI generated dishes, and branding assets.')}
+          <p className="text-xs sm:text-sm pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('storageSubtitle', 'Configure where recipe JSON files (/recipes) and image binaries (/recipes/images or Supabase) are ingested and stored.')}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          <div 
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
-            style={{ 
-              backgroundColor: 'var(--color-inner-dark)', 
-              borderColor: 'var(--color-border)', 
-              color: 'var(--color-text)' 
-            }}
-          >
-            <Database className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
-            <span>{tr('storageSyncBadge', 'Synced with PostgreSQL & MySQL')}</span>
-          </div>
-
-          <button
-            type="button"
-            onClick={loadStorageSettings}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer shadow-sm disabled:opacity-50"
-            style={{ 
-              backgroundColor: 'var(--color-inner-dark)', 
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-            <span>{tr('storageReloadBtn', 'Reload')}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleResetDefaults}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border text-xs font-bold transition hover:opacity-80 cursor-pointer shadow-sm"
-            style={{ 
-              backgroundColor: 'var(--color-inner-dark)', 
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text-secondary)'
-            }}
-          >
-            <span>{tr('storageResetBtn', 'Reset Defaults')}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleSaveSettings}
-            disabled={saving}
-            className="flex items-center gap-2 px-5 py-1.5 rounded-xl text-xs font-bold text-white shadow-lg transition hover:opacity-90 cursor-pointer disabled:opacity-50"
-            style={{ backgroundColor: 'var(--color-primary)' }}
-          >
-            <Save className={`h-4 w-4 ${saving ? 'animate-spin' : ''}`} />
-            <span>{saving ? tr('storageSavingBtn', 'Saving...') : tr('storageSaveBtn', 'Save Storage Settings')}</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs text-white shadow-xs transition cursor-pointer self-start sm:self-auto hover:opacity-90"
+          style={{ backgroundColor: 'var(--color-primary)', opacity: saving ? 0.7 : 1 }}
+        >
+          {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          <span>{saving ? t('saving', 'Saving...') : t('saveStorageSettings', 'Save to PostgreSQL')}</span>
+        </button>
       </div>
 
-      {/* Feedback Toast */}
-      {feedback && (
-        <div
-          className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 border shadow-sm animate-in fade-in"
-          style={{
-            backgroundColor: 'var(--color-inner-dark)',
-            borderColor: feedback.type === 'success' ? 'var(--color-emerald, #10b981)' : '#ef4444',
-            color: feedback.type === 'success' ? 'var(--color-emerald, #10b981)' : '#ef4444'
-          }}
-        >
-          {feedback.type === 'success' ? (
-            <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
-          ) : (
-            <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
-          )}
-          <span>{feedback.msg}</span>
+      {/* FEEDBACK ALERTS */}
+      {saveSuccess && (
+        <div className="p-4 rounded-2xl border flex items-center gap-2.5 text-xs font-bold text-emerald-400 bg-emerald-500/10 border-emerald-500/20 shadow-xs">
+          <Check className="h-4 w-4 shrink-0" />
+          <span>{saveSuccess}</span>
+        </div>
+      )}
+      {saveError && (
+        <div className="p-4 rounded-2xl border flex items-center gap-2.5 text-xs font-bold text-rose-400 bg-rose-500/10 border-rose-500/20 shadow-xs">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{saveError}</span>
         </div>
       )}
 
-      {/* 2. Storage Engine Monitor Summary Bar */}
-      <div 
-        className="p-3.5 px-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs transition-colors duration-200"
-        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-      >
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5 font-bold" style={{ color: 'var(--color-text)' }}>
-            <Activity className="h-4 w-4 text-emerald-500 animate-pulse" />
-            {tr('storageTelemetryHeading', 'Storage Engine Monitor')}
-          </span>
-          <span 
-            className="font-extrabold uppercase px-2.5 py-0.5 rounded text-[11px] border"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            {settings.provider === 'localhost' ? 'Localhost Disk' : 'Supabase S3 Cloud'}
-          </span>
-          <span 
-            className="font-bold px-2 py-0.5 rounded text-[10px] border shadow-xs"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: settings.provider === 'localhost' ? 'var(--color-emerald, #10b981)' : (settings.isConnected ? 'var(--color-emerald, #10b981)' : '#f59e0b'),
-              color: settings.provider === 'localhost' ? 'var(--color-emerald, #10b981)' : (settings.isConnected ? 'var(--color-emerald, #10b981)' : '#fbbf24')
-            }}
-          >
-            {settings.provider === 'localhost' ? 'Filesystem Ready' : (settings.isConnected ? tr('storageStatusConnected', 'S3 Connected') : tr('storageStatusDisconnected', 'Not Connected'))}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-4 font-semibold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-          <div>
-            {tr('storageMaxFileSizeLabel', 'Max Upload Limit:')}{' '}
-            <span className="font-bold font-mono" style={{ color: 'var(--color-text)' }}>
-              {settings.provider === 'localhost' ? settings.localhost.maxFileSizeMb : settings.supabase.maxFileSizeMb} MB
+      {/* 2. UNIVERSAL DISK HEALTH DIAGNOSTIC PANEL */}
+      {diskStats && (
+        <div 
+          className="p-5 rounded-3xl border space-y-3 shadow-xs"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex items-center justify-between">
+            <h3 className="font-extrabold text-sm flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+              <FolderCheck className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
+              <span>Universal Filesystem Storage Status</span>
+            </h3>
+            <span 
+              className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md border"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-emerald)',
+                color: 'var(--color-emerald)'
+              }}
+            >
+              Live Sync
             </span>
           </div>
-          <div>
-            <span>Formats: </span>
-            <span className="font-bold font-mono uppercase" style={{ color: 'var(--color-text)' }}>
-              {settings.allowedFormats.join(', ')}
-            </span>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 text-xs">
+            <div 
+              className="p-3.5 rounded-2xl border flex items-center justify-between"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="flex items-center gap-3">
+                <FileJson className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+                <div>
+                  <div className="font-bold">Recipe JSON Directory</div>
+                  <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>/recipes (*.json)</div>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="font-black text-sm">{diskStats.recipesCount} files</div>
+                <div className="text-[10px] text-emerald-400 font-bold">
+                  {diskStats.jsonDirWritable ? 'Writable ✅' : 'Read-only ⚠️'}
+                </div>
+              </div>
+            </div>
+
+            <div 
+              className="p-3.5 rounded-2xl border flex items-center justify-between"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <div className="flex items-center gap-3">
+                <ImageIcon className="h-5 w-5" style={{ color: 'var(--color-emerald)' }} />
+                <div>
+                  <div className="font-bold">Recipe Image Directory</div>
+                  <div className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>/recipes/images</div>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="font-black text-sm">{diskStats.imagesCount} images</div>
+                <div className="text-[10px] text-emerald-400 font-bold">
+                  {diskStats.imagesDirWritable ? 'Writable ✅' : 'Read-only ⚠️'}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* 3. Provider Selector Cards */}
-      <div 
-        role="region"
-        data-lpignore="true"
-        className="p-6 rounded-3xl border shadow-sm space-y-4 transition-colors"
-        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-      >
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-            <Sliders className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-            {tr('storageProviderLabel', 'Active Storage Provider')}
-          </h2>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleApplyRecommendedLocalhost}
-              className="text-[10px] font-bold px-2.5 py-1 rounded-lg border transition hover:opacity-80 cursor-pointer"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-            >
-              Localhost Preset
-            </button>
-            <button
-              type="button"
-              onClick={handleApplyRecommendedSupabase}
-              className="text-[10px] font-bold px-2.5 py-1 rounded-lg border transition hover:opacity-80 cursor-pointer"
-              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}
-            >
-              Supabase Preset
-            </button>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-          {/* Localhost Card */}
+      {/* 3. STORAGE PROVIDER SELECTOR CARDS */}
+      <div className="space-y-3">
+        <label className="block text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+          {t('selectStorageProvider', 'Active Image Storage Location')}
+        </label>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* LOCALHOST OPTION */}
           <div
-            onClick={() => setSettings({ ...settings, provider: 'localhost' })}
-            className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
-              settings.provider === 'localhost' ? 'shadow-md' : 'opacity-70 hover:opacity-100'
+            onClick={() => setSettings(prev => ({ ...prev, provider: 'localhost' }))}
+            className={`p-6 rounded-3xl border cursor-pointer transition flex flex-col justify-between space-y-4 ${
+              settings.provider === 'localhost' ? 'ring-2 shadow-md' : 'hover:opacity-80'
             }`}
             style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: settings.provider === 'localhost' ? 'var(--color-primary)' : 'var(--color-border)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: settings.provider === 'localhost' ? 'var(--color-primary)' : 'var(--color-border)',
             }}
           >
-            <div>
-              <div className="flex items-center justify-between">
-                <span className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                  <Server className="h-4 w-4 text-emerald-400" />
-                  {tr('providerLocalhostTitle', 'Localhost (Server Disk)')}
-                </span>
-                {settings.provider === 'localhost' && (
-                  <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary)' }}>
-                    <Check className="h-3.5 w-3.5" />
-                  </div>
-                )}
+            <div className="flex items-start justify-between">
+              <div className="p-3 rounded-2xl" style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-primary)' }}>
+                <Server className="h-6 w-6" />
               </div>
-              <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
-                {tr('providerLocalhostDesc', 'Store uploaded and scraped images directly on the server filesystem (public/uploads/recipes).')}
-              </p>
+              <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                settings.provider === 'localhost' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'
+              }`}>
+                {settings.provider === 'localhost' ? 'Active' : 'Offline'}
+              </span>
             </div>
-            <div className="pt-3 border-t mt-3 text-[11px] font-mono flex items-center justify-between opacity-75" style={{ borderColor: 'var(--color-border)' }}>
-              <span>public/uploads/recipes/</span>
-              <span>10 MB Max</span>
+            <div>
+              <h3 className="font-extrabold text-base">Localhost (/recipes/images)</h3>
+              <p className="text-xs pt-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                Stores images directly inside <code className="px-1.5 py-0.5 rounded bg-black/40">public/recipes/images</code> on your server filesystem with instantaneous streaming.
+              </p>
             </div>
           </div>
 
-          {/* Supabase S3 Cloud Storage Card */}
+          {/* SUPABASE S3 OPTION */}
           <div
-            onClick={() => setSettings({ ...settings, provider: 'supabase' })}
-            className={`p-5 rounded-2xl border-2 cursor-pointer transition flex flex-col justify-between ${
-              settings.provider === 'supabase' ? 'shadow-md' : 'opacity-70 hover:opacity-100'
+            onClick={() => setSettings(prev => ({ ...prev, provider: 'supabase' }))}
+            className={`p-6 rounded-3xl border cursor-pointer transition flex flex-col justify-between space-y-4 ${
+              settings.provider === 'supabase' ? 'ring-2 shadow-md' : 'hover:opacity-80'
             }`}
             style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: settings.provider === 'supabase' ? 'var(--color-primary)' : 'var(--color-border)'
+              backgroundColor: 'var(--color-card)',
+              borderColor: settings.provider === 'supabase' ? 'var(--color-primary)' : 'var(--color-border)',
             }}
           >
-            <div>
-              <div className="flex items-center justify-between">
-                <span className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                  <Cloud className="h-4 w-4 text-emerald-400" />
-                  {tr('providerSupabaseTitle', 'Supabase Storage (S3 Protocol)')}
-                </span>
-                {settings.provider === 'supabase' && (
-                  <div className="h-5 w-5 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ backgroundColor: 'var(--color-primary)' }}>
-                    <Check className="h-3.5 w-3.5" />
-                  </div>
-                )}
+            <div className="flex items-start justify-between">
+              <div className="p-3 rounded-2xl" style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-primary)' }}>
+                <Cloud className="h-6 w-6" />
               </div>
-              <p className="text-xs mt-2" style={{ color: 'var(--color-text-secondary)' }}>
-                {tr('providerSupabaseDesc', 'Upload images directly to Supabase S3-compatible cloud bucket with public CDN delivery.')}
-              </p>
+              <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                settings.provider === 'supabase' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-800 text-slate-400'
+              }`}>
+                {settings.provider === 'supabase' ? 'Active' : 'Cloud S3'}
+              </span>
             </div>
-            <div className="pt-3 border-t mt-3 text-[11px] font-mono flex items-center justify-between opacity-75" style={{ borderColor: 'var(--color-border)' }}>
-              <span>recipes bucket (us-west-1)</span>
-              <span>25 MB Max</span>
+            <div>
+              <h3 className="font-extrabold text-base">Supabase Storage (S3 Protocol)</h3>
+              <p className="text-xs pt-1 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                Offloads images directly to your Supabase S3 bucket (<code className="px-1.5 py-0.5 rounded bg-black/40">recipes</code>). Ideal for cloud deployments to keep server disk lightweight.
+              </p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* 4. Configuration Form Cards (Autofill Safe Guardrails - Constraint 9) */}
-      <div 
-        role="region"
-        data-lpignore="true"
-        className="space-y-6"
-      >
-        {/* Localhost Configuration Section */}
-        {settings.provider === 'localhost' && (
-          <div 
-            className="p-6 rounded-3xl border shadow-sm space-y-4 transition-colors"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-          >
-            <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <Server className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-              <h2 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
-                {tr('storageLocalhostSettingsHeading', 'Localhost Storage Settings')}
+      {/* 4. PROVIDER SETTINGS DETAIL VIEW */}
+      {settings.provider === 'supabase' ? (
+        /* SUPABASE S3 CONFIGURATION */
+        <div
+          role="region"
+          aria-label="Supabase S3 Configuration"
+          data-lpignore="true"
+          className="p-6 sm:p-8 rounded-3xl border space-y-6 shadow-xs"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
+            <div>
+              <h2 className="text-lg font-black flex items-center gap-2">
+                <Cloud className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+                <span>Supabase S3 Configuration</span>
               </h2>
+              <p className="text-xs pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                Connect to your bucket using Supabase Storage via the S3 protocol. All recipe JSON records will still be saved to /recipes.
+              </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-mono">
-              <div>
-                <label className="block font-bold mb-1 font-sans" style={{ color: 'var(--color-text)' }}>
-                  {tr('storageLocalhostPathLabel', 'Upload Directory Path')}
-                </label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  spellCheck="false"
-                  value={settings.localhost.uploadPath}
-                  onChange={(e) => setSettings({
-                    ...settings,
-                    localhost: { ...settings.localhost, uploadPath: e.target.value }
-                  })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-bold"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1 font-sans" style={{ color: 'var(--color-text)' }}>
-                  {tr('storageLocalhostServingUrlLabel', 'Public Web Serving URL Prefix')}
-                </label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  spellCheck="false"
-                  value={settings.localhost.publicServingUrl}
-                  onChange={(e) => setSettings({
-                    ...settings,
-                    localhost: { ...settings.localhost, publicServingUrl: e.target.value }
-                  })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-bold"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1 font-sans" style={{ color: 'var(--color-text)' }}>
-                  {tr('storageLocalhostMaxFileSizeLabel', 'Max Upload File Size (MB)')}
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="100"
-                  autoComplete="off"
-                  data-lpignore="true"
-                  value={settings.localhost.maxFileSizeMb}
-                  onChange={(e) => setSettings({
-                    ...settings,
-                    localhost: { ...settings.localhost, maxFileSizeMb: parseInt(e.target.value, 10) || 10 }
-                  })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-bold"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
-              </div>
-            </div>
+            <button
+              type="button"
+              onClick={handleLoadRecommendedSupabase}
+              className="px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer self-start sm:self-auto hover:opacity-80"
+              style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)' }}
+            >
+              Load Recommended Values
+            </button>
           </div>
-        )}
 
-        {/* Supabase S3 Configuration Section */}
-        {settings.provider === 'supabase' && (
-          <div 
-            className="p-6 rounded-3xl border shadow-sm space-y-5 transition-colors"
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+          <div className="space-y-4 text-xs" data-lpignore="true">
+            {/* S3 ENDPOINT */}
+            <div>
+              <label className="block font-bold mb-1">Endpoint (S3 Gateway)</label>
               <div className="flex items-center gap-2">
-                <Cloud className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                <h2 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
-                  {tr('storageSupabaseSettingsHeading', 'Supabase S3 Cloud Storage Settings')}
-                </h2>
-              </div>
-
-              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  data-lpignore="true"
+                  value={settings.supabase.endpoint}
+                  onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, endpoint: e.target.value } }))}
+                  placeholder="https://<project-ref>.storage.supabase.co/storage/v1/s3"
+                  className="flex-1 px-3 py-2.5 rounded-xl border outline-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
                 <button
                   type="button"
-                  onClick={handleTestS3Connection}
-                  disabled={testingConnection}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold text-white shadow transition hover:opacity-90 cursor-pointer disabled:opacity-50"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
+                  onClick={() => handleCopy(settings.supabase.endpoint, 'endpoint')}
+                  className="p-2.5 rounded-xl border cursor-pointer transition hover:opacity-80"
+                  style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)' }}
+                  title="Copy Endpoint"
                 >
-                  <ShieldCheck className={`h-4 w-4 ${testingConnection ? 'animate-spin' : ''}`} />
-                  <span>{testingConnection ? tr('storageTestingConnection', 'Testing S3 Connection...') : tr('storageTestConnectionBtn', 'Test S3 Connection')}</span>
+                  {copiedField === 'endpoint' ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
                 </button>
               </div>
             </div>
 
-            {/* S3 Test Diagnostic Result Banner */}
-            {testResult && (
-              <div 
-                className="p-3.5 rounded-2xl border text-xs font-semibold flex items-start gap-2 shadow-sm animate-in fade-in"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: testResult.success ? 'var(--color-emerald, #10b981)' : '#ef4444',
-                  color: testResult.success ? 'var(--color-emerald, #10b981)' : '#ef4444'
-                }}
-              >
-                {testResult.success ? (
-                  <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-emerald, #10b981)' }} />
-                ) : (
-                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-red-500" />
-                )}
-                <span>{testResult.msg}</span>
+            {/* REGION & BUCKET */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-bold mb-1">Region</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    data-lpignore="true"
+                    value={settings.supabase.region}
+                    onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, region: e.target.value } }))}
+                    placeholder="us-west-1"
+                    className="flex-1 px-3 py-2.5 rounded-xl border outline-none"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(settings.supabase.region, 'region')}
+                    className="p-2.5 rounded-xl border cursor-pointer transition hover:opacity-80"
+                    style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)' }}
+                    title="Copy Region"
+                  >
+                    {copiedField === 'region' ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
-            )}
 
-            <div className="p-3 rounded-2xl border text-xs flex items-start gap-2 leading-relaxed" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-              <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
-              <span>{tr('storageSupabaseHelpNotice', 'Ensure your Supabase storage bucket is set to "Public" in the Supabase Dashboard so images can be viewed without authentication tokens.')}</span>
+              <div>
+                <label className="block font-bold mb-1">Bucket Name</label>
+                <input
+                  type="text"
+                  data-lpignore="true"
+                  value={settings.supabase.bucket}
+                  onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, bucket: e.target.value } }))}
+                  placeholder="recipes"
+                  className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-mono">
-              <div className="sm:col-span-2">
-                <label className="block font-bold mb-1 font-sans" style={{ color: 'var(--color-text)' }}>
-                  {tr('storageSupabaseEndpointLabel', 'S3 Endpoint URL')} *
-                </label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  spellCheck="false"
-                  value={settings.supabase.endpoint}
-                  onChange={(e) => setSettings({
-                    ...settings,
-                    supabase: { ...settings.supabase, endpoint: e.target.value }
-                  })}
-                  placeholder="https://<project-ref>.storage.supabase.co/storage/v1/s3"
-                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-bold"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
+            {/* ACCESS KEY ID & SECRET KEY */}
+            <div className="space-y-4 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <label className="block font-bold mb-1">Access Key ID</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    data-lpignore="true"
+                    value={settings.supabase.accessKeyId}
+                    onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, accessKeyId: e.target.value } }))}
+                    placeholder="f3e0affef5c74972a535153349eb24cc"
+                    className="flex-1 px-3 py-2.5 rounded-xl border outline-none font-mono"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(settings.supabase.accessKeyId, 'accessKey')}
+                    className="p-2.5 rounded-xl border cursor-pointer transition hover:opacity-80"
+                    style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)' }}
+                    title="Copy Key ID"
+                  >
+                    {copiedField === 'accessKey' ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1 font-sans" style={{ color: 'var(--color-text)' }}>
-                  {tr('storageSupabaseRegionLabel', 'Region')} *
-                </label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  spellCheck="false"
-                  value={settings.supabase.region}
-                  onChange={(e) => setSettings({
-                    ...settings,
-                    supabase: { ...settings.supabase, region: e.target.value }
-                  })}
-                  placeholder="us-west-1"
-                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-bold"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1 font-sans" style={{ color: 'var(--color-text)' }}>
-                  {tr('storageSupabaseBucketLabel', 'Bucket Name')} *
-                </label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  spellCheck="false"
-                  value={settings.supabase.bucketName}
-                  onChange={(e) => setSettings({
-                    ...settings,
-                    supabase: { ...settings.supabase, bucketName: e.target.value }
-                  })}
-                  placeholder="recipes"
-                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-bold"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1 font-sans" style={{ color: 'var(--color-text)' }}>
-                  {tr('storageSupabaseAccessKeyLabel', 'Access Key ID')} *
-                </label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  data-lpignore="true"
-                  data-form-type="other"
-                  spellCheck="false"
-                  value={settings.supabase.accessKeyId}
-                  onChange={(e) => setSettings({
-                    ...settings,
-                    supabase: { ...settings.supabase, accessKeyId: e.target.value }
-                  })}
-                  placeholder="f3e0affef5c74972a535153349eb24cc"
-                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-bold"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1 font-sans" style={{ color: 'var(--color-text)' }}>
-                  {tr('storageSupabaseSecretKeyLabel', 'Secret Access Key')} *
-                </label>
-                <div className="relative">
+                <label className="block font-bold mb-1">Secret Access Key</label>
+                <div className="relative flex items-center">
                   <input
                     type={showSecretKey ? 'text' : 'password'}
-                    autoComplete="new-password"
                     data-lpignore="true"
-                    data-form-type="other"
-                    spellCheck="false"
                     value={settings.supabase.secretAccessKey}
-                    onChange={(e) => setSettings({
-                      ...settings,
-                      supabase: { ...settings.supabase, secretAccessKey: e.target.value }
-                    })}
-                    placeholder="Enter Secret Key from Supabase Access Keys..."
-                    className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-bold pr-10"
+                    onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, secretAccessKey: e.target.value } }))}
+                    placeholder="Enter Secret Key generated from Supabase S3 Access Keys"
+                    className="w-full px-3 py-2.5 pr-10 rounded-xl border outline-none font-mono"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                   <button
                     type="button"
                     onClick={() => setShowSecretKey(!showSecretKey)}
-                    className="absolute right-3 top-2.5 opacity-60 hover:opacity-100 transition cursor-pointer"
+                    className="absolute right-3 p-1 cursor-pointer transition"
+                    style={{ color: 'var(--color-text-secondary)' }}
                   >
                     {showSecretKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
               </div>
 
-              <div className="sm:col-span-2">
-                <label className="block font-bold mb-1 font-sans" style={{ color: 'var(--color-text)' }}>
-                  {tr('storageSupabasePublicUrlLabel', 'Public CDN URL Prefix')} *
-                </label>
+              {/* PUBLIC CDN URL PREFIX */}
+              <div>
+                <label className="block font-bold mb-1">Public CDN / URL Prefix</label>
                 <input
                   type="text"
-                  autoComplete="off"
                   data-lpignore="true"
-                  data-form-type="other"
-                  spellCheck="false"
-                  value={settings.supabase.publicUrlPrefix}
-                  onChange={(e) => setSettings({
-                    ...settings,
-                    supabase: { ...settings.supabase, publicUrlPrefix: e.target.value }
-                  })}
+                  value={settings.supabase.publicUrl}
+                  onChange={(e) => setSettings(prev => ({ ...prev, supabase: { ...prev.supabase, publicUrl: e.target.value } }))}
                   placeholder="https://<project-ref>.supabase.co/storage/v1/object/public/recipes"
-                  className="w-full px-3.5 py-2.5 rounded-xl border outline-none font-bold"
+                  className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+                <p className="text-[11px] pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                  Ensure the bucket is configured as <strong>Public</strong> in Supabase Dashboard $\rightarrow$ Storage to allow direct browser image loading.
+                </p>
+              </div>
+            </div>
+
+            {/* TEST CONNECTION SECTION */}
+            <div className="pt-4 border-t space-y-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-extrabold text-sm flex items-center gap-1.5">
+                    <Wifi className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                    <span>Connection Diagnostic</span>
+                  </h3>
+                  <p className="text-[11px] pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                    Verify that your Key ID and Secret Key can authenticate and upload to the Supabase S3 bucket.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleTestConnection}
+                  disabled={testing || !settings.supabase.secretAccessKey}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border transition cursor-pointer self-start sm:self-auto shadow-xs hover:opacity-80"
+                  style={{
+                    borderColor: 'var(--color-border)',
+                    backgroundColor: 'var(--color-inner-dark)',
+                    opacity: (testing || !settings.supabase.secretAccessKey) ? 0.6 : 1,
+                  }}
+                >
+                  {testing ? <RefreshCw className="h-3.5 w-3.5 animate-spin" style={{ color: 'var(--color-primary)' }} /> : <Wifi className="h-3.5 w-3.5 text-amber-400" />}
+                  <span>{testing ? 'Testing Connection...' : 'Test S3 Connection'}</span>
+                </button>
+              </div>
+
+              {testResult && (
+                <div className={`p-4 rounded-2xl border text-xs font-bold flex items-center gap-2.5 ${
+                  testResult.success ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                }`}>
+                  {testResult.success ? <Check className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
+                  <span>{testResult.message}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* LOCALHOST CONFIGURATION */
+        <div
+          role="region"
+          aria-label="Localhost Configuration"
+          data-lpignore="true"
+          className="p-6 sm:p-8 rounded-3xl border space-y-6 shadow-xs"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b" style={{ borderColor: 'var(--color-border)' }}>
+            <div>
+              <h2 className="text-lg font-black flex items-center gap-2">
+                <Server className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+                <span>Localhost Server Disk Configuration</span>
+              </h2>
+              <p className="text-xs pt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                Store uploaded and scraped images directly inside your server public directory (/recipes/images).
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleLoadRecommendedLocalhost}
+              className="px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer self-start sm:self-auto hover:opacity-80"
+              style={{ borderColor: 'var(--color-border)', backgroundColor: 'var(--color-inner-dark)' }}
+            >
+              Reset to Defaults
+            </button>
+          </div>
+
+          <div className="space-y-4 text-xs" data-lpignore="true">
+            <div>
+              <label className="block font-bold mb-1">Image Upload Directory</label>
+              <input
+                type="text"
+                data-lpignore="true"
+                value={settings.localhost.uploadDir}
+                onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, uploadDir: e.target.value } }))}
+                placeholder="public/recipes/images"
+                className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+              <p className="text-[11px] pt-1" style={{ color: 'var(--color-text-secondary)' }}>Relative path where binary images are saved.</p>
+            </div>
+
+            <div>
+              <label className="block font-bold mb-1">Recipe JSON Storage Directory</label>
+              <input
+                type="text"
+                data-lpignore="true"
+                value={settings.localhost.recipesJsonDir}
+                onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, recipesJsonDir: e.target.value } }))}
+                placeholder="public/recipes"
+                className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+              <p className="text-[11px] pt-1" style={{ color: 'var(--color-text-secondary)' }}>Relative path where individual recipe JSON records are saved.</p>
+            </div>
+
+            <div>
+              <label className="block font-bold mb-1">Serving URL Route Prefix</label>
+              <input
+                type="text"
+                data-lpignore="true"
+                value={settings.localhost.publicPrefix}
+                onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, publicPrefix: e.target.value } }))}
+                placeholder="/recipes/images"
+                className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block font-bold mb-1">Maximum File Size (MB)</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="100"
+                  data-lpignore="true"
+                  value={settings.localhost.maxSizeMb}
+                  onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, maxSizeMb: Number(e.target.value) || 10 } }))}
+                  className="w-full px-3 py-2.5 rounded-xl border outline-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">Allowed Image Formats</label>
+                <input
+                  type="text"
+                  data-lpignore="true"
+                  value={settings.localhost.allowedTypes}
+                  onChange={(e) => setSettings(prev => ({ ...prev, localhost: { ...prev.localhost, allowedTypes: e.target.value } }))}
+                  className="w-full px-3 py-2.5 rounded-xl border outline-none"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
             </div>
           </div>
-        )}
-
-        {/* Allowed Formats Multi-Tag Selector */}
-        <div 
-          className="p-6 rounded-3xl border shadow-sm space-y-3 transition-colors"
-          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-        >
-          <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-            <Layers className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-            <h2 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
-              {tr('storageAllowedFormatsLabel', 'Allowed Image Formats')}
-            </h2>
-          </div>
-
-          <div className="flex flex-wrap gap-2 pt-1">
-            {['jpg', 'jpeg', 'png', 'webp', 'svg', 'gif'].map((fmt) => {
-              const isSelected = settings.allowedFormats.includes(fmt);
-              return (
-                <button
-                  key={fmt}
-                  type="button"
-                  onClick={() => {
-                    const next = isSelected
-                      ? settings.allowedFormats.filter(f => f !== fmt)
-                      : [...settings.allowedFormats, fmt];
-                    setSettings({ ...settings, allowedFormats: next });
-                  }}
-                  className="px-3 py-1.5 rounded-xl border text-xs font-bold font-mono uppercase transition cursor-pointer flex items-center gap-1.5"
-                  style={isSelected ? {
-                    backgroundColor: 'var(--color-primary)',
-                    borderColor: 'var(--color-primary)',
-                    color: '#ffffff'
-                  } : {
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text-secondary)'
-                  }}
-                >
-                  <span>{fmt}</span>
-                  {isSelected && <Check className="h-3 w-3" />}
-                </button>
-              );
-            })}
-          </div>
         </div>
-
-        {/* Bottom Persistent Action Bar */}
-        <div className="flex items-center justify-end gap-3 pt-2">
-          <button
-            type="button"
-            onClick={loadStorageSettings}
-            className="px-4 py-2.5 border font-bold text-xs rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text-secondary)'
-            }}
-          >
-            <RefreshCw className="h-4 w-4" />
-            <span>{tr('storageReloadBtn', 'Reload')}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleSaveSettings}
-            disabled={saving}
-            className="px-7 py-2.5 text-white font-bold rounded-xl transition text-xs shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
-            style={{ backgroundColor: 'var(--color-primary)' }}
-          >
-            <Save className={`h-4 w-4 ${saving ? 'animate-spin' : ''}`} />
-            <span>{saving ? tr('storageSavingBtn', 'Saving...') : tr('storageSaveBtn', 'Save Storage Settings')}</span>
-          </button>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -35236,173 +35082,147 @@ export default function RegisterPage() {
 ## File: `apps/web/src/app/manual/page.tsx`
 ```typescript
 'use client';
-// @ts-nocheck
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
-  Plus, Trash2, Save, ArrowLeft, ImagePlus, GripVertical, 
-  ArrowUp, ArrowDown, CheckCircle2, AlertCircle, X, Sparkles, 
-  Flame, Clock, Users, Utensils, Tag, Activity
+  SquarePen, Plus, Trash2, Save, ArrowLeft, Clock, 
+  ChefHat, CheckCircle2, AlertCircle, Tag, Image as ImageIcon,
+  Upload, RefreshCw, GripVertical, Check, Globe, Lock,
+  ImagePlus, X, Utensils, Users, ChevronRight, ChevronLeft
 } from 'lucide-react';
-import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
-import { useRecipeTypes } from '@/lib/recipe-types';
-import { useIngredientCategories } from '@/lib/categories';
 import { useTranslation } from '@/components/LanguageProvider';
+import { getCurrentUser } from '@/lib/auth';
+import { persistSavedRecipe } from '@/lib/recipeSync';
+import { useRecipeTypes, useIngredientCategories } from '@/lib/recipe_types';
 
-interface IngredientItem {
+interface IngredientRow {
+  name: string;
   amount: string;
   unit: string;
-  item: string;
   category: string;
 }
-
-const DEFAULT_RECIPE_TYPES = [
-  'Main Dish', 'Appetizer', 'Soup & Stew', 'Salad', 
-  'Dessert', 'Breakfast', 'Beverage', 'Snack', 'Baking'
-];
-
-const DEFAULT_CATEGORIES = [
-  'Pantry Staples', 'Produce', 'Meat & Seafood', 'Dairy & Eggs', 
-  'Spices & Seasonings', 'Canned Goods', 'Grains & Pasta', 'Condiments & Sauces', 'Other'
-];
-
-
-const getCategoryName = (cat: any): string => {
-  if (!cat) return 'Pantry Staples';
-  if (typeof cat === 'string') {
-    const trimmed = cat.trim();
-    return trimmed === '[object Object]' || !trimmed ? 'Pantry Staples' : trimmed;
-  }
-  if (typeof cat === 'object') {
-    return (cat.name || cat.label || cat.title || cat.slug || cat.id || 'Pantry Staples').trim();
-  }
-  return String(cat).trim();
-};
-
-const getRecipeTypeName = (type: any): string => {
-  if (!type) return 'Main Dish';
-  if (typeof type === 'string') {
-    const trimmed = type.trim();
-    return trimmed === '[object Object]' || !trimmed ? 'Main Dish' : trimmed;
-  }
-  if (typeof type === 'object') {
-    return (type.name || type.label || type.title || type.slug || type.id || 'Main Dish').trim();
-  }
-  return String(type).trim();
-};
 
 export default function ManualRecipePage() {
   const router = useRouter();
   const { t } = useTranslation();
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+
+  const recipeTypes = useRecipeTypes();
+  const ingredientCategories = useIngredientCategories();
+
+  // 3-Tab State: 'info' | 'ingredients' | 'steps'
   const [activeTab, setActiveTab] = useState<'info' | 'ingredients' | 'steps'>('info');
-
-  const remoteRecipeTypes = useRecipeTypes?.() || [];
-  const remoteCategories = useIngredientCategories?.() || [];
-
-  const recipeTypes = remoteRecipeTypes.length > 0 ? remoteRecipeTypes : DEFAULT_RECIPE_TYPES;
-  const ingredientCategories = remoteCategories.length > 0 ? remoteCategories : DEFAULT_CATEGORIES;
 
   const [form, setForm] = useState({
     title: '',
     description: '',
     recipeType: 'Main Dish',
-    servings: 2,
-    prepTimeMinutes: 15,
-    cookTimeMinutes: 30,
-    calories: 450,
-    proteinGrams: 25,
-    carbsGrams: 40,
-    fatGrams: 15,
+    prepTime: '15',
+    cookTime: '25',
+    servings: '4',
+    difficulty: 'Medium',
+    cuisine: '',
     imageUrl: '',
-    ingredients: [
-      { amount: '10', unit: 'g', item: 'Palm sugar, chopped', category: 'Pantry Staples' },
-      { amount: '2', unit: 'tbsp', item: 'Fish sauce', category: 'Condiments & Sauces' }
-    ] as IngredientItem[],
-    instructions: [
-      'Heat a wok or large pan over medium-high heat with a drizzle of oil.',
-      'Add ingredients and stir thoroughly until cooked to perfection.'
-    ] as string[]
+    isPublic: false
   });
 
-  const [saving, setSaving] = useState(false);
+  const [ingredients, setIngredients] = useState<IngredientRow[]>([
+    { name: '', amount: '1', unit: 'unit', category: 'Produce' }
+  ]);
+
+  const [instructions, setInstructions] = useState<string[]>(['']);
+  
+  // Drag and drop states
   const [isReorderingIngredients, setIsReorderingIngredients] = useState(false);
   const [isReorderingSteps, setIsReorderingSteps] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
-    setToastMessage({ type, text });
-    setTimeout(() => setToastMessage(null), 3800);
-  };
+  // Upload & processing states
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const applySavedTheme = useCallback(() => {
+    try {
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
+    } catch (_) {}
+  }, []);
 
   useEffect(() => {
-    document.title = `${t('createRecipe', 'Create Recipe')} - Zecratary`;
-    initAuthStorage();
-    const user = getCurrentUser();
-    if (!user) {
-      router.replace('/login');
-      return;
-    }
-    setCurrentUser(user);
+    document.title = `${t('manualRecipeTitle', 'Manual Recipe Creation')} - FoodiePrep`;
+    applySavedTheme();
 
-    const handleSync = () => {
-      const u = getCurrentUser();
-      if (u) setCurrentUser(u);
-    };
-
-    window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_theme_mode_changed', handleSync);
-    window.addEventListener('zecratary_languages_updated', handleSync);
-    window.addEventListener('zecratary_dictionary_updated', handleSync);
-    window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_updated', applySavedTheme);
+    window.addEventListener('storage', applySavedTheme);
 
     return () => {
-      window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_theme_mode_changed', handleSync);
-      window.removeEventListener('zecratary_languages_updated', handleSync);
-      window.removeEventListener('zecratary_dictionary_updated', handleSync);
-      window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
+      window.removeEventListener('storage', applySavedTheme);
     };
-  }, [router, t]);
+  }, [applySavedTheme, t]);
 
   useEffect(() => {
-    if (recipeTypes && recipeTypes.length > 0 && !recipeTypes.map(getRecipeTypeName).includes(form.recipeType)) {
-      setForm(prev => ({ ...prev, recipeType: getRecipeTypeName(recipeTypes[0]) }));
+    if (recipeTypes && recipeTypes.length > 0 && !recipeTypes.includes(form.recipeType)) {
+      setForm(prev => ({ ...prev, recipeType: recipeTypes[0] }));
     }
   }, [recipeTypes, form.recipeType]);
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  useEffect(() => {
+    if (ingredientCategories && ingredientCategories.length > 0 && ingredients[0]?.category === 'Produce') {
+      setIngredients(prev => prev.map(i => ({ ...i, category: i.category || ingredientCategories[0] })));
+    }
+  }, [ingredientCategories]);
+
+  // Handle Image Upload using /api/recipes/upload (Synchronized with /admin/storage)
+  const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    setIsUploadingImage(true);
+    setErrorMsg('');
 
     try {
       const formData = new FormData();
       formData.append('file', file);
 
+      // Direct upload to storage provider (Supabase S3 or /recipes/images)
       const res = await fetch('/api/recipes/upload', {
         method: 'POST',
         body: formData
       });
-      const data = await res.json();
 
-      if (data.success && data.url) {
-        setForm(prev => ({ ...prev, imageUrl: data.url }));
+      const data = await res.json();
+      if (res.ok && data.success && (data.url || data.imageUrl || data.localUrl)) {
+        const finalUrl = data.url || data.imageUrl || data.localUrl;
+        setForm(prev => ({ ...prev, imageUrl: finalUrl }));
       } else {
+        // Fallback to Base64 data URL
         const reader = new FileReader();
         reader.onloadend = () => {
-          setForm(prev => ({ ...prev, imageUrl: reader.result as string }));
+          if (typeof reader.result === 'string') {
+            setForm(prev => ({ ...prev, imageUrl: reader.result as string }));
+          }
         };
         reader.readAsDataURL(file);
       }
-    } catch (_) {
+    } catch (err: any) {
+      console.warn('Image upload notice:', err.message);
       const reader = new FileReader();
       reader.onloadend = () => {
-        setForm(prev => ({ ...prev, imageUrl: reader.result as string }));
+        if (typeof reader.result === 'string') {
+          setForm(prev => ({ ...prev, imageUrl: reader.result as string }));
+        }
       };
       reader.readAsDataURL(file);
+    } finally {
+      setIsUploadingImage(false);
     }
   };
 
@@ -35416,18 +35236,18 @@ export default function ManualRecipePage() {
     if (draggedIndex === null || draggedIndex === index) return;
 
     if (type === 'ingredients') {
-      const list = [...form.ingredients];
+      const list = [...ingredients];
       const item = list[draggedIndex];
       list.splice(draggedIndex, 1);
       list.splice(index, 0, item);
-      setForm({ ...form, ingredients: list });
+      setIngredients(list);
       setDraggedIndex(index);
     } else {
-      const list = [...form.instructions];
+      const list = [...instructions];
       const item = list[draggedIndex];
       list.splice(draggedIndex, 1);
       list.splice(index, 0, item);
-      setForm({ ...form, instructions: list });
+      setInstructions(list);
       setDraggedIndex(index);
     }
   };
@@ -35436,876 +35256,776 @@ export default function ManualRecipePage() {
     setDraggedIndex(null);
   };
 
-  // Touch-Friendly Accessible Move Handlers
-  const moveIngredient = (idx: number, direction: 'up' | 'down') => {
-    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
-    if (targetIdx < 0 || targetIdx >= form.ingredients.length) return;
-    const list = [...form.ingredients];
-    const item = list[idx];
-    list.splice(idx, 1);
-    list.splice(targetIdx, 0, item);
-    setForm({ ...form, ingredients: list });
+  // Ingredient Helpers
+  const handleAddIngredient = () => {
+    setIngredients(prev => [
+      ...prev, 
+      { name: '', amount: '1', unit: 'unit', category: ingredientCategories[0] || 'Produce' }
+    ]);
   };
 
-  const moveStep = (idx: number, direction: 'up' | 'down') => {
-    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
-    if (targetIdx < 0 || targetIdx >= form.instructions.length) return;
-    const list = [...form.instructions];
-    const item = list[idx];
-    list.splice(idx, 1);
-    list.splice(targetIdx, 0, item);
-    setForm({ ...form, instructions: list });
+  const handleRemoveIngredient = (index: number) => {
+    if (ingredients.length <= 1) return;
+    setIngredients(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleSave = async () => {
+  const handleIngredientChange = (index: number, field: keyof IngredientRow, value: string) => {
+    setIngredients(prev => {
+      const copy = [...prev];
+      copy[index] = { ...copy[index], [field]: value };
+      return copy;
+    });
+  };
+
+  // Instruction Helpers
+  const handleAddInstruction = () => {
+    setInstructions(prev => [...prev, '']);
+  };
+
+  const handleRemoveInstruction = (index: number) => {
+    if (instructions.length <= 1) return;
+    setInstructions(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleInstructionChange = (index: number, value: string) => {
+    setInstructions(prev => {
+      const copy = [...prev];
+      copy[index] = value;
+      return copy;
+    });
+  };
+
+  // Save Recipe to Universal Storage (/recipes JSON, /recipes/images or Supabase, PostgreSQL)
+  const handleSubmit = async () => {
+    setErrorMsg('');
+    setSuccessMsg('');
+
     if (!form.title.trim()) {
-      showToast(t('enterRecipeTitleAlert', 'Please enter a recipe title before saving.'), 'error');
+      setErrorMsg(t('titleRequired', 'Recipe title is required.'));
       setActiveTab('info');
       return;
     }
 
-    const validIngredients = form.ingredients.filter(ing => ing.item && ing.item.trim().length > 0);
+    const validIngredients = ingredients.filter(i => i.name.trim().length > 0);
     if (validIngredients.length === 0) {
-      showToast(t('atLeastOneIngredientAlert', 'Please add at least one ingredient item.'), 'error');
+      setErrorMsg(t('ingredientRequired', 'Please add at least one valid ingredient.'));
       setActiveTab('ingredients');
       return;
     }
 
-    const validInstructions = form.instructions.filter(i => i && i.trim().length > 0);
+    const validInstructions = instructions.filter(s => s.trim().length > 0);
     if (validInstructions.length === 0) {
-      showToast(t('atLeastOneStepAlert', 'Please describe at least one cooking instruction step.'), 'error');
+      setErrorMsg(t('instructionRequired', 'Please add at least one instruction step.'));
       setActiveTab('steps');
       return;
     }
 
-    if (!currentUser) return;
-    setSaving(true);
+    setLoading(true);
+
+    const user = getCurrentUser();
+    const targetUserId = (user?.id || user?.email || 'usr_admin_1').trim();
+    const createdBy = (user?.email || targetUserId).trim();
+    const creatorName = (user?.name || 'Chef').trim();
+    const creatorEmail = (user?.email || '').trim();
+    const recipeId = 'rcp_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
+
+    let finalImageUrl = form.imageUrl.trim();
+    if (!finalImageUrl) {
+      finalImageUrl = '/recipes/images/default.jpg';
+    }
+
+    const recipePayload = {
+      id: recipeId,
+      ownership: {
+        userId: targetUserId,
+        createdBy,
+        creatorName,
+        creatorEmail
+      },
+      owner: {
+        id: targetUserId,
+        name: creatorName,
+        email: creatorEmail
+      },
+      ownerId: targetUserId,
+      ownerName: creatorName,
+      ownerEmail: creatorEmail,
+      userId: targetUserId,
+      user_id: targetUserId,
+      createdBy,
+      created_by: createdBy,
+      creatorName,
+      creator_name: creatorName,
+      creatorEmail,
+      creator_email: creatorEmail,
+      title: form.title.trim(),
+      description: form.description.trim(),
+      recipeType: form.recipeType,
+      category: form.recipeType,
+      prepTime: Number(form.prepTime) || 15,
+      cookTime: Number(form.cookTime) || 25,
+      prepTimeMinutes: Number(form.prepTime) || 15,
+      cookTimeMinutes: Number(form.cookTime) || 25,
+      totalTime: (Number(form.prepTime) || 15) + (Number(form.cookTime) || 25),
+      servings: Number(form.servings) || 4,
+      difficulty: form.difficulty,
+      cuisine: form.cuisine.trim(),
+      imageUrl: finalImageUrl,
+      image: finalImageUrl,
+      image_url: finalImageUrl,
+      isPublic: Boolean(form.isPublic),
+      is_public: Boolean(form.isPublic),
+      isFavorite: false,
+      isCooked: false,
+      rating: 0,
+      note: '',
+      ingredients: validIngredients,
+      instructions: validInstructions,
+      directions: validInstructions,
+      tags: [form.recipeType],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
 
     try {
-      const recipeId = 'manual_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
-      const newRecipe = {
-        id: recipeId,
-        userId: currentUser.id || 'usr_admin_1',
-        createdBy: currentUser.email || 'admin@zecratary.com',
-        creatorName: currentUser.name || 'Chef',
-        title: form.title.trim(),
-        name: form.title.trim(),
-        description: form.description.trim() || 'Handmade recipe created in manual mode',
-        recipeType: form.recipeType,
-        category: form.recipeType,
-        tags: [form.recipeType, 'Manual'],
-        servings: Number(form.servings) || 2,
-        prepTimeMinutes: Number(form.prepTimeMinutes) || 15,
-        cookTimeMinutes: Number(form.cookTimeMinutes) || 30,
-        calories: Number(form.calories) || 450,
-        proteinGrams: Number(form.proteinGrams) || 25,
-        carbsGrams: Number(form.carbsGrams) || 40,
-        fatGrams: Number(form.fatGrams) || 15,
-        imageUrl: form.imageUrl || '/uploads/recipes/default.jpg',
-        image: form.imageUrl || '/uploads/recipes/default.jpg',
-        ingredients: validIngredients.map((ing, idx) => ({
-          id: `ing_${Date.now()}_${idx}`,
-          amount: ing.amount || '1',
-          unit: ing.unit || '',
-          name: ing.item.trim(),
-          item: ing.item.trim(),
-          category: ing.category || 'Pantry Staples'
-        })),
-        instructions: validInstructions,
-        steps: validInstructions,
-        isFavorite: false,
-        isCooked: false,
-        rating: 5,
-        note: '',
-        sourceUrl: '',
-        createdAt: new Date().toISOString()
-      };
+      // 1. Post to API which persists to PostgreSQL/MySQL, saves /recipes/<id>.json, and syncs image
+      const res = await fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([recipePayload])
+      });
 
-      // 1. Persist to PostgreSQL via /api/saved-recipes
-      try {
-        await fetch('/api/saved-recipes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newRecipe)
-        });
-      } catch (_) {}
-
-      // 2. Persist to /api/recipes for backend catalog sync
-      try {
+      if (!res.ok) {
+        // Fallback to /api/recipes
         await fetch('/api/recipes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newRecipe)
+          body: JSON.stringify(recipePayload)
         });
-      } catch (_) {}
-
-      // 3. Update local storage cache for immediate offline hydration
-      if (typeof window !== 'undefined') {
-        try {
-          const raw = localStorage.getItem('zecratary_saved_recipes') || '[]';
-          const existing = JSON.parse(raw);
-          localStorage.setItem('zecratary_saved_recipes', JSON.stringify([newRecipe, ...existing]));
-        } catch (_) {}
-
-        window.dispatchEvent(new Event('storage'));
-        window.dispatchEvent(new Event('zecratary_recipes_updated'));
-        window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
       }
 
-      showToast(t('recipeCreatedSuccessToast', 'Recipe saved successfully to your culinary library!'), 'success');
+      // 2. Synchronize client storage for instantaneous UI response
+      await persistSavedRecipe(targetUserId, recipePayload, {
+        createdBy,
+        creatorName
+      }).catch(() => {});
+
+      const storageKeys = ['zecratary_recipes', 'zecratary_saved_recipes', 'saved_recipes'];
+      storageKeys.forEach((key) => {
+        try {
+          const raw = localStorage.getItem(key);
+          const currentList = raw ? JSON.parse(raw) : [];
+          const filtered = Array.isArray(currentList) ? currentList.filter((r: any) => r.id !== recipeId) : [];
+          localStorage.setItem(key, JSON.stringify([recipePayload, ...filtered]));
+        } catch (_) {}
+      });
+
+      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+      window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+      window.dispatchEvent(new Event('storage'));
+
+      setSuccessMsg(t('recipeSavedSuccess', 'Recipe created and saved to /recipes successfully! Redirecting...'));
+      
+      // Permanent redirect to canonical /recipes endpoint
       setTimeout(() => {
         router.push('/recipes');
       }, 700);
-
     } catch (err: any) {
-      showToast(err.message || 'Failed to save manual recipe', 'error');
-    } finally {
-      setSaving(false);
+      setErrorMsg(err.message || t('errorSavingRecipe', 'Error saving recipe. Please try again.'));
+      setLoading(false);
     }
   };
 
   return (
     <div 
-      className="w-full min-h-screen pb-24 px-2 sm:px-6 pt-4 font-sans transition-colors duration-200"
-      style={{ backgroundColor: 'var(--color-bg)', color: 'var(--color-text)' }}
+      className="max-w-4xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      style={{ color: 'var(--color-text)' }}
     >
-      {/* Toast Alert Banner */}
-      {toastMessage && (
-        <div 
-          className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
-          style={{
-            backgroundColor: 'var(--color-card)',
-            borderColor: toastMessage.type === 'success' ? 'var(--color-emerald)' : '#ef4444',
-            color: 'var(--color-text)'
-          }}
-        >
-          {toastMessage.type === 'success' ? (
-            <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
-          ) : (
-            <AlertCircle className="h-4 w-4 text-red-500" />
-          )}
-          <span>{toastMessage.text}</span>
-        </div>
-      )}
-
-      <div className="max-w-5xl mx-auto space-y-6">
-        {/* Top Header */}
-        <div 
-          className="flex items-center justify-between border-b pb-4"
-          style={{ borderColor: 'var(--color-border)' }}
-        >
-          <div className="flex items-center gap-3">
+      {/* 1. TOP HEADER & NAVIGATION */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
             <Link 
-              href="/recipes" 
-              className="p-2.5 rounded-xl transition shadow-xs border cursor-pointer hover:opacity-80"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text-secondary)'
-              }}
-              title={t('backBtn', '← Back')}
+              href="/recipes"
+              className="p-2 rounded-xl border transition hover:opacity-85 cursor-pointer shadow-xs"
+              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              title="Return to Recipes"
             >
               <ArrowLeft className="h-4 w-4" />
             </Link>
-            <div>
-              <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
-                {t('createRecipe', 'Create Recipe')}
-              </h1>
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('createRecipeSubtitle', 'Fill in details, ingredients, and preparation steps')}
-              </p>
-            </div>
+            <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+              <SquarePen className="h-6 w-6" style={{ color: 'var(--color-primary)' }} />
+              {t('manualRecipeTitle', 'Manual Recipe Creation')}
+            </h1>
           </div>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            {t('manualRecipeSubtitle', 'Craft your own recipe with ingredients, categories, and instructions. Saved to /recipes directory.')}
+          </p>
         </div>
 
-        {/* Tab Switcher Navigation */}
-        <div 
-          className="flex p-1.5 rounded-2xl border shadow-xs"
-          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={loading}
+          className="px-6 py-2.5 rounded-xl font-extrabold text-xs text-white shadow-lg transition flex items-center gap-2 cursor-pointer disabled:opacity-60 self-start sm:self-auto hover:opacity-95"
+          style={{ backgroundColor: 'var(--color-primary)' }}
         >
-          {[
-            { id: 'info', label: t('basicInfoTab', 'Basic Info') },
-            { id: 'ingredients', label: t('ingredientsTab', 'Ingredients') },
-            { id: 'steps', label: t('stepsTab', 'Preparation Steps') }
-          ].map((tab) => {
-            const isActive = activeTab === tab.id;
-            return (
+          {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          <span>{loading ? t('saving', 'Saving...') : t('saveRecipe', 'Save Recipe')}</span>
+        </button>
+      </div>
+
+      {/* FEEDBACK NOTIFICATIONS */}
+      {errorMsg && (
+        <div className="p-3.5 bg-red-950/40 border border-red-800/80 rounded-2xl text-xs text-red-300 font-semibold flex items-center gap-2 shadow-lg animate-in fade-in">
+          <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
+          <span>{errorMsg}</span>
+        </div>
+      )}
+
+      {successMsg && (
+        <div 
+          className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in"
+          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>{successMsg}</span>
+        </div>
+      )}
+
+      {/* 2. THREE-TAB NAVIGATION WIZARD BAR */}
+      <div 
+        className="flex p-1.5 rounded-2xl border transition-colors duration-200"
+        style={{
+          backgroundColor: 'var(--color-inner-dark)',
+          borderColor: 'var(--color-border)'
+        }}
+      >
+        {[
+          { id: 'info', label: t('basicInfoTab', 'Basic Info'), icon: ChefHat },
+          { id: 'ingredients', label: t('ingredientsTab', 'Ingredients'), icon: Tag },
+          { id: 'steps', label: t('stepsTab', 'Steps'), icon: Clock },
+        ].map((tab) => {
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id as any)}
+              className="flex-1 py-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
+              style={isActive ? {
+                backgroundColor: 'var(--color-card)',
+                color: 'var(--color-primary)',
+                borderColor: 'var(--color-primary)',
+                borderWidth: '1px',
+                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+              } : {
+                color: 'var(--color-text-secondary)'
+              }}
+            >
+              <tab.icon className="h-4 w-4" />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 3. ACCESSIBLE REGION CONTAINER (NO NATIVE FORM) */}
+      <div 
+        role="region" 
+        aria-label="Manual recipe details" 
+        data-lpignore="true"
+        className="space-y-6"
+      >
+        {/* TAB 1: BASIC INFO & IMAGE UPLOAD */}
+        {activeTab === 'info' && (
+          <div 
+            className="border rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl transition-colors duration-200 animate-in fade-in"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <h2 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                <ChefHat className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                <span>{t('generalInfo', 'General Information & Cover Image')}</span>
+              </h2>
+
+              {/* Public Marketplace Toggle */}
               <button
-                key={tab.id}
                 type="button"
-                onClick={() => setActiveTab(tab.id as any)}
-                className="flex-1 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer border"
-                style={isActive ? {
-                  backgroundColor: 'var(--color-card)',
-                  color: 'var(--color-primary)',
-                  borderColor: 'var(--color-border)'
-                } : {
-                  backgroundColor: 'transparent',
-                  borderColor: 'transparent',
-                  color: 'var(--color-text-secondary)'
+                onClick={() => setForm(prev => ({ ...prev, isPublic: !prev.isPublic }))}
+                className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: form.isPublic ? 'var(--color-emerald)' : 'var(--color-border)',
+                  color: form.isPublic ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
                 }}
               >
-                {tab.label}
+                {form.isPublic ? <Globe className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+                <span>{form.isPublic ? 'Public (Marketplace)' : 'Private (Only You)'}</span>
               </button>
-            );
-          })}
-        </div>
+            </div>
 
-        {/* ACCESSIBLE FORM-FREE DIV CONTAINER (Constraint 9: Autofill Guardrail) */}
-        <div 
-          role="region"
-          data-lpignore="true"
-          className="space-y-6"
-        >
-          {/* TAB 1: BASIC INFO & NUTRITION */}
-          {activeTab === 'info' && (
-            <div className="space-y-6 animate-in fade-in">
-              {/* Photo Upload & Preview */}
-              <div className="space-y-2">
-                <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-                  {t('photoLabel', 'Recipe Photo')}
-                </label>
-                
-                <div 
-                  className="border-2 border-dashed rounded-2xl min-h-[12rem] flex flex-col items-center justify-center relative overflow-hidden group shadow-xs p-4"
-                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-                >
-                  {form.imageUrl ? (
-                    <div className="relative w-full h-48 rounded-xl overflow-hidden group">
-                      <img src={form.imageUrl} alt="Recipe Preview" className="w-full h-full object-cover" />
-                      <button
-                        type="button"
-                        onClick={() => setForm(prev => ({ ...prev, imageUrl: '' }))}
-                        className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/70 text-white hover:bg-red-600 transition cursor-pointer shadow-md flex items-center gap-1 text-[11px] font-bold"
-                        title={t('removeImage', 'Remove Photo')}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        <span>{t('removeImage', 'Remove Photo')}</span>
-                      </button>
-                    </div>
-                  ) : (
-                    <label className="cursor-pointer text-center space-y-2 p-6 w-full">
-                      <ImagePlus className="h-8 w-8 mx-auto transition text-slate-400 group-hover:text-[var(--color-primary)]" />
-                      <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>
-                        {t('addAPhoto', 'Upload or drag a photo')}
-                      </span>
-                      <span className="text-[11px] block" style={{ color: 'var(--color-text-secondary)' }}>
-                        {t('uploadsHint', 'Supported formats: JPG, PNG, WEBP (Max 5MB)')}
-                      </span>
-                      <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
-                    </label>
-                  )}
+            {/* COVER IMAGE UPLOAD / PREVIEW CARD */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+                {t('recipeImageLabel', 'Recipe Cover Image (Upload or URL)')}
+              </label>
 
-                  <div className="w-full mt-3 pt-3 border-t flex items-center gap-2" style={{ borderColor: 'var(--color-border)' }}>
-                    <span className="text-[11px] font-bold shrink-0 opacity-70" style={{ color: 'var(--color-text-secondary)' }}>
-                      {t('imageUrlOrUpload', 'Or enter Image URL')}:
-                    </span>
-                    <input
-                      type="url"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-form-type="other"
-                      placeholder={t('imageUrlPlaceholder', 'https://example.com/recipe-photo.jpg')}
-                      value={form.imageUrl}
-                      onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
-                      className="flex-1 border rounded-xl p-2 text-xs outline-none font-medium"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <div className="relative flex-1">
+                  <ImageIcon className="h-4 w-4 absolute left-3.5 top-3 text-orange-400 pointer-events-none" />
+                  <input
+                    type="url"
+                    data-lpignore="true"
+                    value={form.imageUrl}
+                    onChange={(e) => setForm({ ...form, imageUrl: e.target.value })}
+                    placeholder="https://example.com/dish.jpg (or upload below)"
+                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none font-medium transition"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploadingImage}
+                  className="px-4 py-2.5 border rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer shadow-xs hover:opacity-85 shrink-0"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                >
+                  <Upload className={`h-4 w-4 ${isUploadingImage ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
+                  <span>{isUploadingImage ? t('uploading', 'Uploading...') : t('uploadImageBtn', 'Upload Image')}</span>
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg, image/png, image/webp"
+                  onChange={handleImageFileChange}
+                  className="hidden"
+                />
               </div>
 
-              {/* Title, Description & Metadata */}
-              <div 
-                className="border rounded-2xl p-6 space-y-4 text-xs shadow-xs"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-              >
+              {form.imageUrl && (
+                <div className="mt-3 relative w-full h-44 rounded-2xl overflow-hidden border shadow-inner group" style={{ borderColor: 'var(--color-border)' }}>
+                  <img src={form.imageUrl} alt="Recipe Preview" className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="px-3 py-1.5 bg-black/80 text-white rounded-xl text-xs font-bold border border-white/20 flex items-center gap-1 cursor-pointer"
+                    >
+                      <ImagePlus className="h-3.5 w-3.5 text-orange-400" /> Change
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, imageUrl: '' })}
+                      className="px-3 py-1.5 bg-red-600/90 text-white rounded-xl text-xs font-bold hover:bg-red-700 cursor-pointer"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* METADATA GRID */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs font-bold">
+              <div className="sm:col-span-2">
+                <label className="block mb-1.5" style={{ color: 'var(--color-text)' }}>
+                  {t('recipeTitle', 'Recipe Title *')}
+                </label>
+                <input
+                  type="text"
+                  required
+                  data-lpignore="true"
+                  value={form.title}
+                  onChange={(e) => setForm({ ...form, title: e.target.value })}
+                  placeholder="e.g. Creamy Tuscan Garlic Chicken"
+                  className="w-full border rounded-xl px-3.5 py-2.5 text-sm outline-none transition font-medium"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block mb-1.5" style={{ color: 'var(--color-text)' }}>
+                  {t('recipeDescription', 'Short Description')}
+                </label>
+                <textarea
+                  rows={2}
+                  data-lpignore="true"
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  placeholder="Brief summary of the dish, taste profile, or background..."
+                  className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none transition font-medium resize-none"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div>
+                <label className="block mb-1.5" style={{ color: 'var(--color-text)' }}>
+                  {t('recipeType', 'Recipe Type')}
+                </label>
+                <select
+                  value={form.recipeType}
+                  onChange={(e) => setForm({ ...form, recipeType: e.target.value })}
+                  className="w-full border rounded-xl px-3 py-2.5 text-xs outline-none transition font-bold cursor-pointer"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                >
+                  {recipeTypes.map((type: any) => {
+                    const val = typeof type === 'string' ? type : (type.id || type.name || type.value || '');
+                    return <option key={val} value={val} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{val}</option>;
+                  })}
+                </select>
+              </div>
+
+              <div>
+                <label className="block mb-1.5" style={{ color: 'var(--color-text)' }}>
+                  {t('cuisine', 'Cuisine (Optional)')}
+                </label>
+                <input
+                  type="text"
+                  data-lpignore="true"
+                  value={form.cuisine}
+                  onChange={(e) => setForm({ ...form, cuisine: e.target.value })}
+                  placeholder="e.g. Italian, Thai, Mediterranean"
+                  className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none transition font-medium"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                />
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 sm:col-span-2">
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
-                    {t('recipeTitleRequired', 'Recipe Title *')}
+                  <label className="block mb-1 text-[11px]" style={{ color: 'var(--color-text)' }}>
+                    {t('prepTime', 'Prep (min)')}
                   </label>
                   <input
-                    type="text"
-                    autoComplete="off"
+                    type="number"
+                    min="0"
                     data-lpignore="true"
-                    data-form-type="other"
-                    spellCheck="false"
-                    placeholder={t('recipeTitlePlaceholder', 'e.g. Authentic Pad Thai')}
-                    value={form.title}
-                    onChange={(e) => setForm({ ...form, title: e.target.value })}
-                    className="w-full border rounded-xl p-3 text-sm outline-none transition font-bold"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
+                    value={form.prepTime}
+                    onChange={(e) => setForm({ ...form, prepTime: e.target.value })}
+                    className="w-full border rounded-xl px-3 py-2 text-xs outline-none transition font-bold text-center"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
 
                 <div>
-                  <label className="block font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
-                    {t('description', 'Description & Story')}
+                  <label className="block mb-1 text-[11px]" style={{ color: 'var(--color-text)' }}>
+                    {t('cookTime', 'Cook (min)')}
                   </label>
-                  <textarea
-                    rows={3}
-                    autoComplete="off"
+                  <input
+                    type="number"
+                    min="0"
                     data-lpignore="true"
-                    data-form-type="other"
-                    spellCheck="false"
-                    placeholder={t('descriptionPlaceholder', 'Describe the taste, occasion, or special culinary techniques...')}
-                    value={form.description}
-                    onChange={(e) => setForm({ ...form, description: e.target.value })}
-                    className="w-full border rounded-xl p-3 text-sm outline-none resize-y transition font-medium"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
+                    value={form.cookTime}
+                    onChange={(e) => setForm({ ...form, cookTime: e.target.value })}
+                    className="w-full border rounded-xl px-3 py-2 text-xs outline-none transition font-bold text-center"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div>
-                    <label className="block font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
-                      {t('recipeTypeLabel', 'Recipe Category / Type')}
-                    </label>
-                    <select
-                      value={form.recipeType}
-                      onChange={(e) => setForm({ ...form, recipeType: e.target.value })}
-                      className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer font-bold"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      {recipeTypes.map((type: any, idx: number) => {
-                        const typeName = getRecipeTypeName(type);
-                        return (
-                          <option key={`manual_type_${typeName}_${idx}`} value={typeName} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
-                            {typeName}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
-                      {t('servingsLabel', 'Servings')}
-                    </label>
-                    <input
-                      type="number"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-form-type="other"
-                      min="1"
-                      value={form.servings}
-                      onChange={(e) => setForm({ ...form, servings: parseInt(e.target.value) || 1 })}
-                      className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
-                      {t('prepTimeMinsLabel', 'Prep Time (mins)')}
-                    </label>
-                    <input
-                      type="number"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-form-type="other"
-                      min="0"
-                      value={form.prepTimeMinutes}
-                      onChange={(e) => setForm({ ...form, prepTimeMinutes: parseInt(e.target.value) || 0 })}
-                      className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
-                      {t('cookTimeMinsLabel', 'Cook Time (mins)')}
-                    </label>
-                    <input
-                      type="number"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-form-type="other"
-                      min="0"
-                      value={form.cookTimeMinutes}
-                      onChange={(e) => setForm({ ...form, cookTimeMinutes: parseInt(e.target.value) || 0 })}
-                      className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {/* NUTRITIONAL INFORMATION SECTION (Restored & Localized) */}
-                <div className="pt-4 border-t space-y-3" style={{ borderColor: 'var(--color-border)' }}>
-                  <label className="block font-bold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-                    {t('nutritionHeading', 'Nutritional Information (Per Serving)')}
+                <div>
+                  <label className="block mb-1 text-[11px]" style={{ color: 'var(--color-text)' }}>
+                    {t('servings', 'Servings')}
                   </label>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div>
-                      <span className="block font-semibold mb-1 opacity-80">{t('caloriesLabel', 'Calories (kcal)')}</span>
-                      <input
-                        type="number"
-                        min="0"
-                        autoComplete="off"
-                        data-lpignore="true"
-                        data-form-type="other"
-                        value={form.calories}
-                        onChange={(e) => setForm({ ...form, calories: parseInt(e.target.value) || 0 })}
-                        className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                      />
-                    </div>
-                    <div>
-                      <span className="block font-semibold mb-1 opacity-80">{t('proteinLabel', 'Protein (g)')}</span>
-                      <input
-                        type="number"
-                        min="0"
-                        autoComplete="off"
-                        data-lpignore="true"
-                        data-form-type="other"
-                        value={form.proteinGrams}
-                        onChange={(e) => setForm({ ...form, proteinGrams: parseInt(e.target.value) || 0 })}
-                        className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                      />
-                    </div>
-                    <div>
-                      <span className="block font-semibold mb-1 opacity-80">{t('carbsLabel', 'Carbohydrates (g)')}</span>
-                      <input
-                        type="number"
-                        min="0"
-                        autoComplete="off"
-                        data-lpignore="true"
-                        data-form-type="other"
-                        value={form.carbsGrams}
-                        onChange={(e) => setForm({ ...form, carbsGrams: parseInt(e.target.value) || 0 })}
-                        className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                      />
-                    </div>
-                    <div>
-                      <span className="block font-semibold mb-1 opacity-80">{t('fatLabel', 'Fat (g)')}</span>
-                      <input
-                        type="number"
-                        min="0"
-                        autoComplete="off"
-                        data-lpignore="true"
-                        data-form-type="other"
-                        value={form.fatGrams}
-                        onChange={(e) => setForm({ ...form, fatGrams: parseInt(e.target.value) || 0 })}
-                        className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                      />
-                    </div>
-                  </div>
+                  <input
+                    type="number"
+                    min="1"
+                    data-lpignore="true"
+                    value={form.servings}
+                    onChange={(e) => setForm({ ...form, servings: e.target.value })}
+                    className="w-full border rounded-xl px-3 py-2 text-xs outline-none transition font-bold text-center"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
                 </div>
               </div>
+            </div>
 
-              {/* Action Buttons */}
-              <div className="flex justify-end">
+            <div className="pt-4 border-t flex justify-end gap-3" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setActiveTab('ingredients')}
+                className="px-6 py-2.5 rounded-xl font-bold text-xs text-white shadow-md transition flex items-center gap-1.5 cursor-pointer hover:opacity-90"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                <span>{t('nextIngredients', 'Next: Ingredients')}</span>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: INGREDIENTS */}
+        {activeTab === 'ingredients' && (
+          <div 
+            className="border rounded-3xl p-6 sm:p-8 space-y-4 shadow-xl transition-colors duration-200 animate-in fade-in"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h2 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <Tag className="h-4 w-4 text-orange-400" />
+                  <span>{t('ingredients', 'Ingredients')}</span>
+                </h2>
+                <p className="text-xs pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  Add scalable recipe items with standardized grocery departments.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setActiveTab('ingredients')}
-                  className="text-white font-bold px-6 py-3 rounded-xl text-xs transition shadow-md cursor-pointer hover:opacity-90"
+                  onClick={() => setIsReorderingIngredients(!isReorderingIngredients)}
+                  className="px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer shadow-xs"
+                  style={isReorderingIngredients ? {
+                    backgroundColor: 'var(--color-emerald)',
+                    borderColor: 'var(--color-emerald)',
+                    color: '#ffffff'
+                  } : {
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  {isReorderingIngredients ? t('done', 'Done') : t('reorder', 'Reorder')}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleAddIngredient}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold text-white transition flex items-center gap-1 cursor-pointer shadow-xs hover:opacity-90"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
-                  {t('nextIngredientsBtn', 'Next: Ingredients →')}
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>{t('addIngredient', 'Add')}</span>
                 </button>
               </div>
             </div>
-          )}
 
-          {/* TAB 2: INGREDIENTS */}
-          {activeTab === 'ingredients' && (
-            <div 
-              className="border rounded-2xl p-6 space-y-4 animate-in fade-in shadow-xs"
-              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-                  {t('ingredientsHeading', 'Ingredients & Quantities')}
-                </h2>
-                <div className="flex items-center gap-2 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setIsReorderingIngredients(!isReorderingIngredients)}
-                    className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
-                    style={isReorderingIngredients ? {
-                      backgroundColor: 'var(--color-emerald)',
-                      borderColor: 'var(--color-emerald)',
-                      color: '#ffffff'
-                    } : {
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text-secondary)'
-                    }}
+            <div className="space-y-3 max-h-[440px] overflow-y-auto pr-1">
+              {ingredients.map((ing, idx) => (
+                <div 
+                  key={idx}
+                  draggable={isReorderingIngredients}
+                  onDragStart={() => handleDragStart(idx)}
+                  onDragOver={(e) => handleDragOver(e, idx, 'ingredients')}
+                  onDrop={handleDrop}
+                  className={`flex flex-col sm:flex-row items-stretch sm:items-center gap-2 p-2.5 rounded-xl border text-xs transition ${
+                    isReorderingIngredients ? 'cursor-grab border-emerald-500/50' : ''
+                  }`}
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: isReorderingIngredients ? 'var(--color-emerald)' : 'var(--color-border)'
+                  }}
+                >
+                  <input
+                    type="text"
+                    data-lpignore="true"
+                    placeholder="Amount"
+                    value={ing.amount}
+                    onChange={(e) => handleIngredientChange(idx, 'amount', e.target.value)}
+                    className="w-full sm:w-20 border rounded-lg px-2.5 py-1.5 text-center font-bold outline-none"
+                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                  <input
+                    type="text"
+                    data-lpignore="true"
+                    placeholder="Unit"
+                    value={ing.unit}
+                    onChange={(e) => handleIngredientChange(idx, 'unit', e.target.value)}
+                    className="w-full sm:w-24 border rounded-lg px-2.5 py-1.5 text-center outline-none"
+                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
+                  />
+                  <input
+                    type="text"
+                    data-lpignore="true"
+                    placeholder="Ingredient name (e.g. Baby Spinach)"
+                    value={ing.name}
+                    onChange={(e) => handleIngredientChange(idx, 'name', e.target.value)}
+                    className="flex-1 bg-transparent border-none outline-none px-2 font-medium"
+                    style={{ color: 'var(--color-text)' }}
+                  />
+                  <select
+                    value={ing.category}
+                    onChange={(e) => handleIngredientChange(idx, 'category', e.target.value)}
+                    className="w-full sm:w-36 border rounded-lg px-2.5 py-1.5 text-[11px] font-bold outline-none cursor-pointer"
+                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   >
-                    {isReorderingIngredients ? t('done', 'Done Reordering') : t('reorder', 'Reorder Mode')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setForm({ 
-                      ...form, 
-                      ingredients: [...form.ingredients, { amount: '1', unit: 'unit', item: '', category: getCategoryName(ingredientCategories[0]) || 'Pantry Staples' }] 
+                    {ingredientCategories.map((cat: any) => {
+                      const val = typeof cat === 'string' ? cat : (cat.id || cat.name || cat.value || '');
+                      return <option key={val} value={val} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{val}</option>;
                     })}
-                    className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs hover:opacity-90"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                  >
-                    <Plus className="h-3.5 w-3.5" /> {t('addIngredient', 'Add Ingredient')}
-                  </button>
-                </div>
-              </div>
+                  </select>
 
-              <div className="space-y-2.5 text-xs max-h-[460px] overflow-y-auto pr-1">
-                {form.ingredients.map((ing, idx) => (
-                  <div
-                    key={idx}
-                    draggable={isReorderingIngredients}
-                    onDragStart={() => handleDragStart(idx)}
-                    onDragOver={(e) => handleDragOver(e, idx, 'ingredients')}
-                    onDrop={handleDrop}
-                    className="flex flex-wrap sm:flex-nowrap items-center gap-2 p-2.5 rounded-xl border transition shadow-xs"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: isReorderingIngredients ? 'var(--color-emerald)' : 'var(--color-border)',
-                      cursor: isReorderingIngredients ? 'grab' : 'default'
-                    }}
-                  >
-                    <input
-                      type="text"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-form-type="other"
-                      placeholder={t('amt', 'Amount')}
-                      value={ing.amount}
-                      onChange={(e) => {
-                        const list = [...form.ingredients];
-                        list[idx].amount = e.target.value;
-                        setForm({ ...form, ingredients: list });
-                      }}
-                      className="w-16 border rounded-lg p-2 text-center font-bold outline-none"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                    <input
-                      type="text"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-form-type="other"
-                      placeholder={t('unit', 'Unit')}
-                      value={ing.unit}
-                      onChange={(e) => {
-                        const list = [...form.ingredients];
-                        list[idx].unit = e.target.value;
-                        setForm({ ...form, ingredients: list });
-                      }}
-                      className="w-20 border rounded-lg p-2 text-center outline-none"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    />
-                    <input
-                      type="text"
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-form-type="other"
-                      spellCheck="false"
-                      placeholder={t('ingredientNamePlaceholder', 'Ingredient name (e.g. Garlic, minced)...')}
-                      value={ing.item}
-                      onChange={(e) => {
-                        const list = [...form.ingredients];
-                        list[idx].item = e.target.value;
-                        setForm({ ...form, ingredients: list });
-                      }}
-                      className="flex-1 min-w-[140px] bg-transparent border-none outline-none px-2 font-medium"
-                      style={{ color: 'var(--color-text)' }}
-                    />
-                    <select
-                      value={ing.category}
-                      onChange={(e) => {
-                        const list = [...form.ingredients];
-                        list[idx].category = e.target.value;
-                        setForm({ ...form, ingredients: list });
-                      }}
-                      className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
+                  {isReorderingIngredients ? (
+                    <div className="p-2 cursor-grab text-emerald-400 self-end sm:self-center">
+                      <GripVertical className="h-4 w-4" />
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveIngredient(idx)}
+                      disabled={ingredients.length <= 1}
+                      className="p-2 text-red-400 hover:text-red-500 transition cursor-pointer disabled:opacity-30 self-end sm:self-center"
+                      title="Remove Ingredient"
                     >
-                      {ingredientCategories.map((cat: any, idx: number) => {
-                        const catName = getCategoryName(cat);
-                        return (
-                          <option key={`manual_cat_${catName}_${idx}`} value={catName} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>
-                            {catName}
-                          </option>
-                        );
-                      })}
-                    </select>
-
-                    {/* Touch Reorder Controls & Drag Handle */}
-                    {isReorderingIngredients ? (
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => moveIngredient(idx, 'up')}
-                          disabled={idx === 0}
-                          className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer"
-                          style={{ borderColor: 'var(--color-border)' }}
-                          title={t('moveUp', 'Move Up')}
-                        >
-                          <ArrowUp className="h-3 w-3" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => moveIngredient(idx, 'down')}
-                          disabled={idx === form.ingredients.length - 1}
-                          className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer"
-                          style={{ borderColor: 'var(--color-border)' }}
-                          title={t('moveDown', 'Move Down')}
-                        >
-                          <ArrowDown className="h-3 w-3" />
-                        </button>
-                        <div className="p-1.5 text-emerald-400 cursor-grab">
-                          <GripVertical className="h-4 w-4" />
-                        </div>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setForm({ ...form, ingredients: form.ingredients.filter((_, i) => i !== idx) })}
-                        className="p-2 text-red-400 hover:text-red-500 transition cursor-pointer"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              <div 
-                className="flex justify-between pt-3 border-t"
-                style={{ borderColor: 'var(--color-border)' }}
-              >
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('info')}
-                  className="border font-bold px-5 py-2.5 rounded-xl text-xs transition cursor-pointer hover:opacity-80"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  {t('backBtn', '← Back')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('steps')}
-                  className="text-white font-bold px-6 py-2.5 rounded-xl text-xs transition shadow-md cursor-pointer hover:opacity-90"
-                  style={{ backgroundColor: 'var(--color-primary)' }}
-                >
-                  {t('nextStepsBtn', 'Next: Preparation Steps →')}
-                </button>
-              </div>
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
-          )}
 
-          {/* TAB 3: STEPS */}
-          {activeTab === 'steps' && (
-            <div 
-              className="border rounded-2xl p-6 space-y-4 animate-in fade-in shadow-xs"
-              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-                  {t('stepByStepInstructions', 'Step-by-Step Cooking Instructions')}
+            <div className="pt-4 border-t flex justify-between gap-3" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setActiveTab('info')}
+                className="px-5 py-2.5 rounded-xl font-bold text-xs border transition flex items-center gap-1.5 cursor-pointer hover:opacity-85"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                <span>{t('backBtn', '← Back')}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('steps')}
+                className="px-6 py-2.5 rounded-xl font-bold text-xs text-white shadow-md transition flex items-center gap-1.5 cursor-pointer hover:opacity-90"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                <span>{t('nextSteps', 'Next: Steps')}</span>
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: STEP-BY-STEP INSTRUCTIONS */}
+        {activeTab === 'steps' && (
+          <div 
+            className="border rounded-3xl p-6 sm:p-8 space-y-4 shadow-xl transition-colors duration-200 animate-in fade-in"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h2 className="text-base font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
+                  <Clock className="h-4 w-4 text-emerald-400" />
+                  <span>{t('instructions', 'Step-by-Step Instructions')}</span>
                 </h2>
-                <div className="flex items-center gap-2 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setIsReorderingSteps(!isReorderingSteps)}
-                    className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
-                    style={isReorderingSteps ? {
-                      backgroundColor: 'var(--color-emerald)',
-                      borderColor: 'var(--color-emerald)',
-                      color: '#ffffff'
-                    } : {
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text-secondary)'
-                    }}
-                  >
-                    {isReorderingSteps ? t('done', 'Done Reordering') : t('reorder', 'Reorder Mode')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setForm({ ...form, instructions: [...form.instructions, ''] })}
-                    className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs hover:opacity-90"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                  >
-                    <Plus className="h-3.5 w-3.5" /> {t('addStep', 'Add Step')}
-                  </button>
-                </div>
+                <p className="text-xs pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  Detailed preparation, cooking, and plating directions.
+                </p>
               </div>
 
-              <div className="space-y-3 text-xs max-h-[460px] overflow-y-auto pr-1">
-                {form.instructions.map((step, idx) => (
-                  <div
-                    key={idx}
-                    draggable={isReorderingSteps}
-                    onDragStart={() => handleDragStart(idx)}
-                    onDragOver={(e) => handleDragOver(e, idx, 'steps')}
-                    onDrop={handleDrop}
-                    className="flex items-start gap-3 p-3 rounded-xl border transition shadow-xs"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: isReorderingSteps ? 'var(--color-emerald)' : 'var(--color-border)'
-                    }}
-                  >
-                    <span 
-                      className="w-6 h-6 rounded-full font-bold flex items-center justify-center shrink-0 mt-1"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        color: 'var(--color-primary)',
-                        borderColor: 'var(--color-primary)',
-                        borderWidth: '1px'
-                      }}
-                    >
-                      {idx + 1}
-                    </span>
-                    <textarea
-                      rows={2}
-                      autoComplete="off"
-                      data-lpignore="true"
-                      data-form-type="other"
-                      spellCheck="false"
-                      placeholder={(t('describeStepPlaceholder', 'Describe step {n} in detail...')).replace('{n}', String(idx + 1))}
-                      value={step}
-                      onChange={(e) => {
-                        const list = [...form.instructions];
-                        list[idx] = e.target.value;
-                        setForm({ ...form, instructions: list });
-                      }}
-                      className="flex-1 bg-transparent border-none outline-none resize-y font-medium text-xs"
-                      style={{ color: 'var(--color-text)' }}
-                    />
-
-                    {/* Touch Reorder Controls & Drag Handle */}
-                    {isReorderingSteps ? (
-                      <div className="flex items-center gap-1 mt-1">
-                        <button
-                          type="button"
-                          onClick={() => moveStep(idx, 'up')}
-                          disabled={idx === 0}
-                          className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer"
-                          style={{ borderColor: 'var(--color-border)' }}
-                          title={t('moveUp', 'Move Up')}
-                        >
-                          <ArrowUp className="h-3 w-3" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => moveStep(idx, 'down')}
-                          disabled={idx === form.instructions.length - 1}
-                          className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer"
-                          style={{ borderColor: 'var(--color-border)' }}
-                          title={t('moveDown', 'Move Down')}
-                        >
-                          <ArrowDown className="h-3 w-3" />
-                        </button>
-                        <div className="p-1.5 text-emerald-400 cursor-grab">
-                          <GripVertical className="h-4 w-4" />
-                        </div>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setForm({ ...form, instructions: form.instructions.filter((_, i) => i !== idx) })}
-                        className="p-2 text-red-400 hover:text-red-500 transition h-fit cursor-pointer"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              <div 
-                className="flex justify-between pt-3 border-t"
-                style={{ borderColor: 'var(--color-border)' }}
-              >
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setActiveTab('ingredients')}
-                  className="border font-bold px-5 py-2.5 rounded-xl text-xs transition cursor-pointer hover:opacity-80"
-                  style={{
+                  onClick={() => setIsReorderingSteps(!isReorderingSteps)}
+                  className="px-3 py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer shadow-xs"
+                  style={isReorderingSteps ? {
+                    backgroundColor: 'var(--color-emerald)',
+                    borderColor: 'var(--color-emerald)',
+                    color: '#ffffff'
+                  } : {
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
                     color: 'var(--color-text)'
                   }}
                 >
-                  {t('backBtn', '← Back')}
+                  {isReorderingSteps ? t('done', 'Done') : t('reorder', 'Reorder')}
                 </button>
+
                 <button
                   type="button"
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="text-white font-bold px-8 py-3 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50 hover:opacity-90"
+                  onClick={handleAddInstruction}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold text-white transition flex items-center gap-1 cursor-pointer shadow-xs hover:opacity-90"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
-                  <Save className="h-4 w-4" /> 
-                  {saving ? t('savingRecipe', 'Saving to Database...') : t('saveRecipe', 'Save Recipe to Library')}
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>{t('addStep', 'Add Step')}</span>
                 </button>
               </div>
             </div>
-          )}
-        </div>
+
+            <div className="space-y-3 max-h-[440px] overflow-y-auto pr-1">
+              {instructions.map((step, idx) => (
+                <div 
+                  key={idx}
+                  draggable={isReorderingSteps}
+                  onDragStart={() => handleDragStart(idx)}
+                  onDragOver={(e) => handleDragOver(e, idx, 'steps')}
+                  onDrop={handleDrop}
+                  className={`flex items-start gap-3 p-3 rounded-2xl border text-xs transition ${
+                    isReorderingSteps ? 'cursor-grab border-emerald-500/50' : ''
+                  }`}
+                  style={{
+                    backgroundColor: 'var(--color-inner-dark)',
+                    borderColor: isReorderingSteps ? 'var(--color-emerald)' : 'var(--color-border)'
+                  }}
+                >
+                  <span 
+                    className="w-6 h-6 rounded-full font-bold flex items-center justify-center shrink-0 mt-1 border"
+                    style={{
+                      backgroundColor: 'var(--color-card)',
+                      color: 'var(--color-primary)',
+                      borderColor: 'var(--color-primary)'
+                    }}
+                  >
+                    {idx + 1}
+                  </span>
+
+                  <textarea
+                    rows={2}
+                    data-lpignore="true"
+                    value={step}
+                    onChange={(e) => handleInstructionChange(idx, e.target.value)}
+                    placeholder={`Describe step ${idx + 1}...`}
+                    className="flex-1 bg-transparent border-none outline-none resize-y font-medium text-xs leading-relaxed"
+                    style={{ color: 'var(--color-text)' }}
+                  />
+
+                  {isReorderingSteps ? (
+                    <div className="p-2 cursor-grab text-emerald-400 mt-1">
+                      <GripVertical className="h-4 w-4" />
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveInstruction(idx)}
+                      disabled={instructions.length <= 1}
+                      className="p-1.5 text-slate-400 hover:text-red-500 transition cursor-pointer disabled:opacity-30 mt-1"
+                      title="Remove Step"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-4 border-t flex justify-between gap-3" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setActiveTab('ingredients')}
+                className="px-5 py-2.5 rounded-xl font-bold text-xs border transition flex items-center gap-1.5 cursor-pointer hover:opacity-85"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                <span>{t('backBtn', '← Back')}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={loading}
+                className="px-8 py-2.5 rounded-xl font-extrabold text-xs text-white shadow-lg transition flex items-center gap-2 cursor-pointer disabled:opacity-60 hover:opacity-95"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {loading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                <span>{loading ? t('saving', 'Saving...') : t('saveRecipe', 'Save Recipe')}</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -37520,7 +37240,7 @@ import {
   Trash2, Save, Plus, ImagePlus, Users, Calendar,
   GripVertical, CheckSquare, CheckCircle2, Type, ExternalLink,
   Carrot, Hourglass, ChevronLeft, ChevronRight, LayoutGrid,
-  Grid3X3, Rows3
+  Grid3X3, Rows3, Globe, Lock, FileJson, Sparkles, Download
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
 import { syncUserSavedRecipes, persistSavedRecipe, deleteSavedRecipe } from '@/lib/recipeSync';
@@ -37584,6 +37304,9 @@ export default function RecipesPage() {
   const [filterFavorites, setFilterFavorites] = useState(false);
   const [filterCooked, setFilterCooked] = useState(false);
   
+  // Tab State: 'my_recipes' | 'marketplace'
+  const [activeTab, setActiveTab] = useState<'my_recipes' | 'marketplace'>('my_recipes');
+
   // Ingredients Filter State
   const [ingredientQuery, setIngredientQuery] = useState('');
   const [selectedIngredientsList, setSelectedIngredientsList] = useState<string[]>([]);
@@ -37677,23 +37400,51 @@ export default function RecipesPage() {
     return `https://${urlStr}`;
   };
 
-  const loadData = useCallback(async (user: User | null) => {
-    if (!user) return;
+  const isOwner = (rec: any): boolean => {
+    if (!currentUser) return true;
+    const uid = currentUser.id || 'usr_admin_1';
+    const email = currentUser.email || '';
+    return (
+      rec.userId === uid ||
+      rec.user_id === uid ||
+      rec.ownerId === uid ||
+      rec.createdBy === uid ||
+      rec.createdBy === email ||
+      rec.created_by === email ||
+      rec.creatorEmail === email
+    );
+  };
+
+  const loadData = useCallback(async (user: User | null, tab: 'my_recipes' | 'marketplace' = activeTab) => {
     setCategories(getStoredCategories());
-    const targetUserId = (user.id || 'usr_admin_1').trim();
+    const targetUserId = (user?.id || 'usr_admin_1').trim();
+    const targetEmail = user?.email || '';
 
     try {
       setLoading(true);
-      const rawRecipes = await syncUserSavedRecipes(targetUserId);
+      const queryParams = new URLSearchParams();
+      queryParams.set('userId', targetUserId);
+      if (targetEmail) queryParams.set('email', targetEmail);
+      if (tab === 'marketplace') queryParams.set('marketplace', 'true');
+      queryParams.set('t', String(Date.now()));
+
+      const res = await fetch(`/api/recipes/saved?${queryParams.toString()}`, { cache: 'no-store' });
+      let rawRecipes: any[] = [];
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.recipes)) rawRecipes = data.recipes;
+      }
 
       const userRecipes = rawRecipes.map((r: any) => {
         const cleanType = getCleanRecipeType(r);
         return {
           ...r,
-          userId: targetUserId,
+          userId: r.userId || r.user_id || targetUserId,
           recipeType: cleanType,
           category: cleanType,
           bookId: r.book_id || r.bookId || null,
+          isPublic: Boolean(r.is_public ?? r.isPublic ?? false),
+          is_public: Boolean(r.is_public ?? r.isPublic ?? false),
           isFavorite: Boolean(r.is_favorite || r.isFavorite),
           is_favorite: Boolean(r.is_favorite || r.isFavorite),
           isCooked: Boolean(r.is_cooked || r.isCooked),
@@ -37702,6 +37453,8 @@ export default function RecipesPage() {
           note: r.note || '',
           sourceUrl: r.source_url || r.sourceUrl || '',
           source_url: r.source_url || r.sourceUrl || '',
+          creatorName: r.creatorName || r.creator_name || r.ownerName || 'Chef',
+          creatorEmail: r.creatorEmail || r.creator_email || r.ownerEmail || '',
           tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
         };
       });
@@ -37725,13 +37478,7 @@ export default function RecipesPage() {
         } catch (_) {}
       }
 
-      const userBooks = parsedBooks.filter((b: any) => {
-        if (!b.userId && !b.createdBy) return true;
-        if (b.userId) return b.userId === targetUserId;
-        return b.createdBy === user.email || b.createdBy === targetUserId;
-      });
-
-      setBooks(userBooks.map((b: any) => ({
+      setBooks(parsedBooks.map((b: any) => ({
         ...b,
         recipeCount: userRecipes.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
       })));
@@ -37740,7 +37487,7 @@ export default function RecipesPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [activeTab]);
 
   useEffect(() => {
     applyGlobalTheme();
@@ -37766,13 +37513,13 @@ export default function RecipesPage() {
       return;
     }
     setCurrentUser(user);
-    loadData(user);
+    loadData(user, activeTab);
 
     const handleSync = () => {
       const activeUser = getCurrentUser();
       if (activeUser) {
         setCurrentUser(activeUser);
-        loadData(activeUser);
+        loadData(activeUser, activeTab);
       }
     };
 
@@ -37791,7 +37538,7 @@ export default function RecipesPage() {
       window.removeEventListener('zecratary_auth_changed', handleSync);
       window.removeEventListener('storage', handleSync);
     };
-  }, [loadData, router, t]);
+  }, [loadData, router, t, activeTab]);
 
   const saveAllRecipes = (updatedUserList: any[]) => {
     if (!currentUser) return;
@@ -37803,6 +37550,8 @@ export default function RecipesPage() {
       user_id: targetUserId,
       bookId: r.bookId || r.book_id || null,
       book_id: r.bookId || r.book_id || null,
+      isPublic: Boolean(r.isPublic ?? r.is_public),
+      is_public: Boolean(r.isPublic ?? r.is_public),
       isFavorite: Boolean(r.isFavorite ?? r.is_favorite),
       is_favorite: Boolean(r.isFavorite ?? r.is_favorite),
       isCooked: Boolean(r.isCooked ?? r.is_cooked),
@@ -37828,6 +37577,118 @@ export default function RecipesPage() {
       recipeCount: updatedWithId.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
     }));
     setBooks(updatedBooks);
+  };
+
+  // Toggle Public / Private Sharing (Marketplace)
+  const handleTogglePublic = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const target = recipes.find(r => r.id === id);
+    if (!target) return;
+    const newPub = !(target.isPublic || target.is_public);
+
+    const updated = recipes.map(r => r.id === id ? { ...r, isPublic: newPub, is_public: newPub } : r);
+    setRecipes(updated);
+
+    if (selectedRecipe?.id === id) {
+      setSelectedRecipe({ ...selectedRecipe, isPublic: newPub, is_public: newPub });
+    }
+
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, isPublic: newPub, is_public: newPub })
+      });
+      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+      alert(newPub ? '🌐 Recipe is now Public on Marketplace!' : '🔒 Recipe set to Private.');
+    } catch (_) {}
+  };
+
+  // Export Complete Recipe JSON with Ownership Telemetry
+  const handleExportJson = (recipe: any, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const currentU = currentUser || getCurrentUser();
+    const exportPayload = {
+      schemaVersion: '1.0.0',
+      exportedAt: new Date().toISOString(),
+      id: recipe.id,
+      ownership: {
+        userId: recipe.userId || recipe.user_id || currentU?.id || 'usr_admin_1',
+        createdBy: recipe.createdBy || recipe.created_by || currentU?.email || 'chef@zecratary.local',
+        creatorName: recipe.creatorName || recipe.creator_name || currentU?.name || 'Chef',
+        creatorEmail: recipe.creatorEmail || recipe.creator_email || currentU?.email || ''
+      },
+      owner: {
+        id: recipe.userId || recipe.user_id || currentU?.id || 'usr_admin_1',
+        name: recipe.creatorName || recipe.creator_name || currentU?.name || 'Chef',
+        email: recipe.creatorEmail || recipe.creator_email || currentU?.email || ''
+      },
+      ownerId: recipe.userId || recipe.user_id || currentU?.id || 'usr_admin_1',
+      ownerName: recipe.creatorName || recipe.creator_name || currentU?.name || 'Chef',
+      ownerEmail: recipe.creatorEmail || recipe.creator_email || currentU?.email || '',
+      userId: recipe.userId || recipe.user_id || currentU?.id || 'usr_admin_1',
+      createdBy: recipe.createdBy || recipe.created_by || currentU?.email || 'chef@zecratary.local',
+      creatorName: recipe.creatorName || recipe.creator_name || currentU?.name || 'Chef',
+      isPublic: Boolean(recipe.isPublic ?? recipe.is_public),
+      title: recipe.title || recipe.name || 'Untitled Recipe',
+      description: recipe.description || '',
+      recipeType: recipe.recipeType || recipe.category || 'Main Dish',
+      cuisine: recipe.cuisine || '',
+      servings: recipe.servings || 4,
+      prepTimeMinutes: recipe.prepTimeMinutes || 15,
+      cookTimeMinutes: recipe.cookTimeMinutes || 25,
+      ingredients: recipe.ingredients || [],
+      instructions: recipe.instructions || recipe.directions || [],
+      nutrition: recipe.nutrition || {},
+      imageUrl: recipe.imageUrl || recipe.image || '',
+      sourceUrl: recipe.sourceUrl || recipe.source_url || '',
+      isFavorite: Boolean(recipe.isFavorite ?? recipe.is_favorite),
+      isCooked: Boolean(recipe.isCooked ?? recipe.is_cooked),
+      rating: Number(recipe.rating) || 0,
+      note: recipe.note || '',
+      tags: recipe.tags || []
+    };
+
+    const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(exportPayload, null, 2))}`;
+    const downloadAnchor = document.createElement('a');
+    const safeFilename = (recipe.title || recipe.name || 'recipe')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '_')
+      .replace(/_+/g, '_')
+      .substring(0, 50);
+    downloadAnchor.setAttribute('href', jsonString);
+    downloadAnchor.setAttribute('download', `${safeFilename}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+  };
+
+  // Clone Marketplace Recipe into Personal Collection
+  const handleSaveToMyRecipes = async (recipe: any, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!currentUser) return;
+
+    const clonedId = `rcp_copy_${Date.now().toString(36)}`;
+    const cloned = {
+      ...recipe,
+      id: clonedId,
+      userId: currentUser.id || 'usr_admin_1',
+      user_id: currentUser.id || 'usr_admin_1',
+      createdBy: currentUser.email || 'user@zecratary.local',
+      creatorName: `${currentUser.name || 'You'} (copied from ${recipe.creatorName || 'Community'})`,
+      isPublic: false,
+      is_public: false
+    };
+
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([cloned])
+      });
+      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+      alert(`"${recipe.title}" copied to your Saved Recipes!`);
+    } catch (_) {}
   };
 
   const toggleFavorite = async (e: React.MouseEvent, id: string) => {
@@ -37923,7 +37784,7 @@ export default function RecipesPage() {
     if (!selectedRecipe || !currentUser) return;
 
     const recName = selectedRecipe.title || selectedRecipe.name || 'Untitled Recipe';
-    const recImage = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || 'https://images.unsplash.com/photo-1559847844-5315695dadae?auto=format&fit=crop&w=1000&q=80';
+    const recImage = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || '/recipes/images/default.jpg';
     const targetUserId = currentUser.id || 'usr_admin_1';
 
     const newPlanItem = {
@@ -37972,11 +37833,6 @@ export default function RecipesPage() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newPlanItem)
-        }),
-        fetch('/api/meal-plan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newPlanItem)
         })
       ]);
     } catch (_) {}
@@ -37984,14 +37840,11 @@ export default function RecipesPage() {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('zecratary_planner_updated'));
       window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
-      window.dispatchEvent(new Event('zecratary_meal_plans_updated'));
       window.dispatchEvent(new Event('storage'));
     }
 
     setShowAddToPlanModal(false);
-    const alertMsg = (t('scheduledMealAlert') || 'Successfully scheduled "{title}" in your meal plan!')
-      .replace('{title}', recName);
-    alert(alertMsg);
+    alert(`Successfully scheduled "${recName}" in your meal plan!`);
   };
 
   const updateSelectedRecipeState = async (key: string, val: any) => {
@@ -38000,6 +37853,7 @@ export default function RecipesPage() {
     if (key === 'isFavorite') updatedRec.is_favorite = val;
     if (key === 'isCooked') updatedRec.is_cooked = val;
     if (key === 'bookId') updatedRec.book_id = val;
+    if (key === 'isPublic') updatedRec.is_public = val;
 
     setSelectedRecipe(updatedRec);
     const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
@@ -38020,21 +37874,8 @@ export default function RecipesPage() {
     
     try {
       await Promise.allSettled([
-        fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { 
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id })
-        }),
-        fetch(`/api/saved-recipes?id=${encodeURIComponent(id)}`, { 
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id })
-        }),
-        fetch(`/api/recipes?id=${encodeURIComponent(id)}`, { 
-          method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id })
-        })
+        fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
+        fetch(`/api/recipes?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
       ]);
 
       if (typeof deleteSavedRecipe === 'function') {
@@ -38046,33 +37887,13 @@ export default function RecipesPage() {
       setSelectedRecipe(null);
       setIsEditing(false);
 
-      const updatedBooks = books.map((b: any) => ({
-        ...b,
-        recipeCount: updated.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
-      }));
-      setBooks(updatedBooks);
-
-      try {
-        const localKeys = ['zecratary_saved_recipes', 'zecratary_recipes', 'zecratary_user_recipes', 'saved_recipes', 'zecratary_imported_recipes'];
-        for (const k of localKeys) {
-          const raw = localStorage.getItem(k);
-          if (raw) {
-            const arr = JSON.parse(raw);
-            if (Array.isArray(arr)) {
-              const cleaned = arr.filter((x: any) => x.id !== id);
-              localStorage.setItem(k, JSON.stringify(cleaned));
-            }
-          }
-        }
-      } catch (_) {}
-
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('zecratary_recipes_updated'));
         window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
       }
     } catch (err) {
       console.error('[RecipesPage] Error deleting recipe:', err);
-      alert(t('errorDeletingRecipe') || 'Failed to delete recipe. Please try again.');
+      alert('Failed to delete recipe. Please try again.');
     }
   };
 
@@ -38317,30 +38138,20 @@ export default function RecipesPage() {
     } catch (_) {}
 
     try {
-      await Promise.allSettled([
-        fetch('/api/shopping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formatted)
-        }),
-        fetch('/api/shopping-list', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formatted)
-        })
-      ]);
+      await fetch('/api/shopping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formatted)
+      });
     } catch (_) {}
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new Event('zecratary_shopping_updated'));
-      window.dispatchEvent(new Event('zecratary_shopping_list_updated'));
       window.dispatchEvent(new Event('storage'));
     }
 
     setIsShoppingModalOpen(false);
-    const alertMsg = (t('addedItemsShoppingAlert') || 'Added {count} items to your Shopping List!')
-      .replace('{count}', String(selectedItems.length));
-    alert(alertMsg);
+    alert(`Added ${selectedItems.length} items to your Shopping List!`);
   };
 
   const handleAddIngredientFilter = () => {
@@ -38360,7 +38171,13 @@ export default function RecipesPage() {
     return recipes.filter(r => {
       const q = search.toLowerCase().trim();
       const title = (r.title || r.name || '').toLowerCase();
-      if (q && !title.includes(q)) return false;
+      const creator = (r.creatorName || r.ownerName || '').toLowerCase();
+      if (q && !title.includes(q) && !creator.includes(q)) return false;
+
+      // Tab filtering
+      if (activeTab === 'marketplace') {
+        if (!(r.isPublic || r.is_public)) return false;
+      }
 
       if (filterFavorites && !r.isFavorite) return false;
       if (filterCooked && !r.isCooked) return false;
@@ -38406,11 +38223,11 @@ export default function RecipesPage() {
 
       return true;
     });
-  }, [recipes, search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime]);
+  }, [recipes, activeTab, search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime, gridMode]);
+  }, [activeTab, search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime, gridMode]);
 
   const itemsPerPage = GRID_CONFIG[gridMode].perPage;
   const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
@@ -38436,7 +38253,7 @@ export default function RecipesPage() {
             {t('savedRecipesTitle') || 'Saved Recipes'}
           </h1>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {(t('savedRecipesSubtitle') || 'Your collection of favorite recipes ({count})').replace('{count}', String(recipes.length))}
+            {(t('savedRecipesSubtitle') || 'Your collection of recipes ({count})').replace('{count}', String(recipes.length))}
           </p>
         </div>
 
@@ -38475,6 +38292,21 @@ export default function RecipesPage() {
             })}
           </div>
 
+          {/* Import Recipe Button */}
+          <Link
+            href="/import"
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-sm hover:opacity-80"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/>
+            <span>{t('importRecipe') || 'Import'}</span>
+          </Link>
+
+          {/* Create Recipe Button */}
           <Link 
             className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg"
             href="/manual"
@@ -38495,7 +38327,7 @@ export default function RecipesPage() {
             <input
               type="text"
               data-lpignore="true"
-              placeholder={t('searchByNamePlaceholder') || 'Search by name'}
+              placeholder={t('searchByNamePlaceholder') || 'Search by name or creator'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none transition-colors"
@@ -38526,9 +38358,45 @@ export default function RecipesPage() {
           </button>
         </div>
 
-        {/* Filter Pills */}
+        {/* Filter Pills with Marketplace Tab */}
         {showFilters && (
           <div className="flex flex-wrap items-center gap-2 pt-1 animate-in fade-in text-xs font-semibold select-none">
+            {/* My Recipes vs Marketplace Tab Pills */}
+            <button
+              type="button"
+              onClick={() => setActiveTab('my_recipes')}
+              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              style={activeTab === 'my_recipes' ? {
+                backgroundColor: 'var(--color-primary)',
+                borderColor: 'var(--color-primary)',
+                color: '#ffffff'
+              } : {
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+            >
+              <span>{t('myRecipes') || 'My Recipes'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('marketplace')}
+              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              style={activeTab === 'marketplace' ? {
+                backgroundColor: 'var(--color-emerald)',
+                borderColor: 'var(--color-emerald)',
+                color: '#ffffff'
+              } : {
+                backgroundColor: 'var(--color-card)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-emerald)'
+              }}
+            >
+              <Globe className="h-3.5 w-3.5"/>
+              <span>{t('marketplaceTab') || 'Marketplace'}</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setFilterFavorites(!filterFavorites)}
@@ -38766,106 +38634,6 @@ export default function RecipesPage() {
                 </div>
               )}
             </div>
-
-            {/* Prep Time Dropdown */}
-            <div className="relative" onClick={(e) => e.stopPropagation()}>
-              <button
-                type="button"
-                onClick={() => setOpenDropdown(openDropdown === 'prepTime' ? null : 'prepTime')}
-                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-                style={selectedPrepTime !== 'All Prep Times' ? {
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-emerald)',
-                  color: 'var(--color-emerald)'
-                } : {
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              >
-                <Hourglass className="h-3.5 w-3.5 opacity-70"/>
-                <span>{selectedPrepTime === 'All Prep Times' ? (t('prepTime') || 'Prep Time') : selectedPrepTime}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
-              </button>
-
-              {openDropdown === 'prepTime' && (
-                <div 
-                  className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)'
-                  }}
-                >
-                  {['All Prep Times', 'Under 15m', '15-30m', 'Over 30m'].map((time) => (
-                    <button
-                      key={time}
-                      type="button"
-                      onClick={() => { setSelectedPrepTime(time); setOpenDropdown(null); }}
-                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
-                      style={selectedPrepTime === time ? {
-                        backgroundColor: 'var(--color-inner-dark)',
-                        color: 'var(--color-text)',
-                        border: '1px solid var(--color-border)'
-                      } : {
-                        color: 'var(--color-text-secondary)'
-                      }}
-                    >
-                      {time}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Cook Time Dropdown */}
-            <div className="relative" onClick={(e) => e.stopPropagation()}>
-              <button
-                type="button"
-                onClick={() => setOpenDropdown(openDropdown === 'cookTime' ? null : 'cookTime')}
-                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-                style={selectedCookTime !== 'All Cook Times' ? {
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-emerald)',
-                  color: 'var(--color-emerald)'
-                } : {
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              >
-                <Clock className="h-3.5 w-3.5 opacity-70"/>
-                <span>{selectedCookTime === 'All Cook Times' ? (t('cookTime') || 'Cook Time') : selectedCookTime}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
-              </button>
-
-              {openDropdown === 'cookTime' && (
-                <div 
-                  className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)'
-                  }}
-                >
-                  {['All Cook Times', 'Under 15m', '15-30m', 'Over 30m'].map((time) => (
-                    <button
-                      key={time}
-                      type="button"
-                      onClick={() => { setSelectedCookTime(time); setOpenDropdown(null); }}
-                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
-                      style={selectedCookTime === time ? {
-                        backgroundColor: 'var(--color-inner-dark)',
-                        color: 'var(--color-text)',
-                        border: '1px solid var(--color-border)'
-                      } : {
-                        color: 'var(--color-text-secondary)'
-                      }}
-                    >
-                      {time}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
         )}
       </div>
@@ -38875,12 +38643,29 @@ export default function RecipesPage() {
         <div className="text-xs py-12 text-center" style={{ color: 'var(--color-text-secondary)' }}>
           {t('loadingRecipes') || 'Loading recipes...'}
         </div>
+      ) : paginatedRecipes.length === 0 ? (
+        <div 
+          className="border rounded-2xl p-12 text-center space-y-3"
+          style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+        >
+          <Book className="h-8 w-8 mx-auto opacity-30" />
+          <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-text)' }}>
+            {activeTab === 'marketplace' ? 'No community recipes on Marketplace yet' : 'No recipes found in your collection'}
+          </h3>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            {activeTab === 'marketplace'
+              ? 'Share your delicious creations to Marketplace so other home chefs can discover them!'
+              : 'Try importing or creating new recipes to build your flat file and database collection.'}
+          </p>
+        </div>
       ) : (
         <div className={`grid ${GRID_CONFIG[gridMode].colsClass} gap-4 sm:gap-5`}>
           {paginatedRecipes.map((r) => {
             const cardBook = books.find(b => b.id === (r.bookId || r.book_id));
             const cardTypeBadge = getCleanRecipeType(r);
             const cfg = GRID_CONFIG[gridMode];
+            const userOwns = isOwner(r);
+            const isPub = Boolean(r.isPublic || r.is_public);
 
             return (
               <div
@@ -38902,13 +38687,30 @@ export default function RecipesPage() {
                 <div>
                   <div className={`relative ${cfg.imgHeight} w-full overflow-hidden`} style={{ backgroundColor: 'var(--color-inner-dark)' }}>
                     <img
-                      src={r.imageUrl || r.image || '/uploads/recipes/default.jpg'}
+                      src={r.imageUrl || r.image || '/recipes/images/default.jpg'}
                       alt={r.title || r.name}
                       className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                     />
                     
-                    {/* Card Action Buttons */}
+                    {/* Card Action Badges: Public / Cooked / Favorite */}
                     <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
+                      {/* Marketplace Visibility Toggle (If Owner) */}
+                      {userOwns && (
+                        <button
+                          type="button"
+                          onClick={(e) => handleTogglePublic(e, r.id)}
+                          className="p-1.5 rounded-full backdrop-blur-md transition shadow-md cursor-pointer border"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: isPub ? 'var(--color-emerald)' : 'var(--color-border)',
+                            color: isPub ? 'var(--color-emerald)' : 'var(--color-text-secondary)'
+                          }}
+                          title={isPub ? 'Public on Marketplace (Click to Make Private)' : 'Private (Click to Share on Marketplace)'}
+                        >
+                          {isPub ? <Globe className="h-3.5 w-3.5 stroke-[2.5]" /> : <Lock className="h-3.5 w-3.5" />}
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         onClick={(e) => toggleCooked(e, r.id)}
@@ -38957,16 +38759,42 @@ export default function RecipesPage() {
                   </div>
 
                   <div className="p-3.5 space-y-1.5">
-                    <h3 
-                      className={`font-bold ${cfg.titleSize} leading-snug line-clamp-2`}
-                      style={{ color: 'var(--color-text)' }}
-                    >
-                      {r.title || r.name}
-                    </h3>
+                    <div className="flex items-center justify-between gap-1">
+                      <h3 
+                        className={`font-bold ${cfg.titleSize} leading-snug line-clamp-2`}
+                        style={{ color: 'var(--color-text)' }}
+                      >
+                        {r.title || r.name}
+                      </h3>
+                      {isPub && (
+                        <span 
+                          className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded border flex items-center gap-0.5 shrink-0"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-emerald)',
+                            color: 'var(--color-emerald)'
+                          }}
+                        >
+                          <Globe className="h-2.5 w-2.5" /> Market
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Creator Attribution on Marketplace */}
+                    {(r.creatorName || r.ownerName) && (
+                      <p className="text-[11px] font-semibold text-emerald-400 truncate">
+                        By {r.creatorName || r.ownerName}
+                      </p>
+                    )}
                   </div>
                 </div>
 
-                <div className="px-3.5 pb-3 pt-0 flex items-center justify-between gap-1">
+                {/* Card Action Row: Export JSON & Delete */}
+                <div 
+                  className="px-3.5 pb-3 pt-2 border-t flex items-center justify-between gap-1"
+                  style={{ borderColor: 'var(--color-border)' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span 
                       className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0"
@@ -38982,9 +38810,56 @@ export default function RecipesPage() {
                     ) : null}
                   </div>
 
-                  <span className="text-[11px] flex items-center gap-1 shrink-0 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-                    <Clock className="h-3 w-3"/> {(r.prepTimeMinutes || 15) + (r.cookTimeMinutes || 10)}m
-                  </span>
+                  <div className="flex items-center gap-1">
+                    {/* Green Export JSON Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => handleExportJson(r, e)}
+                      className="px-2 py-1 rounded-xl text-[11px] font-bold border transition flex items-center gap-1 cursor-pointer shadow-xs hover:opacity-90"
+                      style={{
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-emerald)',
+                        color: 'var(--color-emerald)'
+                      }}
+                      title="Export complete recipe JSON with ownership"
+                    >
+                      <FileJson className="h-3.5 w-3.5" />
+                      <span className="hidden sm:inline">Export JSON</span>
+                    </button>
+
+                    {/* If on Marketplace and not owned: Allow copying */}
+                    {activeTab === 'marketplace' && !userOwns ? (
+                      <button
+                        type="button"
+                        onClick={(e) => handleSaveToMyRecipes(r, e)}
+                        className="px-2 py-1 rounded-xl text-[11px] font-bold border transition flex items-center gap-1 cursor-pointer shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-primary)',
+                          color: 'var(--color-primary)'
+                        }}
+                        title="Copy to My Recipes"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Save</span>
+                      </button>
+                    ) : (
+                      userOwns && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteRecipe(r.id)}
+                          className="p-1 rounded-xl border text-red-400 hover:text-red-500 cursor-pointer shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'rgba(239, 68, 68, 0.3)'
+                          }}
+                          title="Delete Recipe"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -39102,13 +38977,41 @@ export default function RecipesPage() {
                 <div className="space-y-5 pb-6">
                   <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
                     <img
-                      src={selectedRecipe.imageUrl || selectedRecipe.image || '/uploads/recipes/default.jpg'}
+                      src={selectedRecipe.imageUrl || selectedRecipe.image || '/recipes/images/default.jpg'}
                       alt={selectedRecipe.title || selectedRecipe.name}
                       className="absolute inset-0 w-full h-full object-cover"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
 
                     <div className="relative z-10 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <span 
+                          className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full border shadow-sm backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          {recipeCategoryBadge}
+                        </span>
+
+                        <span 
+                          className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 backdrop-blur-md"
+                          style={{
+                            backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                            borderColor: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : 'rgba(255,255,255,0.2)',
+                            color: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : '#ffffff'
+                          }}
+                        >
+                          {(selectedRecipe.isPublic || selectedRecipe.is_public) ? (
+                            <><Globe className="h-3 w-3" /> Public on Marketplace</>
+                          ) : (
+                            <><Lock className="h-3 w-3" /> Private (Only You)</>
+                          )}
+                        </span>
+                      </div>
+
                       <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
                         {selectedRecipe.title || selectedRecipe.name}
                       </h2>
@@ -39120,9 +39023,21 @@ export default function RecipesPage() {
                         <span className="border text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/60 border-white/20">
                           <Clock className="h-3.5 w-3.5"/> {(t('prepTimePrefix') || 'Prep: {time} minutes').replace('{time}', String(selectedRecipe.prepTimeMinutes || 30))}
                         </span>
-                        <span className="border text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/60 border-white/20">
-                          <Utensils className="h-3.5 w-3.5"/> {recipeCategoryBadge}
-                        </span>
+
+                        {isOwner(selectedRecipe) && (
+                          <button
+                            type="button"
+                            onClick={(e) => handleTogglePublic(e, selectedRecipe.id)}
+                            className="px-3 py-1.5 rounded-full border font-bold text-xs transition flex items-center gap-1 cursor-pointer bg-black/60"
+                            style={{
+                              borderColor: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : 'rgba(255,255,255,0.3)',
+                              color: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : '#ffffff'
+                            }}
+                          >
+                            {(selectedRecipe.isPublic || selectedRecipe.is_public) ? <Globe className="h-3.5 w-3.5"/> : <Lock className="h-3.5 w-3.5"/>}
+                            <span>{(selectedRecipe.isPublic || selectedRecipe.is_public) ? 'Marketplace (Public)' : 'Make Public'}</span>
+                          </button>
+                        )}
                         
                         <button
                           type="button"
@@ -39298,18 +39213,22 @@ export default function RecipesPage() {
                       >
                         <Timer className="h-3.5 w-3.5"/> {t('timerBtn') || 'Timer'}
                       </button>
-                      <button
-                        type="button"
-                        onClick={handleOpenEdit}
-                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
-                        }}
-                      >
-                        <Edit3 className="h-3.5 w-3.5"/> {t('editBtn') || 'Edit'}
-                      </button>
+                      
+                      {isOwner(selectedRecipe) && (
+                        <button
+                          type="button"
+                          onClick={handleOpenEdit}
+                          className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                          style={{
+                            backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-primary)',
+                            color: 'var(--color-primary)'
+                          }}
+                        >
+                          <Edit3 className="h-3.5 w-3.5"/> {t('editBtn') || 'Edit'}
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         onClick={() => {
@@ -39566,18 +39485,36 @@ export default function RecipesPage() {
 
                   {/* MODAL FOOTER */}
                   <div className="px-5 flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteRecipe(selectedRecipe.id)}
-                      className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'rgba(239, 68, 68, 0.4)',
-                        color: '#ef4444'
-                      }}
-                    >
-                      <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipeBtn') || 'Delete Recipe'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {/* Green Export JSON Button */}
+                      <button
+                        type="button"
+                        onClick={() => handleExportJson(selectedRecipe)}
+                        className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-emerald)',
+                          color: 'var(--color-emerald)'
+                        }}
+                      >
+                        <FileJson className="h-3.5 w-3.5"/> Export JSON
+                      </button>
+
+                      {isOwner(selectedRecipe) && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteRecipe(selectedRecipe.id)}
+                          className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'rgba(239, 68, 68, 0.4)',
+                            color: '#ef4444'
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipeBtn') || 'Delete Recipe'}
+                        </button>
+                      )}
+                    </div>
 
                     <div className="flex items-center gap-2 ml-auto text-xs">
                       <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
@@ -40499,6 +40436,87 @@ export default function RecipesPage() {
       )}
     </div>
   );
+}
+
+```
+
+## File: `apps/web/src/app/recipes/[filename]/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest, { params }: { params: Promise<{ filename: string }> }) {
+  try {
+    const { filename } = await params;
+    const safeName = path.basename(filename);
+    const searchDirs = [
+      path.join(process.cwd(), 'recipes', safeName),
+      path.join(process.cwd(), 'public', 'recipes', safeName),
+      path.join(process.cwd(), 'apps', 'web', 'recipes', safeName),
+      path.join(process.cwd(), 'apps', 'web', 'public', 'recipes', safeName)
+    ];
+
+    for (const filePath of searchDirs) {
+      if (fs.existsSync(filePath)) {
+        const data = fs.readFileSync(filePath, 'utf-8');
+        return new NextResponse(data, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'public, max-age=30, stale-while-revalidate=120'
+          }
+        });
+      }
+    }
+    return NextResponse.json({ error: 'Recipe JSON not found' }, { status: 404 });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
+}
+
+```
+
+## File: `apps/web/src/app/recipes/images/[filename]/route.ts`
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest, { params }: { params: Promise<{ filename: string }> }) {
+  try {
+    const { filename } = await params;
+    const safeName = path.basename(filename);
+    const searchDirs = [
+      path.join(process.cwd(), 'recipes', 'images', safeName),
+      path.join(process.cwd(), 'public', 'recipes', 'images', safeName),
+      path.join(process.cwd(), 'apps', 'web', 'recipes', 'images', safeName),
+      path.join(process.cwd(), 'apps', 'web', 'public', 'recipes', 'images', safeName)
+    ];
+
+    for (const filePath of searchDirs) {
+      if (fs.existsSync(filePath)) {
+        const buffer = fs.readFileSync(filePath);
+        let contentType = 'image/jpeg';
+        if (safeName.endsWith('.png')) contentType = 'image/png';
+        else if (safeName.endsWith('.webp')) contentType = 'image/webp';
+        else if (safeName.endsWith('.svg')) contentType = 'image/svg+xml';
+
+        return new NextResponse(buffer, {
+          headers: {
+            'Content-Type': contentType,
+            'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800'
+          }
+        });
+      }
+    }
+    return NextResponse.json({ error: 'Image not found' }, { status: 404 });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
+  }
 }
 
 ```
@@ -48119,119 +48137,39 @@ export async function POST(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/admin/storage/route.ts`
 ```typescript
-import { NextResponse } from 'next/server';
-import { query } from '@/lib/db';
-import fs from 'fs';
-import path from 'path';
+import { NextRequest, NextResponse } from 'next/server';
+import { getStorageSettings, saveStorageSettings, getUniversalDiskDiagnostics, DEFAULT_STORAGE_CONFIG } from '@/lib/storageService';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-function readServerStorageFallback(): any {
-  const candidatePaths = [
-    path.join(process.cwd(), 'apps/web/data/admin_settings.json'),
-    path.join(process.cwd(), 'data/admin_settings.json')
-  ];
-  for (const p of candidatePaths) {
-    if (fs.existsSync(p)) {
-      try {
-        const raw = fs.readFileSync(p, 'utf8');
-        const parsed = JSON.parse(raw);
-        if (parsed?.storageSettings || parsed?.storage_settings) {
-          return parsed.storageSettings || parsed.storage_settings;
-        }
-      } catch (_) {}
-    }
-  }
-  return null;
-}
-
 export async function GET() {
-  let settings: any = readServerStorageFallback();
-
   try {
-    const sRes: any = await Promise.race([
-      query(`SELECT storage_settings FROM admin_settings WHERE id::text = 'primary_settings' OR id::text = '1' LIMIT 1`),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('DB Timeout')), 3000))
-    ]).catch(() => null);
-
-    const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
-    if (sRow?.storage_settings) {
-      const parsed = typeof sRow.storage_settings === 'string' ? JSON.parse(sRow.storage_settings) : sRow.storage_settings;
-      if (parsed && typeof parsed === 'object') {
-        settings = { ...(settings || {}), ...parsed };
-      }
-    }
+    const settings = await getStorageSettings();
+    const diskStats = getUniversalDiskDiagnostics();
+    return NextResponse.json(
+      { success: true, settings, diskStats },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
+    );
   } catch (err: any) {
-    console.warn('[Storage API] Fallback to server JSON store:', err?.message || err);
-  }
-
-  const defaultStorage = {
-    provider: 'localhost',
-    localhost: {
-      uploadPath: 'public/uploads/recipes',
-      publicServingUrl: '/uploads/recipes',
-      maxFileSizeMb: 10
-    },
-    supabase: {
-      endpoint: 'https://tnhrkjtujdfgvwhsuuxb.storage.supabase.co/storage/v1/s3',
-      region: 'us-west-1',
-      accessKeyId: 'f3e0affef5c74972a535153349eb24cc',
-      secretAccessKey: '',
-      bucketName: 'recipes',
-      publicUrlPrefix: 'https://tnhrkjtujdfgvwhsuuxb.supabase.co/storage/v1/object/public/recipes',
-      maxFileSizeMb: 25
-    },
-    allowedFormats: ['jpg', 'jpeg', 'png', 'webp', 'svg'],
-    isConnected: false
-  };
-
-  const finalConfig = settings ? { ...defaultStorage, ...settings } : defaultStorage;
-
-  return NextResponse.json({
-    success: true,
-    storageSettings: finalConfig,
-    settings: finalConfig
-  }, {
-    headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
-  });
-}
-
-export async function POST(req: Request) {
-  try {
-    const body = await req.json();
-    const storageSettings = body.storageSettings || body.settings || body;
-
-    // 1. Persist to PostgreSQL admin_settings
-    try {
-      await query(
-        `INSERT INTO admin_settings (id, storage_settings, updated_at)
-         VALUES ('primary_settings', $1::jsonb, NOW())
-         ON CONFLICT (id) DO UPDATE SET
-           storage_settings = EXCLUDED.storage_settings,
-           updated_at = NOW()`,
-        [JSON.stringify(storageSettings)]
-      );
-    } catch (_) {}
-
-    // 2. Persist to JSON store mirror
-    try {
-      const dataDir = path.join(process.cwd(), 'data');
-      const filePath = path.join(dataDir, 'admin_settings.json');
-      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-      let existing: any = {};
-      if (fs.existsSync(filePath)) {
-        try { existing = JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch (_) {}
-      }
-      existing.storageSettings = storageSettings;
-      existing.updatedAt = new Date().toISOString();
-      fs.writeFileSync(filePath, JSON.stringify(existing, null, 2), 'utf8');
-    } catch (_) {}
-
     return NextResponse.json({
       success: true,
-      message: 'Storage settings saved successfully to server and database!',
-      storageSettings
+      settings: DEFAULT_STORAGE_CONFIG,
+      diskStats: getUniversalDiskDiagnostics()
+    });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const updated = await saveStorageSettings(body);
+    const diskStats = getUniversalDiskDiagnostics();
+    return NextResponse.json({
+      success: true,
+      settings: updated,
+      diskStats,
+      message: 'Universal storage settings saved successfully'
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
@@ -51611,7 +51549,13 @@ export async function DELETE(req: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { saveRecipeToJsonFile, loadAllRecipeJsonFiles, updateRecipePublicVisibility } from '@/lib/recipeFiles';
+import {
+  saveRecipeJsonFile,
+  saveRecipeImageLocally,
+  loadAllRecipeJsonFiles,
+  updateRecipePublicVisibility,
+  deleteRecipeJsonFile
+} from '@/lib/recipeFiles';
 
 export const dynamic = 'force-dynamic';
 
@@ -51622,6 +51566,7 @@ async function ensureColumns() {
       ADD COLUMN IF NOT EXISTS user_id TEXT,
       ADD COLUMN IF NOT EXISTS created_by TEXT,
       ADD COLUMN IF NOT EXISTS creator_name TEXT,
+      ADD COLUMN IF NOT EXISTS creator_email TEXT,
       ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
@@ -51631,7 +51576,7 @@ async function ensureColumns() {
       ADD COLUMN IF NOT EXISTS source_url TEXT;
 
       CREATE INDEX IF NOT EXISTS idx_saved_recipes_public ON saved_recipes(is_public);
-      CREATE INDEX IF NOT EXISTS idx_saved_recipes_owner ON saved_recipes(user_id, created_by);
+      CREATE INDEX IF NOT EXISTS idx_saved_recipes_user_owner ON saved_recipes(user_id, created_by);
     `);
   } catch (_) {}
 }
@@ -51645,40 +51590,35 @@ export async function GET(req: NextRequest) {
     const tab = searchParams.get('tab')?.trim();
     const isMarketplace = tab === 'marketplace' || searchParams.get('marketplace') === 'true';
 
-    let sql = `SELECT * FROM saved_recipes WHERE `;
-    const params: any[] = [];
-
-    if (isMarketplace) {
-      // Marketplace tab: Return all public recipes
-      sql += `is_public = TRUE`;
-    } else if (userId || email) {
-      // Personal tab: Return user-owned recipes
-      const conds: string[] = [];
-      if (userId) {
-        params.push(userId);
-        conds.push(`user_id = $${params.length} OR created_by = $${params.length}`);
-      }
-      if (email && email !== userId) {
-        params.push(email);
-        conds.push(`user_id = $${params.length} OR created_by = $${params.length}`);
-      }
-      sql += `(${conds.join(' OR ')})`;
-    } else {
-      sql += `1=1`;
-    }
-
-    sql += ' ORDER BY created_at DESC';
-
     let dbRows: any[] = [];
     try {
+      let sql = 'SELECT * FROM saved_recipes';
+      const params: any[] = [];
+
+      if (isMarketplace) {
+        sql += ' WHERE is_public = TRUE';
+      } else if (userId || email) {
+        const conds: string[] = [];
+        if (userId) {
+          params.push(userId);
+          conds.push(`user_id = $${params.length} OR created_by = $${params.length}`);
+        }
+        if (email && email !== userId) {
+          params.push(email);
+          conds.push(`user_id = $${params.length} OR created_by = $${params.length}`);
+        }
+        sql += ` WHERE (${conds.join(' OR ')})`;
+      }
+
+      sql += ' ORDER BY created_at DESC';
       dbRows = await query(sql, params);
     } catch (_) {}
 
-    // Also load filesystem JSON recipes and merge
-    const jsonRecipes = loadAllRecipeJsonFiles();
+    // Load recipes from disk JSON files in /recipes directory
+    const diskRecipes = loadAllRecipeJsonFiles();
     const recipeMap = new Map<string, any>();
 
-    // Add DB records
+    // Index DB records
     dbRows.forEach((r: any) => {
       let ing = r.ingredients;
       if (typeof ing === 'string') {
@@ -51689,27 +51629,30 @@ export async function GET(req: NextRequest) {
         try { dir = JSON.parse(dir); } catch (_) { dir = []; }
       }
 
-      recipeMap.set(r.id, {
+      const rec = {
+        ...r,
         id: r.id,
         userId: r.user_id || userId,
         user_id: r.user_id || userId,
         createdBy: r.created_by || r.user_id,
         created_by: r.created_by || r.user_id,
         creatorName: r.creator_name || 'Chef',
-        creator_name: r.creator_name || 'Chef',
+        creatorEmail: r.creator_email || '',
         ownerId: r.user_id || userId,
         ownerName: r.creator_name || 'Chef',
-        ownerEmail: r.created_by || `${r.user_id}@zecratary.local`,
+        ownerEmail: r.creator_email || '',
         title: r.title || 'Untitled Recipe',
         description: r.description || '',
         recipeType: r.recipe_type || 'Main Dish',
+        category: r.recipe_type || 'Main Dish',
         cuisine: r.cuisine || '',
-        prepMinutes: Number(r.prep_time) || 15,
-        cookMinutes: Number(r.cook_time) || 25,
+        prepTimeMinutes: Number(r.prep_time) || 15,
+        cookTimeMinutes: Number(r.cook_time) || 25,
         servings: Number(r.servings) || 4,
         difficulty: r.difficulty || 'Medium',
         ingredients: Array.isArray(ing) ? ing : [],
         instructions: Array.isArray(dir) ? dir : [],
+        directions: Array.isArray(dir) ? dir : [],
         imageUrl: r.image_url || '/recipes/images/default.jpg',
         image: r.image_url || '/recipes/images/default.jpg',
         sourceUrl: r.source_url || '',
@@ -51717,19 +51660,23 @@ export async function GET(req: NextRequest) {
         is_public: Boolean(r.is_public),
         isFavorite: Boolean(r.is_favorite),
         isCooked: Boolean(r.is_cooked),
-        rating: Number(r.rating) || 5,
+        rating: Number(r.rating) || 0,
+        note: r.note || '',
         bookId: r.book_id || null,
         createdAt: r.created_at || new Date().toISOString()
-      });
+      };
+      recipeMap.set(r.id, rec);
     });
 
-    // Add or merge filesystem JSON records
-    jsonRecipes.forEach(jr => {
-      if (isMarketplace && !jr.isPublic) return;
-      if (!isMarketplace && userId && jr.ownerId !== userId && jr.ownerEmail !== email) return;
-
-      if (!recipeMap.has(jr.id)) {
-        recipeMap.set(jr.id, jr);
+    // Merge disk JSON records from directory /recipes
+    diskRecipes.forEach(dr => {
+      if (isMarketplace && !dr.isPublic) return;
+      if (!isMarketplace && userId && dr.userId !== userId && dr.createdBy !== email && dr.createdBy !== userId) {
+        // If not marketplace, skip if belongs to another user
+        return;
+      }
+      if (!recipeMap.has(dr.id)) {
+        recipeMap.set(dr.id, dr);
       }
     });
 
@@ -51752,77 +51699,109 @@ export async function POST(req: NextRequest) {
 
     for (const item of items) {
       if (!item) continue;
-      const targetUserId = (item.userId || item.user_id || body.userId || 'guest').trim();
+      const targetUserId = (item.userId || item.user_id || body.userId || 'usr_admin_1').trim();
       const createdBy = (item.createdBy || item.created_by || item.ownerEmail || targetUserId).trim();
       const creatorName = (item.creatorName || item.creator_name || item.ownerName || 'Chef').trim();
-      const id = item.id || 'rec_' + Date.now().toString(36);
-      const isPublic = Boolean(item.isPublic ?? item.is_public ?? false);
+      const creatorEmail = (item.creatorEmail || item.creator_email || item.ownerEmail || '').trim();
+      const id = item.id || `rcp_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
 
-      // 1. Save individual JSON file to /recipes
-      saveRecipeToJsonFile(item, { id: targetUserId, name: creatorName, email: createdBy });
+      // 1. Save Image Locally to /recipes/images/
+      const localImage = await saveRecipeImageLocally(id, item.imageUrl || item.image || item.image_url);
 
-      // 2. Persist to PostgreSQL & MySQL
-      try {
-        const ingredients = Array.isArray(item.ingredients) ? JSON.stringify(item.ingredients) : '[]';
-        const directions = Array.isArray(item.instructions || item.directions) 
-          ? JSON.stringify(item.instructions || item.directions) : '[]';
+      // 2. Format and Save Standalone JSON file to directory /recipes/<id>.json
+      const recipeRecord = {
+        ...item,
+        id,
+        userId: targetUserId,
+        user_id: targetUserId,
+        createdBy,
+        created_by: createdBy,
+        creatorName,
+        creator_name: creatorName,
+        creatorEmail,
+        creator_email: creatorEmail,
+        imageUrl: localImage,
+        image: localImage,
+        image_url: localImage,
+        isPublic: Boolean(item.isPublic ?? item.is_public)
+      };
+      saveRecipeJsonFile(recipeRecord, { userId: targetUserId, createdBy, creatorName, creatorEmail });
 
-        await query(`
-          INSERT INTO saved_recipes (
-            id, user_id, created_by, creator_name, title, description, recipe_type, cuisine, prep_time, cook_time,
-            servings, difficulty, ingredients, directions, image_url, is_public,
-            is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
-          ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-            $11, $12, $13::jsonb, $14::jsonb, $15, $16,
-            $17, $18, $19, $20, $21, $22, NOW()
-          )
-          ON CONFLICT (id) DO UPDATE SET
-            user_id = EXCLUDED.user_id,
-            created_by = EXCLUDED.created_by,
-            creator_name = EXCLUDED.creator_name,
-            title = EXCLUDED.title,
-            description = EXCLUDED.description,
-            recipe_type = EXCLUDED.recipe_type,
-            prep_time = EXCLUDED.prep_time,
-            cook_time = EXCLUDED.cook_time,
-            servings = EXCLUDED.servings,
-            ingredients = EXCLUDED.ingredients,
-            directions = EXCLUDED.directions,
-            image_url = EXCLUDED.image_url,
-            is_public = EXCLUDED.is_public,
-            is_favorite = EXCLUDED.is_favorite,
-            is_cooked = EXCLUDED.is_cooked,
-            rating = EXCLUDED.rating,
-            updated_at = NOW();
-        `, [
-          id,
-          targetUserId,
-          createdBy,
-          creatorName,
-          item.title || 'Untitled Recipe',
-          item.description || '',
-          item.recipeType || 'Main Dish',
-          item.cuisine || '',
-          String(item.prepMinutes || 15),
-          String(item.cookMinutes || 25),
-          String(item.servings || 4),
-          item.difficulty || 'Medium',
-          ingredients,
-          directions,
-          item.imageUrl || item.image || '/recipes/images/default.jpg',
-          isPublic,
-          Boolean(item.isFavorite ?? item.is_favorite),
-          Boolean(item.isCooked ?? item.is_cooked),
-          Number(item.rating) || 5,
-          item.note || '',
-          item.bookId || null,
-          item.sourceUrl || ''
-        ]);
-      } catch (_) {}
+      // 3. Persist in Database (PostgreSQL & MySQL)
+      let ingredients = item.ingredients;
+      if (typeof ingredients === 'string') {
+        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = [ingredients]; }
+      }
+      if (!Array.isArray(ingredients)) ingredients = [];
+
+      let directions = item.instructions || item.directions;
+      if (typeof directions === 'string') {
+        try { directions = JSON.parse(directions); } catch (_) { directions = [directions]; }
+      }
+      if (!Array.isArray(directions)) directions = [];
+
+      await query(`
+        INSERT INTO saved_recipes (
+          id, user_id, created_by, creator_name, creator_email, title, description, recipe_type, cuisine, prep_time, cook_time,
+          servings, difficulty, ingredients, directions, image_url, is_public,
+          is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+          $11, $12, $13::jsonb, $14::jsonb, $15, $16,
+          $17, $18, $19, $20, $21, $22, NOW()
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          user_id = EXCLUDED.user_id,
+          created_by = EXCLUDED.created_by,
+          creator_name = EXCLUDED.creator_name,
+          creator_email = EXCLUDED.creator_email,
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          recipe_type = EXCLUDED.recipe_type,
+          cuisine = EXCLUDED.cuisine,
+          prep_time = EXCLUDED.prep_time,
+          cook_time = EXCLUDED.cook_time,
+          servings = EXCLUDED.servings,
+          difficulty = EXCLUDED.difficulty,
+          ingredients = EXCLUDED.ingredients,
+          directions = EXCLUDED.directions,
+          image_url = EXCLUDED.image_url,
+          is_public = EXCLUDED.is_public,
+          is_favorite = EXCLUDED.is_favorite,
+          is_cooked = EXCLUDED.is_cooked,
+          rating = EXCLUDED.rating,
+          note = EXCLUDED.note,
+          book_id = EXCLUDED.book_id,
+          source_url = EXCLUDED.source_url,
+          updated_at = NOW();
+      `, [
+        id,
+        targetUserId,
+        createdBy,
+        creatorName,
+        creatorEmail,
+        item.title || item.name || 'Untitled Recipe',
+        item.description || '',
+        item.recipeType || item.category || 'Main Dish',
+        item.cuisine || '',
+        String(item.prepTimeMinutes || item.prepMinutes || 15),
+        String(item.cookTimeMinutes || item.cookMinutes || 25),
+        String(item.servings || 4),
+        item.difficulty || 'Medium',
+        JSON.stringify(ingredients),
+        JSON.stringify(directions),
+        localImage,
+        Boolean(item.isPublic ?? item.is_public),
+        Boolean(item.isFavorite ?? item.is_favorite),
+        Boolean(item.isCooked ?? item.is_cooked),
+        Number(item.rating) || 0,
+        item.note || '',
+        item.bookId || item.book_id || null,
+        item.sourceUrl || item.source_url || ''
+      ]);
     }
 
-    return NextResponse.json({ success: true, message: 'Recipe stored in JSON and Database.' });
+    return NextResponse.json({ success: true, message: 'Saved to /recipes JSON file, /recipes/images, and Database.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -51832,11 +51811,9 @@ export async function PATCH(req: NextRequest) {
   try {
     await ensureColumns();
     const body = await req.json();
-    const { id, isPublic, is_public, isFavorite, isCooked, rating, bookId } = body;
+    const { id, isPublic, is_public, isFavorite, is_favorite, isCooked, is_cooked, rating, note, bookId, book_id } = body;
 
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'Recipe ID required' }, { status: 400 });
-    }
+    if (!id) return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
 
     const targetPublic = isPublic !== undefined ? isPublic : is_public;
     if (targetPublic !== undefined) {
@@ -51850,29 +51827,38 @@ export async function PATCH(req: NextRequest) {
       params.push(Boolean(targetPublic));
       updates.push(`is_public = $${params.length}`);
     }
-    if (isFavorite !== undefined) {
-      params.push(Boolean(isFavorite));
+    if (isFavorite !== undefined || is_favorite !== undefined) {
+      params.push(Boolean(isFavorite !== undefined ? isFavorite : is_favorite));
       updates.push(`is_favorite = $${params.length}`);
     }
-    if (isCooked !== undefined) {
-      params.push(Boolean(isCooked));
+    if (isCooked !== undefined || is_cooked !== undefined) {
+      params.push(Boolean(isCooked !== undefined ? isCooked : is_cooked));
       updates.push(`is_cooked = $${params.length}`);
     }
     if (rating !== undefined) {
       params.push(Number(rating));
       updates.push(`rating = $${params.length}`);
     }
-    if (bookId !== undefined) {
-      params.push(bookId);
+    if (note !== undefined) {
+      params.push(String(note));
+      updates.push(`note = $${params.length}`);
+    }
+    if (bookId !== undefined || book_id !== undefined) {
+      params.push(bookId !== undefined ? bookId : book_id);
       updates.push(`book_id = $${params.length}`);
     }
 
     if (updates.length > 0) {
       updates.push('updated_at = NOW()');
       await query(`UPDATE saved_recipes SET ${updates.join(', ')} WHERE id = $1`, params);
+
+      try {
+        const rows = await query('SELECT * FROM saved_recipes WHERE id = $1', [id]);
+        if (rows.length > 0) saveRecipeJsonFile(rows[0]);
+      } catch (_) {}
     }
 
-    return NextResponse.json({ success: true, message: 'Updated visibility and settings.' });
+    return NextResponse.json({ success: true, message: 'Updated in Database and JSON file.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -51885,7 +51871,9 @@ export async function DELETE(req: NextRequest) {
     if (!id) return NextResponse.json({ success: false, error: 'Recipe ID required' }, { status: 400 });
 
     await query('DELETE FROM saved_recipes WHERE id = $1', [id.trim()]);
-    return NextResponse.json({ success: true, message: 'Deleted recipe.' });
+    deleteRecipeJsonFile(id.trim());
+
+    return NextResponse.json({ success: true, message: 'Deleted from Database and /recipes JSON file.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -51897,7 +51885,13 @@ export async function DELETE(req: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { saveRecipeToJsonFile, loadAllRecipeJsonFiles, updateRecipePublicVisibility } from '@/lib/recipeFiles';
+import {
+  saveRecipeJsonFile,
+  saveRecipeImageLocally,
+  loadAllRecipeJsonFiles,
+  updateRecipePublicVisibility,
+  deleteRecipeJsonFile
+} from '@/lib/recipeFiles';
 
 export const dynamic = 'force-dynamic';
 
@@ -51908,6 +51902,7 @@ async function ensureColumns() {
       ADD COLUMN IF NOT EXISTS user_id TEXT,
       ADD COLUMN IF NOT EXISTS created_by TEXT,
       ADD COLUMN IF NOT EXISTS creator_name TEXT,
+      ADD COLUMN IF NOT EXISTS creator_email TEXT,
       ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS is_favorite BOOLEAN DEFAULT FALSE,
       ADD COLUMN IF NOT EXISTS is_cooked BOOLEAN DEFAULT FALSE,
@@ -51917,7 +51912,7 @@ async function ensureColumns() {
       ADD COLUMN IF NOT EXISTS source_url TEXT;
 
       CREATE INDEX IF NOT EXISTS idx_saved_recipes_public ON saved_recipes(is_public);
-      CREATE INDEX IF NOT EXISTS idx_saved_recipes_owner ON saved_recipes(user_id, created_by);
+      CREATE INDEX IF NOT EXISTS idx_saved_recipes_user_owner ON saved_recipes(user_id, created_by);
     `);
   } catch (_) {}
 }
@@ -51931,40 +51926,35 @@ export async function GET(req: NextRequest) {
     const tab = searchParams.get('tab')?.trim();
     const isMarketplace = tab === 'marketplace' || searchParams.get('marketplace') === 'true';
 
-    let sql = `SELECT * FROM saved_recipes WHERE `;
-    const params: any[] = [];
-
-    if (isMarketplace) {
-      // Marketplace tab: Return all public recipes
-      sql += `is_public = TRUE`;
-    } else if (userId || email) {
-      // Personal tab: Return user-owned recipes
-      const conds: string[] = [];
-      if (userId) {
-        params.push(userId);
-        conds.push(`user_id = $${params.length} OR created_by = $${params.length}`);
-      }
-      if (email && email !== userId) {
-        params.push(email);
-        conds.push(`user_id = $${params.length} OR created_by = $${params.length}`);
-      }
-      sql += `(${conds.join(' OR ')})`;
-    } else {
-      sql += `1=1`;
-    }
-
-    sql += ' ORDER BY created_at DESC';
-
     let dbRows: any[] = [];
     try {
+      let sql = 'SELECT * FROM saved_recipes';
+      const params: any[] = [];
+
+      if (isMarketplace) {
+        sql += ' WHERE is_public = TRUE';
+      } else if (userId || email) {
+        const conds: string[] = [];
+        if (userId) {
+          params.push(userId);
+          conds.push(`user_id = $${params.length} OR created_by = $${params.length}`);
+        }
+        if (email && email !== userId) {
+          params.push(email);
+          conds.push(`user_id = $${params.length} OR created_by = $${params.length}`);
+        }
+        sql += ` WHERE (${conds.join(' OR ')})`;
+      }
+
+      sql += ' ORDER BY created_at DESC';
       dbRows = await query(sql, params);
     } catch (_) {}
 
-    // Also load filesystem JSON recipes and merge
-    const jsonRecipes = loadAllRecipeJsonFiles();
+    // Load recipes from disk JSON files in /recipes directory
+    const diskRecipes = loadAllRecipeJsonFiles();
     const recipeMap = new Map<string, any>();
 
-    // Add DB records
+    // Index DB records
     dbRows.forEach((r: any) => {
       let ing = r.ingredients;
       if (typeof ing === 'string') {
@@ -51975,27 +51965,30 @@ export async function GET(req: NextRequest) {
         try { dir = JSON.parse(dir); } catch (_) { dir = []; }
       }
 
-      recipeMap.set(r.id, {
+      const rec = {
+        ...r,
         id: r.id,
         userId: r.user_id || userId,
         user_id: r.user_id || userId,
         createdBy: r.created_by || r.user_id,
         created_by: r.created_by || r.user_id,
         creatorName: r.creator_name || 'Chef',
-        creator_name: r.creator_name || 'Chef',
+        creatorEmail: r.creator_email || '',
         ownerId: r.user_id || userId,
         ownerName: r.creator_name || 'Chef',
-        ownerEmail: r.created_by || `${r.user_id}@zecratary.local`,
+        ownerEmail: r.creator_email || '',
         title: r.title || 'Untitled Recipe',
         description: r.description || '',
         recipeType: r.recipe_type || 'Main Dish',
+        category: r.recipe_type || 'Main Dish',
         cuisine: r.cuisine || '',
-        prepMinutes: Number(r.prep_time) || 15,
-        cookMinutes: Number(r.cook_time) || 25,
+        prepTimeMinutes: Number(r.prep_time) || 15,
+        cookTimeMinutes: Number(r.cook_time) || 25,
         servings: Number(r.servings) || 4,
         difficulty: r.difficulty || 'Medium',
         ingredients: Array.isArray(ing) ? ing : [],
         instructions: Array.isArray(dir) ? dir : [],
+        directions: Array.isArray(dir) ? dir : [],
         imageUrl: r.image_url || '/recipes/images/default.jpg',
         image: r.image_url || '/recipes/images/default.jpg',
         sourceUrl: r.source_url || '',
@@ -52003,19 +51996,23 @@ export async function GET(req: NextRequest) {
         is_public: Boolean(r.is_public),
         isFavorite: Boolean(r.is_favorite),
         isCooked: Boolean(r.is_cooked),
-        rating: Number(r.rating) || 5,
+        rating: Number(r.rating) || 0,
+        note: r.note || '',
         bookId: r.book_id || null,
         createdAt: r.created_at || new Date().toISOString()
-      });
+      };
+      recipeMap.set(r.id, rec);
     });
 
-    // Add or merge filesystem JSON records
-    jsonRecipes.forEach(jr => {
-      if (isMarketplace && !jr.isPublic) return;
-      if (!isMarketplace && userId && jr.ownerId !== userId && jr.ownerEmail !== email) return;
-
-      if (!recipeMap.has(jr.id)) {
-        recipeMap.set(jr.id, jr);
+    // Merge disk JSON records from directory /recipes
+    diskRecipes.forEach(dr => {
+      if (isMarketplace && !dr.isPublic) return;
+      if (!isMarketplace && userId && dr.userId !== userId && dr.createdBy !== email && dr.createdBy !== userId) {
+        // If not marketplace, skip if belongs to another user
+        return;
+      }
+      if (!recipeMap.has(dr.id)) {
+        recipeMap.set(dr.id, dr);
       }
     });
 
@@ -52038,77 +52035,109 @@ export async function POST(req: NextRequest) {
 
     for (const item of items) {
       if (!item) continue;
-      const targetUserId = (item.userId || item.user_id || body.userId || 'guest').trim();
+      const targetUserId = (item.userId || item.user_id || body.userId || 'usr_admin_1').trim();
       const createdBy = (item.createdBy || item.created_by || item.ownerEmail || targetUserId).trim();
       const creatorName = (item.creatorName || item.creator_name || item.ownerName || 'Chef').trim();
-      const id = item.id || 'rec_' + Date.now().toString(36);
-      const isPublic = Boolean(item.isPublic ?? item.is_public ?? false);
+      const creatorEmail = (item.creatorEmail || item.creator_email || item.ownerEmail || '').trim();
+      const id = item.id || `rcp_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
 
-      // 1. Save individual JSON file to /recipes
-      saveRecipeToJsonFile(item, { id: targetUserId, name: creatorName, email: createdBy });
+      // 1. Save Image Locally to /recipes/images/
+      const localImage = await saveRecipeImageLocally(id, item.imageUrl || item.image || item.image_url);
 
-      // 2. Persist to PostgreSQL & MySQL
-      try {
-        const ingredients = Array.isArray(item.ingredients) ? JSON.stringify(item.ingredients) : '[]';
-        const directions = Array.isArray(item.instructions || item.directions) 
-          ? JSON.stringify(item.instructions || item.directions) : '[]';
+      // 2. Format and Save Standalone JSON file to directory /recipes/<id>.json
+      const recipeRecord = {
+        ...item,
+        id,
+        userId: targetUserId,
+        user_id: targetUserId,
+        createdBy,
+        created_by: createdBy,
+        creatorName,
+        creator_name: creatorName,
+        creatorEmail,
+        creator_email: creatorEmail,
+        imageUrl: localImage,
+        image: localImage,
+        image_url: localImage,
+        isPublic: Boolean(item.isPublic ?? item.is_public)
+      };
+      saveRecipeJsonFile(recipeRecord, { userId: targetUserId, createdBy, creatorName, creatorEmail });
 
-        await query(`
-          INSERT INTO saved_recipes (
-            id, user_id, created_by, creator_name, title, description, recipe_type, cuisine, prep_time, cook_time,
-            servings, difficulty, ingredients, directions, image_url, is_public,
-            is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
-          ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-            $11, $12, $13::jsonb, $14::jsonb, $15, $16,
-            $17, $18, $19, $20, $21, $22, NOW()
-          )
-          ON CONFLICT (id) DO UPDATE SET
-            user_id = EXCLUDED.user_id,
-            created_by = EXCLUDED.created_by,
-            creator_name = EXCLUDED.creator_name,
-            title = EXCLUDED.title,
-            description = EXCLUDED.description,
-            recipe_type = EXCLUDED.recipe_type,
-            prep_time = EXCLUDED.prep_time,
-            cook_time = EXCLUDED.cook_time,
-            servings = EXCLUDED.servings,
-            ingredients = EXCLUDED.ingredients,
-            directions = EXCLUDED.directions,
-            image_url = EXCLUDED.image_url,
-            is_public = EXCLUDED.is_public,
-            is_favorite = EXCLUDED.is_favorite,
-            is_cooked = EXCLUDED.is_cooked,
-            rating = EXCLUDED.rating,
-            updated_at = NOW();
-        `, [
-          id,
-          targetUserId,
-          createdBy,
-          creatorName,
-          item.title || 'Untitled Recipe',
-          item.description || '',
-          item.recipeType || 'Main Dish',
-          item.cuisine || '',
-          String(item.prepMinutes || 15),
-          String(item.cookMinutes || 25),
-          String(item.servings || 4),
-          item.difficulty || 'Medium',
-          ingredients,
-          directions,
-          item.imageUrl || item.image || '/recipes/images/default.jpg',
-          isPublic,
-          Boolean(item.isFavorite ?? item.is_favorite),
-          Boolean(item.isCooked ?? item.is_cooked),
-          Number(item.rating) || 5,
-          item.note || '',
-          item.bookId || null,
-          item.sourceUrl || ''
-        ]);
-      } catch (_) {}
+      // 3. Persist in Database (PostgreSQL & MySQL)
+      let ingredients = item.ingredients;
+      if (typeof ingredients === 'string') {
+        try { ingredients = JSON.parse(ingredients); } catch (_) { ingredients = [ingredients]; }
+      }
+      if (!Array.isArray(ingredients)) ingredients = [];
+
+      let directions = item.instructions || item.directions;
+      if (typeof directions === 'string') {
+        try { directions = JSON.parse(directions); } catch (_) { directions = [directions]; }
+      }
+      if (!Array.isArray(directions)) directions = [];
+
+      await query(`
+        INSERT INTO saved_recipes (
+          id, user_id, created_by, creator_name, creator_email, title, description, recipe_type, cuisine, prep_time, cook_time,
+          servings, difficulty, ingredients, directions, image_url, is_public,
+          is_favorite, is_cooked, rating, note, book_id, source_url, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+          $11, $12, $13::jsonb, $14::jsonb, $15, $16,
+          $17, $18, $19, $20, $21, $22, NOW()
+        )
+        ON CONFLICT (id) DO UPDATE SET
+          user_id = EXCLUDED.user_id,
+          created_by = EXCLUDED.created_by,
+          creator_name = EXCLUDED.creator_name,
+          creator_email = EXCLUDED.creator_email,
+          title = EXCLUDED.title,
+          description = EXCLUDED.description,
+          recipe_type = EXCLUDED.recipe_type,
+          cuisine = EXCLUDED.cuisine,
+          prep_time = EXCLUDED.prep_time,
+          cook_time = EXCLUDED.cook_time,
+          servings = EXCLUDED.servings,
+          difficulty = EXCLUDED.difficulty,
+          ingredients = EXCLUDED.ingredients,
+          directions = EXCLUDED.directions,
+          image_url = EXCLUDED.image_url,
+          is_public = EXCLUDED.is_public,
+          is_favorite = EXCLUDED.is_favorite,
+          is_cooked = EXCLUDED.is_cooked,
+          rating = EXCLUDED.rating,
+          note = EXCLUDED.note,
+          book_id = EXCLUDED.book_id,
+          source_url = EXCLUDED.source_url,
+          updated_at = NOW();
+      `, [
+        id,
+        targetUserId,
+        createdBy,
+        creatorName,
+        creatorEmail,
+        item.title || item.name || 'Untitled Recipe',
+        item.description || '',
+        item.recipeType || item.category || 'Main Dish',
+        item.cuisine || '',
+        String(item.prepTimeMinutes || item.prepMinutes || 15),
+        String(item.cookTimeMinutes || item.cookMinutes || 25),
+        String(item.servings || 4),
+        item.difficulty || 'Medium',
+        JSON.stringify(ingredients),
+        JSON.stringify(directions),
+        localImage,
+        Boolean(item.isPublic ?? item.is_public),
+        Boolean(item.isFavorite ?? item.is_favorite),
+        Boolean(item.isCooked ?? item.is_cooked),
+        Number(item.rating) || 0,
+        item.note || '',
+        item.bookId || item.book_id || null,
+        item.sourceUrl || item.source_url || ''
+      ]);
     }
 
-    return NextResponse.json({ success: true, message: 'Recipe stored in JSON and Database.' });
+    return NextResponse.json({ success: true, message: 'Saved to /recipes JSON file, /recipes/images, and Database.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -52118,11 +52147,9 @@ export async function PATCH(req: NextRequest) {
   try {
     await ensureColumns();
     const body = await req.json();
-    const { id, isPublic, is_public, isFavorite, isCooked, rating, bookId } = body;
+    const { id, isPublic, is_public, isFavorite, is_favorite, isCooked, is_cooked, rating, note, bookId, book_id } = body;
 
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'Recipe ID required' }, { status: 400 });
-    }
+    if (!id) return NextResponse.json({ success: false, error: 'Recipe ID is required' }, { status: 400 });
 
     const targetPublic = isPublic !== undefined ? isPublic : is_public;
     if (targetPublic !== undefined) {
@@ -52136,29 +52163,38 @@ export async function PATCH(req: NextRequest) {
       params.push(Boolean(targetPublic));
       updates.push(`is_public = $${params.length}`);
     }
-    if (isFavorite !== undefined) {
-      params.push(Boolean(isFavorite));
+    if (isFavorite !== undefined || is_favorite !== undefined) {
+      params.push(Boolean(isFavorite !== undefined ? isFavorite : is_favorite));
       updates.push(`is_favorite = $${params.length}`);
     }
-    if (isCooked !== undefined) {
-      params.push(Boolean(isCooked));
+    if (isCooked !== undefined || is_cooked !== undefined) {
+      params.push(Boolean(isCooked !== undefined ? isCooked : is_cooked));
       updates.push(`is_cooked = $${params.length}`);
     }
     if (rating !== undefined) {
       params.push(Number(rating));
       updates.push(`rating = $${params.length}`);
     }
-    if (bookId !== undefined) {
-      params.push(bookId);
+    if (note !== undefined) {
+      params.push(String(note));
+      updates.push(`note = $${params.length}`);
+    }
+    if (bookId !== undefined || book_id !== undefined) {
+      params.push(bookId !== undefined ? bookId : book_id);
       updates.push(`book_id = $${params.length}`);
     }
 
     if (updates.length > 0) {
       updates.push('updated_at = NOW()');
       await query(`UPDATE saved_recipes SET ${updates.join(', ')} WHERE id = $1`, params);
+
+      try {
+        const rows = await query('SELECT * FROM saved_recipes WHERE id = $1', [id]);
+        if (rows.length > 0) saveRecipeJsonFile(rows[0]);
+      } catch (_) {}
     }
 
-    return NextResponse.json({ success: true, message: 'Updated visibility and settings.' });
+    return NextResponse.json({ success: true, message: 'Updated in Database and JSON file.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -52171,7 +52207,9 @@ export async function DELETE(req: NextRequest) {
     if (!id) return NextResponse.json({ success: false, error: 'Recipe ID required' }, { status: 400 });
 
     await query('DELETE FROM saved_recipes WHERE id = $1', [id.trim()]);
-    return NextResponse.json({ success: true, message: 'Deleted recipe.' });
+    deleteRecipeJsonFile(id.trim());
+
+    return NextResponse.json({ success: true, message: 'Deleted from Database and /recipes JSON file.' });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -52914,37 +52952,31 @@ export async function POST(req: Request) {
 ## File: `apps/web/src/app/api/recipes/save-remote-image/route.ts`
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
-import { uploadMediaFile } from '@/lib/storageService';
+import { saveRecipeImageLocally } from '@/lib/recipeFiles';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
-    const { imageUrl, filename } = await req.json();
+    const body = await req.json();
+    const { imageUrl, recipeId } = body;
 
-    if (!imageUrl || !imageUrl.startsWith('http')) {
-      return NextResponse.json({ success: false, error: 'Valid image URL is required' }, { status: 400 });
+    if (!imageUrl) {
+      return NextResponse.json({ success: false, error: 'Image URL is required' }, { status: 400 });
     }
 
-    const response = await fetch(imageUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-      },
-      signal: AbortSignal.timeout(10000),
+    const targetId = recipeId || `img_${Date.now()}`;
+    // Downloads and uploads to Supabase S3 or saves to /recipes/images based on /admin/storage
+    const resolvedUrl = await saveRecipeImageLocally(targetId, imageUrl);
+
+    return NextResponse.json({
+      success: true,
+      url: resolvedUrl,
+      localUrl: resolvedUrl,
+      imageUrl: resolvedUrl
     });
-
-    if (!response.ok) {
-      return NextResponse.json({ success: false, error: `Failed to fetch remote image: HTTP ${response.status}` }, { status: 400 });
-    }
-
-    const contentType = response.headers.get('content-type') || 'image/jpeg';
-    const buffer = Buffer.from(await response.arrayBuffer());
-
-    const savedUrl = await uploadMediaFile(buffer, filename || 'scraped.jpg', contentType);
-
-    return NextResponse.json({ success: true, localUrl: savedUrl, url: savedUrl });
   } catch (err: any) {
+    console.error('[Save Remote Image API] Error:', err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -53113,73 +53145,34 @@ export async function POST(req: Request) {
 
 ## File: `apps/web/src/app/api/recipes/upload/route.ts`
 ```typescript
-import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
+import { NextRequest, NextResponse } from 'next/server';
+import { uploadMediaFile } from '@/lib/storageService';
 
 export const dynamic = 'force-dynamic';
 
-function getUploadDir(): string {
-  const possibleDirs = [
-    path.join(process.cwd(), 'apps', 'web', 'public', 'uploads', 'recipes'),
-    path.join(process.cwd(), 'public', 'uploads', 'recipes'),
-  ];
-  for (const d of possibleDirs) {
-    const parentPublic = path.dirname(path.dirname(d));
-    if (fs.existsSync(parentPublic)) {
-      if (!fs.existsSync(d)) {
-        fs.mkdirSync(d, { recursive: true });
-      }
-      return d;
-    }
-  }
-  const defaultDir = path.join(process.cwd(), 'public', 'uploads', 'recipes');
-  if (!fs.existsSync(defaultDir)) {
-    fs.mkdirSync(defaultDir, { recursive: true });
-  }
-  return defaultDir;
-}
-
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
-    const base64Data = formData.get('base64') as string | null;
 
-    const uploadDir = getUploadDir();
-
-    if (file) {
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const ext = path.extname(file.name) || '.jpg';
-      const fileName = `upload-${Date.now()}-${Math.random().toString(36).substring(2, 8)}${ext}`;
-      const filePath = path.join(uploadDir, fileName);
-
-      await fs.promises.writeFile(filePath, buffer);
-      return NextResponse.json({ success: true, url: `/uploads/recipes/${fileName}` });
+    if (!file) {
+      return NextResponse.json({ success: false, error: 'No file provided' }, { status: 400 });
     }
 
-    if (base64Data) {
-      const matches = base64Data.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
-      if (!matches || matches.length !== 3) {
-        return NextResponse.json({ error: 'Invalid base64 image data' }, { status: 400 });
-      }
+    const buffer = Buffer.from(await file.arrayBuffer());
+    // Direct upload respecting /admin/storage settings (Supabase S3 or /recipes/images)
+    const fileUrl = await uploadMediaFile(buffer, file.name, file.type || 'image/jpeg');
 
-      const mimeType = matches[1];
-      const dataBuffer = Buffer.from(matches[2], 'base64');
-      let ext = '.jpg';
-      if (mimeType.includes('png')) ext = '.png';
-      else if (mimeType.includes('webp')) ext = '.webp';
-
-      const fileName = `upload-${Date.now()}-${Math.random().toString(36).substring(2, 8)}${ext}`;
-      const filePath = path.join(uploadDir, fileName);
-
-      await fs.promises.writeFile(filePath, dataBuffer);
-      return NextResponse.json({ success: true, url: `/uploads/recipes/${fileName}` });
-    }
-
-    return NextResponse.json({ error: 'No image file or base64 provided' }, { status: 400 });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Upload failed' }, { status: 500 });
+    return NextResponse.json({
+      success: true,
+      url: fileUrl,
+      localUrl: fileUrl,
+      imageUrl: fileUrl,
+      filename: file.name
+    });
+  } catch (err: any) {
+    console.error('[Upload API] Error uploading media:', err);
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
@@ -53862,7 +53855,7 @@ export async function POST(req: NextRequest) {
     let parsedDescription = '';
     let ingredientsList: string[] = [];
     let directionsList: string[] = [];
-    let parsedImageUrl = '/uploads/recipes/default.jpg';
+    let parsedImageUrl = '/recipes/images/default.jpg';
     let prepTime = '15 mins';
     let cookTime = '25 mins';
     let servings = 4;
@@ -53881,7 +53874,7 @@ export async function POST(req: NextRequest) {
         directionsList = Array.isArray(scraped?.directions) && scraped.directions.length > 0
           ? scraped.directions
           : (Array.isArray(scraped?.instructions) ? scraped.instructions : []);
-        parsedImageUrl = scraped?.imageUrl || scraped?.image || '/uploads/recipes/default.jpg';
+        parsedImageUrl = scraped?.imageUrl || scraped?.image || '/recipes/images/default.jpg';
         prepTime = scraped?.prepTime || prepTime;
         cookTime = scraped?.cookTime || cookTime;
         servings = Number(scraped?.servings) || 4;
@@ -53989,7 +53982,7 @@ Return ONLY valid JSON matching this schema:
         ];
       }
 
-      parsedImageUrl = inputContent.startsWith('/uploads/') ? inputContent : '/uploads/recipes/default.jpg';
+      parsedImageUrl = inputContent.startsWith('/uploads/') ? inputContent : '/recipes/images/default.jpg';
     } 
     // 3. RAW TEXT RECIPE IMPORT (AI PARSER)
     else {
@@ -56887,8 +56880,8 @@ export { default } from '../admin/social-login-setting/page';
 
 ## File: `apps/web/src/app/import/page.tsx`
 ```typescript
+// Generated / Updated by AI Collaborator
 'use client';
-// @ts-nocheck
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -56911,7 +56904,6 @@ const DEFAULT_RECIPE_TYPES = [
 function decodeHtmlEntities(str: string): string {
   if (!str) return '';
   return str
-    .replace(/<[^>]*>/g, '')
     .replace(/&quot;/g, '"')
     .replace(/&#0*39;/g, "'")
     .replace(/&apos;/g, "'")
@@ -56933,7 +56925,7 @@ export default function ImportPage() {
   const [activeTab, setActiveTab] = useState<'url' | 'text' | 'image'>('url');
   const [recipeTypes, setRecipeTypes] = useState<string[]>(DEFAULT_RECIPE_TYPES);
 
-  // Form States (Autofill Safe)
+  // Form States
   const [url, setUrl] = useState('');
   const [textTitle, setTextTitle] = useState('');
   const [textCategory, setTextCategory] = useState('Main Dish');
@@ -56957,7 +56949,7 @@ export default function ImportPage() {
   const [tokenPackages, setTokenPackages] = useState<any[]>([]);
   const [isTokenPurchaseOpen, setIsTokenPurchaseOpen] = useState(false);
 
-  // Synchronized dynamically from /admin/ai-settings
+  // Synced dynamically from /admin/ai-settings
   const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.5-flash');
   const [activeAiProvider, setActiveAiProvider] = useState<string>('gemini');
   const [enableWebSearch, setEnableWebSearch] = useState<boolean>(true);
@@ -56968,40 +56960,37 @@ export default function ImportPage() {
   const [fetchingTelemetry, setFetchingTelemetry] = useState(true);
   const [status, setStatus] = useState<{ type: 'success' | 'error' | 'warning'; msg: string } | null>(null);
 
+  const applySavedTheme = useCallback(() => {
+    try {
+      window.dispatchEvent(new Event('zecratary_theme_updated'));
+    } catch (_) {}
+  }, []);
+
   const fetchTokenAndAiTelemetry = useCallback(async () => {
     try {
       const user = getCurrentUser();
-      const params = new URLSearchParams();
-      if (user?.id) params.set('userId', user.id);
-      if (user?.email) params.set('email', user.email);
-      const queryParam = params.toString() ? `?${params.toString()}` : '';
-
-      // 1. Authoritative synchronization with /admin/ai-settings via /api/admin/settings
+      const queryParam = user?.id ? `?userId=${encodeURIComponent(user.id)}` : user?.email ? `?email=${encodeURIComponent(user.email)}` : '';
+      
+      // 1. Synchronize with /admin/ai-settings
       try {
         const aiRes = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
         if (aiRes.ok) {
           const aiData = await aiRes.json();
-          const s = aiData.settings || aiData;
-          const chef = aiData.chefAiSettings || s.chefAiSettings || s.aiSettings || {};
-          const resolvedModel = aiData.aiModel || chef.model || s.aiModel || s.model;
-          const resolvedProvider = aiData.aiProvider || chef.provider || s.aiProvider || 'gemini';
+          if (aiData.success || aiData.settings) {
+            const s = aiData.settings || aiData;
+            const chef = aiData.chefAiSettings || s.chefAiSettings || s.aiSettings || {};
+            const resolvedModel = aiData.aiModel || chef.model || s.aiModel || s.model;
+            const resolvedProvider = aiData.aiProvider || chef.provider || s.aiProvider || 'gemini';
 
-          if (resolvedModel) {
-            setActiveAiModel(resolvedModel.replace(/^models\//, ''));
-          }
-          if (resolvedProvider) {
-            setActiveAiProvider(resolvedProvider);
-          }
-          if (chef.enableWebSearch !== undefined) {
-            setEnableWebSearch(Boolean(chef.enableWebSearch));
-          } else if (s.enableWebSearch !== undefined) {
-            setEnableWebSearch(Boolean(s.enableWebSearch));
-          }
-          if (chef.strictDietEnforcement !== undefined) {
-            setStrictDietEnforcement(Boolean(chef.strictDietEnforcement));
-          }
-          if (Array.isArray(chef.filterWordsList)) {
-            setFilterWordsList(chef.filterWordsList.filter(Boolean));
+            if (resolvedModel) setActiveAiModel(resolvedModel);
+            if (resolvedProvider) setActiveAiProvider(resolvedProvider);
+            if (chef.enableWebSearch !== undefined) {
+              setEnableWebSearch(Boolean(chef.enableWebSearch));
+            } else if (s.enableWebSearch !== undefined) {
+              setEnableWebSearch(Boolean(s.enableWebSearch));
+            }
+            if (chef.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chef.strictDietEnforcement));
+            if (Array.isArray(chef.filterWordsList)) setFilterWordsList(chef.filterWordsList);
           }
         }
       } catch (_) {}
@@ -57030,7 +57019,7 @@ export default function ImportPage() {
         }
       } catch (_) {}
 
-      // 3. Direct synchronization with /admin/token-setting endpoint
+      // 3. Direct synchronization with /admin/token-setting
       try {
         let adminRes = await fetch(`/api/admin/token-setting?t=${Date.now()}`, { cache: 'no-store' });
         if (!adminRes.ok) {
@@ -57061,31 +57050,7 @@ export default function ImportPage() {
     }
   }, []);
 
-  const fetchRecipeTypes = useCallback(async () => {
-    try {
-      const res = await fetch('/api/admin/recipe-type', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        const types = Array.isArray(data) 
-          ? data 
-          : Array.isArray(data?.types) 
-            ? data.types 
-            : Array.isArray(data?.recipeTypes) 
-              ? data.recipeTypes 
-              : [];
-        if (types.length > 0) {
-          const names = types.map((item: any) => 
-            typeof item === 'string' ? item : item.name || item.title || item.label
-          ).filter(Boolean);
-          if (names.length > 0) {
-            setRecipeTypes(names);
-            setTextCategory(prev => names.includes(prev) ? prev : names[0]);
-            return;
-          }
-        }
-      }
-    } catch (_) {}
-
+  const syncRecipeTypes = () => {
     try {
       const stored = localStorage.getItem('zecratary_recipe_types') || 
                      localStorage.getItem('zecratary_recipe_categories');
@@ -57097,67 +57062,59 @@ export default function ImportPage() {
           ).filter(Boolean);
           if (names.length > 0) {
             setRecipeTypes(names);
-            setTextCategory(prev => names.includes(prev) ? prev : names[0]);
+            if (!names.includes(textCategory)) {
+              setTextCategory(names[0]);
+            }
             return;
           }
         }
       }
     } catch (_) {}
-
     setRecipeTypes(DEFAULT_RECIPE_TYPES);
-  }, []);
-
-  // Cleanup object URLs on unmount to prevent memory leaks
-  useEffect(() => {
-    return () => {
-      previewUrls.forEach(url => URL.revokeObjectURL(url));
-    };
-  }, [previewUrls]);
+  };
 
   useEffect(() => {
-    document.title = `${t('importRecipeTitle', 'AI Recipe Importer')} - Zecratary`;
-    fetchRecipeTypes();
+    document.title = `${t('importRecipeTitle', 'Import Recipe')} - FoodiePrep`;
+    applySavedTheme();
+    syncRecipeTypes();
     fetchTokenAndAiTelemetry();
 
     const handleUpdates = () => {
       fetchTokenAndAiTelemetry();
-      fetchRecipeTypes();
+      syncRecipeTypes();
+      applySavedTheme();
     };
 
-    window.addEventListener('zecratary_theme_mode_changed', handleUpdates);
+    window.addEventListener('zecratary_theme_mode_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_changed', applySavedTheme);
+    window.addEventListener('zecratary_theme_updated', applySavedTheme);
     window.addEventListener('zecratary_token_settings_updated', handleUpdates);
     window.addEventListener('zecratary_tokens_updated', handleUpdates);
     window.addEventListener('zecratary_plans_updated', handleUpdates);
     window.addEventListener('zecratary_users_updated', handleUpdates);
     window.addEventListener('zecratary_admin_settings_updated', handleUpdates);
     window.addEventListener('zecratary_settings_updated', handleUpdates);
-    window.addEventListener('zecratary_engine_config_updated', handleUpdates);
-    window.addEventListener('zecratary_languages_updated', handleUpdates);
-    window.addEventListener('zecratary_dictionary_updated', handleUpdates);
-    window.addEventListener('zecratary_locale_changed', handleUpdates);
+    window.addEventListener('zecratary_storage_updated', handleUpdates);
     window.addEventListener('storage', handleUpdates);
 
     return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', handleUpdates);
+      window.removeEventListener('zecratary_theme_mode_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_changed', applySavedTheme);
+      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
       window.removeEventListener('zecratary_token_settings_updated', handleUpdates);
       window.removeEventListener('zecratary_tokens_updated', handleUpdates);
       window.removeEventListener('zecratary_plans_updated', handleUpdates);
       window.removeEventListener('zecratary_users_updated', handleUpdates);
       window.removeEventListener('zecratary_admin_settings_updated', handleUpdates);
       window.removeEventListener('zecratary_settings_updated', handleUpdates);
-      window.removeEventListener('zecratary_engine_config_updated', handleUpdates);
-      window.removeEventListener('zecratary_languages_updated', handleUpdates);
-      window.removeEventListener('zecratary_dictionary_updated', handleUpdates);
-      window.removeEventListener('zecratary_locale_changed', handleUpdates);
+      window.removeEventListener('zecratary_storage_updated', handleUpdates);
       window.removeEventListener('storage', handleUpdates);
     };
-  }, [fetchTokenAndAiTelemetry, fetchRecipeTypes, t]);
+  }, [fetchTokenAndAiTelemetry, applySavedTheme, t]);
 
   const handlePostImportSuccess = async (recipeData: any, consumedTokens: number, newBalance?: number) => {
     const user = getCurrentUser();
     const targetUserId = (user?.id || user?.email || 'usr_admin_1').trim();
-    const createdBy = (user?.email || targetUserId).trim();
-    const creatorName = (user?.name || 'Chef').trim();
 
     if (typeof newBalance === 'number') {
       setTokenBalance(newBalance);
@@ -57165,77 +57122,46 @@ export default function ImportPage() {
       setTokenBalance(prev => Math.max(0, prev - consumedTokens));
     }
 
-    const cleanCategory = recipeData.recipeType || recipeData.category || textCategory || 'Main Dish';
-    const rawImage = recipeData.image || recipeData.imageUrl || recipeData.image_url || '/uploads/recipes/default.jpg';
-    let localhostImage = rawImage;
-
-    // Ensure scraped remote cover image is saved to localhost disk
-    if (rawImage && (rawImage.startsWith('http://') || rawImage.startsWith('https://'))) {
+    // Ensure scraped cover image is synced with /admin/storage (/recipes/images or Supabase)
+    const processedRecipe = { ...recipeData };
+    const rawImage = processedRecipe.image || processedRecipe.imageUrl;
+    
+    if (rawImage && (rawImage.startsWith('http://') || rawImage.startsWith('https://')) && !rawImage.includes('.supabase.co/storage/')) {
       try {
         const dlRes = await fetch('/api/recipes/save-remote-image', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageUrl: rawImage })
+          body: JSON.stringify({ 
+            imageUrl: rawImage,
+            recipeId: processedRecipe.id || `rcp_${Date.now()}`
+          })
         });
         const dlData = await dlRes.json();
-        if (dlData.success && (dlData.localPath || dlData.localUrl)) {
-          localhostImage = dlData.localPath || dlData.localUrl;
+        if (dlData.success && (dlData.url || dlData.localUrl)) {
+          const finalUrl = dlData.url || dlData.localUrl;
+          processedRecipe.image = finalUrl;
+          processedRecipe.imageUrl = finalUrl;
         }
       } catch (_) {}
     }
 
-    const steps = Array.isArray(recipeData.instructions) && recipeData.instructions.length > 0
-      ? recipeData.instructions
-      : Array.isArray(recipeData.directions) && recipeData.directions.length > 0
-        ? recipeData.directions
-        : ['Follow standard chef cooking guidelines for this dish.'];
+    // Default image fallback to /recipes/images/default.jpg
+    if (!processedRecipe.image && !processedRecipe.imageUrl) {
+      processedRecipe.image = '/recipes/images/default.jpg';
+      processedRecipe.imageUrl = '/recipes/images/default.jpg';
+    }
 
-    const normalizedRecipe = {
-      ...recipeData,
-      id: recipeData.id || ('recipe_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6)),
-      title: decodeHtmlEntities(recipeData.title || textTitle || 'Imported Recipe'),
-      name: decodeHtmlEntities(recipeData.title || textTitle || 'Imported Recipe'),
-      description: recipeData.description || '',
-      userId: targetUserId,
-      user_id: targetUserId,
-      createdBy: createdBy,
-      created_by: createdBy,
-      creatorName: creatorName,
-      creator_name: creatorName,
-      category: cleanCategory,
-      recipeType: cleanCategory,
-      recipe_type: cleanCategory,
-      imageUrl: localhostImage,
-      image: localhostImage,
-      image_url: localhostImage,
-      ingredients: Array.isArray(recipeData.ingredients) ? recipeData.ingredients : [],
-      instructions: steps,
-      directions: steps,
-      steps: steps,
-      prepTime: String(recipeData.prepTime || recipeData.prepTimeMinutes || '15 mins'),
-      cookTime: String(recipeData.cookTime || recipeData.cookTimeMinutes || '25 mins'),
-      servings: Number(recipeData.servings) || 4,
-      sourceUrl: recipeData.sourceUrl || recipeData.source_url || url || '',
-      source_url: recipeData.sourceUrl || recipeData.source_url || url || '',
-      isFavorite: false,
-      rating: 0
-    };
-
-    // Dual-route persistence across PostgreSQL endpoints
+    // Ensure PostgreSQL & MySQL saved_recipes persistence & /recipes JSON file creation
     try {
-      await Promise.allSettled([
-        persistSavedRecipe(targetUserId, normalizedRecipe, { createdBy, creatorName }),
-        fetch('/api/saved-recipes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(normalizedRecipe)
-        }),
-        fetch('/api/recipes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(normalizedRecipe)
-        })
-      ]);
+      await persistSavedRecipe(targetUserId, processedRecipe, {
+        createdBy: user?.email || targetUserId,
+        creatorName: user?.name || 'You'
+      });
+      await fetch('/api/recipes/saved', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([processedRecipe])
+      });
     } catch (_) {}
 
     // Synchronize to localStorage for instantaneous client response
@@ -57245,9 +57171,9 @@ export default function ImportPage() {
         const raw = localStorage.getItem(key);
         const currentList = raw ? JSON.parse(raw) : [];
         const filtered = Array.isArray(currentList)
-          ? currentList.filter((r: any) => (r.id !== normalizedRecipe.id && (r.title || r.name)?.toLowerCase() !== normalizedRecipe.title?.toLowerCase()))
+          ? currentList.filter((r: any) => (r.id !== recipeData.id && (r.title || r.name)?.toLowerCase() !== recipeData.title?.toLowerCase()))
           : [];
-        localStorage.setItem(key, JSON.stringify([normalizedRecipe, ...filtered]));
+        localStorage.setItem(key, JSON.stringify([processedRecipe, ...filtered]));
       } catch (_) {}
     });
 
@@ -57263,26 +57189,23 @@ export default function ImportPage() {
 
     setStatus({
       type: 'success',
-      msg: `${t('importSuccessToast', 'Successfully imported')} "${normalizedRecipe.title}"!${deductionMsg}`
+      msg: `${t('importSuccessToast', 'Successfully imported')} "${processedRecipe.title}"!${deductionMsg}`
     });
 
+    // Permanent redirect to canonical /recipes route
     setTimeout(() => {
       router.push('/recipes');
     }, 850);
   };
 
-  const handleUrlImport = async () => {
-    let cleanUrl = url.trim();
-    if (!cleanUrl) return;
-
-    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
-      cleanUrl = `https://${cleanUrl}`;
-    }
+  const handleUrlImport = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
+    if (!url.trim()) return;
 
     if (!enableWebSearch) {
       setStatus({
         type: 'warning',
-        msg: t('webSearchDisabledWarning', 'Web URL imports are currently disabled by the administrator in AI Settings.')
+        msg: t('webSearchDisabledMsg', 'Web URL imports are disabled by the administrator in AI Settings.')
       });
       return;
     }
@@ -57307,8 +57230,8 @@ export default function ImportPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'url',
-          url: cleanUrl,
-          userId: user?.id || user?.email || 'usr_admin_1',
+          url: url.trim(),
+          userId: user?.id,
           userEmail: user?.email,
           userName: user?.name,
           category: textCategory,
@@ -57332,7 +57255,8 @@ export default function ImportPage() {
     }
   };
 
-  const handleTextImport = async () => {
+  const handleTextImport = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (!rawText.trim()) return;
 
     const cost = isTokenEnabled ? tokenCosts.text : 0;
@@ -57358,7 +57282,7 @@ export default function ImportPage() {
           text: rawText.trim(),
           title: textTitle.trim(),
           category: textCategory,
-          userId: user?.id || user?.email || 'usr_admin_1',
+          userId: user?.id,
           userEmail: user?.email,
           userName: user?.name,
           model: activeAiModel,
@@ -57389,20 +57313,17 @@ export default function ImportPage() {
     if (validFiles.length === 0) return;
     const merged = [...selectedFiles, ...validFiles].slice(0, 5);
     setSelectedFiles(merged);
-    previewUrls.forEach(url => URL.revokeObjectURL(url));
     setPreviewUrls(merged.map(f => URL.createObjectURL(f)));
   };
 
   const removeFile = (index: number) => {
-    if (previewUrls[index]) {
-      URL.revokeObjectURL(previewUrls[index]);
-    }
     const updatedFiles = selectedFiles.filter((_, idx) => idx !== index);
     setSelectedFiles(updatedFiles);
     setPreviewUrls(previewUrls.filter((_, idx) => idx !== index));
   };
 
-  const handleImageImport = async () => {
+  const handleImageImport = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
+    if (e && 'preventDefault' in e) e.preventDefault();
     if (selectedFiles.length === 0) return;
 
     const cost = isTokenEnabled ? tokenCosts.photo : 0;
@@ -57424,27 +57345,15 @@ export default function ImportPage() {
       const formData = new FormData();
       formData.append('file', primaryFile);
 
-      let localPhotoPath = '';
+      // Saves via /api/recipes/upload which uploads to Supabase S3 or /recipes/images
+      let localPhotoPath = '/recipes/images/default.jpg';
       try {
         const uploadRes = await fetch('/api/recipes/upload', {
           method: 'POST',
           body: formData
         });
-        if (uploadRes.ok) {
-          const uploadData = await uploadRes.json();
-          if (uploadData?.url) localPhotoPath = uploadData.url;
-        }
-      } catch (_) {}
-
-      // Convert file to Base64 data URL for direct Vision OCR ingestion
-      let base64Data = '';
-      try {
-        base64Data = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve((reader.result as string) || '');
-          reader.onerror = () => resolve('');
-          reader.readAsDataURL(primaryFile);
-        });
+        const uploadData = await uploadRes.json();
+        if (uploadData?.url) localPhotoPath = uploadData.url;
       } catch (_) {}
 
       const res = await fetch('/api/ai/import', {
@@ -57452,11 +57361,10 @@ export default function ImportPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           type: 'photo',
-          image: localPhotoPath || base64Data,
-          base64: base64Data,
+          image: localPhotoPath,
           title: primaryFile.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' '),
           category: textCategory,
-          userId: user?.id || user?.email || 'usr_admin_1',
+          userId: user?.id,
           userEmail: user?.email,
           userName: user?.name,
           model: activeAiModel,
@@ -57499,25 +57407,17 @@ export default function ImportPage() {
         <div className="flex flex-wrap items-center gap-2.5">
           <div 
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-sm"
-            style={{ 
-              backgroundColor: 'var(--color-inner-dark)', 
-              borderColor: 'var(--color-border)', 
-              color: 'var(--color-text)' 
-            }}
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
             title={t('activeModelConfiguredTooltip', 'Active Model configured dynamically in /admin/ai-settings')}
           >
-            <Cpu className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+            <Cpu className="h-3.5 w-3.5 text-orange-400" />
             <span className="font-mono">{activeAiModel}</span>
           </div>
 
           {!isTokenEnabled && (
             <div 
-              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider"
-              style={{ 
-                backgroundColor: 'var(--color-inner-dark)', 
-                borderColor: 'var(--color-emerald)',
-                color: 'var(--color-emerald)'
-              }}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider text-emerald-400"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
               title={t('tokenFreeModeTooltip', 'Token consumption is currently bypassed (Free Mode) in /admin/token-setting')}
             >
               <Sparkles className="h-3 w-3" />
@@ -57540,14 +57440,14 @@ export default function ImportPage() {
             className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl border shadow-sm"
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
           >
-            <Coins className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+            <Coins className="h-4 w-4 text-amber-500" />
             <div className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
-              {tokenBalance} <span style={{ color: 'var(--color-primary)' }}>{tokenSymbol}</span>
+              {tokenBalance} <span className="text-amber-500">{tokenSymbol}</span>
             </div>
             <button
               type="button"
               onClick={() => setIsTokenPurchaseOpen(true)}
-              className="ml-1 text-[10px] font-extrabold px-2 py-0.5 rounded-lg text-white transition hover:opacity-90 cursor-pointer shadow-xs"
+              className="ml-1 text-[10px] font-extrabold px-2 py-0.5 rounded-lg text-white transition hover:opacity-90 cursor-pointer"
               style={{ backgroundColor: 'var(--color-primary)' }}
             >
               {t('topUpBtn', 'Top Up')}
@@ -57556,10 +57456,8 @@ export default function ImportPage() {
         </div>
       </div>
 
-      {/* Main Container Card (Form-Free Container, Constraint 9) */}
+      {/* Main Container Card */}
       <div 
-        role="region"
-        data-lpignore="true"
         className="rounded-3xl p-6 space-y-6 shadow-xl border transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
@@ -57575,9 +57473,9 @@ export default function ImportPage() {
           }}
         >
           {[
-            { id: 'url', label: t('urlTab', 'Web URL'), icon: Link2, cost: tokenCosts.url },
-            { id: 'text', label: t('textTab', 'Recipe Text'), icon: FileText, cost: tokenCosts.text },
-            { id: 'image', label: t('imageTab', 'Photo / OCR'), icon: ImageIcon, cost: tokenCosts.photo },
+            { id: 'url', label: t('urlTab', 'URL'), icon: Link2, cost: tokenCosts.url },
+            { id: 'text', label: t('textTab', 'Text'), icon: FileText, cost: tokenCosts.text },
+            { id: 'image', label: t('imageTab', 'Image'), icon: ImageIcon, cost: tokenCosts.photo },
           ].map((tab) => {
             const isActive = activeTab === tab.id;
             return (
@@ -57591,8 +57489,8 @@ export default function ImportPage() {
                 className="flex-1 py-3 text-xs font-bold rounded-xl flex items-center justify-center gap-2 transition cursor-pointer"
                 style={isActive ? {
                   backgroundColor: 'var(--color-card)',
-                  color: 'var(--color-primary)',
-                  borderColor: 'var(--color-primary)',
+                  color: 'var(--color-emerald)',
+                  borderColor: 'var(--color-emerald)',
                   borderWidth: '1px',
                   boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
                 } : {
@@ -57623,7 +57521,7 @@ export default function ImportPage() {
             style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
           >
             <div className="flex items-center gap-2">
-              <ShieldAlert className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }} />
+              <ShieldAlert className="h-4 w-4 shrink-0 text-amber-500" />
               <span>
                 <strong>{t('dietNoticeTitle', 'AI Dietary Restrictions Enforced')}:</strong> {t('dietNoticeDesc', 'Recipes containing avoid terms')} ({filterWordsList.slice(0, 4).join(', ')}{filterWordsList.length > 4 ? '...' : ''}) {t('willBeBlocked', 'will be automatically blocked.')}
               </span>
@@ -57633,15 +57531,11 @@ export default function ImportPage() {
 
         {/* TAB 1: URL IMPORT */}
         {activeTab === 'url' && (
-          <div className="space-y-4">
+          <div role="region" aria-label="URL Import" data-lpignore="true" className="space-y-4">
             {!enableWebSearch && (
               <div 
-                className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2"
-                style={{ 
-                  backgroundColor: 'var(--color-inner-dark)', 
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-primary)'
-                }}
+                className="p-3.5 border rounded-2xl text-xs font-semibold flex items-center gap-2 text-amber-500"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'rgba(245, 158, 11, 0.4)' }}
               >
                 <AlertTriangle className="h-4 w-4 shrink-0" />
                 <span>{t('webSearchDisabledWarning', 'Web URL imports are currently disabled by the administrator in AI Settings.')}</span>
@@ -57654,10 +57548,8 @@ export default function ImportPage() {
               </label>
               <input
                 type="url"
-                autoComplete="off"
+                required
                 data-lpignore="true"
-                data-form-type="other"
-                spellCheck="false"
                 disabled={!enableWebSearch}
                 placeholder={t('recipeWebUrlPlaceholder', 'https://www.recipetineats.com/... or food blog URL')}
                 value={url}
@@ -57683,12 +57575,12 @@ export default function ImportPage() {
               type="button"
               onClick={() => handleUrlImport()}
               disabled={loading || !url.trim() || !enableWebSearch}
-              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50 hover:opacity-90"
+              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary)' }}
             >
               <Sparkles className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {loading 
-                ? t('downloadingPhotoParsingSteps', 'Parsing recipe & deducting tokens...') 
+                ? t('downloadingPhotoParsingSteps', 'Parsing recipe & syncing storage...') 
                 : isTokenEnabled && tokenCosts.url > 0
                   ? `${t('importRecipeBtn', 'Import Recipe')} (${tokenCosts.url} ${tokenSymbol})`
                   : `${t('importRecipeBtn', 'Import Recipe')} (${t('freeBadge', 'Free')})`}
@@ -57698,7 +57590,7 @@ export default function ImportPage() {
 
         {/* TAB 2: TEXT IMPORT */}
         {activeTab === 'text' && (
-          <div className="space-y-4">
+          <div role="region" aria-label="Text Import" data-lpignore="true" className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
@@ -57706,10 +57598,7 @@ export default function ImportPage() {
                 </label>
                 <input
                   type="text"
-                  autoComplete="off"
                   data-lpignore="true"
-                  data-form-type="other"
-                  spellCheck="false"
                   placeholder={t('recipeTitlePlaceholder', 'e.g. Homemade Apple Cake')}
                   value={textTitle}
                   onChange={(e) => setTextTitle(e.target.value)}
@@ -57719,7 +57608,7 @@ export default function ImportPage() {
                       handleTextImport();
                     }
                   }}
-                  className="w-full border rounded-xl px-4 py-3 text-sm outline-none font-medium"
+                  className="w-full border rounded-xl px-4 py-3 text-sm outline-none"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
@@ -57736,7 +57625,7 @@ export default function ImportPage() {
                 <select
                   value={textCategory}
                   onChange={(e) => setTextCategory(e.target.value)}
-                  className="w-full border rounded-xl px-4 py-3 text-sm outline-none cursor-pointer font-bold"
+                  className="w-full border rounded-xl px-4 py-3 text-sm outline-none cursor-pointer"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
@@ -57757,20 +57646,12 @@ export default function ImportPage() {
                 {t('pasteIngredientsSteps', 'Paste Ingredients & Steps *')}
               </label>
               <textarea
-                autoComplete="off"
-                data-lpignore="true"
-                data-form-type="other"
-                spellCheck="false"
+                required
                 rows={7}
-                placeholder={t('pasteRecipeContentPlaceholder', 'Paste ingredients and cooking steps here... (Ctrl+Enter to Import)')}
+                data-lpignore="true"
+                placeholder={t('pasteRecipeContentPlaceholder', 'Paste ingredients and cooking steps here...')}
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
-                onKeyDown={(e) => {
-                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                    e.preventDefault();
-                    handleTextImport();
-                  }
-                }}
                 className="w-full border rounded-xl p-4 text-xs outline-none resize-none font-mono"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
@@ -57786,7 +57667,7 @@ export default function ImportPage() {
               type="button"
               onClick={() => handleTextImport()}
               disabled={loading || !rawText.trim()}
-              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50 hover:opacity-90"
+              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary)' }}
             >
               <Sparkles className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
@@ -57799,9 +57680,9 @@ export default function ImportPage() {
           </div>
         )}
 
-        {/* TAB 3: IMAGE / PHOTO OCR IMPORT */}
+        {/* TAB 3: IMAGE / PHOTO IMPORT */}
         {activeTab === 'image' && (
-          <div className="space-y-4">
+          <div role="region" aria-label="Image Import" data-lpignore="true" className="space-y-4">
             <div>
               <label className="block text-xs font-bold mb-2" style={{ color: 'var(--color-text)' }}>
                 {t('recipeImagesMax5', 'Recipe Images (up to 5)')}
@@ -57812,9 +57693,11 @@ export default function ImportPage() {
                 onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); }}
                 onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragging(false); if (e.dataTransfer.files) handleFilesAdded(e.dataTransfer.files); }}
                 onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed rounded-2xl py-12 px-6 flex flex-col items-center justify-center text-center cursor-pointer transition relative"
+                className={`border-2 border-dashed rounded-2xl py-12 px-6 flex flex-col items-center justify-center text-center cursor-pointer transition relative ${
+                  isDragging ? 'border-emerald-400' : 'hover:border-emerald-400'
+                }`}
                 style={{
-                  borderColor: isDragging ? 'var(--color-primary)' : 'var(--color-border)',
+                  borderColor: isDragging ? 'var(--color-emerald)' : 'var(--color-border)',
                   backgroundColor: 'var(--color-inner-dark)'
                 }}
               >
@@ -57827,17 +57710,17 @@ export default function ImportPage() {
                   className="hidden"
                 />
                 <div className="w-14 h-14 rounded-full flex items-center justify-center mb-3">
-                  <Upload className="h-10 w-10 stroke-[2.2]" style={{ color: 'var(--color-primary)' }} />
+                  <Upload className="h-10 w-10 stroke-[2.2]" style={{ color: 'var(--color-emerald)' }} />
                 </div>
                 <p className="text-xs sm:text-sm font-semibold tracking-wide" style={{ color: 'var(--color-text)' }}>
                   <span style={{ color: 'var(--color-primary)' }} className="font-bold">
                     {t('clickToUpload', 'Click to upload')}
                   </span>{' '}
-                  <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                  <span className="font-semibold" style={{ color: 'var(--color-emerald)' }}>
                     {t('orDragAndDrop', 'or drag and drop')}
                   </span>
                 </p>
-                <p className="text-[11px] font-medium mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                <p className="text-[11px] font-medium mt-1" style={{ color: 'var(--color-emerald)' }}>
                   {t('pngJpgWebpMax5', 'PNG, JPG, or WEBP (Cookbook captures or food photos)')}
                 </p>
               </div>
@@ -57876,12 +57759,12 @@ export default function ImportPage() {
               type="button"
               onClick={() => handleImageImport()}
               disabled={loading || selectedFiles.length === 0}
-              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50 hover:opacity-90"
+              className="w-full text-white font-bold py-3.5 rounded-xl transition flex items-center justify-center gap-2 text-xs shadow-lg cursor-pointer disabled:opacity-50"
               style={{ backgroundColor: 'var(--color-primary)' }}
             >
               <Upload className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
               {loading 
-                ? t('aiSearchingRecipeImporting', 'AI OCR analyzing & importing...') 
+                ? t('aiSearchingRecipeImporting', 'AI OCR analyzing & uploading to storage...') 
                 : isTokenEnabled && tokenCosts.photo > 0
                   ? `${t('importRecipeFromImages', 'Import Recipe from Images')} (${tokenCosts.photo} ${tokenSymbol})`
                   : `${t('importRecipeFromImages', 'Import Recipe from Images')} (${t('freeBadge', 'Free')})`}
@@ -57893,14 +57776,18 @@ export default function ImportPage() {
         {status && (
           <div
             className="p-4 rounded-2xl border text-xs font-semibold flex items-center justify-between gap-2 animate-in fade-in"
-            style={{
+            style={status.type === 'success' ? {
               backgroundColor: 'var(--color-inner-dark)',
-              borderColor: status.type === 'success' 
-                ? 'var(--color-emerald)' 
-                : status.type === 'warning' 
-                  ? 'var(--color-border)' 
-                  : 'rgba(239, 68, 68, 0.4)',
-              color: status.type === 'success' ? 'var(--color-emerald)' : status.type === 'warning' ? '#f59e0b' : '#ef4444'
+              borderColor: 'var(--color-emerald)',
+              color: 'var(--color-emerald)'
+            } : status.type === 'warning' ? {
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'rgba(245, 158, 11, 0.5)',
+              color: '#f59e0b'
+            } : {
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'rgba(239, 68, 68, 0.4)',
+              color: '#ef4444'
             }}
           >
             <div className="flex items-center gap-2">
@@ -57918,7 +57805,7 @@ export default function ImportPage() {
               <button
                 type="button"
                 onClick={() => setIsTokenPurchaseOpen(true)}
-                className="px-3 py-1 rounded-xl font-bold text-[11px] text-white shrink-0 cursor-pointer shadow-sm hover:opacity-90"
+                className="px-3 py-1 rounded-xl font-bold text-[11px] text-white shrink-0 cursor-pointer shadow-sm"
                 style={{ backgroundColor: 'var(--color-primary)' }}
               >
                 {t('buyTokensNowBtn', 'Buy Tokens')}
@@ -57932,7 +57819,7 @@ export default function ImportPage() {
       <TokenPurchaseModal
         isOpen={isTokenPurchaseOpen}
         onClose={() => setIsTokenPurchaseOpen(false)}
-        userId={getCurrentUser()?.id || getCurrentUser()?.email || 'usr_admin_1'}
+        userId={getCurrentUser()?.id}
         userEmail={getCurrentUser()?.email}
         tokenSymbol={tokenSymbol}
         packages={tokenPackages}
@@ -71941,8 +71828,8 @@ export async function deleteTokenTransactionsAndSyncBalance(ids: string[]): Prom
 
 ## File: `apps/web/src/lib/storageService.ts`
 ```typescript
-// Centralized Media Storage Engine (Localhost & Supabase S3)
-// GitHub: cygnusorbit/zecratary (Constraints 8, 10)
+// Centralized Media Storage Engine (Universal /recipes/images & Supabase S3)
+// GitHub: cygnusorbit/zecratary
 
 import fs from 'fs';
 import path from 'path';
@@ -71954,6 +71841,7 @@ export interface StorageConfig {
   localhost: {
     uploadDir: string;
     publicPrefix: string;
+    recipesJsonDir: string;
     maxSizeMb: number;
     allowedTypes?: string;
   };
@@ -71971,10 +71859,11 @@ export interface StorageConfig {
 export const DEFAULT_STORAGE_CONFIG: StorageConfig = {
   provider: 'localhost',
   localhost: {
-    uploadDir: 'public/uploads/recipes',
-    publicPrefix: '/uploads/recipes',
+    uploadDir: 'public/recipes/images',
+    publicPrefix: '/recipes/images',
+    recipesJsonDir: 'public/recipes',
     maxSizeMb: 10,
-    allowedTypes: 'image/jpeg, image/png, image/webp, image/gif',
+    allowedTypes: 'image/jpeg, image/png, image/webp, image/gif, image/avif',
   },
   supabase: {
     enabled: true,
@@ -72009,12 +71898,22 @@ export async function getStorageSettings(): Promise<StorageConfig> {
 
   // Fallback to local server JSON store
   try {
-    const jsonPath = path.join(process.cwd(), 'data', 'admin_settings.json');
-    if (fs.existsSync(jsonPath)) {
-      const fileData = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-      if (fileData.storage_settings) {
-        memoryStorageConfig = { ...DEFAULT_STORAGE_CONFIG, ...fileData.storage_settings };
-        return memoryStorageConfig;
+    const jsonPaths = [
+      path.join(process.cwd(), 'data', 'admin_settings.json'),
+      path.join(process.cwd(), 'apps', 'web', 'data', 'admin_settings.json'),
+    ];
+    for (const jp of jsonPaths) {
+      if (fs.existsSync(jp)) {
+        const fileData = JSON.parse(fs.readFileSync(jp, 'utf8'));
+        if (fileData.storage_settings) {
+          memoryStorageConfig = {
+            ...DEFAULT_STORAGE_CONFIG,
+            ...fileData.storage_settings,
+            localhost: { ...DEFAULT_STORAGE_CONFIG.localhost, ...(fileData.storage_settings.localhost || {}) },
+            supabase: { ...DEFAULT_STORAGE_CONFIG.supabase, ...(fileData.storage_settings.supabase || {}) },
+          };
+          return memoryStorageConfig;
+        }
       }
     }
   } catch (_) {}
@@ -72023,16 +71922,17 @@ export async function getStorageSettings(): Promise<StorageConfig> {
 }
 
 export async function saveStorageSettings(config: Partial<StorageConfig>): Promise<StorageConfig> {
+  const current = await getStorageSettings();
   const merged: StorageConfig = {
-    ...memoryStorageConfig,
+    ...current,
     ...config,
-    localhost: { ...memoryStorageConfig.localhost, ...(config.localhost || {}) },
-    supabase: { ...memoryStorageConfig.supabase, ...(config.supabase || {}) },
+    localhost: { ...current.localhost, ...(config.localhost || {}) },
+    supabase: { ...current.supabase, ...(config.supabase || {}) },
   };
 
   memoryStorageConfig = merged;
 
-  // 1. Commit to PostgreSQL
+  // 1. Commit to PostgreSQL & MySQL
   try {
     await query(`
       INSERT INTO admin_settings (id, storage_settings, updated_at)
@@ -72054,9 +71954,7 @@ export async function saveStorageSettings(config: Partial<StorageConfig>): Promi
   for (const jp of jsonPaths) {
     try {
       const dir = path.dirname(jp);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       let existing = {};
       if (fs.existsSync(jp)) {
         try { existing = JSON.parse(fs.readFileSync(jp, 'utf8')); } catch (_) {}
@@ -72069,7 +71967,7 @@ export async function saveStorageSettings(config: Partial<StorageConfig>): Promi
   return merged;
 }
 
-// Native AWS S3 SigV4 Upload Implementation (Zero external dependency bloat)
+// Native AWS S3 SigV4 Upload Implementation for Supabase S3 Gateway
 export async function uploadToSupabaseS3(
   buffer: Buffer,
   filename: string,
@@ -72119,7 +72017,6 @@ export async function uploadToSupabaseS3(
 
   const uploadTargetUrl = `${endpointUrl.protocol}//${host}${canonicalUri}`;
 
-  // Fixed TS2769: BodyInit expects Uint8Array (ArrayBufferView / BufferSource)
   const res = await fetch(uploadTargetUrl, {
     method: 'PUT',
     headers: {
@@ -72137,7 +72034,6 @@ export async function uploadToSupabaseS3(
     throw new Error(`Supabase S3 upload failed (HTTP ${res.status}): ${errorText}`);
   }
 
-  // Return public CDN url if configured, otherwise fallback to S3 URL
   if (config.publicUrl) {
     const base = config.publicUrl.replace(/\/+$/, '');
     return `${base}/${filename}`;
@@ -72155,25 +72051,65 @@ export async function uploadMediaFile(
   const ext = path.extname(originalFilename) || '.jpg';
   const cleanName = `${Date.now()}_${crypto.randomBytes(6).toString('hex')}${ext}`;
 
-  if (settings.provider === 'supabase' && settings.supabase.enabled) {
+  if (settings.provider === 'supabase' && settings.supabase.enabled && settings.supabase.secretAccessKey) {
     try {
       return await uploadToSupabaseS3(buffer, cleanName, contentType, settings.supabase);
     } catch (err: any) {
-      console.warn('[Storage] Supabase S3 failed, falling back to localhost:', err.message);
+      console.warn('[Storage] Supabase S3 failed, falling back to /recipes/images:', err.message);
     }
   }
 
-  // Localhost Disk Storage Fallback / Default
-  const uploadDir = path.join(process.cwd(), settings.localhost.uploadDir || 'public/uploads/recipes');
-  if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
+  // Universal Localhost Disk Storage: Write to /recipes/images
+  const targetDirs = [
+    path.join(process.cwd(), 'recipes', 'images'),
+    path.join(process.cwd(), 'public', 'recipes', 'images'),
+    path.join(process.cwd(), 'apps', 'web', 'recipes', 'images'),
+    path.join(process.cwd(), 'apps', 'web', 'public', 'recipes', 'images'),
+  ];
+
+  for (const d of targetDirs) {
+    try {
+      if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, cleanName), buffer);
+    } catch (_) {}
   }
 
-  const filePath = path.join(uploadDir, cleanName);
-  fs.writeFileSync(filePath, buffer);
-
-  const prefix = settings.localhost.publicPrefix || '/uploads/recipes';
+  const prefix = settings.localhost.publicPrefix || '/recipes/images';
   return `${prefix}/${cleanName}`;
+}
+
+export function getUniversalDiskDiagnostics() {
+  const root = process.cwd();
+  const recipesDir = path.join(root, 'public', 'recipes');
+  const imagesDir = path.join(root, 'public', 'recipes', 'images');
+
+  let recipesCount = 0;
+  let imagesCount = 0;
+  let jsonDirWritable = false;
+  let imagesDirWritable = false;
+
+  try {
+    if (!fs.existsSync(recipesDir)) fs.mkdirSync(recipesDir, { recursive: true });
+    recipesCount = fs.readdirSync(recipesDir).filter(f => f.endsWith('.json')).length;
+    fs.accessSync(recipesDir, fs.constants.W_OK);
+    jsonDirWritable = true;
+  } catch (_) {}
+
+  try {
+    if (!fs.existsSync(imagesDir)) fs.mkdirSync(imagesDir, { recursive: true });
+    imagesCount = fs.readdirSync(imagesDir).filter(f => /\.(jpg|jpeg|png|webp|gif|avif)$/i.test(f)).length;
+    fs.accessSync(imagesDir, fs.constants.W_OK);
+    imagesDirWritable = true;
+  } catch (_) {}
+
+  return {
+    recipesCount,
+    imagesCount,
+    jsonDirWritable,
+    imagesDirWritable,
+    jsonDirPath: 'public/recipes',
+    imagesDirPath: 'public/recipes/images',
+  };
 }
 
 ```
@@ -72717,68 +72653,84 @@ export default {
 
 ## File: `apps/web/src/lib/recipe_types.ts`
 ```typescript
-// Server-backed Recipe Types Store
-// Synchronizes dynamically with PostgreSQL with zero localStorage writes
+import { useState, useEffect } from 'react';
 
-import { fetchServerAdminSettings, persistServerAdminSettings } from '@/lib/adminSync';
-
-export const DEFAULT_RECIPE_TYPES: string[] = [
-  'Breakfast',
-  'Lunch',
-  'Dinner',
-  'Snack',
-  'Dessert',
-  'Beverage',
-  'Appetizer',
-  'Salad',
-  'Soup',
-  'Side Dish',
-  'Baking'
+const DEFAULT_TYPES = [
+  'Main Dish', 'Breakfast', 'Lunch', 'Dinner', 'Appetiser', 
+  'Side Dish', 'Dessert', 'Snacks', 'Beverages', 'Soup', 'Salad'
 ];
 
-let memoryRecipeTypes: string[] = [...DEFAULT_RECIPE_TYPES];
-
-export function getStoredRecipeTypes(): string[] {
-  return [...memoryRecipeTypes];
-}
-
-export function setMemoryRecipeTypes(types: string[]): void {
-  if (Array.isArray(types) && types.length > 0) {
-    memoryRecipeTypes = [...types];
-  }
-}
-
-export async function saveRecipeTypes(types: string[]): Promise<boolean> {
-  memoryRecipeTypes = [...types];
-
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('zecratary_recipe_types_changed', { detail: types }));
-    window.dispatchEvent(new CustomEvent('zecratary_recipe_types_updated', { detail: types }));
-  }
-
-  let success = false;
-
-  // 1. Direct PostgreSQL API Save
-  try {
-    const res = await fetch('/api/admin/recipe-type', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recipeTypes: types })
-    });
-    if (res.ok) success = true;
-  } catch (_) {}
-
-  // 2. Settings Synchronizer Save
-  try {
-    const res2 = await persistServerAdminSettings({ recipeTypes: types });
-    if (res2) success = true;
-  } catch (_) {}
-
-  return success;
-}
+const DEFAULT_CATEGORIES = [
+  'Produce', 'Meat & Seafood', 'Pantry & Dry Goods', 'Dairy & Eggs',
+  'Bakery', 'Frozen', 'Spices & Seasonings', 'Canned Goods', 'Condiments & Sauces', 'Other'
+];
 
 export function useRecipeTypes(): string[] {
-  return getStoredRecipeTypes();
+  const [types, setTypes] = useState<string[]>(DEFAULT_TYPES);
+
+  useEffect(() => {
+    async function fetchTypes() {
+      try {
+        const res = await fetch('/api/admin/recipe-type', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          const list = Array.isArray(data) ? data : (data.types || data.recipeTypes || []);
+          if (list.length > 0) {
+            setTypes(list.map((x: any) => typeof x === 'string' ? x : (x.name || x.label || x.id)).filter(Boolean));
+            return;
+          }
+        }
+      } catch (_) {}
+
+      try {
+        const local = localStorage.getItem('zecratary_recipe_types') || localStorage.getItem('zecratary_recipe_categories');
+        if (local) {
+          const parsed = JSON.parse(local);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setTypes(parsed.map((x: any) => typeof x === 'string' ? x : (x.name || x.label || x.id)).filter(Boolean));
+          }
+        }
+      } catch (_) {}
+    }
+
+    fetchTypes();
+  }, []);
+
+  return types;
+}
+
+export function useIngredientCategories(): string[] {
+  const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
+
+  useEffect(() => {
+    async function fetchCategories() {
+      try {
+        const res = await fetch('/api/admin/ingredient-categories', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          const list = Array.isArray(data) ? data : (data.categories || data.ingredientCategories || []);
+          if (list.length > 0) {
+            setCategories(list.map((x: any) => typeof x === 'string' ? x : (x.name || x.label || x.id)).filter(Boolean));
+            return;
+          }
+        }
+      } catch (_) {}
+
+      try {
+        const local = localStorage.getItem('zecratary_categories') || localStorage.getItem('zecratary_ingredient_categories');
+        if (local) {
+          const parsed = JSON.parse(local);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setCategories(parsed.map((x: any) => typeof x === 'string' ? x : (x.name || x.label || x.id)).filter(Boolean));
+          }
+        }
+      } catch (_) {}
+    }
+
+    fetchCategories();
+  }, []);
+
+  return categories;
 }
 
 ```
@@ -73519,156 +73471,296 @@ export default dbModule;
 ```typescript
 import fs from 'fs';
 import path from 'path';
+import { getStorageSettings, uploadToSupabaseS3 } from '@/lib/storageService';
 
-export interface RecipeOwner {
-  id: string;
-  name: string;
-  email: string;
+export interface RecipeOwnership {
+  userId: string;
+  createdBy: string;
+  creatorName: string;
+  creatorEmail: string;
 }
 
-export interface StoredRecipe {
+export interface FullRecipeRecord {
   id: string;
-  owner: RecipeOwner;
+  ownership: RecipeOwnership;
+  owner: { id: string; name: string; email: string };
   ownerId: string;
   ownerName: string;
   ownerEmail: string;
   userId: string;
-  userEmail: string;
   createdBy: string;
   creatorName: string;
+  creatorEmail: string;
   isPublic: boolean;
   visibility: 'public' | 'private';
   title: string;
   description?: string;
-  prepMinutes?: number;
-  cookMinutes?: number;
-  servings?: number;
-  calories?: number;
   recipeType?: string;
-  mealType?: string;
+  category?: string;
   cuisine?: string;
+  servings?: number;
+  prepTimeMinutes?: number;
+  cookTimeMinutes?: number;
   ingredients: any[];
   instructions: any[];
+  directions?: any[];
   nutrition?: any;
-  tags?: string[];
-  image?: string;
   imageUrl?: string;
+  image?: string;
   sourceUrl?: string;
   isFavorite?: boolean;
   isCooked?: boolean;
   rating?: number;
+  note?: string;
   bookId?: string | null;
+  tags?: string[];
   createdAt: string;
   updatedAt: string;
 }
 
-const getStorageDirs = (): string[] => {
+const getRecipeDirs = (): string[] => {
   const root = process.cwd();
   return [
     path.join(root, 'recipes'),
-    path.join(root, 'apps', 'web', 'recipes'),
     path.join(root, 'public', 'recipes'),
+    path.join(root, 'apps', 'web', 'recipes'),
     path.join(root, 'apps', 'web', 'public', 'recipes')
   ];
 };
 
-export function saveRecipeToJsonFile(recipe: any, owner?: Partial<RecipeOwner>): StoredRecipe {
-  const id = recipe.id || 'rec_' + Date.now();
-  const ownerId = recipe.ownerId || recipe.userId || recipe.user_id || owner?.id || 'guest';
-  const ownerName = recipe.ownerName || recipe.creatorName || recipe.creator_name || owner?.name || 'Chef';
-  const ownerEmail = recipe.ownerEmail || recipe.userEmail || recipe.creator_email || owner?.email || `${ownerId}@zecratary.local`;
+const getImageDirs = (): string[] => {
+  const root = process.cwd();
+  return [
+    path.join(root, 'recipes', 'images'),
+    path.join(root, 'public', 'recipes', 'images'),
+    path.join(root, 'apps', 'web', 'recipes', 'images'),
+    path.join(root, 'apps', 'web', 'public', 'recipes', 'images')
+  ];
+};
+
+export async function saveRecipeImageLocally(recipeId: string, imageInput?: string): Promise<string> {
+  if (!imageInput || typeof imageInput !== 'string') return '/recipes/images/default.jpg';
+  
+  // If already hosted on Supabase or local /recipes/images
+  if (imageInput.includes('.supabase.co/storage/v1/object/public/')) return imageInput;
+  if (imageInput.startsWith('/recipes/images/')) return imageInput;
+
+  const safeId = recipeId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const settings = await getStorageSettings();
+
+  // 1. Check if Supabase S3 is active
+  if (settings.provider === 'supabase' && settings.supabase.enabled && settings.supabase.secretAccessKey) {
+    try {
+      let buffer: Buffer | null = null;
+      let contentType = 'image/jpeg';
+      let ext = 'jpg';
+
+      if (imageInput.startsWith('data:image/')) {
+        const match = imageInput.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/);
+        if (match) {
+          ext = match[1] === 'jpeg' ? 'jpg' : match[1];
+          contentType = `image/${ext}`;
+          buffer = Buffer.from(match[2], 'base64');
+        }
+      } else if (imageInput.startsWith('http://') || imageInput.startsWith('https://')) {
+        const res = await fetch(imageInput, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
+          }
+        });
+        if (res.ok) {
+          contentType = res.headers.get('content-type') || 'image/jpeg';
+          if (contentType.includes('png')) ext = 'png';
+          else if (contentType.includes('webp')) ext = 'webp';
+          buffer = Buffer.from(await res.arrayBuffer());
+        }
+      }
+
+      if (buffer) {
+        const cloudFilename = `${safeId}_${Date.now()}.${ext}`;
+        const cloudUrl = await uploadToSupabaseS3(buffer, cloudFilename, contentType, settings.supabase);
+        return cloudUrl;
+      }
+    } catch (err: any) {
+      console.warn('[recipeFiles] Supabase upload error, falling back to disk:', err.message);
+    }
+  }
+
+  // 2. Localhost Disk Fallback to /recipes/images/
+  const targetDirs = getImageDirs();
+  targetDirs.forEach(d => { if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true }); });
+
+  if (imageInput.startsWith('data:image/')) {
+    try {
+      const match = imageInput.match(/^data:image\/([a-zA-Z0-9]+);base64,(.+)$/);
+      if (match) {
+        const ext = match[1] === 'jpeg' ? 'jpg' : match[1];
+        const filename = `${safeId}_${Date.now()}.${ext}`;
+        const buffer = Buffer.from(match[2], 'base64');
+        targetDirs.forEach(d => {
+          try { fs.writeFileSync(path.join(d, filename), buffer); } catch (_) {}
+        });
+        return `/recipes/images/${filename}`;
+      }
+    } catch (_) {}
+  }
+
+  if (imageInput.startsWith('http://') || imageInput.startsWith('https://')) {
+    try {
+      const res = await fetch(imageInput, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8'
+        }
+      });
+      if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        let ext = 'jpg';
+        if (contentType.includes('png')) ext = 'png';
+        else if (contentType.includes('webp')) ext = 'webp';
+
+        const filename = `${safeId}_${Date.now()}.${ext}`;
+        const arrayBuf = await res.arrayBuffer();
+        const buffer = Buffer.from(arrayBuf);
+        targetDirs.forEach(d => {
+          try { fs.writeFileSync(path.join(d, filename), buffer); } catch (_) {}
+        });
+        return `/recipes/images/${filename}`;
+      }
+    } catch (_) {}
+  }
+
+  return imageInput;
+}
+
+export function saveRecipeJsonFile(recipe: any, ownerInfo?: Partial<RecipeOwnership>): FullRecipeRecord {
+  const id = recipe.id || `rcp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+  const userId = recipe.userId || recipe.user_id || recipe.ownerId || ownerInfo?.userId || 'usr_admin_1';
+  const createdBy = recipe.createdBy || recipe.created_by || recipe.ownerEmail || ownerInfo?.createdBy || `${userId}@zecratary.local`;
+  const creatorName = recipe.creatorName || recipe.creator_name || recipe.ownerName || ownerInfo?.creatorName || 'Chef';
+  const creatorEmail = recipe.creatorEmail || recipe.creator_email || ownerInfo?.creatorEmail || createdBy;
   const isPublic = Boolean(recipe.isPublic ?? recipe.is_public ?? false);
 
-  const stored: StoredRecipe = {
+  let rawIngredients = recipe.ingredients;
+  if (typeof rawIngredients === 'string') {
+    try { rawIngredients = JSON.parse(rawIngredients); } catch (_) { rawIngredients = [rawIngredients]; }
+  }
+  if (!Array.isArray(rawIngredients)) rawIngredients = [];
+
+  let rawInstructions = recipe.instructions || recipe.directions || recipe.steps;
+  if (typeof rawInstructions === 'string') {
+    try { rawInstructions = JSON.parse(rawInstructions); } catch (_) { rawInstructions = [rawInstructions]; }
+  }
+  if (!Array.isArray(rawInstructions)) rawInstructions = [];
+
+  const record: FullRecipeRecord = {
     id,
-    owner: {
-      id: ownerId,
-      name: ownerName,
-      email: ownerEmail
-    },
-    ownerId,
-    ownerName,
-    ownerEmail,
-    userId: ownerId,
-    userEmail: ownerEmail,
-    createdBy: ownerEmail,
-    creatorName: ownerName,
+    ownership: { userId, createdBy, creatorName, creatorEmail },
+    owner: { id: userId, name: creatorName, email: creatorEmail },
+    ownerId: userId,
+    ownerName: creatorName,
+    ownerEmail: creatorEmail,
+    userId,
+    createdBy,
+    creatorName,
+    creatorEmail,
     isPublic,
     visibility: isPublic ? 'public' : 'private',
     title: recipe.title || recipe.name || 'Untitled Recipe',
     description: recipe.description || '',
-    prepMinutes: Number(recipe.prepMinutes || recipe.prepTimeMinutes || recipe.prep_time) || 15,
-    cookMinutes: Number(recipe.cookMinutes || recipe.cookTimeMinutes || recipe.cook_time) || 25,
-    servings: Number(recipe.servings) || 4,
-    calories: recipe.calories ? Number(recipe.calories) : undefined,
-    recipeType: recipe.recipeType || recipe.mealType || recipe.category || 'Main Dish',
-    mealType: recipe.mealType || recipe.recipeType || recipe.category || 'Main Dish',
+    recipeType: recipe.recipeType || recipe.category || 'Main Dish',
+    category: recipe.category || recipe.recipeType || 'Main Dish',
     cuisine: recipe.cuisine || '',
-    ingredients: Array.isArray(recipe.ingredients) ? recipe.ingredients : [],
-    instructions: Array.isArray(recipe.instructions || recipe.directions || recipe.steps) 
-      ? (recipe.instructions || recipe.directions || recipe.steps) : [],
+    servings: Number(recipe.servings) || 4,
+    prepTimeMinutes: Number(recipe.prepTimeMinutes || recipe.prepMinutes || recipe.prep_time) || 15,
+    cookTimeMinutes: Number(recipe.cookTimeMinutes || recipe.cookMinutes || recipe.cook_time) || 25,
+    ingredients: rawIngredients,
+    instructions: rawInstructions,
+    directions: rawInstructions,
     nutrition: recipe.nutrition || {},
-    tags: Array.isArray(recipe.tags) ? recipe.tags : [],
-    image: recipe.image || recipe.imageUrl || recipe.image_url || '/recipes/images/default.jpg',
     imageUrl: recipe.imageUrl || recipe.image || recipe.image_url || '/recipes/images/default.jpg',
+    image: recipe.image || recipe.imageUrl || recipe.image_url || '/recipes/images/default.jpg',
     sourceUrl: recipe.sourceUrl || recipe.source_url || '',
     isFavorite: Boolean(recipe.isFavorite ?? recipe.is_favorite),
     isCooked: Boolean(recipe.isCooked ?? recipe.is_cooked),
     rating: Number(recipe.rating) || 0,
+    note: recipe.note || '',
     bookId: recipe.bookId || recipe.book_id || null,
+    tags: Array.isArray(recipe.tags) ? recipe.tags : [recipe.recipeType || 'Main Dish'],
     createdAt: recipe.createdAt || recipe.created_at || new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
 
-  const jsonStr = JSON.stringify(stored, null, 2);
-
-  getStorageDirs().forEach(dir => {
+  const jsonStr = JSON.stringify(record, null, 2);
+  const targetDirs = getRecipeDirs();
+  targetDirs.forEach(d => {
     try {
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, `${id}.json`), jsonStr, 'utf-8');
+      if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, `${safeId}.json`), jsonStr, 'utf-8');
     } catch (_) {}
   });
 
-  return stored;
+  return record;
 }
 
-export function loadAllRecipeJsonFiles(): StoredRecipe[] {
-  const map = new Map<string, StoredRecipe>();
-  getStorageDirs().forEach(dir => {
+export function loadAllRecipeJsonFiles(): FullRecipeRecord[] {
+  const map = new Map<string, FullRecipeRecord>();
+  const targetDirs = getRecipeDirs();
+
+  targetDirs.forEach(d => {
     try {
-      if (fs.existsSync(dir)) {
-        const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+      if (fs.existsSync(d)) {
+        const files = fs.readdirSync(d).filter(f => f.endsWith('.json') && !f.includes('index.json'));
         files.forEach(f => {
           try {
-            const raw = fs.readFileSync(path.join(dir, f), 'utf-8');
+            const raw = fs.readFileSync(path.join(d, f), 'utf-8');
             const data = JSON.parse(raw);
-            if (data && data.id) {
-              map.set(data.id, data);
+            if (data && (data.id || data.title)) {
+              const id = data.id || f.replace('.json', '');
+              map.set(id, { ...data, id });
             }
           } catch (_) {}
         });
       }
     } catch (_) {}
   });
+
   return Array.from(map.values());
 }
 
 export function updateRecipePublicVisibility(id: string, isPublic: boolean): boolean {
+  const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const targetDirs = getRecipeDirs();
   let updated = false;
-  getStorageDirs().forEach(dir => {
+
+  targetDirs.forEach(d => {
     try {
-      const filePath = path.join(dir, `${id}.json`);
-      if (fs.existsSync(filePath)) {
-        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      const fp = path.join(d, `${safeId}.json`);
+      if (fs.existsSync(fp)) {
+        const data = JSON.parse(fs.readFileSync(fp, 'utf-8'));
         data.isPublic = isPublic;
         data.visibility = isPublic ? 'public' : 'private';
         data.updatedAt = new Date().toISOString();
-        fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+        fs.writeFileSync(fp, JSON.stringify(data, null, 2), 'utf-8');
         updated = true;
       }
     } catch (_) {}
   });
+
   return updated;
+}
+
+export function deleteRecipeJsonFile(id: string): void {
+  const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '_');
+  getRecipeDirs().forEach(d => {
+    try {
+      const fp = path.join(d, `${safeId}.json`);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    } catch (_) {}
+  });
 }
 
 ```

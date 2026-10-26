@@ -4012,5 +4012,24 @@
         "isPopular": false
       }
     ]
+  },
+  "storage_settings": {
+    "provider": "localhost",
+    "localhost": {
+      "uploadDir": "public/recipes/images",
+      "publicPrefix": "/recipes/images",
+      "recipesJsonDir": "public/recipes",
+      "maxSizeMb": 10,
+      "allowedTypes": "image/jpeg, image/png, image/webp, image/gif, image/avif"
+    },
+    "supabase": {
+      "enabled": true,
+      "endpoint": "https://tnhrkjtujdfgvwhsuuxb.storage.supabase.co/storage/v1/s3",
+      "region": "us-west-1",
+      "accessKeyId": "f3e0affef5c74972a535153349eb24cc",
+      "secretAccessKey": "254a87503f1f1ab95bcaffea64517cca785feec11976a8be4ee8ed2a032fa9ed",
+      "bucket": "recipes",
+      "publicUrl": "https://tnhrkjtujdfgvwhsuuxb.supabase.co/storage/v1/object/public/recipes"
+    }
   }
 }
