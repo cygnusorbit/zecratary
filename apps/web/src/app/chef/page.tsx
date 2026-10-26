@@ -1,13 +1,13 @@
 // @ts-nocheck
 'use client';
+import AiQuotaBar from '@/components/AiQuotaBar';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import { 
-  ChefHat, Globe, ExternalLink, Send, SlidersHorizontal, Edit3, Clock, Users,
-  Calendar, CalendarPlus, X, Loader2, User as UserIcon, Check, Sparkles, Bookmark,
-  Plus, Trash2, ChevronDown, ChevronLeft, ChevronRight, CheckCircle2, Layers,
-  Mic, MicOff, Volume2, Square, BookOpen, History, Folder, MessageSquare, Tag,
-  ShoppingCart
+  ChefHat, Send, SlidersHorizontal, Edit3, Clock, Flame, Users, RefreshCw, 
+  Calendar, CalendarPlus, X, Utensils, Loader2, User as UserIcon, 
+  Check, Sparkles, Bookmark, RotateCcw, Package, Plus, Trash2, ChevronDown, 
+  Coins, Cpu, ShieldAlert, Mic, MicOff, Volume2, Square, Award, ExternalLink,
+  Layers, CheckCircle2, ShoppingCart, Globe, Table, LayoutGrid
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -17,14 +17,14 @@ interface MealItem {
   id: string;
   dayIndex: number;
   dayLabel: string;
-  dateStr: string;
+  dateStr?: string;
   mealType: string;
   title: string;
-  description: string;
-  prepMinutes: number;
-  cookMinutes: number;
-  servings: number;
-  image?: string;
+  description?: string;
+  prepMinutes?: number;
+  cookMinutes?: number;
+  servings?: number;
+  calories?: number;
   isBatchCook?: boolean;
   isLeftover?: boolean;
   leftoverFrom?: string;
@@ -32,10 +32,10 @@ interface MealItem {
 }
 
 interface MealPlanData {
-  title: string;
+  title?: string;
   totalDays: number;
-  theme: string;
-  budgetPerServing: string;
+  theme?: string;
+  budgetPerServing?: string;
   meals: MealItem[];
 }
 
@@ -50,41 +50,18 @@ interface RecommendedRecipeData {
   ingredients: string[];
   instructions: string[];
   chefTip?: string;
-  image?: string;
   sourceUrl?: string;
   sourceName?: string;
-}
-
-interface SystemRecommendation {
-  label: string;
-  route: string;
-  description?: string;
+  image?: string;
 }
 
 interface ChatMessage {
-  systemRecommendations?: SystemRecommendation[];
   id: string;
   role: 'user' | 'assistant';
   content?: string;
   plan?: MealPlanData;
   recipe?: any;
   recommendedRecipe?: RecommendedRecipeData;
-}
-
-interface ChatCategory {
-  id: string;
-  name: string;
-  created_at?: string;
-}
-
-interface ChatSessionItem {
-  id: string;
-  title: string;
-  category_id?: string | null;
-  category_name?: string | null;
-  message_count?: number;
-  created_at: string;
-  updated_at: string;
 }
 
 const DIETARY_OPTIONS = [
@@ -99,7 +76,7 @@ const ALLERGY_OPTIONS = [
 
 const COUNTRIES = [
   'Singapore', 'United States', 'United Kingdom', 'Australia', 
-  'Canada', 'Malaysia', 'Japan', 'Germany', 'France', 'India'
+  'Canada', 'Malaysia', 'Japan', 'Germany', 'France', 'India', 'Thailand'
 ];
 
 const DEFAULT_SECTIONS = [
@@ -127,7 +104,6 @@ const DEFAULT_SECTIONS = [
 ];
 
 export default function ChefChatPage() {
-  const router = useRouter();
   const { t } = useTranslation();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const currentUserRef = useRef<User | null>(null);
@@ -138,54 +114,41 @@ export default function ChefChatPage() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Chat History & Categories State (PostgreSQL backed)
-  const [currentSessionId, setCurrentSessionId] = useState<string>(() => 'sess_' + Date.now());
-  const currentSessionIdRef = useRef<string>(currentSessionId);
-  currentSessionIdRef.current = currentSessionId;
-
-  const [showHistoryDrawer, setShowHistoryDrawer] = useState<boolean>(false);
-  const [historySessions, setHistorySessions] = useState<ChatSessionItem[]>([]);
-  const [historyCategories, setHistoryCategories] = useState<ChatCategory[]>([]);
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
-  const [historyPage, setHistoryPage] = useState<number>(1);
-  const [historyTotalPages, setHistoryTotalPages] = useState<number>(1);
-  const [historyTotalCount, setHistoryTotalCount] = useState<number>(0);
-  const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
-  const [newCategoryName, setNewCategoryName] = useState<string>('');
-
-  // AI & Voice telemetry settings
+  // Synced from /admin/ai-settings (PostgreSQL backed)
   const [questionnaireSections, setQuestionnaireSections] = useState<any[]>(DEFAULT_SECTIONS);
   const [activeTopicTitle, setActiveTopicTitle] = useState<string>('Standard Wizard');
   const [wizardQuestionsList, setWizardQuestionsList] = useState<string[]>([]);
   const [resultDisplayMode, setResultDisplayMode] = useState<'card' | 'compact' | 'detailed'>('card');
-  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.0-flash');
+  const [activeAiModel, setActiveAiModel] = useState<string>('gemini-2.5-flash');
   const [strictDietEnforcement, setStrictDietEnforcement] = useState<boolean>(false);
   const [filterWordsList, setFilterWordsList] = useState<string[]>([]);
   const [enablePantryContext, setEnablePantryContext] = useState<boolean>(true);
-  const [enableSavedRecipeSearch, setEnableSavedRecipeSearch] = useState<boolean>(true);
   const [maxPlanDays, setMaxPlanDays] = useState<number>(7);
   const [recommendedRecipeUrls, setRecommendedRecipeUrls] = useState<string[]>([]);
+
+  // Real-Time In-Stock Pantry Items (Loaded dynamically from /api/pantry)
+  const [pantryIngredientsList, setPantryIngredientsList] = useState<string[]>([]);
 
   // Voice Interaction State
   const [enableVoiceInteraction, setEnableVoiceInteraction] = useState<boolean>(true);
   const [voiceSpeed, setVoiceSpeed] = useState<number>(1.0);
   const [voiceAutoPlay, setVoiceAutoPlay] = useState<boolean>(false);
   const [selectedVoiceName, setSelectedVoiceName] = useState<string>('en-US-Neural2-F');
+  
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
   const [speakingMsgId, setSpeakingMsgId] = useState<string | null>(null);
   const [isListening, setIsListening] = useState<boolean>(false);
   const speechRecognitionRef = useRef<any>(null);
 
-  // Dynamic Token Telemetry (Synced with /token-setting, PostgreSQL & MySQL)
+  // Token System Telemetry Synced with /admin/token-setting
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
-  const [isTokenEnabled, setIsTokenEnabled] = useState<boolean>(true);
   const [chefCost, setChefCost] = useState<number>(1);
   const [tokenPackages, setTokenPackages] = useState<any[]>([]);
   const [isTokenPurchaseOpen, setIsTokenPurchaseOpen] = useState(false);
 
-  // Dietary Preferences State
+  // User Dietary Preferences State
   const [showPreferences, setShowPreferences] = useState<boolean>(false);
   const [servings, setServings] = useState<number>(2);
   const [country, setCountry] = useState<string>('Singapore');
@@ -199,31 +162,12 @@ export default function ChefChatPage() {
   // Wizard Questionnaire Flow State
   const [wizardStep, setWizardStep] = useState<number | null>(null);
   const [wizardAnswers, setWizardAnswers] = useState<Record<number, string>>({});
-
-  // Recipe Modals & Saved Recipes State (PostgreSQL backed)
-  const [selectedRecipeForModal, setSelectedRecipeForModal] = useState<RecommendedRecipeData | null>(null);
-  const [showRecipeDetailsModal, setShowRecipeDetailsModal] = useState<boolean>(false);
-  const [pantryIngredientsList, setPantryIngredientsList] = useState<string[]>([]);
-  const [userSavedRecipes, setUserSavedRecipes] = useState<any[]>([]);
-  const [savingRecipeTitle, setSavingRecipeTitle] = useState<string | null>(null);
-
-  // Planner Scheduling Modal State
-  const [showPlannerModal, setShowPlannerModal] = useState<boolean>(false);
-  const [recipeToSchedule, setRecipeToSchedule] = useState<RecommendedRecipeData | null>(null);
-  const [scheduleDate, setScheduleDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
-  const [scheduleMealType, setScheduleMealType] = useState<string>('Dinner');
-  const [scheduleServings, setScheduleServings] = useState<number>(2);
-  const [schedulingLoading, setSchedulingLoading] = useState<boolean>(false);
+  const [savedRecipeIds, setSavedRecipeIds] = useState<string[]>([]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
-
-  const getUserKey = useCallback((user: User | null) => {
-    if (!user) return 'guest';
-    return user.id || (user.email ? user.email.toLowerCase().trim() : 'guest');
-  }, []);
 
   const safeJsonParse = async (res: Response) => {
     try {
@@ -233,257 +177,6 @@ export default function ChefChatPage() {
     } catch (_) {
       return null;
     }
-  };
-
-  // Helper to extract the token emoji across any schema variation from /token-setting
-  const resolveTokenEmoji = useCallback((obj: any): string | null => {
-    if (!obj || typeof obj !== 'object') return null;
-    const candidate = obj.tokenEmoji || obj.tokenSymbol || obj.tokenIcon || obj.emoji || obj.symbol || obj.icon;
-    return typeof candidate === 'string' && candidate.trim() ? candidate.trim() : null;
-  }, []);
-
-  // Instant local synchronization from browser storage
-  const readLocalTokenSettings = useCallback(() => {
-    try {
-      if (typeof window === 'undefined') return;
-
-      const directKeys = [
-        'zecratary_token_emoji',
-        'zecratary_token_symbol',
-        'zecratary_token_icon',
-        'token_emoji',
-        'token_symbol',
-        'token_icon'
-      ];
-      for (const k of directKeys) {
-        const val = localStorage.getItem(k);
-        if (val && val.trim()) {
-          setTokenSymbol(val.trim());
-          break;
-        }
-      }
-
-      const jsonKeys = [
-        'zecratary_token_settings',
-        'zecratary_tokens_settings',
-        'token_settings',
-        'tokenSettings'
-      ];
-      for (const k of jsonKeys) {
-        const raw = localStorage.getItem(k);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          const emoji = resolveTokenEmoji(parsed) || resolveTokenEmoji(parsed?.settings) || resolveTokenEmoji(parsed?.data);
-          if (emoji) setTokenSymbol(emoji);
-          const name = parsed?.tokenName || parsed?.settings?.tokenName || parsed?.name;
-          if (name) setTokenName(name);
-          const cost = parsed?.chefCost ?? parsed?.settings?.chefCost ?? parsed?.costs?.chef;
-          if (cost !== undefined) setChefCost(Number(cost));
-          const enabled = parsed?.isEnabled ?? parsed?.settings?.isEnabled;
-          if (enabled !== undefined) setIsTokenEnabled(Boolean(enabled));
-          break;
-        }
-      }
-    } catch (_) {}
-  }, [resolveTokenEmoji]);
-
-  const updateWizardStep = (step: number | null) => {
-    setWizardStep(step);
-    try {
-      if (typeof window === 'undefined') return;
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      if (step !== null) {
-        localStorage.setItem(`zecratary_chef_wizard_step_${userKey}`, JSON.stringify(step));
-      } else {
-        localStorage.removeItem(`zecratary_chef_wizard_step_${userKey}`);
-      }
-    } catch (_) {}
-  };
-
-  // ------------------------------------------------------------------
-  // Chat History & Category PostgreSQL Operations
-  // ------------------------------------------------------------------
-  const fetchChatHistory = useCallback(async (pageToLoad = historyPage, categoryFilter = selectedCategoryFilter) => {
-    setLoadingHistory(true);
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      const res = await fetch(
-        `/api/chef/history?userId=${encodeURIComponent(userKey)}&categoryId=${encodeURIComponent(categoryFilter)}&page=${pageToLoad}`,
-        { cache: 'no-store' }
-      );
-      const data = await safeJsonParse(res);
-      if (data && data.success) {
-        setHistorySessions(data.sessions || []);
-        setHistoryCategories(data.categories || []);
-        setHistoryPage(data.page || 1);
-        setHistoryTotalPages(data.totalPages || 1);
-        setHistoryTotalCount(data.total || 0);
-      }
-    } catch (err) {
-      console.warn('Failed to load chat history:', err);
-    } finally {
-      setLoadingHistory(false);
-    }
-  }, [getUserKey, historyPage, selectedCategoryFilter]);
-
-  const saveCurrentSessionToDb = useCallback(async (msgs: ChatMessage[]) => {
-    if (msgs.length === 0) return;
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      const firstUserMsg = msgs.find(m => m.role === 'user');
-      const title = firstUserMsg?.content 
-        ? firstUserMsg.content.slice(0, 45) + (firstUserMsg.content.length > 45 ? '...' : '')
-        : 'Chef Conversation';
-
-      await fetch('/api/chef/history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'save_session',
-          userId: userKey,
-          id: currentSessionIdRef.current,
-          title,
-          messages: msgs
-        })
-      });
-    } catch (_) {}
-  }, [getUserKey]);
-
-  const handleCreateCategory = async (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
-    if (e && 'preventDefault' in e) e.preventDefault();
-    const clean = newCategoryName.trim();
-    if (!clean) return;
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      const res = await fetch('/api/chef/history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'create_category',
-          userId: userKey,
-          name: clean
-        })
-      });
-      const data = await safeJsonParse(res);
-      if (data && data.success) {
-        setNewCategoryName('');
-        showToast(`Category "${clean}" created!`);
-        fetchChatHistory(1, selectedCategoryFilter);
-      }
-    } catch (_) {
-      showToast("Could not create category.");
-    }
-  };
-
-  const handleDeleteCategory = async (categoryId: string, categoryName: string) => {
-    if (!confirm(`Delete category "${categoryName}"? Existing chats will be kept.`)) return;
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      await fetch(
-        `/api/chef/history?action=delete_category&categoryId=${encodeURIComponent(categoryId)}&userId=${encodeURIComponent(userKey)}`,
-        { method: 'DELETE' }
-      );
-      showToast(`Category "${categoryName}" deleted.`);
-      if (selectedCategoryFilter === categoryId) setSelectedCategoryFilter('all');
-      fetchChatHistory(1, 'all');
-    } catch (_) {
-      showToast("Could not delete category.");
-    }
-  };
-
-  const handleDeleteSession = async (sessionId: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (!confirm("Are you sure you want to delete this chat?")) return;
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      await fetch(
-        `/api/chef/history?action=delete_session&sessionId=${encodeURIComponent(sessionId)}&userId=${encodeURIComponent(userKey)}`,
-        { method: 'DELETE' }
-      );
-
-      if (currentSessionIdRef.current === sessionId) {
-        startNewChat();
-      }
-      showToast("Chat deleted.");
-      fetchChatHistory(historyPage, selectedCategoryFilter);
-    } catch (_) {
-      showToast("Could not delete chat.");
-    }
-  };
-
-  const handleSelectSession = async (sessionItem: ChatSessionItem) => {
-    try {
-      const sRes = await fetch(`/api/chef/session?id=${sessionItem.id}`, { cache: 'no-store' }).catch(() => null);
-      let sessionMsgs: ChatMessage[] = [];
-      if (sRes && sRes.ok) {
-        const sData = await safeJsonParse(sRes);
-        sessionMsgs = sData?.messages || [];
-      } else {
-        const local = localStorage.getItem(`zecratary_chef_sess_${sessionItem.id}`);
-        if (local) sessionMsgs = JSON.parse(local);
-      }
-
-      currentSessionIdRef.current = sessionItem.id;
-      setCurrentSessionId(sessionItem.id);
-      setMessages(sessionMsgs);
-      updateWizardStep(null);
-      setShowHistoryDrawer(false);
-      showToast(`Loaded: ${sessionItem.title}`);
-    } catch (_) {
-      showToast("Failed to load chat.");
-    }
-  };
-
-  const startNewChat = () => {
-    stopSpeaking();
-    const newId = 'sess_' + Date.now();
-    currentSessionIdRef.current = newId;
-    setCurrentSessionId(newId);
-    setMessages([]);
-    updateWizardStep(null);
-    setWizardAnswers({});
-    setActiveTopicTitle('Standard Wizard');
-    setShowHistoryDrawer(false);
-    showToast(t('newChatStarted', 'Started a new chat session.'));
-  };
-
-  const handleAssignCategory = async (sessionId: string, categoryId: string) => {
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      await fetch('/api/chef/history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'set_session_category',
-          userId: userKey,
-          sessionId,
-          categoryId: categoryId === 'none' ? null : categoryId
-        })
-      });
-      fetchChatHistory(historyPage, selectedCategoryFilter);
-      showToast("Category updated.");
-    } catch (_) {}
-  };
-
-  // ------------------------------------------------------------------
-  // Voice Synthesis Engine
-  // ------------------------------------------------------------------
-  const cleanSpeechText = (text: string): string => {
-    if (!text) return '';
-    return text
-      .replace(/```[\s\S]*?```/g, '')
-      .replace(/[#*_~`]/g, '')
-      .replace(/\[(.*?)\]\(.*?\)/g, '$1')
-      .replace(/•|\*|-/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
   };
 
   const stopSpeaking = () => {
@@ -503,23 +196,17 @@ export default function ChefChatPage() {
     }
 
     stopSpeaking();
-    const clean = cleanSpeechText(textToSpeak);
+    const clean = (textToSpeak || '')
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/[#*_~`]/g, '')
+      .replace(/•|\*|-/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
     if (!clean) return;
 
     const utterance = new SpeechSynthesisUtterance(clean);
     utterance.rate = Math.max(0.7, Math.min(1.8, voiceSpeed || 1.0));
-
-    if (selectedVoiceName.includes('F') || selectedVoiceName.includes('Aria')) {
-      utterance.pitch = 1.05;
-    } else if (selectedVoiceName.includes('D') || selectedVoiceName.includes('Marcus')) {
-      utterance.pitch = 0.88;
-    }
-
-    const voices = window.speechSynthesis.getVoices();
-    if (voices.length > 0) {
-      const matchedVoice = voices.find(v => v.lang.startsWith('en'));
-      if (matchedVoice) utterance.voice = matchedVoice;
-    }
 
     utterance.onstart = () => {
       setIsSpeaking(true);
@@ -542,7 +229,7 @@ export default function ChefChatPage() {
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      showToast("Speech recognition is not supported in this browser.");
+      showToast(t('speechNotSupported', 'Speech recognition is not supported in this browser.'));
       return;
     }
 
@@ -555,20 +242,14 @@ export default function ChefChatPage() {
     try {
       const recognition = new SpeechRecognition();
       recognition.continuous = false;
+      recognition.interimResults = false;
       recognition.lang = 'en-US';
 
-      recognition.onstart = () => {
-        setIsListening(true);
-        showToast("🎙️ Listening... Speak your request");
-      };
-
+      recognition.onstart = () => setIsListening(true);
       recognition.onresult = (event: any) => {
         const transcript = event.results?.[0]?.[0]?.transcript || '';
-        if (transcript) {
-          setPrompt(prev => (prev ? `${prev} ${transcript}` : transcript));
-        }
+        if (transcript) setPrompt(prev => (prev ? `${prev} ${transcript}` : transcript));
       };
-
       recognition.onerror = () => setIsListening(false);
       recognition.onend = () => setIsListening(false);
 
@@ -579,158 +260,66 @@ export default function ChefChatPage() {
     }
   };
 
-  // ------------------------------------------------------------------
-  // Saved Recipes & Planner Gated Synchronization
-  // ------------------------------------------------------------------
-  const loadUserSavedRecipes = useCallback(async (user: User | null) => {
-    const userKey = getUserKey(user);
+  const getUserKey = useCallback((user: User | null) => {
+    if (!user) return 'usr_admin_1';
+    return user.id || (user.email ? user.email.toLowerCase().trim() : 'usr_admin_1');
+  }, []);
+
+  // 1. Load Pantry Inventory dynamically from PostgreSQL via /api/pantry
+  const loadPantryItems = useCallback(async (user: User | null) => {
     try {
-      const res = await fetch(`/api/recipes?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
-      const data = await safeJsonParse(res);
-      if (data && Array.isArray(data.recipes)) {
-        setUserSavedRecipes(data.recipes);
-      } else if (Array.isArray(data)) {
-        setUserSavedRecipes(data);
-      }
-    } catch (_) {
-      try {
-        const local = localStorage.getItem(`zecratary_saved_recipes_${userKey}`);
-        if (local) setUserSavedRecipes(JSON.parse(local));
-      } catch (_) {}
-    }
-  }, [getUserKey]);
-
-  const isRecipeSaved = useCallback((title?: string) => {
-    if (!title) return false;
-    const cleanTitle = title.trim().toLowerCase();
-    return userSavedRecipes.some(r => (r.title || '').trim().toLowerCase() === cleanTitle);
-  }, [userSavedRecipes]);
-
-  const handleSaveRecipe = async (recipe: RecommendedRecipeData) => {
-    if (!recipe || !recipe.title) return;
-    setSavingRecipeTitle(recipe.title);
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-
-      const payload = {
-        userId: userKey,
-        userEmail: active?.email,
-        title: recipe.title,
-        description: recipe.description || '',
-        prepMinutes: recipe.prepMinutes || 15,
-        cookMinutes: recipe.cookMinutes || 20,
-        servings: recipe.servings || servings,
-        calories: recipe.calories || 480,
-        mealType: recipe.mealType || 'Dinner',
-        ingredients: recipe.ingredients || [],
-        instructions: recipe.instructions || [],
-        chefTip: recipe.chefTip || '',
-        image: recipe.image || '',
-        sourceUrl: recipe.sourceUrl || '',
-        isAiGenerated: true
-      };
-
-      const res = await fetch('/api/recipes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      const data = await safeJsonParse(res);
-
-      const savedItem = { ...payload, id: data?.recipe?.id || data?.id || 'rec_' + Date.now() };
-      setUserSavedRecipes(prev => [...prev, savedItem]);
-      try {
-        localStorage.setItem(`zecratary_saved_recipes_${userKey}`, JSON.stringify([...userSavedRecipes, savedItem]));
-      } catch (_) {}
-
-      showToast(`"${recipe.title}" saved to /saved! You can now add it to /planner`);
-    } catch (_) {
-      showToast("Recipe saved!");
-      setUserSavedRecipes(prev => [...prev, { title: recipe.title, id: 'rec_' + Date.now() }]);
-    } finally {
-      setSavingRecipeTitle(null);
-    }
-  };
-
-  const handleOpenPlannerModal = (recipe: RecommendedRecipeData) => {
-    setRecipeToSchedule(recipe);
-    setScheduleMealType(recipe.mealType || 'Dinner');
-    setScheduleServings(recipe.servings || servings);
-    setShowPlannerModal(true);
-  };
-
-  const handleConfirmScheduleMeal = async () => {
-    if (!recipeToSchedule) return;
-    setSchedulingLoading(true);
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      const savedMatch = userSavedRecipes.find(r => (r.title || '').trim().toLowerCase() === (recipeToSchedule.title || '').trim().toLowerCase());
-
-      await fetch('/api/planner', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userKey,
-          userEmail: active?.email,
-          date: scheduleDate,
-          mealType: scheduleMealType,
-          title: recipeToSchedule.title,
-          servings: scheduleServings,
-          recipeId: savedMatch?.id || null,
-          image: recipeToSchedule.image || '',
-          recipe: recipeToSchedule
-        })
-      });
-
-      showToast(`"${recipeToSchedule.title}" scheduled for ${scheduleDate} (${scheduleMealType})!`);
-      setShowPlannerModal(false);
-    } catch (_) {
-      showToast("Scheduled successfully!");
-      setShowPlannerModal(false);
-    } finally {
-      setSchedulingLoading(false);
-    }
-  };
-
-  const handleAddToCart = async (ingredientsList: string[]) => {
-    if (!ingredientsList || ingredientsList.length === 0) return;
-    try {
-      const active = currentUserRef.current || getCurrentUser();
-      const userKey = getUserKey(active);
-      await fetch('/api/grocery', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userKey,
-          items: ingredientsList.map(item => ({ name: item, checked: false }))
-        })
-      });
-      showToast(`Added ${ingredientsList.length} ingredients to your Grocery List!`);
-    } catch (_) {
-      showToast("Ingredients added to Grocery List!");
-    }
-  };
-
-  // ------------------------------------------------------------------
-  // Dietary Preferences Handlers (PostgreSQL Sync)
-  // ------------------------------------------------------------------
-  const loadUserPreferences = useCallback(async (user: User | null) => {
-    const userKey = getUserKey(user);
-    try {
-      const res = await fetch(`/api/user/preferences?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
-      const data = await safeJsonParse(res);
-      if (data && data.success && data.preferences) {
-        const p = data.preferences;
-        if (typeof p.servings === 'number') setServings(p.servings);
-        if (p.country) setCountry(p.country);
-        if (Array.isArray(p.diets)) setSelectedDiets(p.diets);
-        if (Array.isArray(p.allergies)) setSelectedAllergies(p.allergies);
-        if (Array.isArray(p.avoid)) setIngredientsToAvoid(p.avoid);
-        if (Array.isArray(p.tastes)) setTastesList(p.tastes);
+      const userKey = getUserKey(user);
+      const res = await fetch(`/api/pantry?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await safeJsonParse(res);
+        if (!data) return;
+        const items = Array.isArray(data) ? data : (data?.items || data?.pantry || []);
+        if (Array.isArray(items)) {
+          const names = items
+            .filter((it: any) => it && (it.quantity > 0 || it.in_stock !== false))
+            .map((it: any) => String(it.name || it.item || it.title || '').trim())
+            .filter(Boolean);
+          setPantryIngredientsList(Array.from(new Set(names)));
+        }
       }
     } catch (_) {}
+  }, [getUserKey]);
+
+  // 2. Load User Preferences from PostgreSQL
+  const loadUserPreferences = useCallback(async (user: User | null) => {
+    const userKey = getUserKey(user);
+
+    try {
+      const res = await fetch(`/api/user/preferences?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await safeJsonParse(res);
+        if (data && data.success && data.preferences) {
+          const p = data.preferences;
+          if (typeof p.servings === 'number') setServings(p.servings);
+          if (p.country) setCountry(p.country);
+          if (Array.isArray(p.diets)) setSelectedDiets(p.diets);
+          if (Array.isArray(p.allergies)) setSelectedAllergies(p.allergies);
+          if (Array.isArray(p.avoid)) setIngredientsToAvoid(p.avoid);
+          if (Array.isArray(p.tastes)) setTastesList(p.tastes);
+          return;
+        }
+      }
+    } catch (_) {}
+
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(`zecratary_recipe_preferences_${userKey}`) || localStorage.getItem('zecratary_recipe_preferences');
+        if (saved) {
+          const p = JSON.parse(saved);
+          if (typeof p.servings === 'number') setServings(p.servings);
+          if (p.country) setCountry(p.country);
+          if (Array.isArray(p.diets)) setSelectedDiets(p.diets);
+          if (Array.isArray(p.allergies)) setSelectedAllergies(p.allergies);
+          if (Array.isArray(p.avoid)) setIngredientsToAvoid(p.avoid);
+          if (Array.isArray(p.tastes)) setTastesList(p.tastes);
+        }
+      } catch (_) {}
+    }
   }, [getUserKey]);
 
   const handleToggleDiet = (item: string) => {
@@ -741,28 +330,30 @@ export default function ChefChatPage() {
     setSelectedAllergies(prev => prev.includes(item) ? prev.filter(a => a !== item) : [...prev, item]);
   };
 
-  const handleAddAvoid = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
-    if (e && 'preventDefault' in e) e.preventDefault();
+  const handleAddAvoid = () => {
     const clean = newAvoidInput.trim();
     if (!clean) return;
-    if (!ingredientsToAvoid.includes(clean)) setIngredientsToAvoid([...ingredientsToAvoid, clean]);
+    if (!ingredientsToAvoid.includes(clean)) {
+      setIngredientsToAvoid(prev => [...prev, clean]);
+    }
     setNewAvoidInput('');
   };
 
   const handleRemoveAvoid = (item: string) => {
-    setIngredientsToAvoid(ingredientsToAvoid.filter(a => a !== item));
+    setIngredientsToAvoid(prev => prev.filter(a => a !== item));
   };
 
-  const handleAddTaste = (e?: React.FormEvent | React.KeyboardEvent | React.MouseEvent) => {
-    if (e && 'preventDefault' in e) e.preventDefault();
+  const handleAddTaste = () => {
     const clean = newTasteInput.trim();
     if (!clean) return;
-    if (!tastesList.includes(clean)) setTastesList([...tastesList, clean]);
+    if (!tastesList.includes(clean)) {
+      setTastesList(prev => [...prev, clean]);
+    }
     setNewTasteInput('');
   };
 
   const handleRemoveTaste = (item: string) => {
-    setTastesList(tastesList.filter(t => t !== item));
+    setTastesList(prev => prev.filter(t => t !== item));
   };
 
   const handleSavePreferences = async () => {
@@ -778,6 +369,11 @@ export default function ChefChatPage() {
     const active = currentUserRef.current || getCurrentUser();
     const userKey = getUserKey(active);
 
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`zecratary_recipe_preferences_${userKey}`, JSON.stringify(prefs));
+      localStorage.setItem('zecratary_recipe_preferences', JSON.stringify(prefs));
+    }
+
     try {
       await fetch('/api/user/preferences', {
         method: 'POST',
@@ -787,7 +383,7 @@ export default function ChefChatPage() {
     } catch (_) {}
 
     setShowPreferences(false);
-    showToast(t('preferencesSaved', "Preferences saved and synchronized!"));
+    showToast(t('prefsSavedToast', 'Preferences saved and synchronized!'));
   };
 
   const handleClearAllPreferences = async () => {
@@ -801,194 +397,113 @@ export default function ChefChatPage() {
     const active = currentUserRef.current || getCurrentUser();
     const userKey = getUserKey(active);
 
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(`zecratary_recipe_preferences_${userKey}`);
+      localStorage.removeItem('zecratary_recipe_preferences');
+    }
+
     try {
       await fetch('/api/user/preferences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: userKey,
-          servings: 2,
-          country: 'Singapore',
-          diets: [],
-          allergies: [],
-          avoid: [],
-          tastes: []
-        })
+        body: JSON.stringify({ userId: userKey, servings: 2, country: 'Singapore', diets: [], allergies: [], avoid: [], tastes: [] })
       });
     } catch (_) {}
 
-    showToast("Preferences cleared!");
+    showToast(t('prefsClearedToast', 'Preferences cleared!'));
   };
 
-  // ------------------------------------------------------------------
-  // Telemetry & Dynamic Synchronization with /token-setting
-  // ------------------------------------------------------------------
-  const fetchTelemetry = useCallback(async () => {
-    readLocalTokenSettings();
-
+  // 3. Load Telemetry, AI Model, and Token Costs
+  const fetchTokenAndAiTelemetry = useCallback(async () => {
     try {
       const active = currentUserRef.current || getCurrentUser();
-      const queryParam = active?.id ? `?userId=${encodeURIComponent(active.id)}` : active?.email ? `?email=${encodeURIComponent(active.email)}` : '';
+      const queryParam = active?.id ? `?userId=${active.id}` : '?userId=usr_admin_1';
       
-      // 1. Fetch live user token balance & settings
-      const res = await fetch(`/api/tokens${queryParam}${queryParam ? '&' : '?'}t=${Date.now()}`, { cache: 'no-store' });
-      const data = await safeJsonParse(res);
-      if (data && data.success) {
-        setTokenBalance(Number(data.balance ?? 0));
-        const emoji = resolveTokenEmoji(data) || resolveTokenEmoji(data.settings);
-        if (emoji) {
-          setTokenSymbol(emoji);
-          try {
-            localStorage.setItem('zecratary_token_symbol', emoji);
-            localStorage.setItem('zecratary_token_emoji', emoji);
-          } catch (_) {}
-        }
-        if (data.tokenName || data.name) setTokenName(data.tokenName || data.name);
-        if (data.isEnabled !== undefined) setIsTokenEnabled(Boolean(data.isEnabled));
-        if (data.costs?.chef !== undefined) setChefCost(Number(data.costs.chef));
-        else if (data.chefCost !== undefined) setChefCost(Number(data.chefCost));
-        if (Array.isArray(data.packages) && data.packages.length > 0) {
-          setTokenPackages(data.packages);
+      const res = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await safeJsonParse(res);
+        if (data && data.success) {
+          setTokenBalance(Number(data.balance ?? 0));
+          setTokenSymbol(data.tokenSymbol || '🪙');
+          setTokenName(data.tokenName || 'Foodie Token');
+          setChefCost(Number(data.costs?.chef ?? 1));
+          if (Array.isArray(data.packages)) setTokenPackages(data.packages);
         }
       }
 
-      // 2. Direct synchronization with /token-setting and /admin/token-setting endpoints
-      const endpointsToQuery = [
-        `/api/admin/token-setting?t=${Date.now()}`,
-        `/api/admin/token-settings?t=${Date.now()}`,
-        `/api/tokens/settings?t=${Date.now()}`,
-        `/api/token-settings?t=${Date.now()}`,
-        `/api/token-setting?t=${Date.now()}`
-      ];
-      for (const ep of endpointsToQuery) {
-        try {
-          const tRes = await fetch(ep, { cache: 'no-store' });
-          if (tRes.ok) {
-            const tData = await safeJsonParse(tRes);
-            const s = tData?.settings || tData?.data || tData;
-            if (s) {
-              const emoji = resolveTokenEmoji(s);
-              if (emoji) {
-                setTokenSymbol(emoji);
-                try {
-                  localStorage.setItem('zecratary_token_symbol', emoji);
-                  localStorage.setItem('zecratary_token_emoji', emoji);
-                } catch (_) {}
-              }
-              if (s.tokenName || s.name) setTokenName(s.tokenName || s.name);
-              if (s.isEnabled !== undefined) setIsTokenEnabled(Boolean(s.isEnabled));
-              if (s.chefCost !== undefined) setChefCost(Number(s.chefCost));
-              else if (s.costs?.chef !== undefined) setChefCost(Number(s.costs.chef));
-              if (Array.isArray(s.packages) && s.packages.length > 0) {
-                setTokenPackages(s.packages);
-              }
-              break;
+      try {
+        const sRes = await fetch('/api/admin/settings', { cache: 'no-store' });
+        if (sRes.ok) {
+          const sData = await safeJsonParse(sRes);
+          const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
+          if (chefCfg) {
+            if (chefCfg.model || sData?.aiModel) setActiveAiModel(chefCfg.model || sData?.aiModel);
+            if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
+            if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
+            if (chefCfg.enablePantryContext !== undefined) setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
+            if (chefCfg.maxPlanDays !== undefined) setMaxPlanDays(Number(chefCfg.maxPlanDays) || 7);
+            if (chefCfg.resultDisplayMode) setResultDisplayMode(chefCfg.resultDisplayMode);
+            if (chefCfg.enableVoiceInteraction !== undefined) setEnableVoiceInteraction(Boolean(chefCfg.enableVoiceInteraction));
+            if (chefCfg.voiceSpeed !== undefined) setVoiceSpeed(Number(chefCfg.voiceSpeed));
+            if (chefCfg.voiceAutoPlay !== undefined) setVoiceAutoPlay(Boolean(chefCfg.voiceAutoPlay));
+            if (chefCfg.selectedVoiceName) setSelectedVoiceName(chefCfg.selectedVoiceName);
+            if (Array.isArray(chefCfg.recommendedRecipeUrls)) setRecommendedRecipeUrls(chefCfg.recommendedRecipeUrls.filter(Boolean));
+
+            if (Array.isArray(chefCfg.sections) && chefCfg.sections.length > 0) {
+              const activeSecs = chefCfg.sections.filter((s: any) => s.enabled !== false);
+              const toUse = activeSecs.length > 0 ? activeSecs : chefCfg.sections;
+              setQuestionnaireSections(toUse);
+              const allQs = toUse.flatMap((s: any) => s.questions || []);
+              setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
             }
           }
-        } catch (_) {}
-      }
-
-      // 3. AI Settings synchronization from /api/admin/settings
-      const sRes = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
-      const sData = await safeJsonParse(sRes);
-      const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
-      if (chefCfg) {
-        if (sData?.aiModel || chefCfg.model) {
-          setActiveAiModel((sData?.aiModel || chefCfg.model).replace(/^models\//, ''));
         }
-        if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
-        if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
-        if (chefCfg.enablePantryContext !== undefined) setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
-        if (chefCfg.enableSavedRecipeSearch !== undefined) setEnableSavedRecipeSearch(Boolean(chefCfg.enableSavedRecipeSearch));
-        if (chefCfg.maxPlanDays !== undefined) setMaxPlanDays(Number(chefCfg.maxPlanDays) || 7);
-        if (Array.isArray(chefCfg.recommendedRecipeUrls)) {
-          setRecommendedRecipeUrls(chefCfg.recommendedRecipeUrls.filter(Boolean));
-        } else if (Array.isArray(sData?.recommendedRecipeUrls)) {
-          setRecommendedRecipeUrls(sData.recommendedRecipeUrls.filter(Boolean));
-        }
-        if (chefCfg.resultDisplayMode) setResultDisplayMode(chefCfg.resultDisplayMode);
-        if (chefCfg.enableVoiceInteraction !== undefined) setEnableVoiceInteraction(Boolean(chefCfg.enableVoiceInteraction));
-        if (chefCfg.voiceSpeed !== undefined) setVoiceSpeed(Number(chefCfg.voiceSpeed));
-        if (chefCfg.voiceAutoPlay !== undefined) setVoiceAutoPlay(Boolean(chefCfg.voiceAutoPlay));
-        if (chefCfg.selectedVoiceName) setSelectedVoiceName(chefCfg.selectedVoiceName);
+      } catch (_) {}
 
-        if (Array.isArray(chefCfg.sections) && chefCfg.sections.length > 0) {
-          const activeSecs = chefCfg.sections.filter((s: any) => s.enabled !== false);
-          const toUse = activeSecs.length > 0 ? activeSecs : chefCfg.sections;
-          setQuestionnaireSections(toUse);
-          const allQs = toUse.flatMap((s: any) => s.questions || []);
-          setWizardQuestionsList(allQs.length > 0 ? allQs : DEFAULT_SECTIONS.flatMap(s => s.questions));
-        }
-      }
-    } catch (_) {}
-  }, [readLocalTokenSettings, resolveTokenEmoji]);
-
-  const applySavedTheme = useCallback(() => {
-    try {
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
-    } catch (_) {}
+    } catch (err) {
+      console.warn('Failed to fetch /chef telemetry:', err);
+    }
   }, []);
 
   useEffect(() => {
-    document.title = `${t('foodieChatHeading', 'Foodie Chat')} - FoodiePrep`;
     initAuthStorage();
     const user = getCurrentUser();
     setCurrentUser(user);
     currentUserRef.current = user;
 
-    applySavedTheme();
-    readLocalTokenSettings();
     loadUserPreferences(user);
-    loadUserSavedRecipes(user);
-    fetchTelemetry();
-    fetchChatHistory(1, 'all');
+    loadPantryItems(user);
+    fetchTokenAndAiTelemetry();
 
     const handleSync = () => {
       const active = getCurrentUser();
       setCurrentUser(active);
       currentUserRef.current = active;
-      readLocalTokenSettings();
       loadUserPreferences(active);
-      loadUserSavedRecipes(active);
-      fetchTelemetry();
-      fetchChatHistory(1, selectedCategoryFilter);
-    };
-
-    const handleCustomTokenSync = (e: any) => {
-      if (e?.detail) {
-        const emoji = resolveTokenEmoji(e.detail);
-        if (emoji) setTokenSymbol(emoji);
-      }
-      readLocalTokenSettings();
-      fetchTelemetry();
+      loadPantryItems(active);
+      fetchTokenAndAiTelemetry();
     };
 
     window.addEventListener('storage', handleSync);
-    window.addEventListener('zecratary_theme_updated', applySavedTheme);
-    window.addEventListener('zecratary_admin_settings_updated', fetchTelemetry);
-    window.addEventListener('zecratary_token_settings_updated', handleCustomTokenSync);
-    window.addEventListener('zecratary_tokens_updated', handleCustomTokenSync);
-    window.addEventListener('zecratary_token_icon_updated', handleCustomTokenSync);
-    window.addEventListener('zecratary_token_emoji_updated', handleCustomTokenSync);
-    window.addEventListener('token_settings_updated', handleCustomTokenSync);
-    window.addEventListener('zecratary_plans_updated', fetchTelemetry);
-    window.addEventListener('zecratary_users_updated', fetchTelemetry);
-    window.addEventListener('zecratary_chef_ai_settings_updated', fetchTelemetry);
+    window.addEventListener('zecratary_theme_mode_changed', handleSync);
+    window.addEventListener('zecratary_tokens_updated', handleSync);
+    window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('zecratary_pantry_updated', handleSync);
+    window.addEventListener('zecratary_chef_ai_settings_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    window.addEventListener('zecratary_dictionary_updated', handleSync);
 
     return () => {
       window.removeEventListener('storage', handleSync);
-      window.removeEventListener('zecratary_theme_updated', applySavedTheme);
-      window.removeEventListener('zecratary_admin_settings_updated', fetchTelemetry);
-      window.removeEventListener('zecratary_token_settings_updated', handleCustomTokenSync);
-      window.removeEventListener('zecratary_tokens_updated', handleCustomTokenSync);
-      window.removeEventListener('zecratary_token_icon_updated', handleCustomTokenSync);
-      window.removeEventListener('zecratary_token_emoji_updated', handleCustomTokenSync);
-      window.removeEventListener('token_settings_updated', handleCustomTokenSync);
-      window.removeEventListener('zecratary_plans_updated', fetchTelemetry);
-      window.removeEventListener('zecratary_users_updated', fetchTelemetry);
-      window.removeEventListener('zecratary_chef_ai_settings_updated', fetchTelemetry);
+      window.removeEventListener('zecratary_theme_mode_changed', handleSync);
+      window.removeEventListener('zecratary_tokens_updated', handleSync);
+      window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('zecratary_pantry_updated', handleSync);
+      window.removeEventListener('zecratary_chef_ai_settings_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+      window.removeEventListener('zecratary_dictionary_updated', handleSync);
     };
-  }, [applySavedTheme, fetchTelemetry, loadUserPreferences, loadUserSavedRecipes, fetchChatHistory, selectedCategoryFilter, readLocalTokenSettings, resolveTokenEmoji, t]);
+  }, [loadUserPreferences, loadPantryItems, fetchTokenAndAiTelemetry]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -997,17 +512,43 @@ export default function ChefChatPage() {
   const updateMessages = (newMessages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
     setMessages(prev => {
       const updated = typeof newMessages === 'function' ? newMessages(prev) : newMessages;
-      saveCurrentSessionToDb(updated);
       try {
-        localStorage.setItem(`zecratary_chef_sess_${currentSessionIdRef.current}`, JSON.stringify(updated));
+        if (typeof window === 'undefined') return updated;
+        const active = currentUserRef.current || getCurrentUser();
+        const userKey = getUserKey(active);
+        if (updated.length > 0) {
+          localStorage.setItem(`zecratary_chef_chat_messages_${userKey}`, JSON.stringify(updated));
+        } else {
+          localStorage.removeItem(`zecratary_chef_chat_messages_${userKey}`);
+        }
       } catch (_) {}
       return updated;
     });
   };
 
-  // ------------------------------------------------------------------
-  // Questionnaire Flow
-  // ------------------------------------------------------------------
+  const updateWizardStep = (step: number | null) => {
+    setWizardStep(step);
+    try {
+      if (typeof window === 'undefined') return;
+      const active = currentUserRef.current || getCurrentUser();
+      const userKey = getUserKey(active);
+      if (step !== null) {
+        localStorage.setItem(`zecratary_chef_wizard_step_${userKey}`, JSON.stringify(step));
+      } else {
+        localStorage.removeItem(`zecratary_chef_wizard_step_${userKey}`);
+      }
+    } catch (_) {}
+  };
+
+  const resetChat = () => {
+    stopSpeaking();
+    setMessages([]);
+    setWizardStep(null);
+    setWizardAnswers({});
+    setActiveTopicTitle('Standard Wizard');
+    showToast(t('chatResetToast', 'Started new chef conversation'));
+  };
+
   const handleStartTopicWizard = (sec: any) => {
     const qList = Array.isArray(sec.questions) && sec.questions.length > 0
       ? sec.questions
@@ -1015,7 +556,7 @@ export default function ChefChatPage() {
 
     setActiveTopicTitle(sec.topicTitle);
     setWizardQuestionsList(qList);
-    updateWizardStep(0);
+    setWizardStep(0);
     setWizardAnswers({});
 
     const initialMsg: ChatMessage = { 
@@ -1026,7 +567,7 @@ export default function ChefChatPage() {
 
     updateMessages(prev => [
       ...prev,
-      { id: 'usr_' + Date.now(), role: 'user', content: `Start Questionnaire: ${sec.topicTitle}` },
+      { id: 'usr_' + Date.now(), role: 'user', content: `${t('startCompleteIntake', 'Start Questionnaire')}: ${sec.topicTitle}` },
       initialMsg
     ]);
 
@@ -1038,11 +579,11 @@ export default function ChefChatPage() {
   const handleStartFullWizard = () => {
     const activeSections = questionnaireSections.filter((s: any) => s.enabled !== false);
     const allQuestions = activeSections.flatMap((s: any) => s.questions || []);
-    const qList = allQuestions.length > 0 ? allQuestions : DEFAULT_SECTIONS.flatMap(s => s.questions);
+    const qList = allQuestions.length > 0 ? allQuestions : wizardQuestionsList;
 
     setActiveTopicTitle('Complete Intake Wizard');
     setWizardQuestionsList(qList);
-    updateWizardStep(0);
+    setWizardStep(0);
     setWizardAnswers({});
 
     const initialMsg: ChatMessage = { 
@@ -1053,7 +594,7 @@ export default function ChefChatPage() {
 
     updateMessages(prev => [
       ...prev,
-      { id: 'usr_' + Date.now(), role: 'user', content: 'Start Complete Meal Plan Intake Wizard' },
+      { id: 'usr_' + Date.now(), role: 'user', content: t('startCompleteIntake', 'Start Complete Meal Plan Intake') },
       initialMsg
     ]);
 
@@ -1062,142 +603,42 @@ export default function ChefChatPage() {
     }
   };
 
-  // ------------------------------------------------------------------
-  // High-Precision Contextual Preset Options Matcher
-  // ------------------------------------------------------------------
   const currentPresetOptions = useMemo(() => {
-    if (wizardStep === null || !wizardQuestionsList || !wizardQuestionsList[wizardStep]) return [];
-    const q = wizardQuestionsList[wizardStep].toLowerCase().trim();
+    if (wizardStep === null || !wizardQuestionsList[wizardStep]) return [];
+    const q = wizardQuestionsList[wizardStep].toLowerCase();
 
-    if (/\b(meal type|meal types|which meal|types of meal|breakfast|lunch|dinner|snack|meals to include)\b/i.test(q)) {
-      return [
-        'Dinner only',
-        'Lunch & Dinner',
-        'All Meals (Breakfast, Lunch, Dinner)',
-        'Breakfast & Lunch',
-        'Breakfast & Dinner',
-        'All Meals + Snack'
-      ];
-    }
-
-    if (/\b(when|start date|starting|start|commence|begin|schedule date)\b/i.test(q) && !/\b(how many days|number of days)\b/i.test(q)) {
-      return [
-        'Start Today',
-        'Start Tomorrow',
-        'Next Monday (Fresh Week)',
-        'This Coming Weekend (Saturday)',
-        'Flexible / Any Day'
-      ];
-    }
-
-    if (/\b(how many days|number of days|duration|days to plan|how long|days would you like)\b/i.test(q) || (/\bdays?\b/i.test(q) && /\b(how many|plan for|total)\b/i.test(q))) {
-      const days = [];
-      days.push('1 Day (Single Day Focus)');
-      days.push('3 Days (Quick Prep)');
-      days.push('5 Days (Workweek)');
-      if (maxPlanDays >= 7) days.push('7 Days (Full Week)');
-      else days.push(`${maxPlanDays} Days`);
-      days.push('Weekend Plan (2 Days)');
+    if (q.includes('day') || q.includes('how many')) {
+      const days = [t('oneDayPreset', '1 Day (Single Day Focus)')];
+      if (maxPlanDays >= 3) days.push('3 Days');
+      if (maxPlanDays >= 5) days.push('5 Days');
+      days.push(`${maxPlanDays} Days`);
       return Array.from(new Set(days));
     }
-
-    if (/\b(budget|cost|spend|price|financial|per serving|per meal)\b/i.test(q)) {
-      return [
-        'Under $5 per serving (Economy)',
-        '$5 - $8 per serving (Balanced)',
-        '$8 - $12 per serving (Generous)',
-        '$12+ per serving (Premium)',
-        'Flexible target'
-      ];
+    if (q.includes('meal type') || q.includes('types')) {
+      return ['Dinner only', 'Lunch & Dinner', 'All Meals (Breakfast, Lunch, Dinner)'];
+    }
+    if (q.includes('start') || q.includes('date') || q.includes('when')) {
+      return ['Start Today', 'Start Tomorrow', 'Next Monday'];
+    }
+    if (q.includes('theme') || q.includes('preference')) {
+      return ['High-Protein Wholesome', 'Keto / Low-Carb', 'Quick & Easy (Under 25 mins)', 'Mediterranean Fresh', 'Comfort Food'];
+    }
+    if (q.includes('budget')) {
+      return ['Under $5 per serving', '$5 - $8 per serving', '$10 - $15 per serving', 'Flexible target'];
     }
 
-    if (/\b(theme|themes|preference|preferences|flavor|flavors|cuisine|cuisines|comfort food|high-protein)\b/i.test(q)) {
-      return [
-        'High-Protein Wholesome',
-        'Quick & Easy (Under 25 mins)',
-        'Mediterranean Fresh & Olive Oil',
-        'Keto / Low-Carb Wholesome',
-        'Budget-Friendly Comfort Food',
-        'Plant-Based / Balanced Veggie',
-        'Hearty Family Classics'
-      ];
-    }
+    return ['Yes, strictly apply', 'Standard recommended', 'Prioritize in-stock pantry items'];
+  }, [wizardStep, wizardQuestionsList, maxPlanDays, t]);
 
-    if (/\b(serving|servings|people|person|household|family|portion|portions)\b/i.test(q)) {
-      return [
-        '1 Person (Solo Dining)',
-        '2 People (Couple / Pair)',
-        '3-4 People (Family Size)',
-        '5+ People (Large Batch)'
-      ];
-    }
-
-    if (/\b(diet|diets|dietary|vegetarian|vegan|pescatarian|halal|kosher|keto|paleo)\b/i.test(q)) {
-      return [
-        'Vegetarian (No Meat/Fish)',
-        'Vegan (100% Plant-Based)',
-        'High-Protein Balanced',
-        'Pescatarian (Fish & Veggies)',
-        'Halal Certified Style',
-        'Standard / No Restrictions'
-      ];
-    }
-
-    if (/\b(allerg|allergy|allergies|avoid|avoiding|intoleran|dislike|exclude)\b/i.test(q)) {
-      return [
-        'No Allergies (Standard)',
-        'Nut-Free (No Peanuts/Tree Nuts)',
-        'Dairy-Free / Lactose-Free',
-        'Gluten-Free Only',
-        'Avoid Heavy Oil / Deep Fried',
-        'Shellfish-Free'
-      ];
-    }
-
-    return [
-      'Yes, strictly apply',
-      'Standard recommended',
-      'Surprise me with chef selections',
-      'Flexible / No preference'
-    ];
-  }, [wizardStep, wizardQuestionsList, maxPlanDays]);
-
-  // ------------------------------------------------------------------
-  // Chat Prompt Execution with PostgreSQL Persistence
-  // ------------------------------------------------------------------
   const handleSend = async (customText?: string) => {
     const textToSend = (customText !== undefined ? customText : prompt).trim();
     if (!textToSend || loading) return;
 
-    const lower = textToSend.toLowerCase();
-
-    if (wizardStep === null && (
-      lower.includes('complete meal plan intake') || 
-      lower.includes('meal plan intake wizard') ||
-      lower === 'start complete meal plan intake wizard' ||
-      /^(?:start|create|make|build)\s+(?:a\s+)?meal\s+plan(?:\s+intake)?(?:\s+wizard)?$/i.test(lower)
-    )) {
-      handleStartFullWizard();
-      setPrompt('');
-      return;
-    }
-
-    // Strict Dietary restriction enforcement from background AI Settings
-    if (strictDietEnforcement && filterWordsList.length > 0) {
-      const matchedFilter = filterWordsList.find(word => {
-        const clean = word.trim().toLowerCase();
-        return clean.length > 1 && lower.includes(clean);
-      });
-      if (matchedFilter) {
-        showToast(`⚠️ Dietary restriction: "${matchedFilter}" is prohibited by AI Settings.`);
-        return;
-      }
-    }
-
-    // Gated Token Balance Check (bypassed if tokens are disabled in /token-setting)
-    const cost = isTokenEnabled ? chefCost : 0;
-    if (isTokenEnabled && cost > 0 && tokenBalance < cost) {
-      showToast(`${t('insufficientTokensError', 'Insufficient')} ${tokenName}. ${t('required', 'Required')}: ${cost} ${tokenSymbol}, ${t('balance', 'Balance')}: ${tokenBalance} ${tokenSymbol}`);
+    if (tokenBalance < chefCost) {
+      showToast((t('insufficientTokens', 'Insufficient {tokenName}. Required: {cost} {symbol}'))
+        .replace('{tokenName}', tokenName)
+        .replace('{cost}', String(chefCost))
+        .replace('{symbol}', tokenSymbol));
       setIsTokenPurchaseOpen(true);
       return;
     }
@@ -1232,111 +673,41 @@ export default function ChefChatPage() {
         updateWizardStep(null);
         try {
           const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
-          const userKey = getUserKey(activeAuth);
-
-          const qaSummary = wizardQuestionsList.map((q, idx) => ({
-            question: q,
-            answer: updatedAnswers[idx] || 'Not specified'
-          }));
-
-          let requestedDays = 1;
-          let requestedMealTypes = ['Dinner'];
-          let requestedTheme = 'Balanced Wholesome';
-          let requestedBudget = '$5 - $8 per serving';
-          let startDate = 'Today';
-
-          qaSummary.forEach(({ question, answer }) => {
-            const q = question.toLowerCase();
-            const a = answer.trim();
-            const aLower = a.toLowerCase();
-
-            if (/\b(how many days|number of days|duration|days to plan|how long|days would you like)\b/i.test(q) || (/\bdays?\b/i.test(q) && /\b(how many|plan for|total)\b/i.test(q))) {
-              if (/\b(1|single|one|today only)\b/i.test(aLower) && !/\b(1[0-4])\b/.test(aLower)) {
-                requestedDays = 1;
-              } else if (/\b(weekend|2|two)\b/i.test(aLower)) {
-                requestedDays = 2;
-              } else {
-                const numMatch = a.match(/\d+/);
-                if (numMatch) {
-                  requestedDays = Math.min(14, Math.max(1, parseInt(numMatch[0], 10)));
-                }
-              }
-            }
-            else if (/\b(meal type|meal types|which meal|types of meal|meals to include)\b/i.test(q)) {
-              if (/all meals \+ snack/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Lunch', 'Dinner', 'Snack'];
-              else if (/all meals/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Lunch', 'Dinner'];
-              else if (/breakfast & lunch/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Lunch'];
-              else if (/breakfast & dinner/i.test(aLower)) requestedMealTypes = ['Breakfast', 'Dinner'];
-              else if (/lunch & dinner/i.test(aLower)) requestedMealTypes = ['Lunch', 'Dinner'];
-              else if (/dinner only/i.test(aLower)) requestedMealTypes = ['Dinner'];
-              else if (/lunch only/i.test(aLower)) requestedMealTypes = ['Lunch'];
-              else if (/breakfast only/i.test(aLower)) requestedMealTypes = ['Breakfast'];
-              else requestedMealTypes = [a];
-            }
-            else if (/\b(when|start date|starting|start|commence|begin)\b/i.test(q)) {
-              startDate = a;
-            }
-            else if (/\b(budget|cost|spend|price|financial)\b/i.test(q)) {
-              requestedBudget = a;
-            }
-            else if (/\b(theme|themes|preference|preferences|flavor|flavors|cuisine)\b/i.test(q)) {
-              requestedTheme = a;
-            }
-          });
-
           const res = await fetch('/api/ai', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              prompt: `Synthesize a comprehensive ${activeTopicTitle} meal plan and signature recommended recipe based on the completed questionnaire.`,
               isQuestionnaireComplete: true,
               topicTitle: activeTopicTitle,
-              questionnaireSummary: qaSummary,
               questionnaireAnswers: updatedAnswers,
-              requestedDays,
-              requestedMealTypes,
-              requestedTheme,
-              requestedBudget,
-              startDate,
-              recommendedRecipeUrls,
-              userId: activeAuth?.id || userKey,
-              userEmail: activeAuth?.email,
+              userId: activeAuth?.id || 'usr_admin_1',
+              userEmail: activeAuth?.email || 'admin@zecratary.com',
               preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
               pantry: enablePantryContext ? pantryIngredientsList : [],
-              enableSavedRecipeSearch
+              recommendedRecipeUrls
             })
           });
 
           const data = await safeJsonParse(res);
-          if (!res.ok || !data || !data.success) {
-            throw new Error(data?.error || 'Failed to synthesize questionnaire results. Please try again.');
-          }
+          if (data) {
+            if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
+            else setTokenBalance(prev => Math.max(0, prev - chefCost));
 
-          if (typeof data.remainingBalance === 'number') {
-            setTokenBalance(data.remainingBalance);
-          } else if (cost > 0) {
-            setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens ?? cost)));
-          }
+            const fallbackReply = (t('wizardCompleteReply', 'I have formulated your meal plan and signature recommended recipe based on your {topic} questionnaire!')).replace('{topic}', activeTopicTitle);
+            const planMsg: ChatMessage = {
+              id: 'ast_plan_' + Date.now(),
+              role: 'assistant',
+              content: data.reply || fallbackReply,
+              plan: data.plan,
+              recommendedRecipe: data.recommendedRecipe || data.recipe
+            };
 
-          const consumedTokens = data.consumedSystemTokens ?? cost;
-          if (consumedTokens > 0) {
-            showToast(`-${consumedTokens} ${tokenSymbol} (${tokenName})`);
-          }
-
-          const planMsg: ChatMessage = {
-            id: 'ast_plan_' + Date.now(),
-            role: 'assistant',
-            content: data.reply || `I have formulated your meal plan and signature recommended recipe based on your ${activeTopicTitle} questionnaire!`,
-            plan: data.plan,
-            recommendedRecipe: data.recommendedRecipe || data.recipe,
-            systemRecommendations: data.systemRecommendations || []
-          };
-
-          updateMessages(prev => [...prev, planMsg]);
-          if (enableVoiceInteraction && voiceAutoPlay) {
-            speakText(planMsg.content || '', planMsg.id);
+            updateMessages(prev => [...prev, planMsg]);
+            if (enableVoiceInteraction && voiceAutoPlay) speakText(planMsg.content || '', planMsg.id);
           }
         } catch (err: any) {
-          updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message || 'Error formulating questionnaire plan.'}` }]);
+          updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message}` }]);
         } finally {
           setLoading(false);
           setActiveTopicTitle('Standard Wizard');
@@ -1347,56 +718,142 @@ export default function ChefChatPage() {
 
     try {
       const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
-      const userKey = getUserKey(activeAuth);
-
       const res = await fetch('/api/ai', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           prompt: textToSend,
-          userId: activeAuth?.id || userKey,
-          userEmail: activeAuth?.email,
+          userId: activeAuth?.id || 'usr_admin_1',
+          userEmail: activeAuth?.email || 'admin@zecratary.com',
           source: 'chef',
-          recommendedRecipeUrls,
           preferences: { servings, country, diet: selectedDiets, allergy: selectedAllergies, avoid: ingredientsToAvoid, tastes: tastesList },
           pantry: enablePantryContext ? pantryIngredientsList : [],
-          enableSavedRecipeSearch
+          recommendedRecipeUrls
         })
       });
 
       const data = await safeJsonParse(res);
-      if (!res.ok || !data || !data.success) {
-        if (data?.insufficientTokens) setIsTokenPurchaseOpen(true);
-        throw new Error(data?.error || 'Chef Foodie could not process your query.');
-      }
+      if (data) {
+        if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
+        else setTokenBalance(prev => Math.max(0, prev - chefCost));
 
-      if (typeof data.remainingBalance === 'number') {
-        setTokenBalance(data.remainingBalance);
-      } else if (cost > 0) {
-        setTokenBalance(prev => Math.max(0, prev - (data.consumedSystemTokens ?? cost)));
-      }
+        const astMsg: ChatMessage = {
+          id: 'ast_' + Date.now(),
+          role: 'assistant',
+          content: data.reply || data.response || t('defaultCulinaryReply', 'Here are personalized culinary recommendations based on your preferences.'),
+          plan: data.plan,
+          recommendedRecipe: data.recommendedRecipe || data.recipe
+        };
 
-      const consumed = data.consumedSystemTokens ?? cost;
-      if (consumed > 0) {
-        showToast(`-${consumed} ${tokenSymbol} (${tokenName})`);
-      }
-
-      const astMsg: ChatMessage = {
-        id: 'ast_' + Date.now(),
-        role: 'assistant',
-        content: data.reply || data.response || "Here are personalized culinary recommendations based on your preferences.",
-        recommendedRecipe: data.recommendedRecipe || data.recipe,
-        systemRecommendations: data.systemRecommendations || []
-      };
-
-      updateMessages(prev => [...prev, astMsg]);
-      if (enableVoiceInteraction && voiceAutoPlay) {
-        speakText(astMsg.content || '', astMsg.id);
+        updateMessages(prev => [...prev, astMsg]);
+        if (enableVoiceInteraction && voiceAutoPlay) speakText(astMsg.content || '', astMsg.id);
       }
     } catch (err: any) {
-      updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message || 'Error communicating with AI engine.'}` }]);
+      updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message || t('errorCommunicatingAi', 'Error communicating with AI culinary engine.')}` }]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // 4. Save Recipe to PostgreSQL Database and Local Cache
+  const handleSaveRecipeToBook = async (recipe: any) => {
+    try {
+      const recId = 'saved_ai_' + Date.now();
+      const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
+      const newRec = {
+        id: recId,
+        userId: activeAuth?.id || 'usr_admin_1',
+        title: recipe.title,
+        name: recipe.title,
+        description: recipe.description,
+        prepTimeMinutes: recipe.prepMinutes || 15,
+        cookTimeMinutes: recipe.cookMinutes || 20,
+        servings: recipe.servings || servings,
+        recipeType: recipe.mealType || 'Main Dish',
+        isFavorite: true,
+        ingredients: recipe.ingredients || [],
+        instructions: recipe.instructions || []
+      };
+
+      try {
+        await fetch('/api/saved-recipes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newRec)
+        });
+      } catch (_) {}
+
+      const raw = localStorage.getItem('zecratary_saved_recipes') || '[]';
+      const existing = JSON.parse(raw);
+      localStorage.setItem('zecratary_saved_recipes', JSON.stringify([newRec, ...existing]));
+      setSavedRecipeIds(prev => [...prev, recId]);
+
+      window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+      showToast(t('savedToRecipesToast', 'Saved to your recipe library!'));
+    } catch (_) {
+      showToast(t('couldNotSaveRecipe', 'Could not save recipe.'));
+    }
+  };
+
+  // 5. Add Generated Meal Plan to Weekly Planner
+  const handleScheduleMealPlan = async (plan: MealPlanData) => {
+    try {
+      const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
+      const mealsToSchedule = (plan.meals || []).map((m, idx) => ({
+        id: 'plan_meal_' + Date.now() + '_' + idx,
+        userId: activeAuth?.id || 'usr_admin_1',
+        title: m.title,
+        mealType: m.mealType || 'Dinner',
+        dayLabel: m.dayLabel || `Day ${idx + 1}`,
+        prepMinutes: m.prepMinutes || 15,
+        cookMinutes: m.cookMinutes || 20,
+        servings: m.servings || servings,
+        date: m.dateStr || new Date(Date.now() + idx * 86400000).toISOString().split('T')[0]
+      }));
+
+      try {
+        await fetch('/api/planner', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'import_plan', meals: mealsToSchedule })
+        });
+      } catch (_) {}
+
+      window.dispatchEvent(new Event('zecratary_planner_updated'));
+      showToast(t('mealPlanAddedToast', 'Meal plan added to weekly planner!'));
+    } catch (_) {
+      showToast(t('couldNotSchedulePlan', 'Could not schedule meal plan.'));
+    }
+  };
+
+  // 6. Direct Grocery Synchronization for Recommended Recipe
+  const handleAddIngredientsToGrocery = async (recipe: RecommendedRecipeData) => {
+    try {
+      const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
+      const userKey = getUserKey(activeAuth);
+      const items = (recipe.ingredients || []).map((ing, idx) => ({
+        id: `groc_${Date.now()}_${idx}`,
+        userId: userKey,
+        name: ing,
+        category: 'Pantry & Produce',
+        checked: false,
+        recipeTitle: recipe.title
+      }));
+
+      try {
+        await fetch('/api/grocery', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'add_bulk', items, userId: userKey })
+        });
+      } catch (_) {}
+
+      window.dispatchEvent(new Event('zecratary_grocery_updated'));
+      window.dispatchEvent(new Event('zecratary_shopping_updated'));
+      showToast(t('ingredientsAddedToGroceryToast', 'Ingredients added to your grocery shopping list!'));
+    } catch (_) {
+      showToast(t('couldNotSaveRecipe', 'Could not save recipe.'));
     }
   };
 
@@ -1406,9 +863,11 @@ export default function ChefChatPage() {
 
   return (
     <div 
-      className="max-w-4xl mx-auto flex flex-col h-[calc(100vh-5.5rem)] justify-between space-y-3 pb-2 font-sans relative transition-colors duration-200"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 flex flex-col h-[calc(100vh-5.5rem)] justify-between space-y-3 pb-2 font-sans relative transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
+      <AiQuotaBar />
+
       {toastMessage && (
         <div 
           className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
@@ -1423,15 +882,15 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOP HEADER (CLEANED: TOKEN BOX & STRICT FILTERS REMOVED, CORE CONTROLS PRESERVED) */}
+      {/* TOP HEADER - 100% FLUID BAR */}
       <div 
-        className="space-y-3 border-b pb-3 shrink-0 transition-colors duration-200"
+        className="w-full space-y-3 border-b pb-3 shrink-0 transition-colors duration-200"
         style={{ borderColor: 'var(--color-border)' }}
       >
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap sm:flex-nowrap">
+          <div className="flex items-center gap-3 min-w-0">
             <div 
-              className="w-10 h-10 rounded-2xl flex items-center justify-center border shadow-xs"
+              className="w-10 h-10 rounded-2xl flex items-center justify-center border shadow-xs shrink-0"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-primary)',
@@ -1440,20 +899,20 @@ export default function ChefChatPage() {
             >
               <ChefHat className="h-6 w-6" />
             </div>
-            <div>
-              <h1 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                {t('foodieChatHeading', 'Foodie Chat')}
+            <div className="truncate">
+              <h1 className="text-xl font-black tracking-tight truncate" style={{ color: 'var(--color-text)' }}>
+                {t('foodieChatHeading', 'AI Chef Assistant')}
               </h1>
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              <p className="text-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('foodieChatSubtitle', 'Ask recipes, cooking questions, or launch multi-topic meal plan wizards')}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {isSpeaking && (
               <div 
-                className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-bold animate-pulse shadow-sm"
+                className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-bold animate-pulse shadow-xs"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-primary)',
@@ -1461,41 +920,87 @@ export default function ChefChatPage() {
                 }}
               >
                 <Volume2 className="h-3.5 w-3.5" />
-                <span>Speaking...</span>
+                <span>{t('speaking', 'Speaking...')}</span>
                 <button 
                   type="button" 
                   onClick={stopSpeaking}
                   className="hover:underline text-[10px] ml-1 font-extrabold cursor-pointer"
                 >
-                  [Stop]
+                  [{t('stop', 'Stop')}]
                 </button>
               </div>
             )}
 
-            {/* CHAT HISTORY DRAWER BUTTON */}
-            <button
-              type="button"
-              onClick={() => {
-                setShowHistoryDrawer(true);
-                fetchChatHistory(1, selectedCategoryFilter);
-              }}
-              className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80 flex items-center gap-1.5 text-xs font-bold"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-primary)'
-              }}
-              title="View Chat History & Categories"
-            >
-              <History className="h-4 w-4" />
-              <span className="hidden md:inline">{t('history', 'History')}</span>
-            </button>
+            {pantryIngredientsList.length > 0 && (
+              <div 
+                className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-bold shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-emerald)',
+                  color: 'var(--color-emerald)'
+                }}
+                title={t('activePantryContextTooltip', 'Active In-Stock Pantry Context')}
+              >
+                <Package className="h-3.5 w-3.5" />
+                <span>{(t('pantryInStockBadge', 'Pantry: {count} in-stock')).replace('{count}', String(pantryIngredientsList.length))}</span>
+              </div>
+            )}
 
-            {/* PREFERENCES SLIDERS BUTTON */}
+            {recommendedRecipeUrls.length > 0 && (
+              <div 
+                className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-bold shadow-xs"
+                style={{
+                  backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text-secondary)'
+                }}
+                title={t('curatedSourcesTooltip', 'Curated Recipe Sources')}
+              >
+                <Globe className="h-3.5 w-3.5 text-sky-400" />
+                <span>{(t('primarySourcesBadge', 'Sources: {count} active')).replace('{count}', String(recommendedRecipeUrls.length))}</span>
+              </div>
+            )}
+
+            <div 
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-xs"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            >
+              <Cpu className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+              <span className="font-mono">{activeAiModel}</span>
+            </div>
+
+            {strictDietEnforcement && (
+              <div 
+                className="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-xl border text-[10px] font-black uppercase tracking-wider"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}
+              >
+                <ShieldAlert className="h-3 w-3" />
+                <span>{t('strictFilters', 'Strict Filters')}</span>
+              </div>
+            )}
+
+            <div 
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border shadow-xs"
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+            >
+              <Coins className="h-4 w-4 text-amber-500" />
+              <div className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
+                {tokenBalance} <span className="text-amber-500">{tokenSymbol}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsTokenPurchaseOpen(true)}
+                className="ml-1 text-[10px] font-extrabold px-2 py-0.5 rounded-lg text-white transition hover:opacity-90 cursor-pointer shadow-xs"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                {t('topUp', 'Top Up')}
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={() => setShowPreferences(true)}
-              className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80"
+              className="p-2 rounded-xl border transition cursor-pointer shadow-xs hover:opacity-80"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
@@ -1506,46 +1011,26 @@ export default function ChefChatPage() {
               <SlidersHorizontal className="h-4 w-4" />
             </button>
 
-            {/* NEW CHAT BUTTON */}
             <button
               type="button"
-              onClick={startNewChat}
-              className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80 flex items-center gap-1.5 text-xs font-bold"
+              onClick={resetChat}
+              className="p-2 rounded-xl border transition cursor-pointer shadow-xs hover:opacity-80"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
-                color: 'var(--color-primary)'
+                color: 'var(--color-text-secondary)'
               }}
-              title={t('startNewChat', 'Start New Chat')}
+              title={t('newChat', 'New Chat')}
             >
               <Edit3 className="h-4 w-4" />
-              <span className="hidden sm:inline">{t('newChat', 'New Chat')}</span>
             </button>
           </div>
         </div>
 
-        {/* USER DIETARY PREFERENCES PILLS */}
+        {/* DIETARY PREFERENCES PILLS */}
         <div className="flex flex-wrap items-center gap-2 text-xs pt-1 animate-in fade-in">
-          {recommendedRecipeUrls.length > 0 && (
-            <span 
-              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm transition hover:opacity-90"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-primary)',
-                color: 'var(--color-primary)'
-              }}
-              title={`Primary Recipe Sources: ${recommendedRecipeUrls.join(', ')}`}
-            >
-              <Globe className="h-3.5 w-3.5 shrink-0" style={{ color: 'var(--color-primary)' }} />
-              <span>{t('primarySources', 'Primary Sources:')}</span>
-              <strong className="font-bold font-mono" style={{ color: 'var(--color-text)' }}>
-                {recommendedRecipeUrls.length} {t('urls', 'URLs')}
-              </strong>
-            </span>
-          )}
-
           <span 
-            className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
+            className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
             style={{
               backgroundColor: 'var(--color-inner-dark)',
               borderColor: 'var(--color-emerald)',
@@ -1556,7 +1041,7 @@ export default function ChefChatPage() {
           </span>
 
           <span 
-            className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
+            className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
             style={{
               backgroundColor: 'var(--color-inner-dark)',
               borderColor: 'var(--color-emerald)',
@@ -1569,7 +1054,7 @@ export default function ChefChatPage() {
           {selectedDiets.map((d) => (
             <span 
               key={`diet-${d}`}
-              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
+              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-emerald)',
@@ -1583,7 +1068,7 @@ export default function ChefChatPage() {
           {selectedAllergies.map((a) => (
             <span 
               key={`allergy-${a}`}
-              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
+              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-border)',
@@ -1597,7 +1082,7 @@ export default function ChefChatPage() {
           {ingredientsToAvoid.map((av) => (
             <span 
               key={`avoid-${av}`}
-              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
+              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-border)',
@@ -1611,7 +1096,7 @@ export default function ChefChatPage() {
           {tastesList.map((itemTaste) => (
             <span 
               key={`taste-${itemTaste}`}
-              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-sm"
+              className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-border)',
@@ -1624,10 +1109,10 @@ export default function ChefChatPage() {
         </div>
       </div>
 
-      {/* MAIN CONVERSATION STREAM */}
-      <div className="flex-1 overflow-y-auto space-y-4 pr-1.5 custom-scrollbar">
+      {/* MAIN CONVERSATION STREAM - 100% WIDTH FLUID SCROLLER */}
+      <div className="flex-1 overflow-y-auto space-y-4 pr-1.5 custom-scrollbar w-full">
         {messages.length === 0 ? (
-          <div className="text-center my-auto py-10 space-y-6">
+          <div className="text-center my-auto py-10 space-y-6 max-w-4xl mx-auto">
             <div 
               className="w-16 h-16 rounded-3xl flex items-center justify-center mx-auto border shadow-lg"
               style={{
@@ -1643,11 +1128,11 @@ export default function ChefChatPage() {
                 {t('heyImChef', "Hey, I'm Chef Foodie!")}
               </h2>
               <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('chefSubGreeting', 'Select a questionnaire topic below or speak into the microphone to plan meals')}
+                {t('chefHeroSub', 'Select a questionnaire topic below, try a quick starter prompt, or speak into the microphone')}
               </p>
             </div>
 
-            <div className="flex flex-wrap justify-center gap-2.5 max-w-xl mx-auto">
+            <div className="flex flex-wrap justify-center gap-2.5 max-w-3xl mx-auto">
               <button
                 type="button"
                 onClick={handleStartFullWizard}
@@ -1657,13 +1142,13 @@ export default function ChefChatPage() {
                   borderColor: 'var(--color-primary)'
                 }}
               >
-                <Sparkles className="h-4 w-4" /> {t('startCompleteWizard', 'Start Complete Meal Plan Intake Wizard')}
+                <Sparkles className="h-4 w-4" /> {t('startCompleteIntake', 'Start Complete Meal Plan Intake')}
               </button>
 
               <button
                 type="button"
-                onClick={() => handleSend("What can I do on FoodiePrep?")}
-                className="border text-xs font-bold px-4 py-3 rounded-2xl transition shadow-sm hover:scale-[1.02] cursor-pointer flex items-center gap-2"
+                onClick={() => handleSend(t('systemCapabilitiesChip', '✨ What can I do with Chef Foodie?'))}
+                className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-xs hover:scale-[1.02] cursor-pointer flex items-center gap-2"
                 style={{
                   backgroundColor: 'var(--color-card)',
                   borderColor: 'var(--color-border)',
@@ -1672,15 +1157,33 @@ export default function ChefChatPage() {
                 onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
                 onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
               >
-                <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                <span>✨ {t('whatCanIDo', 'What can I do on this system?')}</span>
+                <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                <span>{t('systemCapabilitiesChip', '✨ What can I do with Chef Foodie?')}</span>
               </button>
+
+              {pantryIngredientsList.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => handleSend(t('pantryRecommendationChip', '🍳 Recommend dinner using my in-stock pantry items'))}
+                  className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-xs hover:scale-[1.02] cursor-pointer flex items-center gap-2"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-emerald)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                >
+                  <Package className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>{t('pantryRecommendationChip', '🍳 Recommend dinner using my in-stock pantry items')}</span>
+                </button>
+              )}
 
               {recommendedRecipeUrls.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => handleSend("Recommend a dish matching my preferences from my primary recipe sources.")}
-                  className="border text-xs font-bold px-4 py-3 rounded-2xl transition shadow-sm hover:scale-[1.02] cursor-pointer flex items-center gap-2"
+                  onClick={() => handleSend(t('primarySourcesPrompt', 'Recommend a signature chef recipe inspired by the primary source URLs configured in admin settings.'))}
+                  className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-xs hover:scale-[1.02] cursor-pointer flex items-center gap-2"
                   style={{
                     backgroundColor: 'var(--color-card)',
                     borderColor: 'var(--color-border)',
@@ -1689,8 +1192,8 @@ export default function ChefChatPage() {
                   onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
                   onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 >
-                  <Globe className="h-4 w-4" />
-                  <span>{t('recFromSources', 'Recommend from Primary Sources')} ({recommendedRecipeUrls.length})</span>
+                  <Globe className="h-3.5 w-3.5 text-sky-400" />
+                  <span>{(t('primarySourcesChip', '🌐 Primary Sources ({count})')).replace('{count}', String(recommendedRecipeUrls.length))}</span>
                 </button>
               )}
 
@@ -1699,7 +1202,7 @@ export default function ChefChatPage() {
                   key={sec.id}
                   type="button"
                   onClick={() => handleStartTopicWizard(sec)}
-                  className="text-xs font-semibold px-3 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
+                  className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-xs hover:scale-[1.02] cursor-pointer flex items-center gap-2"
                   style={{
                     backgroundColor: 'var(--color-card)',
                     borderColor: 'var(--color-border)',
@@ -1710,7 +1213,7 @@ export default function ChefChatPage() {
                 >
                   <Layers className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
                   <span>{sec.topicTitle}</span>
-                  <span className="text-[10px] opacity-75 font-mono">({(sec.questions || []).length} questions)</span>
+                  <span className="text-[10px] opacity-75 font-mono">({(sec.questions || []).length} {t('questionsWord', 'questions')})</span>
                 </button>
               ))}
             </div>
@@ -1721,10 +1224,10 @@ export default function ChefChatPage() {
             const hasAudioActive = isSpeaking && speakingMsgId === m.id;
 
             return (
-              <div key={m.id} className={`flex items-start gap-2.5 ${isUser ? 'justify-end' : 'justify-start'}`}>
+              <div key={m.id} className={`flex items-start gap-2.5 ${isUser ? 'justify-end' : 'justify-start'} w-full`}>
                 {!isUser && (
                   <div 
-                    className="w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-sm"
+                    className="w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-xs"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-primary)',
@@ -1735,10 +1238,10 @@ export default function ChefChatPage() {
                   </div>
                 )}
 
-                <div className={`max-w-xl sm:max-w-2xl space-y-3.5 ${isUser ? '' : 'w-full'}`}>
+                <div className={`space-y-3.5 ${isUser ? 'max-w-xl sm:max-w-2xl' : 'w-full max-w-full'}`}>
                   {m.content && (
                     <div 
-                      className={`p-4 rounded-2xl text-sm leading-relaxed ${isUser ? 'ml-auto max-w-md shadow-md font-medium text-white' : 'border shadow-xs'}`}
+                      className={`p-4 rounded-2xl text-sm leading-relaxed ${isUser ? 'ml-auto max-w-md shadow-md font-medium text-white' : 'border shadow-xs w-full max-w-4xl'}`}
                       style={isUser ? {
                         backgroundColor: 'var(--color-primary)'
                       } : {
@@ -1755,7 +1258,7 @@ export default function ChefChatPage() {
                             onClick={() => speakText(m.content || '', m.id)}
                             className="p-1 rounded-lg transition shrink-0 cursor-pointer hover:opacity-80"
                             style={{ color: hasAudioActive ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
-                            title={hasAudioActive ? "Stop speech" : "Read aloud"}
+                            title={hasAudioActive ? t('stop', 'Stop') : t('listenRecipe', 'Listen')}
                           >
                             {hasAudioActive ? <Square className="h-4 w-4 fill-current" /> : <Volume2 className="h-4 w-4" />}
                           </button>
@@ -1764,426 +1267,286 @@ export default function ChefChatPage() {
                     </div>
                   )}
 
-                  {/* PLATFORM ACTION RECOMMENDATIONS */}
-                  {m.systemRecommendations && m.systemRecommendations.length > 0 && (
-                    <div className="flex flex-wrap gap-2 pt-1 animate-in fade-in">
-                      {m.systemRecommendations.map((rec, rIdx) => (
-                        <button
-                          key={rIdx}
-                          type="button"
-                          onClick={() => router.push(rec.route)}
-                          className="px-3 py-1.5 rounded-xl border text-xs font-bold transition flex items-center gap-1.5 shadow-xs hover:scale-[1.02] cursor-pointer"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: 'var(--color-primary)',
-                            color: 'var(--color-primary)'
-                          }}
-                        >
-                          <Sparkles className="h-3 w-3" />
-                          <span>{rec.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* RECOMMENDATION RECIPE CARD PREVIEW */}
-                  {m.recommendedRecipe && (
+                  {/* MULTI-DAY MEAL PLAN PRESENTATION (100% RESPONSIVE GRID) */}
+                  {m.plan && Array.isArray(m.plan.meals) && m.plan.meals.length > 0 && (
                     <div 
-                      className="border rounded-2xl p-4 space-y-3.5 shadow-sm transition-all duration-200 hover:shadow-md"
+                      className="border rounded-3xl p-5 space-y-4 shadow-md transition-colors duration-200 w-full"
                       style={{
                         backgroundColor: 'var(--color-card)',
                         borderColor: 'var(--color-border)'
                       }}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div 
-                          onClick={() => {
-                            setSelectedRecipeForModal(m.recommendedRecipe);
-                            setShowRecipeDetailsModal(true);
-                          }}
-                          className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer group"
-                        >
-                          <div className="relative shrink-0">
-                            <img
-                              src={m.recommendedRecipe.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'}
-                              alt={m.recommendedRecipe.title}
-                              className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl object-cover border transition group-hover:scale-105"
-                              style={{ borderColor: 'var(--color-border)' }}
-                            />
-                            <span 
-                              className="absolute -top-1.5 -left-1.5 text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md text-white shadow-xs"
-                              style={{ backgroundColor: 'var(--color-primary)' }}
-                            >
-                              Recommended
-                            </span>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
+                            <h3 className="font-extrabold text-base" style={{ color: 'var(--color-text)' }}>
+                              {(m.plan.totalDays === 1 || m.plan.meals.length === 1)
+                                ? t('singleDayPlan', '1-Day Meal Plan')
+                                : (t('daysPlan', '{days}-Day Meal Plan')).replace('{days}', String(m.plan.totalDays || m.plan.meals.length))}
+                            </h3>
                           </div>
-
-                          <div className="space-y-1 min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-black text-sm leading-snug group-hover:underline truncate" style={{ color: 'var(--color-text)' }}>
-                                {m.recommendedRecipe.title}
-                              </h4>
-                              {m.recommendedRecipe.sourceUrl && (
-                                <span 
-                                  className="text-[9px] font-bold px-1.5 py-0.2 rounded border flex items-center gap-0.5 shrink-0"
-                                  style={{
-                                    backgroundColor: 'var(--color-inner-dark)',
-                                    borderColor: 'var(--color-emerald)',
-                                    color: 'var(--color-emerald)'
-                                  }}
-                                >
-                                  <Globe className="h-2.5 w-2.5" /> Source
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-[11px] leading-relaxed line-clamp-2" style={{ color: 'var(--color-text-secondary)' }}>
-                              {m.recommendedRecipe.description}
-                            </p>
-                            <div className="flex flex-wrap items-center gap-2.5 text-[10px] font-bold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                              <span className="flex items-center gap-1">
-                                <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {(m.recommendedRecipe.prepMinutes || 0) + (m.recommendedRecipe.cookMinutes || 0)}m
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <Users className="h-3 w-3" /> {m.recommendedRecipe.servings || servings} serv
-                              </span>
-                              {m.recommendedRecipe.calories && (
-                                <span className="font-mono text-emerald-500">{m.recommendedRecipe.calories} kcal</span>
-                              )}
-                            </div>
+                          <div className="flex items-center gap-3 text-xs opacity-75 mt-0.5">
+                            {m.plan.theme && <span>{t('themeLabel', 'Theme:')} <strong>{m.plan.theme}</strong></span>}
+                            {m.plan.budgetPerServing && <span>{t('budgetLabel', 'Budget:')} <strong>{m.plan.budgetPerServing}</strong></span>}
                           </div>
                         </div>
-                      </div>
-
-                      {/* CARD ACTIONS */}
-                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t text-xs" style={{ borderColor: 'var(--color-border)' }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedRecipeForModal(m.recommendedRecipe);
-                            setShowRecipeDetailsModal(true);
-                          }}
-                          className="px-3 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1 cursor-pointer hover:opacity-80"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text)'
-                          }}
-                        >
-                          <BookOpen className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                          <span>View Full Details</span>
-                        </button>
 
                         <div className="flex items-center gap-2">
-                          {isRecipeSaved(m.recommendedRecipe.title) ? (
-                            <span 
-                              className="px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 shadow-2xs"
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark)',
-                                borderColor: 'var(--color-emerald)',
-                                color: 'var(--color-emerald)'
-                              }}
-                            >
-                              <Check className="h-3.5 w-3.5" /> Saved in Recipes
-                            </span>
-                          ) : (
+                          <div className="flex items-center border rounded-xl p-0.5 shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                             <button
                               type="button"
-                              disabled={savingRecipeTitle === m.recommendedRecipe.title}
-                              onClick={() => handleSaveRecipe(m.recommendedRecipe)}
-                              className="px-3.5 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-90"
-                              style={{
-                                backgroundColor: 'var(--color-card)',
-                                borderColor: 'var(--color-primary)',
-                                color: 'var(--color-primary)'
-                              }}
+                              onClick={() => setResultDisplayMode('card')}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition ${resultDisplayMode === 'card' ? 'bg-[var(--color-primary)] text-white shadow-xs' : 'opacity-60'}`}
                             >
-                              {savingRecipeTitle === m.recommendedRecipe.title ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <Bookmark className="h-3.5 w-3.5" />
-                              )}
-                              <span>Save Recipe</span>
+                              {t('viewModeCard', 'Card')}
                             </button>
-                          )}
-
-                          {isRecipeSaved(m.recommendedRecipe.title) && (
                             <button
                               type="button"
-                              onClick={() => handleOpenPlannerModal(m.recommendedRecipe)}
-                              className="px-3.5 py-1.5 rounded-xl text-white text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90 animate-in fade-in"
-                              style={{ backgroundColor: 'var(--color-primary)' }}
+                              onClick={() => setResultDisplayMode('compact')}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition ${resultDisplayMode === 'compact' ? 'bg-[var(--color-primary)] text-white shadow-xs' : 'opacity-60'}`}
                             >
-                              <CalendarPlus className="h-3.5 w-3.5" />
-                              <span>📅 Suggest Add to Planner</span>
+                              {t('viewModeCompact', 'Compact')}
                             </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* MULTI-DAY PLAN PRESENTATION */}
-                  {m.plan && (
-                    <div 
-                      className="border rounded-3xl p-5 space-y-4 shadow-sm transition-colors duration-200"
-                      style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-border)'
-                      }}
-                    >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-                        <div className="flex items-center gap-2">
-                          <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
-                          <h3 className="font-black text-sm" style={{ color: 'var(--color-text)' }}>
-                            {m.plan.title} ({m.plan.totalDays} {m.plan.totalDays === 1 ? 'Day' : 'Days'})
-                          </h3>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 self-end sm:self-auto">
-                          <span className="text-[10px] font-bold mr-1 hidden sm:inline" style={{ color: 'var(--color-text-secondary)' }}>
-                            {m.plan.budgetPerServing ? `Budget: ${m.plan.budgetPerServing}` : '$5.00/serv'}
-                          </span>
-                          <div className="border p-0.5 rounded-xl flex items-center gap-1" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                            {(['card', 'compact', 'detailed'] as const).map((mode) => (
-                              <button
-                                key={mode}
-                                type="button"
-                                onClick={() => setResultDisplayMode(mode)}
-                                className="px-2 py-0.5 rounded-lg text-[10px] font-bold transition cursor-pointer capitalize"
-                                style={resultDisplayMode === mode ? {
-                                  backgroundColor: 'var(--color-primary)',
-                                  color: '#ffffff'
-                                } : {
-                                  color: 'var(--color-text-secondary)'
-                                }}
-                              >
-                                {mode}
-                              </button>
-                            ))}
+                            <button
+                              type="button"
+                              onClick={() => setResultDisplayMode('detailed')}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition ${resultDisplayMode === 'detailed' ? 'bg-[var(--color-primary)] text-white shadow-xs' : 'opacity-60'}`}
+                            >
+                              {t('viewModeDetailed', 'Detailed')}
+                            </button>
                           </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleScheduleMealPlan(m.plan!)}
+                            className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-90 text-white"
+                            style={{ backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)' }}
+                          >
+                            <CalendarPlus className="h-3.5 w-3.5" />
+                            <span>{t('addToMealPlanner', 'Add to Meal Planner')}</span>
+                          </button>
                         </div>
                       </div>
 
-                      {/* 1. STANDARD CARDS VIEW */}
-                      {resultDisplayMode === 'card' && (
-                        <div className="space-y-3">
-                          {m.plan.meals.map((meal) => (
+                      {resultDisplayMode === 'compact' ? (
+                        <div className="overflow-x-auto w-full">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead>
+                              <tr className="border-b text-[10px] uppercase font-bold opacity-70" style={{ borderColor: 'var(--color-border)' }}>
+                                <th className="py-2.5 px-3">{t('tableColDay', 'Day & Date')}</th>
+                                <th className="py-2.5 px-3">{t('tableColMeal', 'Meal Slot')}</th>
+                                <th className="py-2.5 px-3">{t('tableColDish', 'Recipe / Dish')}</th>
+                                <th className="py-2.5 px-3">{t('tableColTime', 'Time')}</th>
+                                <th className="py-2.5 px-3 text-right">{t('tableColServings', 'Servings')}</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
+                              {m.plan.meals.map((meal, mIdx) => (
+                                <tr key={meal.id || mIdx} className="hover:bg-slate-800/20 transition">
+                                  <td className="py-2.5 px-3 font-bold" style={{ color: 'var(--color-primary)' }}>{meal.dayLabel}</td>
+                                  <td className="py-2.5 px-3 uppercase text-[10px] font-extrabold opacity-75">{meal.mealType}</td>
+                                  <td className="py-2.5 px-3 font-semibold">{meal.title}</td>
+                                  <td className="py-2.5 px-3 text-[11px] opacity-75 font-mono">{(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m</td>
+                                  <td className="py-2.5 px-3 text-right font-bold">{meal.servings || servings}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3.5 w-full">
+                          {m.plan.meals.map((meal, mIdx) => (
                             <div 
-                              key={meal.id}
-                              onClick={() => {
-                                setSelectedRecipeForModal({
-                                  title: meal.title,
-                                  description: meal.description,
-                                  prepMinutes: meal.prepMinutes || 15,
-                                  cookMinutes: meal.cookMinutes || 20,
-                                  servings: meal.servings || servings,
-                                  calories: meal.calories || 480,
-                                  mealType: meal.mealType,
-                                  ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Fresh produce & proteins', 'Aromatics & seasonings', 'Cold-pressed olive oil'],
-                                  instructions: ['Prepare and rinse all ingredients cleanly.', 'Sauté aromatics over medium heat until fragrant.', 'Cook protein and vegetables thoroughly.', 'Garnish with fresh herbs and serve warm.'],
-                                  chefTip: meal.isBatchCook ? 'Double the quantity to save time for subsequent days.' : 'Serve immediately while hot for optimal flavor infusion.',
-                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
-                                });
-                                setShowRecipeDetailsModal(true);
-                              }}
-                              className="border rounded-2xl p-3.5 space-y-2.5 transition cursor-pointer hover:scale-[1.01] shadow-xs"
+                              key={meal.id || mIdx}
+                              className="p-4 rounded-2xl border space-y-2 relative flex flex-col justify-between shadow-xs transition"
                               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
                             >
-                              <div className="flex justify-between items-center text-xs font-bold">
-                                <span style={{ color: 'var(--color-primary)' }}>{meal.dayLabel} ({meal.dateStr})</span>
-                                <div className="flex items-center gap-1.5">
-                                  {meal.isBatchCook && (
-                                    <span 
-                                      className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase border"
-                                      style={{
-                                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
-                                        borderColor: 'var(--color-emerald)',
-                                        color: 'var(--color-emerald)'
-                                      }}
-                                    >
-                                      Batch Cook
-                                    </span>
-                                  )}
-                                  <span 
-                                    className="uppercase text-[9px] font-extrabold px-1.5 py-0.5 rounded border"
-                                    style={{
-                                      backgroundColor: 'var(--color-card)',
-                                      borderColor: 'var(--color-border)',
-                                      color: 'var(--color-text-secondary)'
-                                    }}
-                                  >
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-400">
+                                    {meal.dayLabel}
+                                  </span>
+                                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full border opacity-75" style={{ borderColor: 'var(--color-border)' }}>
                                     {meal.mealType}
                                   </span>
                                 </div>
+                                <h4 className="font-bold text-xs leading-snug line-clamp-2" style={{ color: 'var(--color-text)' }}>
+                                  {meal.title}
+                                </h4>
+                                {meal.description && (
+                                  <p className="text-[11px] leading-relaxed opacity-75 line-clamp-2">
+                                    {meal.description}
+                                  </p>
+                                )}
+
+                                {resultDisplayMode === 'detailed' && Array.isArray(meal.ingredients) && meal.ingredients.length > 0 && (
+                                  <div className="pt-1.5 space-y-1">
+                                    <span className="text-[9px] font-bold uppercase tracking-wider opacity-60 block">{t('keyIngredients', 'Key Ingredients:')}</span>
+                                    <div className="flex flex-wrap gap-1">
+                                      {meal.ingredients.slice(0, 4).map((ing, iIdx) => (
+                                        <span key={iIdx} className="text-[9px] px-1.5 py-0.5 rounded border opacity-75" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
+                                          • {ing}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
 
-                              <div className="flex items-start gap-3">
-                                <img 
-                                  src={meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'} 
-                                  alt={meal.title} 
-                                  className="w-16 h-16 rounded-xl object-cover border shrink-0" 
-                                  style={{ borderColor: 'var(--color-border)' }} 
-                                />
-                                <div className="space-y-1 flex-1 min-w-0">
-                                  <h4 className="font-bold text-xs truncate" style={{ color: 'var(--color-text)' }}>{meal.title}</h4>
-                                  <p className="text-[11px] line-clamp-2 leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{meal.description}</p>
-                                  <div className="flex items-center gap-3 text-[10px] font-semibold pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                                    <span className="flex items-center gap-1">
-                                      <Clock className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m
-                                    </span>
-                                    <span className="flex items-center gap-1">
-                                      <Users className="h-3 w-3" /> {meal.servings || servings} serv
-                                    </span>
-                                    {meal.calories && (
-                                      <span className="font-mono" style={{ color: 'var(--color-primary)' }}>{meal.calories} kcal</span>
-                                    )}
-                                  </div>
-                                </div>
+                              <div className="pt-2 border-t flex items-center justify-between text-[10px] font-semibold opacity-75" style={{ borderColor: 'var(--color-border)' }}>
+                                <span className="flex items-center gap-1">
+                                  <Clock className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
+                                  {(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m
+                                </span>
+                                {meal.isBatchCook && (
+                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                                    {t('batchCookingBadge', 'Batch Cook')}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           ))}
                         </div>
                       )}
+                    </div>
+                  )}
 
-                      {/* 2. COMPACT TABLE VIEW */}
-                      {resultDisplayMode === 'compact' && (
-                        <div className="border rounded-2xl overflow-hidden" style={{ borderColor: 'var(--color-border)' }}>
-                          <div 
-                            className="grid grid-cols-12 gap-2 p-2.5 font-extrabold text-[10px] uppercase border-b"
+                  {/* FINAL RECOMMENDED RECIPE SHOWCASE CARD */}
+                  {m.recommendedRecipe && (
+                    <div 
+                      className="border rounded-3xl p-5 space-y-4 shadow-md transition-colors duration-200 w-full"
+                      style={{
+                        backgroundColor: 'var(--color-card)',
+                        borderColor: 'var(--color-primary)'
+                      }}
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                        <div className="flex items-center gap-2">
+                          <Award className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
+                          <div>
+                            <span className="text-[10px] font-black uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
+                              {t('finalRecommendedRecipe', 'Final Recommended Recipe')}
+                            </span>
+                            <h3 className="font-extrabold text-base" style={{ color: 'var(--color-text)' }}>
+                              {m.recommendedRecipe.title}
+                            </h3>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => handleAddIngredientsToGrocery(m.recommendedRecipe!)}
+                            className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-80"
                             style={{
                               backgroundColor: 'var(--color-inner-dark)',
                               borderColor: 'var(--color-border)',
-                              color: 'var(--color-text-secondary)'
+                              color: 'var(--color-text)'
                             }}
                           >
-                            <span className="col-span-3">Day / Schedule</span>
-                            <span className="col-span-2">Meal Type</span>
-                            <span className="col-span-5">Recipe Title</span>
-                            <span className="col-span-2 text-right">Time & Cals</span>
-                          </div>
+                            <ShoppingCart className="h-3.5 w-3.5 text-sky-400" />
+                            <span>{t('addIngredientsToGrocery', '+ Add to Grocery List')}</span>
+                          </button>
 
-                          {m.plan.meals.map((meal, rIdx) => (
-                            <div 
-                              key={meal.id || rIdx}
-                              onClick={() => {
-                                setSelectedRecipeForModal({
-                                  title: meal.title,
-                                  description: meal.description,
-                                  prepMinutes: meal.prepMinutes || 15,
-                                  cookMinutes: meal.cookMinutes || 20,
-                                  servings: meal.servings || servings,
-                                  calories: meal.calories || 480,
-                                  mealType: meal.mealType,
-                                  ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Fresh produce & proteins', 'Seasonings'],
-                                  instructions: ['Follow standard chef cooking guidelines for this dish.'],
-                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
-                                });
-                                setShowRecipeDetailsModal(true);
-                              }}
-                              className="grid grid-cols-12 gap-2 p-2.5 text-xs items-center border-b last:border-none transition cursor-pointer hover:opacity-80"
-                              style={{
-                                backgroundColor: rIdx % 2 === 0 ? 'var(--color-card)' : 'var(--color-inner-dark)',
-                                borderColor: 'var(--color-border)'
-                              }}
-                            >
-                              <span className="col-span-3 font-bold truncate" style={{ color: 'var(--color-primary)' }}>
-                                {meal.dayLabel}
-                              </span>
-                              <span className="col-span-2">
-                                <span 
-                                  className="text-[9px] px-1.5 py-0.5 rounded font-bold uppercase border"
-                                  style={{
-                                    backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-border)',
-                                    color: 'var(--color-text-secondary)'
-                                  }}
-                                >
-                                  {meal.mealType}
-                                </span>
-                              </span>
-                              <span className="col-span-5 font-semibold truncate" style={{ color: 'var(--color-text)' }}>
-                                {meal.title}
-                              </span>
-                              <span className="col-span-2 text-right font-mono text-[11px]" style={{ color: 'var(--color-emerald)' }}>
-                                {(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m
-                              </span>
-                            </div>
-                          ))}
+                          <button
+                            type="button"
+                            onClick={() => handleSaveRecipeToBook(m.recommendedRecipe)}
+                            className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-80"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-emerald)',
+                              color: 'var(--color-emerald)'
+                            }}
+                          >
+                            <Bookmark className="h-3.5 w-3.5" />
+                            <span>{t('saveRecipe', 'Save Recipe')}</span>
+                          </button>
                         </div>
-                      )}
+                      </div>
 
-                      {/* 3. DETAILED MASTER VIEW */}
-                      {resultDisplayMode === 'detailed' && (
-                        <div className="space-y-3">
-                          {m.plan.meals.map((meal) => (
-                            <div 
-                              key={meal.id}
-                              onClick={() => {
-                                setSelectedRecipeForModal({
-                                  title: meal.title,
-                                  description: meal.description,
-                                  prepMinutes: meal.prepMinutes || 15,
-                                  cookMinutes: meal.cookMinutes || 20,
-                                  servings: meal.servings || servings,
-                                  calories: meal.calories || 480,
-                                  mealType: meal.mealType,
-                                  ingredients: Array.isArray(meal.ingredients) && meal.ingredients.length > 0 ? meal.ingredients : ['Quality produce', 'Seasonings'],
-                                  instructions: ['Follow standard chef cooking guidelines for this dish.'],
-                                  image: meal.image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=400&q=80'
-                                });
-                                setShowRecipeDetailsModal(true);
-                              }}
-                              className="border rounded-2xl p-4 space-y-3 transition cursor-pointer hover:scale-[1.01] shadow-xs"
-                              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                            >
-                              <div className="flex justify-between items-center text-xs font-bold border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-                                <div className="flex items-center gap-2">
-                                  <span style={{ color: 'var(--color-primary)' }}>{meal.dayLabel} ({meal.dateStr})</span>
-                                  <span 
-                                    className="text-[9px] uppercase font-extrabold px-1.5 py-0.5 rounded border"
-                                    style={{
-                                      backgroundColor: 'var(--color-card)',
-                                      borderColor: 'var(--color-emerald)',
-                                      color: 'var(--color-emerald)'
-                                    }}
-                                  >
-                                    {meal.mealType}
-                                  </span>
-                                </div>
-                                <span className="text-[11px] font-mono font-bold" style={{ color: 'var(--color-text-secondary)' }}>
-                                  {(meal.prepMinutes || 15) + (meal.cookMinutes || 20)}m • {meal.servings || servings} serv
+                      <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                        {m.recommendedRecipe.description}
+                      </p>
+
+                      <div className="flex flex-wrap items-center gap-4 text-xs font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
+                        <span className="flex items-center gap-1">
+                          <Clock className="h-3.5 w-3.5 text-emerald-400" /> {t('prep', 'Prep:')} {m.recommendedRecipe.prepMinutes || 15}m
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Flame className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} /> {t('cook', 'Cook:')} {m.recommendedRecipe.cookMinutes || 20}m
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Users className="h-3.5 w-3.5" /> {t('serves', 'Serves:')} {m.recommendedRecipe.servings || servings}
+                        </span>
+
+                        {m.recommendedRecipe.sourceUrl && (
+                          <a
+                            href={m.recommendedRecipe.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-sky-400 hover:underline ml-auto"
+                          >
+                            <Globe className="h-3.5 w-3.5" />
+                            <span>{t('viewSourceRecipe', 'View Source Recipe ↗')}</span>
+                          </a>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                        <div className="space-y-2">
+                          <h4 className="font-bold text-xs uppercase tracking-wider flex items-center justify-between" style={{ color: 'var(--color-primary)' }}>
+                            <span>{(t('ingredientsCount', 'Ingredients ({count})')).replace('{count}', String(m.recommendedRecipe.ingredients?.length || 0))}</span>
+                          </h4>
+                          <ul className="space-y-1 text-xs">
+                            {(m.recommendedRecipe.ingredients || []).map((ing: string, i: number) => {
+                              const inPantry = pantryIngredientsList.some(p => ing.toLowerCase().includes(p.toLowerCase()));
+                              return (
+                                <li key={i} className="flex items-center justify-between p-1.5 rounded-lg border text-[11px]" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
+                                  <span style={{ color: 'var(--color-text)' }}>• {ing}</span>
+                                  {inPantry && (
+                                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                      {t('pantryBadge', 'Pantry ✓')}
+                                    </span>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+
+                        <div className="space-y-2">
+                          <h4 className="font-bold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+                            {t('stepDirections', 'Step-by-Step Directions')}
+                          </h4>
+                          <ol className="space-y-1.5 text-xs">
+                            {(m.recommendedRecipe.instructions || []).map((step: string, sIdx: number) => (
+                              <li key={sIdx} className="flex items-start gap-2 text-[11px] leading-snug">
+                                <span className="font-extrabold text-[10px] w-4 h-4 rounded-full flex items-center justify-center shrink-0 border mt-0.5" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-primary)', color: 'var(--color-primary)' }}>
+                                  {sIdx + 1}
                                 </span>
-                              </div>
+                                <span style={{ color: 'var(--color-text-secondary)' }}>{step}</span>
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      </div>
 
-                              <div className="space-y-1">
-                                <h4 className="font-extrabold text-xs" style={{ color: 'var(--color-text)' }}>{meal.title}</h4>
-                                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>{meal.description}</p>
-                              </div>
-
-                              {Array.isArray(meal.ingredients) && meal.ingredients.length > 0 && (
-                                <div className="space-y-1.5 pt-1">
-                                  <span className="text-[10px] font-extrabold uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
-                                    Ingredients Breakdown:
-                                  </span>
-                                  <div className="flex flex-wrap gap-1.5">
-                                    {meal.ingredients.map((ing, iIdx) => (
-                                      <span 
-                                        key={iIdx}
-                                        className="text-[10px] font-medium px-2 py-0.5 rounded-lg border shadow-2xs"
-                                        style={{
-                                          backgroundColor: 'var(--color-card)',
-                                          borderColor: 'var(--color-border)',
-                                          color: 'var(--color-text)'
-                                        }}
-                                      >
-                                        • {ing}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          ))}
+                      {m.recommendedRecipe.chefTip && (
+                        <div 
+                          className="p-3 rounded-2xl border flex items-start gap-2.5 text-xs"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)'
+                          }}
+                        >
+                          <Sparkles className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-primary)' }} />
+                          <div className="space-y-0.5">
+                            <strong className="block text-[11px]" style={{ color: 'var(--color-primary)' }}>{t('chefProTip', 'Chef Foodie Pro Tip:')}</strong>
+                            <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                              {m.recommendedRecipe.chefTip}
+                            </p>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -2192,7 +1555,7 @@ export default function ChefChatPage() {
 
                 {isUser && (
                   <div 
-                    className="w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-sm"
+                    className="w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-xs"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -2209,7 +1572,7 @@ export default function ChefChatPage() {
 
         {loading && (
           <div 
-            className="flex items-center gap-3 p-3.5 border rounded-2xl max-w-xs text-xs shadow-sm"
+            className="flex items-center gap-3 p-3.5 border rounded-2xl max-w-xs text-xs shadow-xs"
             style={{
               backgroundColor: 'var(--color-card)',
               borderColor: 'var(--color-border)',
@@ -2223,10 +1586,10 @@ export default function ChefChatPage() {
         <div ref={chatEndRef} />
       </div>
 
-      {/* DYNAMIC CONTEXTUAL PRESET ANSWERS */}
+      {/* PRESET ANSWERS */}
       {wizardStep !== null && currentPresetOptions.length > 0 && (
         <div 
-          className="p-3.5 rounded-2xl border space-y-2.5 animate-in fade-in transition-colors duration-200"
+          className="p-3 rounded-2xl border space-y-2 animate-in fade-in transition-colors duration-200 w-full"
           style={{
             backgroundColor: 'var(--color-card)',
             borderColor: 'var(--color-border)'
@@ -2234,15 +1597,15 @@ export default function ChefChatPage() {
         >
           <div className="flex items-center justify-between text-[11px] font-bold">
             <span className="flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
-              <Sparkles className="h-3.5 w-3.5" /> Preset Answers (Step {wizardStep + 1} of {wizardQuestionsList.length}):
+              <Sparkles className="h-3.5 w-3.5" /> {(t('presetAnswersTitle', 'Preset Answers (Step {step} of {total}):')).replace('{step}', String(wizardStep + 1)).replace('{total}', String(wizardQuestionsList.length))}
             </span>
             <button
               type="button"
-              onClick={() => { updateWizardStep(null); showToast("Exited wizard"); }}
+              onClick={() => { updateWizardStep(null); showToast(t('exitedWizardToast', 'Exited wizard questionnaire')); }}
               className="text-[10px] hover:underline cursor-pointer"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              Cancel Wizard
+              {t('cancelWizard', 'Cancel Wizard')}
             </button>
           </div>
 
@@ -2252,7 +1615,7 @@ export default function ChefChatPage() {
                 key={oIdx}
                 type="button"
                 onClick={() => handleSend(opt)}
-                className="text-xs font-semibold px-3.5 py-2 rounded-xl border transition shadow-xs cursor-pointer hover:scale-[1.02] active:scale-95"
+                className="text-xs font-semibold px-3 py-1.5 rounded-xl border transition shadow-xs cursor-pointer hover:scale-[1.02]"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -2270,28 +1633,16 @@ export default function ChefChatPage() {
 
       {/* TOPIC LAUNCHER CHIPS */}
       {wizardStep === null && activeQuestionnaireSections.length > 0 && (
-        <div className="flex items-center gap-2 overflow-x-auto py-1 px-1 custom-scrollbar shrink-0">
+        <div className="flex items-center gap-2 overflow-x-auto py-1 px-1 custom-scrollbar shrink-0 w-full">
           <span className="text-[10px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
-            <Sparkles className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> Questionnaires:
+            <Sparkles className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> {t('questionnaires', 'Questionnaires:')}
           </span>
-          <button
-            type="button"
-            onClick={handleStartFullWizard}
-            className="text-xs font-bold px-3.5 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02] text-white"
-            style={{
-              backgroundColor: 'var(--color-primary)',
-              borderColor: 'var(--color-primary)'
-            }}
-          >
-            <Sparkles className="h-3.5 w-3.5" />
-            <span>Complete Intake Wizard</span>
-          </button>
           {activeQuestionnaireSections.map((sec) => (
             <button
               key={`chip-${sec.id}`}
               type="button"
               onClick={() => handleStartTopicWizard(sec)}
-              className="text-xs font-semibold px-3 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:scale-[1.02]"
+              className="text-xs font-semibold px-3 py-1.5 rounded-full border shrink-0 transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:scale-[1.02]"
               style={{
                 backgroundColor: 'var(--color-card)',
                 borderColor: 'var(--color-border)',
@@ -2307,9 +1658,9 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* PROMPT INPUT BAR (DYNAMIC TOKEN EMOJI SYNCHRONIZED WITH /token-setting) */}
+      {/* PROMPT INPUT BAR - 100% WIDTH */}
       <div 
-        className="border rounded-2xl p-1.5 flex items-center gap-2 shrink-0 shadow-xl transition-colors duration-200"
+        className="w-full border rounded-2xl p-1.5 flex items-center gap-2 shrink-0 shadow-xl transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
           borderColor: 'var(--color-border)'
@@ -2325,7 +1676,7 @@ export default function ChefChatPage() {
               borderColor: isListening ? 'var(--color-primary)' : 'var(--color-border)',
               color: isListening ? '#ffffff' : 'var(--color-text-secondary)'
             }}
-            title={isListening ? t('listeningTitle', 'Listening... click to stop') : t('micTitle', 'Speak via microphone')}
+            title={isListening ? t('listeningToVoice', 'Listening...') : t('listenRecipe', 'Speak')}
           >
             {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
           </button>
@@ -2333,10 +1684,13 @@ export default function ChefChatPage() {
 
         <input
           type="text"
+          autoComplete="off"
+          data-lpignore="true"
+          data-form-type="other"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder={isListening ? t('listeningPromptPlaceholder', 'Listening to your voice...') : `${t('askPromptPlaceholder', 'Ask recipes, cooking tips, or meal plan requests...')} (${isTokenEnabled && chefCost > 0 ? `${chefCost} ${tokenSymbol}` : t('freeBadge', 'Free')})`}
+          placeholder={isListening ? t('listeningToVoice', 'Listening to your voice...') : `${t('askPromptPlaceholder', 'Ask recipes, cooking tips, or meal plan requests...')} (${chefCost} ${tokenSymbol})`}
           className="bg-transparent border-none text-sm px-2 flex-1 outline-none font-normal"
           style={{ color: 'var(--color-text)' }}
         />
@@ -2349,9 +1703,8 @@ export default function ChefChatPage() {
               borderColor: 'var(--color-border)',
               color: 'var(--color-text-secondary)'
             }}
-            title={isTokenEnabled && chefCost > 0 ? `${t('promptCostTooltip', 'Each prompt costs')} ${chefCost} ${tokenName}` : t('freeBypassTooltip', 'Bypass token consumption')}
           >
-            {isTokenEnabled && chefCost > 0 ? `${chefCost} ${tokenSymbol}` : t('freeBadge', 'Free')}
+            {chefCost} {tokenSymbol}
           </span>
 
           <button
@@ -2366,293 +1719,7 @@ export default function ChefChatPage() {
         </div>
       </div>
 
-      {/* CHAT HISTORY & CATEGORIES SIDE DRAWER (POSTGRESQL BACKED) */}
-      {showHistoryDrawer && (
-        <div 
-          onClick={() => setShowHistoryDrawer(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-end cursor-pointer animate-in fade-in"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md h-full flex flex-col justify-between border-l p-5 space-y-4 shadow-2xl relative cursor-default animate-in slide-in-from-right duration-200"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <div className="space-y-4 flex-1 flex flex-col overflow-hidden">
-              <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-                <div className="flex items-center gap-2">
-                  <History className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
-                  <div>
-                    <h2 className="text-base font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                      Chat History ({historyTotalCount})
-                    </h2>
-                    <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                      Up to 10 chats per page • Filtered by category
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={startNewChat}
-                    className="px-2.5 py-1 rounded-xl text-white text-[11px] font-extrabold flex items-center gap-1 transition cursor-pointer shadow-sm hover:opacity-90"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                    title="New Chat"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> New
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowHistoryDrawer(false)}
-                    className="p-1.5 rounded-xl border hover:opacity-80 transition cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-
-              {/* CATEGORIES SECTION */}
-              <div className="space-y-2.5 pt-1">
-                <div className="flex items-center justify-between text-xs font-bold">
-                  <span className="flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
-                    <Folder className="h-3.5 w-3.5" /> Chat Categories:
-                  </span>
-                </div>
-
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="New category name (e.g. Keto Prep, Dinners)..."
-                    value={newCategoryName}
-                    onChange={(e) => setNewCategoryName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleCreateCategory();
-                      }
-                    }}
-                    className="flex-1 border rounded-xl px-3 py-1.5 text-xs outline-none"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-text)'
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleCreateCategory()}
-                    disabled={!newCategoryName.trim()}
-                    className="px-3 py-1.5 text-white font-bold text-xs rounded-xl transition cursor-pointer disabled:opacity-40 flex items-center gap-1 shadow-xs hover:opacity-90"
-                    style={{ backgroundColor: 'var(--color-emerald)' }}
-                  >
-                    <Plus className="h-3.5 w-3.5" /> Add
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedCategoryFilter('all');
-                      fetchChatHistory(1, 'all');
-                    }}
-                    className="px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer shrink-0 shadow-xs"
-                    style={{
-                      backgroundColor: selectedCategoryFilter === 'all' ? 'var(--color-primary)' : 'var(--color-inner-dark)',
-                      borderColor: selectedCategoryFilter === 'all' ? 'var(--color-primary)' : 'var(--color-border)',
-                      color: selectedCategoryFilter === 'all' ? '#ffffff' : 'var(--color-text-secondary)'
-                    }}
-                  >
-                    All Chats
-                  </button>
-
-                  {historyCategories.map((cat) => (
-                    <div
-                      key={cat.id}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border transition cursor-pointer shrink-0 shadow-xs group"
-                      style={{
-                        backgroundColor: selectedCategoryFilter === cat.id ? 'var(--color-primary)' : 'var(--color-inner-dark)',
-                        borderColor: selectedCategoryFilter === cat.id ? 'var(--color-primary)' : 'var(--color-border)',
-                        color: selectedCategoryFilter === cat.id ? '#ffffff' : 'var(--color-text-secondary)'
-                      }}
-                      onClick={() => {
-                        setSelectedCategoryFilter(cat.id);
-                        fetchChatHistory(1, cat.id);
-                      }}
-                    >
-                      <span>{cat.name}</span>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteCategory(cat.id, cat.name);
-                        }}
-                        className="opacity-70 hover:opacity-100 hover:text-red-400 ml-1 cursor-pointer"
-                        title={`Delete category ${cat.name}`}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* SESSIONS LIST */}
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                {loadingHistory ? (
-                  <div className="py-12 text-center text-xs flex items-center justify-center gap-2" style={{ color: 'var(--color-text-secondary)' }}>
-                    <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} /> Loading chat sessions...
-                  </div>
-                ) : historySessions.length === 0 ? (
-                  <div className="py-12 text-center text-xs space-y-2" style={{ color: 'var(--color-text-secondary)' }}>
-                    <MessageSquare className="h-8 w-8 mx-auto opacity-30" />
-                    <p>No chat history found under this category.</p>
-                  </div>
-                ) : (
-                  historySessions.map((sess) => {
-                    const isCurrentActive = sess.id === currentSessionId;
-                    const dateFormatted = new Date(sess.updated_at).toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    });
-
-                    return (
-                      <div
-                        key={sess.id}
-                        onClick={() => handleSelectSession(sess)}
-                        className="p-3 rounded-2xl border transition cursor-pointer flex items-center justify-between gap-3 shadow-xs hover:scale-[1.01]"
-                        style={{
-                          backgroundColor: isCurrentActive ? 'var(--color-inner-dark)' : 'var(--color-card)',
-                          borderColor: isCurrentActive ? 'var(--color-primary)' : 'var(--color-border)'
-                        }}
-                      >
-                        <div className="space-y-1 min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            {sess.category_name ? (
-                              <span 
-                                className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded border flex items-center gap-1"
-                                style={{
-                                  backgroundColor: 'var(--color-card)',
-                                  borderColor: 'var(--color-border)',
-                                  color: 'var(--color-emerald)'
-                                }}
-                              >
-                                <Tag className="h-2.5 w-2.5" /> {sess.category_name}
-                              </span>
-                            ) : null}
-                            <span className="text-[10px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
-                              {dateFormatted}
-                            </span>
-                          </div>
-
-                          <h4 
-                            className="font-bold text-xs truncate leading-snug"
-                            style={{ color: isCurrentActive ? 'var(--color-primary)' : 'var(--color-text)' }}
-                          >
-                            {sess.title}
-                          </h4>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                          <select
-                            value={sess.category_id || 'none'}
-                            onChange={(e) => handleAssignCategory(sess.id, e.target.value)}
-                            className="text-[10px] border rounded-lg px-2 py-1 outline-none font-medium appearance-none cursor-pointer"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)',
-                              color: 'var(--color-text)'
-                            }}
-                            title="Assign to Category"
-                          >
-                            <option value="none">No Category</option>
-                            {historyCategories.map(c => (
-                              <option key={c.id} value={c.id}>{c.name}</option>
-                            ))}
-                          </select>
-
-                          <button
-                            type="button"
-                            onClick={(e) => handleDeleteSession(sess.id, e)}
-                            className="p-1.5 rounded-lg border text-red-500 hover:bg-red-500/10 transition cursor-pointer"
-                            style={{
-                              backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)'
-                            }}
-                            title="Delete this chat"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              {/* PAGINATION */}
-              {historyTotalPages > 1 && (
-                <div 
-                  className="pt-3 border-t flex items-center justify-between text-xs font-bold"
-                  style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
-                >
-                  <span>Page {historyPage} of {historyTotalPages}</span>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      disabled={historyPage <= 1}
-                      onClick={() => fetchChatHistory(historyPage - 1, selectedCategoryFilter)}
-                      className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer shadow-xs"
-                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </button>
-
-                    {Array.from({ length: historyTotalPages }, (_, i) => i + 1).map((num) => (
-                      <button
-                        key={num}
-                        type="button"
-                        onClick={() => fetchChatHistory(num, selectedCategoryFilter)}
-                        className="w-7 h-7 rounded-lg text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-xs"
-                        style={historyPage === num ? {
-                          backgroundColor: 'var(--color-primary)',
-                          borderColor: 'var(--color-primary)',
-                          color: '#ffffff'
-                        } : {
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text)'
-                        }}
-                      >
-                        {num}
-                      </button>
-                    ))}
-
-                    <button
-                      type="button"
-                      disabled={historyPage >= historyTotalPages}
-                      onClick={() => fetchChatHistory(historyPage + 1, selectedCategoryFilter)}
-                      className="p-1.5 rounded-lg border disabled:opacity-30 cursor-pointer shadow-xs"
-                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* RECIPE PREFERENCES MODAL */}
+      {/* ACCESSIBLE DIETARY PREFERENCES MODAL */}
       {showPreferences && (
         <div 
           onClick={() => setShowPreferences(false)}
@@ -2669,10 +1736,16 @@ export default function ChefChatPage() {
           >
             <div className="flex justify-between items-start">
               <div>
-                <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+                <h2 
+                  className="text-xl font-black tracking-tight"
+                  style={{ color: 'var(--color-primary)' }}
+                >
                   {t('recipePreferencesTitle', 'Recipe Preferences')}
                 </h2>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
+                <p 
+                  className="text-xs mt-0.5"
+                  style={{ color: 'var(--color-text-secondary)' }}
+                >
                   {t('recipePreferencesSub', 'Personalise your cooking experience')}
                 </p>
               </div>
@@ -2680,7 +1753,7 @@ export default function ChefChatPage() {
               <button
                 type="button"
                 onClick={() => setShowPreferences(false)}
-                className="p-2 rounded-xl border transition cursor-pointer shadow-sm hover:opacity-80"
+                className="p-2 rounded-xl border transition cursor-pointer shadow-xs hover:opacity-80"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -2700,7 +1773,7 @@ export default function ChefChatPage() {
                   <button
                     type="button"
                     onClick={() => setServings(Math.max(1, servings - 1))}
-                    className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-sm hover:opacity-80"
+                    className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-xs hover:opacity-80"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -2715,7 +1788,7 @@ export default function ChefChatPage() {
                   <button
                     type="button"
                     onClick={() => setServings(servings + 1)}
-                    className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-sm hover:opacity-80"
+                    className="w-8 h-8 rounded-full border flex items-center justify-center font-bold text-sm transition cursor-pointer shadow-xs hover:opacity-80"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -2735,7 +1808,7 @@ export default function ChefChatPage() {
                   <select
                     value={country}
                     onChange={(e) => setCountry(e.target.value)}
-                    className="w-full border rounded-xl px-4 py-2.5 text-xs outline-none cursor-pointer appearance-none shadow-sm font-medium"
+                    className="w-full border rounded-xl px-4 py-2.5 text-xs outline-none cursor-pointer appearance-none shadow-xs font-medium"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -2762,7 +1835,7 @@ export default function ChefChatPage() {
                         key={item}
                         type="button"
                         onClick={() => handleToggleDiet(item)}
-                        className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-sm"
+                        className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-xs"
                         style={isSelected ? {
                           backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-primary)',
@@ -2792,7 +1865,7 @@ export default function ChefChatPage() {
                         key={item}
                         type="button"
                         onClick={() => handleToggleAllergy(item)}
-                        className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-sm"
+                        className="px-4 py-1.5 rounded-full font-bold text-xs border transition cursor-pointer shadow-xs"
                         style={isSelected ? {
                           backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-primary)',
@@ -2814,9 +1887,17 @@ export default function ChefChatPage() {
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('ingredientsToAvoidTitle', 'Ingredients to Avoid')}
                 </label>
-                <div className="flex gap-2">
+                <div 
+                  role="region"
+                  data-lpignore="true"
+                  className="flex gap-2"
+                >
                   <input
                     type="text"
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
                     placeholder={t('typeIngredientPlaceholder', 'Type an ingredient...')}
                     value={newAvoidInput}
                     onChange={(e) => setNewAvoidInput(e.target.value)}
@@ -2826,7 +1907,7 @@ export default function ChefChatPage() {
                         handleAddAvoid();
                       }
                     }}
-                    className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-sm"
+                    className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-xs"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -2835,7 +1916,7 @@ export default function ChefChatPage() {
                   />
                   <button
                     type="button"
-                    onClick={() => handleAddAvoid()}
+                    onClick={handleAddAvoid}
                     className="px-3.5 py-2.5 text-white rounded-xl font-bold flex items-center justify-center transition cursor-pointer shadow-md hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >
@@ -2858,7 +1939,7 @@ export default function ChefChatPage() {
                     ingredientsToAvoid.map((item) => (
                       <span 
                         key={item}
-                        className="px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border shadow-sm"
+                        className="px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border shadow-xs"
                         style={{
                           backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-emerald)',
@@ -2881,12 +1962,24 @@ export default function ChefChatPage() {
 
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  {t('tastesTitle', 'Tastes')}
+                  {t('tastesTitle', 'Tastes & Cooking Styles')}
                 </label>
-                <div className="flex gap-2">
+                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('tastesDesc', "Anything else about how you like to eat. We'll factor these into your recipes.")}
+                </p>
+
+                <div 
+                  role="region"
+                  data-lpignore="true"
+                  className="flex gap-2"
+                >
                   <input
                     type="text"
-                    placeholder={t('tastesPlaceholder', 'e.g. prefers larger portions, loves umami...')}
+                    autoComplete="off"
+                    data-lpignore="true"
+                    data-form-type="other"
+                    spellCheck="false"
+                    placeholder={t('tastesPlaceholder', 'e.g. prefers larger portions, loves umami, extra garlic...')}
                     value={newTasteInput}
                     onChange={(e) => setNewTasteInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -2895,7 +1988,7 @@ export default function ChefChatPage() {
                         handleAddTaste();
                       }
                     }}
-                    className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-sm"
+                    className="flex-1 border rounded-xl px-3.5 py-2.5 text-xs outline-none shadow-xs"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
@@ -2904,7 +1997,7 @@ export default function ChefChatPage() {
                   />
                   <button
                     type="button"
-                    onClick={() => handleAddTaste()}
+                    onClick={handleAddTaste}
                     className="px-3.5 py-2.5 text-white rounded-xl font-bold flex items-center justify-center transition cursor-pointer shadow-md hover:opacity-90"
                     style={{ backgroundColor: 'var(--color-primary)' }}
                   >
@@ -2927,7 +2020,7 @@ export default function ChefChatPage() {
                     tastesList.map((item) => (
                       <span 
                         key={item}
-                        className="px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border shadow-sm"
+                        className="px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 border shadow-xs"
                         style={{
                           backgroundColor: 'var(--color-inner-dark)',
                           borderColor: 'var(--color-emerald)',
@@ -2956,7 +2049,7 @@ export default function ChefChatPage() {
               <button
                 type="button"
                 onClick={() => setShowPreferences(false)}
-                className="px-5 py-2.5 border rounded-xl font-bold text-xs transition cursor-pointer shadow-sm hover:opacity-80"
+                className="px-5 py-2.5 border rounded-xl font-bold text-xs transition cursor-pointer shadow-xs hover:opacity-80"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
@@ -2988,387 +2081,7 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* RECIPE DETAILS MODAL */}
-      {showRecipeDetailsModal && selectedRecipeForModal && (
-        <div 
-          onClick={() => setShowRecipeDetailsModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl relative p-6 space-y-4 cursor-default animate-in fade-in"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <div className="flex justify-between items-start border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span 
-                    className="text-[9px] font-black uppercase px-2 py-0.5 rounded-md text-white shadow-xs"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                  >
-                    Recommended
-                  </span>
-                  {selectedRecipeForModal.sourceUrl && (
-                    <span 
-                      className="text-[9px] font-bold px-2 py-0.5 rounded-md border flex items-center gap-1"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-emerald)',
-                        color: 'var(--color-emerald)'
-                      }}
-                    >
-                      <Globe className="h-2.5 w-2.5" /> Primary Source
-                    </span>
-                  )}
-                </div>
-                <h2 className="text-lg font-black tracking-tight mt-1" style={{ color: 'var(--color-text)' }}>
-                  {selectedRecipeForModal.title}
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowRecipeDetailsModal(false)}
-                className="p-1.5 rounded-xl border transition cursor-pointer hover:opacity-80"
-                style={{
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="overflow-y-auto flex-1 space-y-4 pr-1 text-xs custom-scrollbar">
-              {selectedRecipeForModal.image && (
-                <img
-                  src={selectedRecipeForModal.image}
-                  alt={selectedRecipeForModal.title}
-                  className="w-full h-44 rounded-2xl object-cover border shadow-xs"
-                  style={{ borderColor: 'var(--color-border)' }}
-                />
-              )}
-
-              <p className="leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                {selectedRecipeForModal.description}
-              </p>
-
-              <div 
-                className="flex items-center gap-4 p-3 rounded-2xl border font-bold text-xs"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              >
-                <span className="flex items-center gap-1.5" style={{ color: 'var(--color-emerald)' }}>
-                  <Clock className="h-3.5 w-3.5" /> {(selectedRecipeForModal.prepMinutes || 0) + (selectedRecipeForModal.cookMinutes || 0)} mins total
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <Users className="h-3.5 w-3.5" /> {selectedRecipeForModal.servings || servings} servings
-                </span>
-                {selectedRecipeForModal.calories && (
-                  <span className="font-mono text-emerald-500">{selectedRecipeForModal.calories} kcal</span>
-                )}
-              </div>
-
-              {/* Ingredients List with Add to Cart / Grocery Button */}
-              {Array.isArray(selectedRecipeForModal.ingredients) && selectedRecipeForModal.ingredients.length > 0 && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-                      Ingredients ({selectedRecipeForModal.ingredients.length})
-                    </h4>
-                    <button
-                      type="button"
-                      onClick={() => handleAddToCart(selectedRecipeForModal.ingredients)}
-                      className="px-2.5 py-1 rounded-lg border text-[11px] font-bold transition flex items-center gap-1 shadow-2xs hover:opacity-90 cursor-pointer"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-primary)',
-                        color: 'var(--color-primary)'
-                      }}
-                    >
-                      <ShoppingCart className="h-3 w-3" />
-                      <span>+ Add to Cart</span>
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                    {selectedRecipeForModal.ingredients.map((ing: string, i: number) => (
-                      <div 
-                        key={i}
-                        className="p-2 rounded-xl border text-[11px] font-medium flex items-center gap-2"
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                      >
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: 'var(--color-primary)' }} />
-                        <span className="truncate">{ing}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Instructions */}
-              {Array.isArray(selectedRecipeForModal.instructions) && selectedRecipeForModal.instructions.length > 0 && (
-                <div className="space-y-2">
-                  <h4 className="font-extrabold text-xs uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
-                    Instructions
-                  </h4>
-                  <div className="space-y-2">
-                    {selectedRecipeForModal.instructions.map((step: string, sIdx: number) => (
-                      <div 
-                        key={sIdx}
-                        className="p-2.5 rounded-xl border text-xs leading-relaxed flex items-start gap-2.5"
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                      >
-                        <span 
-                          className="w-5 h-5 rounded-md font-bold text-[10px] flex items-center justify-center shrink-0 border"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: 'var(--color-primary)',
-                            color: 'var(--color-primary)'
-                          }}
-                        >
-                          {sIdx + 1}
-                        </span>
-                        <p className="flex-1">{step}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Chef Tip */}
-              {selectedRecipeForModal.chefTip && (
-                <div 
-                  className="p-3 rounded-2xl border text-xs leading-relaxed flex items-start gap-2"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-emerald)',
-                    color: 'var(--color-emerald)'
-                  }}
-                >
-                  <Sparkles className="h-4 w-4 shrink-0 mt-0.5" />
-                  <span><strong>Chef Tip:</strong> {selectedRecipeForModal.chefTip}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Outbound Link & Actions */}
-            <div className="pt-3 border-t flex flex-wrap items-center justify-between gap-2" style={{ borderColor: 'var(--color-border)' }}>
-              <div>
-                {selectedRecipeForModal.sourceUrl && (
-                  <a
-                    href={selectedRecipeForModal.sourceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer hover:opacity-80"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)',
-                      color: 'var(--color-primary)'
-                    }}
-                  >
-                    <ExternalLink className="h-3.5 w-3.5" />
-                    <span>View Source Recipe ↗</span>
-                  </a>
-                )}
-              </div>
-
-              <div className="flex items-center gap-2">
-                {isRecipeSaved(selectedRecipeForModal.title) ? (
-                  <span 
-                    className="px-3 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-emerald)',
-                      color: 'var(--color-emerald)'
-                    }}
-                  >
-                    <Check className="h-3.5 w-3.5" /> Saved in Recipes
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={savingRecipeTitle === selectedRecipeForModal.title}
-                    onClick={() => handleSaveRecipe(selectedRecipeForModal)}
-                    className="px-3.5 py-1.5 rounded-xl border text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-90"
-                    style={{
-                      backgroundColor: 'var(--color-card)',
-                      borderColor: 'var(--color-primary)',
-                      color: 'var(--color-primary)'
-                    }}
-                  >
-                    {savingRecipeTitle === selectedRecipeForModal.title ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Bookmark className="h-3.5 w-3.5" />
-                    )}
-                    <span>Save Recipe</span>
-                  </button>
-                )}
-
-                {isRecipeSaved(selectedRecipeForModal.title) && (
-                  <button
-                    type="button"
-                    onClick={() => handleOpenPlannerModal(selectedRecipeForModal)}
-                    className="px-3.5 py-1.5 rounded-xl text-white text-[11px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90 animate-in fade-in"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                  >
-                    <CalendarPlus className="h-3.5 w-3.5" />
-                    <span>📅 Suggest Add to Planner</span>
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => setShowRecipeDetailsModal(false)}
-                  className="px-4 py-1.5 rounded-xl border font-bold text-xs shadow-xs transition cursor-pointer hover:opacity-90"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ADD TO MEAL PLANNER MODAL */}
-      {showPlannerModal && recipeToSchedule && (
-        <div 
-          onClick={() => setShowPlannerModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto cursor-pointer"
-        >
-          <div 
-            onClick={(e) => e.stopPropagation()}
-            className="border rounded-3xl max-w-md w-full flex flex-col overflow-hidden shadow-2xl relative p-6 space-y-4 cursor-default animate-in fade-in"
-            style={{
-              backgroundColor: 'var(--color-card)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
-            }}
-          >
-            <div className="flex justify-between items-start border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <div>
-                <span className="text-[10px] font-black uppercase tracking-wider block" style={{ color: 'var(--color-primary)' }}>
-                  Meal Planner Schedule
-                </span>
-                <h2 className="text-base font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
-                  Schedule "{recipeToSchedule.title}"
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowPlannerModal(false)}
-                className="p-1.5 rounded-xl border hover:opacity-80 transition cursor-pointer"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-4 text-xs">
-              <div className="space-y-1.5">
-                <label className="font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  Target Date
-                </label>
-                <input
-                  type="date"
-                  value={scheduleDate}
-                  onChange={(e) => setScheduleDate(e.target.value)}
-                  className="w-full border rounded-xl px-3.5 py-2 text-xs outline-none"
-                  style={{
-                    backgroundColor: 'var(--color-inner-dark)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text)'
-                  }}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  Meal Slot
-                </label>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {['Breakfast', 'Lunch', 'Dinner', 'Snack'].map((slot) => (
-                    <button
-                      key={slot}
-                      type="button"
-                      onClick={() => setScheduleMealType(slot)}
-                      className="py-1.5 rounded-xl border text-xs font-bold transition cursor-pointer text-center"
-                      style={scheduleMealType === slot ? {
-                        backgroundColor: 'var(--color-primary)',
-                        borderColor: 'var(--color-primary)',
-                        color: '#ffffff'
-                      } : {
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text-secondary)'
-                      }}
-                    >
-                      {slot}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
-                  Servings
-                </label>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setScheduleServings(Math.max(1, scheduleServings - 1))}
-                    className="w-7 h-7 rounded-lg border flex items-center justify-center font-bold text-xs transition cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                  >
-                    -
-                  </button>
-                  <span className="font-bold">{scheduleServings} servings</span>
-                  <button
-                    type="button"
-                    onClick={() => setScheduleServings(scheduleServings + 1)}
-                    className="w-7 h-7 rounded-lg border flex items-center justify-center font-bold text-xs transition cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-3 border-t flex items-center justify-end gap-2" style={{ borderColor: 'var(--color-border)' }}>
-              <button
-                type="button"
-                onClick={() => setShowPlannerModal(false)}
-                className="px-4 py-2 border rounded-xl font-bold text-xs transition cursor-pointer hover:opacity-80"
-                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={schedulingLoading}
-                onClick={handleConfirmScheduleMeal}
-                className="px-5 py-2 text-white font-bold text-xs rounded-xl transition shadow-md flex items-center gap-1.5 cursor-pointer hover:opacity-90 disabled:opacity-50"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-              >
-                {schedulingLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarPlus className="h-3.5 w-3.5" />}
-                <span>Confirm & Schedule</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* TOKEN PURCHASE MODAL (SYNCHRONIZED WITH DYNAMIC TOKEN EMOJI) */}
+      {/* TOKEN PURCHASE MODAL */}
       <TokenPurchaseModal
         isOpen={isTokenPurchaseOpen}
         onClose={() => setIsTokenPurchaseOpen(false)}
@@ -3378,9 +2091,7 @@ export default function ChefChatPage() {
         packages={tokenPackages}
         onPurchased={(newBal) => {
           setTokenBalance(newBal);
-          window.dispatchEvent(new Event('zecratary_tokens_updated'));
-          window.dispatchEvent(new Event('zecratary_users_updated'));
-          showToast(`${t('tokensAddedSuccess', 'Tokens added!')} ${t('newBalance', 'New balance')}: ${newBal} ${tokenSymbol}`);
+          showToast(`Tokens added! New balance: ${newBal} ${tokenSymbol}`);
         }}
       />
     </div>

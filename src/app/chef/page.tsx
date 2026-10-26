@@ -1,6 +1,5 @@
-'use client';
 // @ts-nocheck
-
+'use client';
 import AiQuotaBar from '@/components/AiQuotaBar';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
@@ -8,7 +7,7 @@ import {
   Calendar, CalendarPlus, X, Utensils, Loader2, User as UserIcon, 
   Check, Sparkles, Bookmark, RotateCcw, Package, Plus, Trash2, ChevronDown, 
   Coins, Cpu, ShieldAlert, Mic, MicOff, Volume2, Square, Award, ExternalLink,
-  Layers, CheckCircle2, CheckCircle, Zap, Globe, Table, LayoutGrid
+  Layers, CheckCircle2, ShoppingCart, Globe, Table, LayoutGrid
 } from 'lucide-react';
 import { getCurrentUser, initAuthStorage, User } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
@@ -115,7 +114,7 @@ export default function ChefChatPage() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Settings telemetry synced from /admin/ai-settings (PostgreSQL backed)
+  // Synced from /admin/ai-settings (PostgreSQL backed)
   const [questionnaireSections, setQuestionnaireSections] = useState<any[]>(DEFAULT_SECTIONS);
   const [activeTopicTitle, setActiveTopicTitle] = useState<string>('Standard Wizard');
   const [wizardQuestionsList, setWizardQuestionsList] = useState<string[]>([]);
@@ -168,6 +167,16 @@ export default function ChefChatPage() {
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
+  };
+
+  const safeJsonParse = async (res: Response) => {
+    try {
+      const text = await res.text();
+      if (!text || !text.trim()) return null;
+      return JSON.parse(text);
+    } catch (_) {
+      return null;
+    }
   };
 
   const stopSpeaking = () => {
@@ -256,13 +265,14 @@ export default function ChefChatPage() {
     return user.id || (user.email ? user.email.toLowerCase().trim() : 'usr_admin_1');
   }, []);
 
-  // 1. Load Pantry Inventory from PostgreSQL / MySQL via /api/pantry
+  // 1. Load Pantry Inventory dynamically from PostgreSQL via /api/pantry
   const loadPantryItems = useCallback(async (user: User | null) => {
     try {
       const userKey = getUserKey(user);
       const res = await fetch(`/api/pantry?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
       if (res.ok) {
-        const data = await res.json();
+        const data = await safeJsonParse(res);
+        if (!data) return;
         const items = Array.isArray(data) ? data : (data?.items || data?.pantry || []);
         if (Array.isArray(items)) {
           const names = items
@@ -282,8 +292,8 @@ export default function ChefChatPage() {
     try {
       const res = await fetch(`/api/user/preferences?userId=${encodeURIComponent(userKey)}`, { cache: 'no-store' });
       if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.preferences) {
+        const data = await safeJsonParse(res);
+        if (data && data.success && data.preferences) {
           const p = data.preferences;
           if (typeof p.servings === 'number') setServings(p.servings);
           if (p.country) setCountry(p.country);
@@ -411,8 +421,8 @@ export default function ChefChatPage() {
       
       const res = await fetch(`/api/tokens${queryParam}`, { cache: 'no-store' });
       if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
+        const data = await safeJsonParse(res);
+        if (data && data.success) {
           setTokenBalance(Number(data.balance ?? 0));
           setTokenSymbol(data.tokenSymbol || '🪙');
           setTokenName(data.tokenName || 'Foodie Token');
@@ -424,10 +434,10 @@ export default function ChefChatPage() {
       try {
         const sRes = await fetch('/api/admin/settings', { cache: 'no-store' });
         if (sRes.ok) {
-          const sData = await sRes.json();
+          const sData = await safeJsonParse(sRes);
           const chefCfg = sData?.chefAiSettings || sData?.settings?.chefAiSettings || sData;
           if (chefCfg) {
-            if (chefCfg.model || sData.aiModel) setActiveAiModel(chefCfg.model || sData.aiModel);
+            if (chefCfg.model || sData?.aiModel) setActiveAiModel(chefCfg.model || sData?.aiModel);
             if (chefCfg.strictDietEnforcement !== undefined) setStrictDietEnforcement(Boolean(chefCfg.strictDietEnforcement));
             if (Array.isArray(chefCfg.filterWordsList)) setFilterWordsList(chefCfg.filterWordsList.filter(Boolean));
             if (chefCfg.enablePantryContext !== undefined) setEnablePantryContext(Boolean(chefCfg.enablePantryContext));
@@ -598,7 +608,7 @@ export default function ChefChatPage() {
     const q = wizardQuestionsList[wizardStep].toLowerCase();
 
     if (q.includes('day') || q.includes('how many')) {
-      const days = [];
+      const days = [t('oneDayPreset', '1 Day (Single Day Focus)')];
       if (maxPlanDays >= 3) days.push('3 Days');
       if (maxPlanDays >= 5) days.push('5 Days');
       days.push(`${maxPlanDays} Days`);
@@ -618,7 +628,7 @@ export default function ChefChatPage() {
     }
 
     return ['Yes, strictly apply', 'Standard recommended', 'Prioritize in-stock pantry items'];
-  }, [wizardStep, wizardQuestionsList, maxPlanDays]);
+  }, [wizardStep, wizardQuestionsList, maxPlanDays, t]);
 
   const handleSend = async (customText?: string) => {
     const textToSend = (customText !== undefined ? customText : prompt).trim();
@@ -679,20 +689,23 @@ export default function ChefChatPage() {
             })
           });
 
-          const data = await res.json();
-          if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
-          else setTokenBalance(prev => Math.max(0, prev - chefCost));
+          const data = await safeJsonParse(res);
+          if (data) {
+            if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
+            else setTokenBalance(prev => Math.max(0, prev - chefCost));
 
-          const planMsg: ChatMessage = {
-            id: 'ast_plan_' + Date.now(),
-            role: 'assistant',
-            content: data.reply || `I have formulated your meal plan and signature recommended recipe based on your ${activeTopicTitle} questionnaire!`,
-            plan: data.plan,
-            recommendedRecipe: data.recommendedRecipe || data.recipe
-          };
+            const fallbackReply = (t('wizardCompleteReply', 'I have formulated your meal plan and signature recommended recipe based on your {topic} questionnaire!')).replace('{topic}', activeTopicTitle);
+            const planMsg: ChatMessage = {
+              id: 'ast_plan_' + Date.now(),
+              role: 'assistant',
+              content: data.reply || fallbackReply,
+              plan: data.plan,
+              recommendedRecipe: data.recommendedRecipe || data.recipe
+            };
 
-          updateMessages(prev => [...prev, planMsg]);
-          if (enableVoiceInteraction && voiceAutoPlay) speakText(planMsg.content || '', planMsg.id);
+            updateMessages(prev => [...prev, planMsg]);
+            if (enableVoiceInteraction && voiceAutoPlay) speakText(planMsg.content || '', planMsg.id);
+          }
         } catch (err: any) {
           updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message}` }]);
         } finally {
@@ -719,20 +732,22 @@ export default function ChefChatPage() {
         })
       });
 
-      const data = await res.json();
-      if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
-      else setTokenBalance(prev => Math.max(0, prev - chefCost));
+      const data = await safeJsonParse(res);
+      if (data) {
+        if (typeof data.remainingBalance === 'number') setTokenBalance(data.remainingBalance);
+        else setTokenBalance(prev => Math.max(0, prev - chefCost));
 
-      const astMsg: ChatMessage = {
-        id: 'ast_' + Date.now(),
-        role: 'assistant',
-        content: data.reply || data.response || "Here are personalized culinary recommendations based on your preferences.",
-        plan: data.plan,
-        recommendedRecipe: data.recommendedRecipe || data.recipe
-      };
+        const astMsg: ChatMessage = {
+          id: 'ast_' + Date.now(),
+          role: 'assistant',
+          content: data.reply || data.response || t('defaultCulinaryReply', 'Here are personalized culinary recommendations based on your preferences.'),
+          plan: data.plan,
+          recommendedRecipe: data.recommendedRecipe || data.recipe
+        };
 
-      updateMessages(prev => [...prev, astMsg]);
-      if (enableVoiceInteraction && voiceAutoPlay) speakText(astMsg.content || '', astMsg.id);
+        updateMessages(prev => [...prev, astMsg]);
+        if (enableVoiceInteraction && voiceAutoPlay) speakText(astMsg.content || '', astMsg.id);
+      }
     } catch (err: any) {
       updateMessages(prev => [...prev, { id: 'ast_' + Date.now(), role: 'assistant', content: `⚠️ ${err.message || t('errorCommunicatingAi', 'Error communicating with AI culinary engine.')}` }]);
     } finally {
@@ -777,7 +792,7 @@ export default function ChefChatPage() {
       window.dispatchEvent(new Event('zecratary_recipes_updated'));
       showToast(t('savedToRecipesToast', 'Saved to your recipe library!'));
     } catch (_) {
-      showToast("Could not save recipe.");
+      showToast(t('couldNotSaveRecipe', 'Could not save recipe.'));
     }
   };
 
@@ -808,7 +823,37 @@ export default function ChefChatPage() {
       window.dispatchEvent(new Event('zecratary_planner_updated'));
       showToast(t('mealPlanAddedToast', 'Meal plan added to weekly planner!'));
     } catch (_) {
-      showToast("Could not schedule meal plan.");
+      showToast(t('couldNotSchedulePlan', 'Could not schedule meal plan.'));
+    }
+  };
+
+  // 6. Direct Grocery Synchronization for Recommended Recipe
+  const handleAddIngredientsToGrocery = async (recipe: RecommendedRecipeData) => {
+    try {
+      const activeAuth = currentUserRef.current || currentUser || getCurrentUser();
+      const userKey = getUserKey(activeAuth);
+      const items = (recipe.ingredients || []).map((ing, idx) => ({
+        id: `groc_${Date.now()}_${idx}`,
+        userId: userKey,
+        name: ing,
+        category: 'Pantry & Produce',
+        checked: false,
+        recipeTitle: recipe.title
+      }));
+
+      try {
+        await fetch('/api/grocery', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'add_bulk', items, userId: userKey })
+        });
+      } catch (_) {}
+
+      window.dispatchEvent(new Event('zecratary_grocery_updated'));
+      window.dispatchEvent(new Event('zecratary_shopping_updated'));
+      showToast(t('ingredientsAddedToGroceryToast', 'Ingredients added to your grocery shopping list!'));
+    } catch (_) {
+      showToast(t('couldNotSaveRecipe', 'Could not save recipe.'));
     }
   };
 
@@ -818,7 +863,7 @@ export default function ChefChatPage() {
 
   return (
     <div 
-      className="max-w-4xl mx-auto flex flex-col h-[calc(100vh-5.5rem)] justify-between space-y-3 pb-2 font-sans relative transition-colors duration-200"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 flex flex-col h-[calc(100vh-5.5rem)] justify-between space-y-3 pb-2 font-sans relative transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
       <AiQuotaBar />
@@ -837,15 +882,15 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* TOP HEADER */}
+      {/* TOP HEADER - 100% FLUID BAR */}
       <div 
-        className="space-y-3 border-b pb-3 shrink-0 transition-colors duration-200"
+        className="w-full space-y-3 border-b pb-3 shrink-0 transition-colors duration-200"
         style={{ borderColor: 'var(--color-border)' }}
       >
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap sm:flex-nowrap">
+          <div className="flex items-center gap-3 min-w-0">
             <div 
-              className="w-10 h-10 rounded-2xl flex items-center justify-center border shadow-xs"
+              className="w-10 h-10 rounded-2xl flex items-center justify-center border shadow-xs shrink-0"
               style={{
                 backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-primary)',
@@ -854,17 +899,17 @@ export default function ChefChatPage() {
             >
               <ChefHat className="h-6 w-6" />
             </div>
-            <div>
-              <h1 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-text)' }}>
+            <div className="truncate">
+              <h1 className="text-xl font-black tracking-tight truncate" style={{ color: 'var(--color-text)' }}>
                 {t('foodieChatHeading', 'AI Chef Assistant')}
               </h1>
-              <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+              <p className="text-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>
                 {t('foodieChatSubtitle', 'Ask recipes, cooking questions, or launch multi-topic meal plan wizards')}
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {isSpeaking && (
               <div 
                 className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-bold animate-pulse shadow-xs"
@@ -894,7 +939,7 @@ export default function ChefChatPage() {
                   borderColor: 'var(--color-emerald)',
                   color: 'var(--color-emerald)'
                 }}
-                title="Active In-Stock Pantry Context"
+                title={t('activePantryContextTooltip', 'Active In-Stock Pantry Context')}
               >
                 <Package className="h-3.5 w-3.5" />
                 <span>{(t('pantryInStockBadge', 'Pantry: {count} in-stock')).replace('{count}', String(pantryIngredientsList.length))}</span>
@@ -909,7 +954,7 @@ export default function ChefChatPage() {
                   borderColor: 'var(--color-border)',
                   color: 'var(--color-text-secondary)'
                 }}
-                title="Curated Recipe Sources"
+                title={t('curatedSourcesTooltip', 'Curated Recipe Sources')}
               >
                 <Globe className="h-3.5 w-3.5 text-sky-400" />
                 <span>{(t('primarySourcesBadge', 'Sources: {count} active')).replace('{count}', String(recommendedRecipeUrls.length))}</span>
@@ -917,7 +962,7 @@ export default function ChefChatPage() {
             )}
 
             <div 
-              className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-xs"
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-xs"
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
             >
               <Cpu className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
@@ -982,7 +1027,7 @@ export default function ChefChatPage() {
           </div>
         </div>
 
-        {/* DIETARY PREFERENCES PILLS HEADER */}
+        {/* DIETARY PREFERENCES PILLS */}
         <div className="flex flex-wrap items-center gap-2 text-xs pt-1 animate-in fade-in">
           <span 
             className="border px-3 py-1 rounded-full font-medium flex items-center gap-1.5 shadow-xs"
@@ -1064,10 +1109,10 @@ export default function ChefChatPage() {
         </div>
       </div>
 
-      {/* MAIN CONVERSATION STREAM */}
-      <div className="flex-1 overflow-y-auto space-y-4 pr-1.5 custom-scrollbar">
+      {/* MAIN CONVERSATION STREAM - 100% WIDTH FLUID SCROLLER */}
+      <div className="flex-1 overflow-y-auto space-y-4 pr-1.5 custom-scrollbar w-full">
         {messages.length === 0 ? (
-          <div className="text-center my-auto py-10 space-y-6">
+          <div className="text-center my-auto py-10 space-y-6 max-w-4xl mx-auto">
             <div 
               className="w-16 h-16 rounded-3xl flex items-center justify-center mx-auto border shadow-lg"
               style={{
@@ -1083,11 +1128,11 @@ export default function ChefChatPage() {
                 {t('heyImChef', "Hey, I'm Chef Foodie!")}
               </h2>
               <p className="text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-                {t('chefHeroSub', 'Select a questionnaire topic below or speak into the microphone to plan meals')}
+                {t('chefHeroSub', 'Select a questionnaire topic below, try a quick starter prompt, or speak into the microphone')}
               </p>
             </div>
 
-            <div className="flex flex-wrap justify-center gap-2.5 max-w-xl mx-auto">
+            <div className="flex flex-wrap justify-center gap-2.5 max-w-3xl mx-auto">
               <button
                 type="button"
                 onClick={handleStartFullWizard}
@@ -1099,6 +1144,40 @@ export default function ChefChatPage() {
               >
                 <Sparkles className="h-4 w-4" /> {t('startCompleteIntake', 'Start Complete Meal Plan Intake')}
               </button>
+
+              <button
+                type="button"
+                onClick={() => handleSend(t('systemCapabilitiesChip', '✨ What can I do with Chef Foodie?'))}
+                className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-xs hover:scale-[1.02] cursor-pointer flex items-center gap-2"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
+                onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              >
+                <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                <span>{t('systemCapabilitiesChip', '✨ What can I do with Chef Foodie?')}</span>
+              </button>
+
+              {pantryIngredientsList.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => handleSend(t('pantryRecommendationChip', '🍳 Recommend dinner using my in-stock pantry items'))}
+                  className="border text-xs font-semibold px-4 py-2.5 rounded-full transition shadow-xs hover:scale-[1.02] cursor-pointer flex items-center gap-2"
+                  style={{
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--color-emerald)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+                >
+                  <Package className="h-3.5 w-3.5 text-emerald-400" />
+                  <span>{t('pantryRecommendationChip', '🍳 Recommend dinner using my in-stock pantry items')}</span>
+                </button>
+              )}
 
               {recommendedRecipeUrls.length > 0 && (
                 <button
@@ -1145,7 +1224,7 @@ export default function ChefChatPage() {
             const hasAudioActive = isSpeaking && speakingMsgId === m.id;
 
             return (
-              <div key={m.id} className={`flex items-start gap-2.5 ${isUser ? 'justify-end' : 'justify-start'}`}>
+              <div key={m.id} className={`flex items-start gap-2.5 ${isUser ? 'justify-end' : 'justify-start'} w-full`}>
                 {!isUser && (
                   <div 
                     className="w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 mt-1 shadow-xs"
@@ -1159,10 +1238,10 @@ export default function ChefChatPage() {
                   </div>
                 )}
 
-                <div className={`max-w-xl sm:max-w-2xl space-y-3.5 ${isUser ? '' : 'w-full'}`}>
+                <div className={`space-y-3.5 ${isUser ? 'max-w-xl sm:max-w-2xl' : 'w-full max-w-full'}`}>
                   {m.content && (
                     <div 
-                      className={`p-4 rounded-2xl text-sm leading-relaxed ${isUser ? 'ml-auto max-w-md shadow-md font-medium text-white' : 'border shadow-xs'}`}
+                      className={`p-4 rounded-2xl text-sm leading-relaxed ${isUser ? 'ml-auto max-w-md shadow-md font-medium text-white' : 'border shadow-xs w-full max-w-4xl'}`}
                       style={isUser ? {
                         backgroundColor: 'var(--color-primary)'
                       } : {
@@ -1188,10 +1267,10 @@ export default function ChefChatPage() {
                     </div>
                   )}
 
-                  {/* MULTI-DAY MEAL PLAN PRESENTATION (RESPECTS RESULT DISPLAY MODE) */}
+                  {/* MULTI-DAY MEAL PLAN PRESENTATION (100% RESPONSIVE GRID) */}
                   {m.plan && Array.isArray(m.plan.meals) && m.plan.meals.length > 0 && (
                     <div 
-                      className="border rounded-3xl p-5 space-y-4 shadow-md transition-colors duration-200"
+                      className="border rounded-3xl p-5 space-y-4 shadow-md transition-colors duration-200 w-full"
                       style={{
                         backgroundColor: 'var(--color-card)',
                         borderColor: 'var(--color-border)'
@@ -1202,7 +1281,9 @@ export default function ChefChatPage() {
                           <div className="flex items-center gap-2">
                             <Calendar className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                             <h3 className="font-extrabold text-base" style={{ color: 'var(--color-text)' }}>
-                              {(t('daysPlan', '{days}-Day Meal Plan')).replace('{days}', String(m.plan.totalDays || m.plan.meals.length))}
+                              {(m.plan.totalDays === 1 || m.plan.meals.length === 1)
+                                ? t('singleDayPlan', '1-Day Meal Plan')
+                                : (t('daysPlan', '{days}-Day Meal Plan')).replace('{days}', String(m.plan.totalDays || m.plan.meals.length))}
                             </h3>
                           </div>
                           <div className="flex items-center gap-3 text-xs opacity-75 mt-0.5">
@@ -1212,7 +1293,6 @@ export default function ChefChatPage() {
                         </div>
 
                         <div className="flex items-center gap-2">
-                          {/* In-Chat Mode Switcher */}
                           <div className="flex items-center border rounded-xl p-0.5 shadow-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                             <button
                               type="button"
@@ -1249,17 +1329,16 @@ export default function ChefChatPage() {
                         </div>
                       </div>
 
-                      {/* COMPACT TABLE VIEW */}
                       {resultDisplayMode === 'compact' ? (
-                        <div className="overflow-x-auto">
+                        <div className="overflow-x-auto w-full">
                           <table className="w-full text-left text-xs border-collapse">
                             <thead>
                               <tr className="border-b text-[10px] uppercase font-bold opacity-70" style={{ borderColor: 'var(--color-border)' }}>
-                                <th className="py-2 px-3">{t('tableColDay', 'Day & Date')}</th>
-                                <th className="py-2 px-3">{t('tableColMeal', 'Meal Slot')}</th>
-                                <th className="py-2 px-3">{t('tableColDish', 'Recipe / Dish')}</th>
-                                <th className="py-2 px-3">{t('tableColTime', 'Time')}</th>
-                                <th className="py-2 px-3 text-right">{t('tableColServings', 'Servings')}</th>
+                                <th className="py-2.5 px-3">{t('tableColDay', 'Day & Date')}</th>
+                                <th className="py-2.5 px-3">{t('tableColMeal', 'Meal Slot')}</th>
+                                <th className="py-2.5 px-3">{t('tableColDish', 'Recipe / Dish')}</th>
+                                <th className="py-2.5 px-3">{t('tableColTime', 'Time')}</th>
+                                <th className="py-2.5 px-3 text-right">{t('tableColServings', 'Servings')}</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y" style={{ borderColor: 'var(--color-border)' }}>
@@ -1276,12 +1355,11 @@ export default function ChefChatPage() {
                           </table>
                         </div>
                       ) : (
-                        /* CARD OR DETAILED GRID VIEW */
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3.5 w-full">
                           {m.plan.meals.map((meal, mIdx) => (
                             <div 
                               key={meal.id || mIdx}
-                              className="p-3.5 rounded-2xl border space-y-2 relative flex flex-col justify-between shadow-xs transition"
+                              className="p-4 rounded-2xl border space-y-2 relative flex flex-col justify-between shadow-xs transition"
                               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
                             >
                               <div className="space-y-1.5">
@@ -1304,7 +1382,7 @@ export default function ChefChatPage() {
 
                                 {resultDisplayMode === 'detailed' && Array.isArray(meal.ingredients) && meal.ingredients.length > 0 && (
                                   <div className="pt-1.5 space-y-1">
-                                    <span className="text-[9px] font-bold uppercase tracking-wider opacity-60 block">Key Ingredients:</span>
+                                    <span className="text-[9px] font-bold uppercase tracking-wider opacity-60 block">{t('keyIngredients', 'Key Ingredients:')}</span>
                                     <div className="flex flex-wrap gap-1">
                                       {meal.ingredients.slice(0, 4).map((ing, iIdx) => (
                                         <span key={iIdx} className="text-[9px] px-1.5 py-0.5 rounded border opacity-75" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}>
@@ -1337,13 +1415,13 @@ export default function ChefChatPage() {
                   {/* FINAL RECOMMENDED RECIPE SHOWCASE CARD */}
                   {m.recommendedRecipe && (
                     <div 
-                      className="border rounded-3xl p-5 space-y-4 shadow-md transition-colors duration-200"
+                      className="border rounded-3xl p-5 space-y-4 shadow-md transition-colors duration-200 w-full"
                       style={{
                         backgroundColor: 'var(--color-card)',
                         borderColor: 'var(--color-primary)'
                       }}
                     >
-                      <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
                         <div className="flex items-center gap-2">
                           <Award className="h-5 w-5" style={{ color: 'var(--color-primary)' }} />
                           <div>
@@ -1356,7 +1434,21 @@ export default function ChefChatPage() {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => handleAddIngredientsToGrocery(m.recommendedRecipe!)}
+                            className="px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-80"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                          >
+                            <ShoppingCart className="h-3.5 w-3.5 text-sky-400" />
+                            <span>{t('addIngredientsToGrocery', '+ Add to Grocery List')}</span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={() => handleSaveRecipeToBook(m.recommendedRecipe)}
@@ -1387,6 +1479,18 @@ export default function ChefChatPage() {
                         <span className="flex items-center gap-1">
                           <Users className="h-3.5 w-3.5" /> {t('serves', 'Serves:')} {m.recommendedRecipe.servings || servings}
                         </span>
+
+                        {m.recommendedRecipe.sourceUrl && (
+                          <a
+                            href={m.recommendedRecipe.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-sky-400 hover:underline ml-auto"
+                          >
+                            <Globe className="h-3.5 w-3.5" />
+                            <span>{t('viewSourceRecipe', 'View Source Recipe ↗')}</span>
+                          </a>
+                        )}
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
@@ -1436,7 +1540,7 @@ export default function ChefChatPage() {
                             borderColor: 'var(--color-border)'
                           }}
                         >
-                          <Zap className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-primary)' }} />
+                          <Sparkles className="h-4 w-4 shrink-0 mt-0.5" style={{ color: 'var(--color-primary)' }} />
                           <div className="space-y-0.5">
                             <strong className="block text-[11px]" style={{ color: 'var(--color-primary)' }}>{t('chefProTip', 'Chef Foodie Pro Tip:')}</strong>
                             <p className="text-[11px] leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
@@ -1485,7 +1589,7 @@ export default function ChefChatPage() {
       {/* PRESET ANSWERS */}
       {wizardStep !== null && currentPresetOptions.length > 0 && (
         <div 
-          className="p-3 rounded-2xl border space-y-2 animate-in fade-in transition-colors duration-200"
+          className="p-3 rounded-2xl border space-y-2 animate-in fade-in transition-colors duration-200 w-full"
           style={{
             backgroundColor: 'var(--color-card)',
             borderColor: 'var(--color-border)'
@@ -1529,7 +1633,7 @@ export default function ChefChatPage() {
 
       {/* TOPIC LAUNCHER CHIPS */}
       {wizardStep === null && activeQuestionnaireSections.length > 0 && (
-        <div className="flex items-center gap-2 overflow-x-auto py-1 px-1 custom-scrollbar shrink-0">
+        <div className="flex items-center gap-2 overflow-x-auto py-1 px-1 custom-scrollbar shrink-0 w-full">
           <span className="text-[10px] font-bold uppercase tracking-wider shrink-0 flex items-center gap-1" style={{ color: 'var(--color-text-secondary)' }}>
             <Sparkles className="h-3 w-3" style={{ color: 'var(--color-primary)' }} /> {t('questionnaires', 'Questionnaires:')}
           </span>
@@ -1554,9 +1658,9 @@ export default function ChefChatPage() {
         </div>
       )}
 
-      {/* PROMPT INPUT BAR */}
+      {/* PROMPT INPUT BAR - 100% WIDTH */}
       <div 
-        className="border rounded-2xl p-1.5 flex items-center gap-2 shrink-0 shadow-xl transition-colors duration-200"
+        className="w-full border rounded-2xl p-1.5 flex items-center gap-2 shrink-0 shadow-xl transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
           borderColor: 'var(--color-border)'
@@ -1615,7 +1719,7 @@ export default function ChefChatPage() {
         </div>
       </div>
 
-      {/* ACCESSIBLE DIETARY PREFERENCES MODAL (AUTOFILL-SAFE FORM-FREE DIVS) */}
+      {/* ACCESSIBLE DIETARY PREFERENCES MODAL */}
       {showPreferences && (
         <div 
           onClick={() => setShowPreferences(false)}
@@ -1661,7 +1765,6 @@ export default function ChefChatPage() {
             </div>
 
             <div className="overflow-y-auto flex-1 space-y-5 pr-1 text-xs">
-              {/* Servings */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('servingsTitle', 'Servings')}
@@ -1697,7 +1800,6 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* Country */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('countryTitle', 'Country')}
@@ -1721,7 +1823,6 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* Dietary Preferences */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('dietaryPreferencesTitle', 'Dietary Preferences')}
@@ -1752,7 +1853,6 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* Allergies */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('allergiesTitle', 'Allergies')}
@@ -1783,7 +1883,6 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* Ingredients to Avoid (Accessible Container, No Form) */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('ingredientsToAvoidTitle', 'Ingredients to Avoid')}
@@ -1861,7 +1960,6 @@ export default function ChefChatPage() {
                 </div>
               </div>
 
-              {/* Tastes (Accessible Container, No Form) */}
               <div className="space-y-2">
                 <label className="block font-bold text-xs" style={{ color: 'var(--color-primary)' }}>
                   {t('tastesTitle', 'Tastes & Cooking Styles')}
