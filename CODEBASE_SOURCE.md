@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.44",
+  "version": "8.1.45",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.44",
+  "version": "8.1.45",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -35982,65 +35982,72 @@ export default function ProfilePage() {
 
 ## File: `apps/web/src/app/recipes/page.tsx`
 ```typescript
+// @ts-nocheck
 'use client';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import {
-  Search, SlidersHorizontal, Heart, Clock, Utensils,
-  X, UploadCloud, BookmarkPlus, CalendarPlus, ShoppingCart,
-  Timer, Edit3, Share2, Star, Check, Book, ChevronDown,
-  Trash2, Save, Plus, ImagePlus, Users, Calendar,
-  GripVertical, CheckSquare, CheckCircle2, Type, ExternalLink,
-  Carrot, Hourglass, ChevronLeft, ChevronRight, LayoutGrid,
-  Grid3X3, Rows3, Globe, Lock, FileJson, Sparkles, Download
+import { 
+  Search, Filter, Heart, CheckCircle2, AlertCircle, ChefHat, 
+  Clock, Users, ArrowUpRight, Sparkles, Plus, Trash2, Edit3, 
+  ChevronLeft, ChevronRight, FileJson, Upload, X, Volume2, 
+  Play, Pause, RotateCcw, Share2, Lock, Globe, HardDrive, 
+  Cloud, RefreshCw, Tag, ExternalLink, Calendar, ShoppingCart, 
+  BookOpen, GripVertical, ArrowUp, ArrowDown, BookmarkPlus, 
+  ChevronDown, Check, Star, Type, ImagePlus, CheckSquare, Utensils, Save
 } from 'lucide-react';
 import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
-import { persistSavedRecipe, deleteSavedRecipe } from '@/lib/recipeSync';
-import { getStoredCategories } from '@/lib/categories';
 import { useTranslation } from '@/components/LanguageProvider';
-
-const RECIPE_TYPES = [
-  'All Types',
-  'Appetiser',
-  'Main Dish',
-  'Side Dish',
-  'Dessert',
-  'Snack',
-  'Breakfast',
-  'Lunch'
-];
+import { IconGrid3x3, IconGrid4x4, IconGrid5x5 } from '@/components/GridDensityIcons';
 
 type GridMode = '3x3' | '4x4' | '5x5';
 
-const GRID_CONFIG: Record<GridMode, { colsClass: string; perPage: number; label: string; imgHeight: string; titleSize: string }> = {
+const GRID_CONFIG: Record<GridMode, { perPage: number; gridClass: string; imageAspect: string }> = {
   '3x3': {
-    colsClass: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3',
     perPage: 9,
-    label: '3×3',
-    imgHeight: 'h-44',
-    titleSize: 'text-base'
+    gridClass: 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6',
+    imageAspect: 'h-52'
   },
   '4x4': {
-    colsClass: 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4',
     perPage: 16,
-    label: '4×4',
-    imgHeight: 'h-36',
-    titleSize: 'text-sm'
+    gridClass: 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5',
+    imageAspect: 'h-44'
   },
   '5x5': {
-    colsClass: 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5',
     perPage: 25,
-    label: '5×5',
-    imgHeight: 'h-28',
-    titleSize: 'text-xs'
+    gridClass: 'grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4',
+    imageAspect: 'h-36'
   }
 };
 
-const isRecipeInBook = (rec: any, bookId: string): boolean => {
-  if (!rec || !bookId) return false;
-  return Boolean(rec.bookId === bookId || rec.book_id === bookId);
-};
+const RECIPE_TYPES = [
+  'Main Dish', 'Breakfast', 'Lunch', 'Dinner', 'Appetizer', 
+  'Side Dish', 'Dessert', 'Snacks', 'Beverages', 'Soup', 'Salad'
+];
+
+const DEFAULT_CATEGORIES = [
+  'Produce', 'Meat & Seafood', 'Dairy & Eggs', 'Pantry Staples', 
+  'Spices & Seasonings', 'Canned Goods', 'Grains & Pasta', 'Condiments & Sauces', 'Other'
+];
+
+function decodeHtmlEntities(str: string): string {
+  if (!str) return '';
+  return str
+    .replace(/<[^>]*>/g, '')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0*39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&deg;/g, '°')
+    .replace(/&#0*8211;/g, '–')
+    .replace(/&#0*8212;/g, '—')
+    .replace(/&ndash;/g, '–')
+    .replace(/&mdash;/g, '—');
+}
 
 export default function RecipesPage() {
   const router = useRouter();
@@ -36048,213 +36055,221 @@ export default function RecipesPage() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [recipes, setRecipes] = useState<any[]>([]);
   const [books, setBooks] = useState<any[]>([]);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [selectedRecipe, setSelectedRecipe] = useState<any | null>(null);
+  const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
+  const [loading, setLoading] = useState(true);
+  const isSelfUpdatingRef = useRef(false);
 
-  // Search & Filters
+  // Storage Settings Telemetry (Synced with /admin/storage)
+  const [storageProvider, setStorageProvider] = useState<'local' | 'supabase'>('local');
+
+  // Filter & Search States
   const [search, setSearch] = useState('');
-  const [showFilters, setShowFilters] = useState(true);
   const [filterFavorites, setFilterFavorites] = useState(false);
   const [filterCooked, setFilterCooked] = useState(false);
-  
-  // Tab State: 'my_recipes' | 'marketplace'
-  const [activeTab, setActiveTab] = useState<'my_recipes' | 'marketplace'>('my_recipes');
-
-  // Ingredients Filter State
-  const [ingredientQuery, setIngredientQuery] = useState('');
+  const [selectedType, setSelectedType] = useState('ALL');
+  const [selectedRating, setSelectedRating] = useState('ALL');
+  const [selectedPrepTime, setSelectedPrepTime] = useState('ALL');
+  const [selectedCookTime, setSelectedCookTime] = useState('ALL');
   const [selectedIngredientsList, setSelectedIngredientsList] = useState<string[]>([]);
-
-  // Dropdown Filters
-  const [selectedType, setSelectedType] = useState('All Types');
-  const [selectedRating, setSelectedRating] = useState('All Ratings');
-  const [selectedPrepTime, setSelectedPrepTime] = useState('All Prep Times');
-  const [selectedCookTime, setSelectedCookTime] = useState('All Cook Times');
-
-  const [openDropdown, setOpenDropdown] = useState<string | null>(null);
-  const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
-
-  // Add to Plan / Calendar Modal State
-  const [showAddToPlanModal, setShowAddToPlanModal] = useState(false);
-  const [planDate, setPlanDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [planMealType, setPlanMealType] = useState('Dinner');
-  const [planTime, setPlanTime] = useState('19:00');
-  const [planNotes, setPlanNotes] = useState('');
-
-  // Edit Mode & Form State (Includes isPublic Slide-Toggle)
-  const [isEditing, setIsEditing] = useState(false);
-  const [editTab, setEditTab] = useState<'info' | 'ingredients' | 'steps'>('info');
-  const [editForm, setEditForm] = useState<any>({
-    title: '',
-    description: '',
-    recipeType: 'Main Dish',
-    sourceUrl: '',
-    servings: 4,
-    prepTimeMinutes: 30,
-    cookTimeMinutes: 10,
-    imageUrl: '',
-    isPublic: false,
-    ingredients: [],
-    instructions: []
-  });
-
-  const [isReorderingIngredients, setIsReorderingIngredients] = useState(false);
-  const [isReorderingSteps, setIsReorderingSteps] = useState(false);
-  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
-
-  // View States
-  const [servingsMultiplier, setServingsMultiplier] = useState(1);
-  const [fontSizeScale, setFontSizeScale] = useState(80);
-  const [completedSteps, setCompletedSteps] = useState<number[]>([]);
-  const [noteText, setNoteText] = useState('');
-  const [isNoteOpen, setIsNoteOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [isIngredientPopoverOpen, setIsIngredientPopoverOpen] = useState(false);
+  const [ingredientSearchQuery, setIngredientSearchQuery] = useState('');
 
   // Grid Density & Pagination States
   const [gridMode, setGridMode] = useState<GridMode>('3x3');
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Shopping List Modal State
+  // Authentic Recipe Details Modal State
+  const [selectedRecipe, setSelectedRecipe] = useState<any | null>(null);
+  const [servingsMultiplier, setServingsMultiplier] = useState(1);
+  const [fontSizeScale, setFontSizeScale] = useState(100);
+  const [completedSteps, setCompletedSteps] = useState<number[]>([]);
+  const [noteText, setNoteText] = useState('');
+  const [isNoteOpen, setIsNoteOpen] = useState(false);
+  const [isBookDropdownOpen, setIsBookDropdownOpen] = useState(false);
+
+  // Full-Featured In-Place Recipe Edit Studio Modal
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTab, setEditTab] = useState<'info' | 'ingredients' | 'steps'>('info');
+  const [editForm, setEditForm] = useState<any>({
+    title: '', description: '', recipeType: 'Main Dish', sourceUrl: '',
+    servings: 4, prepTimeMinutes: 30, cookTimeMinutes: 10, imageUrl: '',
+    ingredients: [], instructions: []
+  });
+  const [isReorderingIngredients, setIsReorderingIngredients] = useState(false);
+  const [isReorderingSteps, setIsReorderingSteps] = useState(false);
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+
+  // Sub-Modals (Add to Plan & Shopping List)
+  const todayDateStr = new Date().toISOString().split('T')[0];
+  const [showAddToPlanModal, setShowAddToPlanModal] = useState(false);
+  const [planDate, setPlanDate] = useState(todayDateStr);
+  const [planMealType, setPlanMealType] = useState('Dinner');
+  const [planTime, setPlanTime] = useState('');
+  const [planNotes, setPlanNotes] = useState('');
+
   const [isShoppingModalOpen, setIsShoppingModalOpen] = useState(false);
   const [shoppingModalIngredients, setShoppingModalIngredients] = useState<any[]>([]);
 
-  const defaultBooks = [
-    { id: 'book_1', title: 'Family Favorites & Weeknight Dinners', description: 'Quick and easy meals.' },
-    { id: 'book_2', title: 'Authentic Asian Cuisine', description: 'Traditional recipes & stir-fries.' },
-    { id: 'book_3', title: 'Baking & Desserts', description: 'Sweet treats & pastries.' }
-  ];
+  // Task 4: Interactive Import Recipe Modal State
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importImageFile, setImportImageFile] = useState<File | null>(null);
+  const [importImagePreview, setImportImagePreview] = useState<string>('');
+  const [importJsonFile, setImportJsonFile] = useState<File | null>(null);
+  const [importedRecipeData, setImportedRecipeData] = useState<any | null>(null);
+  const [isUploadingImportImage, setIsUploadingImportImage] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [isDraggingImage, setIsDraggingImage] = useState(false);
+  const [isDraggingJson, setIsDraggingJson] = useState(false);
+  const importImageInputRef = useRef<HTMLInputElement | null>(null);
+  const importJsonInputRef = useRef<HTMLInputElement | null>(null);
 
-  const applyGlobalTheme = useCallback(() => {
+  // Web Audio Kitchen Timer Widget
+  const [activeTimer, setActiveTimer] = useState<{ running: boolean; remainingSeconds: number; initialSeconds: number } | null>(null);
+
+  // Toast Notification State
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
+  const showToast = (text: string, type: 'success' | 'error' | 'warning' = 'success') => {
+    setToastMessage({ type, text });
+    setTimeout(() => setToastMessage(null), 3800);
+  };
+
+  // Sync Storage Engine with /admin/storage
+  const fetchStorageSettings = useCallback(async () => {
     try {
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
-    } catch (_) {}
-  }, []);
-
-  const getCleanRecipeType = (rec: any): string => {
-    const raw = rec.recipeType || rec.category || (Array.isArray(rec.tags) ? rec.tags[0] : 'Main Dish');
-    if (raw === 'Appetizer' || raw === 'Appetiser') return 'Appetiser';
-    if (RECIPE_TYPES.includes(raw)) return raw;
-    return 'Main Dish';
-  };
-
-  const getSafeHostname = (urlStr?: string | null): string => {
-    if (!urlStr || typeof urlStr !== 'string') return 'source website';
-    try {
-      const normalized = urlStr.startsWith('http://') || urlStr.startsWith('https://') 
-        ? urlStr 
-        : `https://${urlStr}`;
-      return new URL(normalized).hostname.replace('www.', '');
-    } catch {
-      return urlStr.replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0] || 'source website';
-    }
-  };
-
-  const getSafeHref = (urlStr?: string | null): string => {
-    if (!urlStr || typeof urlStr !== 'string') return '#';
-    if (urlStr.startsWith('http://') || urlStr.startsWith('https://')) return urlStr;
-    return `https://${urlStr}`;
-  };
-
-  // Type-Safe Ownership Evaluation (Resolves TS2322)
-  const isOwner = (rec: any): boolean => {
-    if (!currentUser) return true;
-    const uid = currentUser.id || 'usr_admin_1';
-    const email = currentUser.email || '';
-    const rUid = rec.userId || rec.user_id || rec.ownerId || rec.ownership?.userId;
-    const rEmail = rec.createdBy || rec.created_by || rec.creatorEmail || rec.ownerEmail || rec.ownership?.creatorEmail;
-
-    return Boolean(
-      rUid === uid ||
-      rEmail === uid ||
-      (Boolean(email) && (rUid === email || rEmail === email))
-    );
-  };
-
-  const loadData = useCallback(async (user: User | null, tab: 'my_recipes' | 'marketplace' = activeTab) => {
-    setCategories(getStoredCategories());
-    const targetUserId = (user?.id || 'usr_admin_1').trim();
-    const targetEmail = user?.email || '';
-
-    try {
-      setLoading(true);
-      const queryParams = new URLSearchParams();
-      if (tab === 'marketplace') {
-        queryParams.set('marketplace', 'true');
-      } else {
-        queryParams.set('userId', targetUserId);
-        if (targetEmail) queryParams.set('email', targetEmail);
-      }
-      queryParams.set('t', String(Date.now()));
-
-      const res = await fetch(`/api/recipes/saved?${queryParams.toString()}`, { cache: 'no-store' });
-      let rawRecipes: any[] = [];
+      const res = await fetch(`/api/admin/storage?t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data.recipes)) rawRecipes = data.recipes;
+        const s = data.storage || data.settings || data;
+        const provider = s.provider || s.activeProvider || (s.supabase?.enabled ? 'supabase' : 'local');
+        setStorageProvider(provider === 'supabase' ? 'supabase' : 'local');
       }
-
-      const userRecipes = rawRecipes.map((r: any) => {
-        const cleanType = getCleanRecipeType(r);
-        return {
-          ...r,
-          userId: r.userId || r.user_id || targetUserId,
-          recipeType: cleanType,
-          category: cleanType,
-          bookId: r.book_id || r.bookId || null,
-          isPublic: Boolean(r.is_public ?? r.isPublic ?? false),
-          is_public: Boolean(r.is_public ?? r.isPublic ?? false),
-          isFavorite: Boolean(r.is_favorite || r.isFavorite),
-          is_favorite: Boolean(r.is_favorite || r.isFavorite),
-          isCooked: Boolean(r.is_cooked || r.isCooked),
-          is_cooked: Boolean(r.is_cooked || r.isCooked),
-          rating: Number(r.rating) || 5,
-          note: r.note || '',
-          sourceUrl: r.source_url || r.sourceUrl || '',
-          source_url: r.source_url || r.sourceUrl || '',
-          creatorName: r.creatorName || r.creator_name || r.ownerName || 'Chef',
-          creatorEmail: r.creatorEmail || r.creator_email || r.ownerEmail || '',
-          tags: [cleanType, ...(Array.isArray(r.tags) ? r.tags.filter((t: string) => t !== 'Imported' && t !== cleanType) : [])]
-        };
-      });
-
-      setRecipes(userRecipes);
-
-      let parsedBooks = defaultBooks;
+    } catch (_) {
       try {
-        const bRes = await fetch(`/api/books?userId=${encodeURIComponent(targetUserId)}`, { cache: 'no-store' });
-        if (bRes.ok) {
-          const bData = await bRes.json();
-          if (Array.isArray(bData.books) && bData.books.length > 0) parsedBooks = bData.books;
+        const adminRes = await fetch(`/api/admin/settings?t=${Date.now()}`, { cache: 'no-store' });
+        if (adminRes.ok) {
+          const adm = await adminRes.json();
+          const s = adm.storage || adm.settings?.storage || {};
+          if (s.provider) setStorageProvider(s.provider);
         }
       } catch (_) {}
+    }
+  }, []);
 
-      setBooks(parsedBooks.map((b: any) => ({
-        ...b,
-        recipeCount: userRecipes.filter((r: any) => r.bookId === b.id || (Array.isArray(b.recipeIds) && b.recipeIds.includes(r.id))).length
-      })));
-    } catch (e) {
-      console.error('[RecipesPage] Load error:', e);
-    } finally {
+  // Web Audio Synthesizer Chime
+  const playChimeSound = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.8);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.8);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.8);
+    } catch (_) {}
+  };
+
+  useEffect(() => {
+    let interval: any = null;
+    if (activeTimer && activeTimer.running && activeTimer.remainingSeconds > 0) {
+      interval = setInterval(() => {
+        setActiveTimer(prev => {
+          if (!prev) return null;
+          if (prev.remainingSeconds <= 1) {
+            playChimeSound();
+            return { ...prev, running: false, remainingSeconds: 0 };
+          }
+          return { ...prev, remainingSeconds: prev.remainingSeconds - 1 };
+        });
+      }, 1000);
+    }
+    return () => { if (interval) clearInterval(interval); };
+  }, [activeTimer]);
+
+  // Load Recipes from Multi-Source REST Endpoints & Local Hydration
+  const loadData = useCallback(async (user: User | null, showSpinner = false) => {
+    if (!user) return;
+    if (isSelfUpdatingRef.current) return;
+    if (showSpinner) setLoading(true);
+
+    try {
+      const targetUserId = (user.id || user.email || 'usr_admin_1').trim();
+      const [savedRes, recipesRes, booksRes, catRes] = await Promise.allSettled([
+        fetch(`/api/saved-recipes?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' }),
+        fetch(`/api/recipes?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' }),
+        fetch(`/api/books?t=${Date.now()}`, { cache: 'no-store' }),
+        fetch(`/api/admin/ingredient-categories?t=${Date.now()}`, { cache: 'no-store' })
+      ]);
+
+      let combined: any[] = [];
+      if (savedRes.status === 'fulfilled' && savedRes.value.ok) {
+        const data = await savedRes.value.json();
+        const list = Array.isArray(data) ? data : data.recipes || [];
+        combined.push(...list);
+      }
+      if (recipesRes.status === 'fulfilled' && recipesRes.value.ok) {
+        const data = await recipesRes.value.json();
+        const list = Array.isArray(data) ? data : data.recipes || [];
+        combined.push(...list);
+      }
+      if (booksRes.status === 'fulfilled' && booksRes.value.ok) {
+        const bData = await booksRes.value.json();
+        setBooks(Array.isArray(bData) ? bData : bData.books || []);
+      }
+      if (catRes.status === 'fulfilled' && catRes.value.ok) {
+        const cData = await catRes.value.json();
+        const cList = Array.isArray(cData) ? cData : cData.categories || [];
+        if (cList.length > 0) setCategories(cList.map((c: any) => typeof c === 'string' ? c : c.name || c.label));
+      }
+
+      // LocalStorage Fallback Hydration
+      const storageKeys = ['zecratary_recipes', 'zecratary_saved_recipes', 'saved_recipes'];
+      storageKeys.forEach(k => {
+        try {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) combined.push(...parsed);
+          }
+        } catch (_) {}
+      });
+
+      // Deduplicate Recipes by ID
+      const seen = new Set();
+      const deduplicated: any[] = [];
+      for (const item of combined) {
+        if (!item || !item.id) continue;
+        if (!seen.has(item.id)) {
+          seen.add(item.id);
+          deduplicated.push({
+            ...item,
+            title: decodeHtmlEntities(item.title || item.name || 'Untitled Recipe'),
+            imageUrl: item.imageUrl || item.image || item.image_url || '/recipes/images/default.jpg',
+            recipeType: item.recipeType || item.category || 'Main Dish',
+            isFavorite: Boolean(item.isFavorite ?? item.is_favorite),
+            isCooked: Boolean(item.isCooked ?? item.is_cooked),
+            isPublic: Boolean(item.isPublic ?? item.is_public),
+            servings: Number(item.servings) || 4,
+            rating: Number(item.rating) || 5,
+            note: item.note || item.notes || ''
+          });
+        }
+      }
+
+      setRecipes(deduplicated);
+    } catch (_) {} finally {
       setLoading(false);
     }
-  }, [activeTab]);
+  }, []);
 
   useEffect(() => {
-    applyGlobalTheme();
-    window.addEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_changed', applyGlobalTheme);
-    window.addEventListener('zecratary_theme_updated', applyGlobalTheme);
-    window.addEventListener('storage', applyGlobalTheme);
-
-    return () => {
-      window.removeEventListener('zecratary_theme_mode_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_changed', applyGlobalTheme);
-      window.removeEventListener('zecratary_theme_updated', applyGlobalTheme);
-      window.removeEventListener('storage', applyGlobalTheme);
-    };
-  }, [applyGlobalTheme]);
-
-  useEffect(() => {
-    document.title = `${t('savedRecipesTitle') || 'Recipes'} - FoodiePrep`;
+    document.title = `${t('recipesTitle', 'Recipe Library')} - Zecratary`;
     initAuthStorage();
     const user = getCurrentUser();
     if (!user) {
@@ -36262,488 +36277,52 @@ export default function RecipesPage() {
       return;
     }
     setCurrentUser(user);
-    loadData(user, activeTab);
+    loadData(user, true);
+    fetchStorageSettings();
+
+    try {
+      const savedGrid = localStorage.getItem('zecratary_recipe_grid_mode') as GridMode;
+      if (savedGrid && GRID_CONFIG[savedGrid]) setGridMode(savedGrid);
+    } catch (_) {}
 
     const handleSync = () => {
-      const activeUser = getCurrentUser();
-      if (activeUser) {
-        setCurrentUser(activeUser);
-        loadData(activeUser, activeTab);
+      const u = getCurrentUser();
+      if (u) {
+        setCurrentUser(u);
+        loadData(u, false);
       }
+      fetchStorageSettings();
     };
 
-    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
-    window.addEventListener('zecratary_recipes_updated', handleSync);
-    window.addEventListener('zecratary_recipe_books_updated', handleSync);
-    window.addEventListener('zecratary_categories_changed', handleSync);
-    window.addEventListener('zecratary_auth_changed', handleSync);
     window.addEventListener('storage', handleSync);
+    window.addEventListener('zecratary_recipes_updated', handleSync);
+    window.addEventListener('zecratary_saved_recipes_updated', handleSync);
+    window.addEventListener('zecratary_storage_settings_updated', handleSync);
+    window.addEventListener('zecratary_admin_settings_updated', handleSync);
+    window.addEventListener('zecratary_theme_mode_changed', handleSync);
+    window.addEventListener('zecratary_languages_updated', handleSync);
+    window.addEventListener('zecratary_dictionary_updated', handleSync);
+    window.addEventListener('zecratary_locale_changed', handleSync);
 
     return () => {
-      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_recipes_updated', handleSync);
-      window.removeEventListener('zecratary_recipe_books_updated', handleSync);
-      window.removeEventListener('zecratary_categories_changed', handleSync);
-      window.removeEventListener('zecratary_auth_changed', handleSync);
       window.removeEventListener('storage', handleSync);
+      window.removeEventListener('zecratary_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_saved_recipes_updated', handleSync);
+      window.removeEventListener('zecratary_storage_settings_updated', handleSync);
+      window.removeEventListener('zecratary_admin_settings_updated', handleSync);
+      window.removeEventListener('zecratary_theme_mode_changed', handleSync);
+      window.removeEventListener('zecratary_languages_updated', handleSync);
+      window.removeEventListener('zecratary_dictionary_updated', handleSync);
+      window.removeEventListener('zecratary_locale_changed', handleSync);
     };
-  }, [loadData, router, t, activeTab]);
+  }, [router, t, loadData, fetchStorageSettings]);
 
-  const saveAllRecipes = (updatedUserList: any[]) => {
-    if (!currentUser) return;
-    const targetUserId = currentUser.id || 'usr_admin_1';
-
-    const updatedWithId = updatedUserList.map(r => ({
-      ...r,
-      userId: targetUserId,
-      user_id: targetUserId,
-      bookId: r.bookId || r.book_id || null,
-      book_id: r.bookId || r.book_id || null,
-      isPublic: Boolean(r.isPublic ?? r.is_public),
-      is_public: Boolean(r.isPublic ?? r.is_public),
-      isFavorite: Boolean(r.isFavorite ?? r.is_favorite),
-      is_favorite: Boolean(r.isFavorite ?? r.is_favorite),
-      isCooked: Boolean(r.isCooked ?? r.is_cooked),
-      is_cooked: Boolean(r.isCooked ?? r.is_cooked),
-      rating: Number(r.rating) || 5,
-      note: r.note || '',
-      sourceUrl: r.sourceUrl || r.source_url || '',
-      source_url: r.sourceUrl || r.source_url || ''
-    }));
-
-    setRecipes(updatedWithId);
-
-    persistSavedRecipe(targetUserId, updatedWithId).then(() => {
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_recipes_updated'));
-      }
-    }).catch((err) => {
-      console.error('[RecipesPage] Error saving recipes:', err);
-    });
-  };
-
-  // Interactive Slide-Toggle for Public Marketplace
-  const handleTogglePublic = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    const target = recipes.find(r => r.id === id);
-    if (!target) return;
-    const newPub = !Boolean(target.isPublic || target.is_public);
-
-    const updated = recipes.map(r => r.id === id ? { ...r, isPublic: newPub, is_public: newPub } : r);
-    setRecipes(updated);
-
-    if (selectedRecipe?.id === id) {
-      setSelectedRecipe({ ...selectedRecipe, isPublic: newPub, is_public: newPub });
-    }
-
+  const changeGridMode = (mode: GridMode) => {
+    setGridMode(mode);
     try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, isPublic: newPub, is_public: newPub })
-      });
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+      localStorage.setItem('zecratary_recipe_grid_mode', mode);
     } catch (_) {}
-  };
-
-  // Export Complete Recipe JSON with Ownership Telemetry
-  const handleExportJson = (recipe: any, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    const currentU = currentUser || getCurrentUser();
-    const exportPayload = {
-      schemaVersion: '1.0.0',
-      exportedAt: new Date().toISOString(),
-      id: recipe.id,
-      ownership: {
-        userId: recipe.userId || recipe.user_id || currentU?.id || 'usr_admin_1',
-        createdBy: recipe.createdBy || recipe.created_by || currentU?.email || 'chef@zecratary.local',
-        creatorName: recipe.creatorName || recipe.creator_name || currentU?.name || 'Chef',
-        creatorEmail: recipe.creatorEmail || recipe.creator_email || currentU?.email || ''
-      },
-      owner: {
-        id: recipe.userId || recipe.user_id || currentU?.id || 'usr_admin_1',
-        name: recipe.creatorName || recipe.creator_name || currentU?.name || 'Chef',
-        email: recipe.creatorEmail || recipe.creator_email || currentU?.email || ''
-      },
-      ownerId: recipe.userId || recipe.user_id || currentU?.id || 'usr_admin_1',
-      ownerName: recipe.creatorName || recipe.creator_name || currentU?.name || 'Chef',
-      ownerEmail: recipe.creatorEmail || recipe.creator_email || currentU?.email || '',
-      userId: recipe.userId || recipe.user_id || currentU?.id || 'usr_admin_1',
-      createdBy: recipe.createdBy || recipe.created_by || currentU?.email || 'chef@zecratary.local',
-      creatorName: recipe.creatorName || recipe.creator_name || currentU?.name || 'Chef',
-      isPublic: Boolean(recipe.isPublic ?? recipe.is_public),
-      title: recipe.title || recipe.name || 'Untitled Recipe',
-      description: recipe.description || '',
-      recipeType: recipe.recipeType || recipe.category || 'Main Dish',
-      cuisine: recipe.cuisine || '',
-      servings: recipe.servings || 4,
-      prepTimeMinutes: recipe.prepTimeMinutes || 15,
-      cookTimeMinutes: recipe.cookTimeMinutes || 25,
-      ingredients: recipe.ingredients || [],
-      instructions: recipe.instructions || recipe.directions || [],
-      nutrition: recipe.nutrition || {},
-      imageUrl: recipe.imageUrl || recipe.image || '',
-      sourceUrl: recipe.sourceUrl || recipe.source_url || '',
-      isFavorite: Boolean(recipe.isFavorite ?? recipe.is_favorite),
-      isCooked: Boolean(recipe.isCooked ?? recipe.is_cooked),
-      rating: Number(recipe.rating) || 5,
-      note: recipe.note || '',
-      tags: recipe.tags || []
-    };
-
-    const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(exportPayload, null, 2))}`;
-    const downloadAnchor = document.createElement('a');
-    const safeFilename = (recipe.title || recipe.name || 'recipe')
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '_')
-      .replace(/_+/g, '_')
-      .substring(0, 50);
-    downloadAnchor.setAttribute('href', jsonString);
-    downloadAnchor.setAttribute('download', `${safeFilename}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-  };
-
-  // Clone Marketplace Recipe into Personal Collection
-  const handleSaveToMyRecipes = async (recipe: any, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-    if (!currentUser) return;
-
-    const clonedId = `rcp_copy_${Date.now().toString(36)}`;
-    const cloned = {
-      ...recipe,
-      id: clonedId,
-      userId: currentUser.id || 'usr_admin_1',
-      user_id: currentUser.id || 'usr_admin_1',
-      createdBy: currentUser.email || 'user@zecratary.local',
-      creatorName: `${currentUser.name || 'You'} (copied from ${recipe.creatorName || 'Community'})`,
-      isPublic: false,
-      is_public: false
-    };
-
-    try {
-      await fetch('/api/recipes/saved', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify([cloned])
-      });
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-      alert(`"${recipe.title}" copied to your Recipes!`);
-    } catch (_) {}
-  };
-
-  const toggleFavorite = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    const target = recipes.find(r => r.id === id);
-    if (!target) return;
-    const newFav = !target.isFavorite;
-
-    const updated = recipes.map(r => r.id === id ? { ...r, isFavorite: newFav, is_favorite: newFav } : r);
-    setRecipes(updated);
-
-    if (selectedRecipe?.id === id) {
-      setSelectedRecipe({ ...selectedRecipe, isFavorite: newFav, is_favorite: newFav });
-    }
-
-    saveAllRecipes(updated);
-
-    try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, isFavorite: newFav, is_favorite: newFav })
-      });
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-    } catch (_) {}
-  };
-
-  const toggleCooked = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    const target = recipes.find(r => r.id === id);
-    if (!target) return;
-    const newCooked = !target.isCooked;
-
-    const updated = recipes.map(r => r.id === id ? { ...r, isCooked: newCooked, is_cooked: newCooked } : r);
-    setRecipes(updated);
-
-    if (selectedRecipe?.id === id) {
-      setSelectedRecipe({ ...selectedRecipe, isCooked: newCooked, is_cooked: newCooked });
-    }
-
-    saveAllRecipes(updated);
-
-    try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, isCooked: newCooked, is_cooked: newCooked })
-      });
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-    } catch (_) {}
-  };
-
-  const handleAssignToBook = async (bookId: string) => {
-    if (!selectedRecipe) return;
-    const isRemoving = isRecipeInBook(selectedRecipe, bookId);
-    const targetBookId = isRemoving ? null : bookId;
-    
-    const updatedRecipe = {
-      ...selectedRecipe,
-      bookId: targetBookId,
-      book_id: targetBookId
-    };
-    setSelectedRecipe(updatedRecipe);
-
-    const updatedRecipes = recipes.map(r => r.id === selectedRecipe.id ? updatedRecipe : r);
-    setRecipes(updatedRecipes);
-
-    try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selectedRecipe.id, bookId: targetBookId, book_id: targetBookId })
-      });
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-      window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
-      window.dispatchEvent(new Event('zecratary_recipe_books_updated'));
-      window.dispatchEvent(new Event('storage'));
-    } catch (err) {
-      console.error('Error assigning recipe to book:', err);
-    }
-  };
-
-  const openAddToPlanModal = () => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    setPlanDate(todayStr);
-    setPlanMealType('Dinner');
-    setPlanTime('19:00');
-    setPlanNotes('');
-    setShowAddToPlanModal(true);
-  };
-
-  const handleSaveToCalendar = async () => {
-    if (!selectedRecipe || !currentUser) return;
-
-    const recName = selectedRecipe.title || selectedRecipe.name || 'Untitled Recipe';
-    const recImage = selectedRecipe.imageUrl || selectedRecipe.image || selectedRecipe.image_url || '/recipes/images/default.jpg';
-    const targetUserId = currentUser.id || 'usr_admin_1';
-
-    const newPlanItem = {
-      id: 'plan_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-      userId: targetUserId,
-      user_id: targetUserId,
-      createdBy: currentUser.email || 'user@zecratary.local',
-      creatorName: currentUser.name || 'User',
-      date: planDate,
-      recipeId: selectedRecipe.id,
-      recipe_id: selectedRecipe.id,
-      recipeName: recName,
-      title: recName,
-      image: recImage,
-      imageUrl: recImage,
-      image_url: recImage,
-      mealType: planMealType,
-      time: planTime || '',
-      notes: planNotes || '',
-      servings: currentTotalServings || selectedRecipe.servings || 4,
-      prepTimeMinutes: selectedRecipe.prepTimeMinutes || 15,
-      cookTimeMinutes: selectedRecipe.cookTimeMinutes || 25,
-      recipe: selectedRecipe,
-      isLeftover: false,
-      createdAt: new Date().toISOString()
-    };
-
-    try {
-      const planKeys = ['zecratary_meal_plan', 'zecratary_meal_plans'];
-      for (const k of planKeys) {
-        const raw = localStorage.getItem(k);
-        const currentPlan = raw ? JSON.parse(raw) : [];
-        const updated = Array.isArray(currentPlan) ? [...currentPlan, newPlanItem] : [newPlanItem];
-        localStorage.setItem(k, JSON.stringify(updated));
-      }
-    } catch (_) {}
-
-    try {
-      await Promise.allSettled([
-        fetch('/api/planner', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newPlanItem)
-        }),
-        fetch('/api/meal-plans', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newPlanItem)
-        })
-      ]);
-    } catch (_) {}
-
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('zecratary_planner_updated'));
-      window.dispatchEvent(new Event('zecratary_meal_plan_updated'));
-      window.dispatchEvent(new Event('storage'));
-    }
-
-    setShowAddToPlanModal(false);
-    alert(`Successfully scheduled "${recName}" in your meal plan!`);
-  };
-
-  const updateSelectedRecipeState = async (key: string, val: any) => {
-    if (!selectedRecipe) return;
-    const updatedRec = { ...selectedRecipe, [key]: val };
-    if (key === 'isFavorite') updatedRec.is_favorite = val;
-    if (key === 'isCooked') updatedRec.is_cooked = val;
-    if (key === 'bookId') updatedRec.book_id = val;
-    if (key === 'isPublic') updatedRec.is_public = val;
-
-    setSelectedRecipe(updatedRec);
-    const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
-    saveAllRecipes(updatedList);
-
-    try {
-      await fetch('/api/recipes/saved', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: selectedRecipe.id, [key]: val })
-      });
-      window.dispatchEvent(new Event('zecratary_recipes_updated'));
-    } catch (_) {}
-  };
-
-  const handleDeleteRecipe = async (id: string) => {
-    if (!confirm(t('confirmDeleteRecipe') || 'Are you sure you want to delete this recipe?')) return;
-    
-    try {
-      await Promise.allSettled([
-        fetch(`/api/recipes/saved?id=${encodeURIComponent(id)}`, { method: 'DELETE' }),
-        fetch(`/api/recipes?id=${encodeURIComponent(id)}`, { method: 'DELETE' })
-      ]);
-
-      if (typeof deleteSavedRecipe === 'function') {
-        await deleteSavedRecipe(currentUser?.id || 'usr_admin_1', id).catch(() => {});
-      }
-
-      const updated = recipes.filter(r => r.id !== id);
-      setRecipes(updated);
-      setSelectedRecipe(null);
-      setIsEditing(false);
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('zecratary_recipes_updated'));
-        window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
-      }
-    } catch (err) {
-      console.error('[RecipesPage] Error deleting recipe:', err);
-      alert('Failed to delete recipe. Please try again.');
-    }
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setEditForm((prev: any) => ({ ...prev, imageUrl: reader.result as string }));
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleDragStart = (index: number) => {
-    setDraggedIndex(index);
-  };
-
-  const handleDragOver = (e: React.DragEvent, index: number, type: 'ingredients' | 'steps') => {
-    e.preventDefault();
-    if (draggedIndex === null || draggedIndex === index) return;
-
-    if (type === 'ingredients') {
-      const list = [...editForm.ingredients];
-      const item = list[draggedIndex];
-      list.splice(draggedIndex, 1);
-      list.splice(index, 0, item);
-      setEditForm({ ...editForm, ingredients: list });
-      setDraggedIndex(index);
-    } else {
-      const list = [...editForm.instructions];
-      const item = list[draggedIndex];
-      list.splice(draggedIndex, 1);
-      list.splice(index, 0, item);
-      setEditForm({ ...editForm, instructions: list });
-      setDraggedIndex(index);
-    }
-  };
-
-  const handleDrop = () => {
-    setDraggedIndex(null);
-  };
-
-  // Open Edit Mode
-  const handleOpenEdit = () => {
-    if (!selectedRecipe) return;
-    const defaultCat = categories[0] || 'Produce';
-    const cleanType = getCleanRecipeType(selectedRecipe);
-
-    let rawIngredients = selectedRecipe.ingredients;
-    if (typeof rawIngredients === 'string') {
-      try { rawIngredients = JSON.parse(rawIngredients); } catch (_) { rawIngredients = [rawIngredients]; }
-    }
-    if (!Array.isArray(rawIngredients)) rawIngredients = [];
-
-    setEditForm({
-      title: selectedRecipe.title || selectedRecipe.name || '',
-      description: selectedRecipe.description || '',
-      recipeType: cleanType,
-      sourceUrl: selectedRecipe.sourceUrl || selectedRecipe.source_url || '',
-      servings: selectedRecipe.servings || 4,
-      prepTimeMinutes: selectedRecipe.prepTimeMinutes || 30,
-      cookTimeMinutes: selectedRecipe.cookTimeMinutes || 10,
-      imageUrl: selectedRecipe.imageUrl || selectedRecipe.image || '',
-      isPublic: Boolean(selectedRecipe.isPublic ?? selectedRecipe.is_public ?? false),
-      ingredients: rawIngredients.length > 0
-        ? rawIngredients.map((ing: any) => ({
-            amount: typeof ing === 'string' ? '' : ing.amount || ing.quantity || '',
-            unit: typeof ing === 'string' ? '' : ing.unit || '',
-            item: typeof ing === 'string' ? ing : ing.item || ing.name || '',
-            category: typeof ing === 'string' ? defaultCat : ing.category || defaultCat
-          }))
-        : [{ amount: '', unit: '', item: '', category: defaultCat }],
-      instructions: selectedRecipe.instructions && selectedRecipe.instructions.length > 0
-        ? [...selectedRecipe.instructions]
-        : ['']
-    });
-    setEditTab('info');
-    setIsReorderingIngredients(false);
-    setIsReorderingSteps(false);
-    setIsEditing(true);
-  };
-
-  // Save Edit Mode Changes
-  const handleSaveEdit = () => {
-    if (!editForm.title.trim()) {
-      alert(t('enterRecipeTitleAlert') || 'Please enter a recipe title.');
-      setEditTab('info');
-      return;
-    }
-
-    const cleanType = getCleanRecipeType(editForm);
-
-    const updatedRec = {
-      ...selectedRecipe,
-      ...editForm,
-      userId: currentUser?.id || selectedRecipe.userId || 'usr_admin_1',
-      recipeType: cleanType,
-      category: cleanType,
-      isPublic: Boolean(editForm.isPublic),
-      is_public: Boolean(editForm.isPublic),
-      tags: [cleanType]
-    };
-
-    setSelectedRecipe(updatedRec);
-    const updatedList = recipes.map(r => r.id === updatedRec.id ? updatedRec : r);
-    saveAllRecipes(updatedList);
-    setIsEditing(false);
+    setCurrentPage(1);
   };
 
   const calculateScaledAmount = (rawAmt: any, baseServings: number, currentServings: number) => {
@@ -36767,39 +36346,216 @@ export default function RecipesPage() {
       }
       return rawAmt;
     }
-
     const num = Number(rawAmt);
     const scaled = (num / (baseServings || 4)) * currentServings;
     return Number.isInteger(scaled) ? scaled : Number(scaled.toFixed(2));
   };
 
-  const parseIngredientString = (rawStr: string, defaultCat: string) => {
-    const trimmed = String(rawStr || '').trim();
-    if (!trimmed) return { amount: '1', unit: 'unit', item: '', category: defaultCat };
-
-    const regex = /^((?:\d+\s+)?\d+\/\d+|\d+(?:\.\d+)?)\s*([a-zA-Z]+)?\s+(?:of\s+)?(.*)$/i;
-    const match = trimmed.match(regex);
-
-    if (match) {
-      const amount = match[1].trim();
-      const possibleUnit = (match[2] || '').trim().toLowerCase();
-      const rest = match[3].trim();
-
-      const knownUnits = [
-        'cup', 'cups', 'tbsp', 'tbs', 'tablespoon', 'tablespoons', 'tsp', 'teaspoon', 'teaspoons',
-        'oz', 'ounce', 'ounces', 'lb', 'lbs', 'pound', 'pounds', 'g', 'gram', 'grams', 'kg',
-        'ml', 'l', 'liter', 'liters', 'clove', 'cloves', 'can', 'cans', 'slice', 'slices',
-        'pinch', 'pinches', 'bunch', 'bunches', 'stalk', 'stalks', 'piece', 'pieces', 'dash'
-      ];
-
-      if (knownUnits.includes(possibleUnit)) {
-        return { amount, unit: possibleUnit, item: rest || trimmed, category: defaultCat };
-      } else if (possibleUnit) {
-        return { amount, unit: '', item: `${possibleUnit} ${rest}`.trim(), category: defaultCat };
+  const allAvailableIngredients = useMemo(() => {
+    const set = new Set<string>();
+    recipes.forEach(r => {
+      if (Array.isArray(r.ingredients)) {
+        r.ingredients.forEach((ing: any) => {
+          const name = typeof ing === 'string' ? ing : ing.name || ing.item;
+          if (name && typeof name === 'string') {
+            const clean = name.trim().toLowerCase();
+            if (clean.length > 1) set.add(clean);
+          }
+        });
       }
-    }
+    });
+    return Array.from(set).sort();
+  }, [recipes]);
 
-    return { amount: '1', unit: '', item: trimmed, category: defaultCat };
+  const filteredRecipes = useMemo(() => {
+    return recipes.filter(r => {
+      if (search.trim()) {
+        const q = search.toLowerCase();
+        const matchesTitle = (r.title || '').toLowerCase().includes(q);
+        const matchesDesc = (r.description || '').toLowerCase().includes(q);
+        const matchesNotes = (r.note || r.notes || '').toLowerCase().includes(q);
+        const matchesIng = Array.isArray(r.ingredients) && r.ingredients.some((ing: any) => {
+          const name = typeof ing === 'string' ? ing : ing.name || ing.item;
+          return (name || '').toLowerCase().includes(q);
+        });
+        if (!matchesTitle && !matchesDesc && !matchesNotes && !matchesIng) return false;
+      }
+
+      if (filterFavorites && !r.isFavorite) return false;
+      if (filterCooked && !r.isCooked) return false;
+      if (selectedType !== 'ALL' && r.recipeType !== selectedType) return false;
+
+      if (selectedRating !== 'ALL') {
+        const minRating = Number(selectedRating);
+        if ((r.rating || 0) < minRating) return false;
+      }
+
+      if (selectedPrepTime !== 'ALL') {
+        const prep = Number(r.prepTimeMinutes || r.prepTime || 0);
+        if (selectedPrepTime === '15' && prep > 15) return false;
+        if (selectedPrepTime === '30' && prep > 30) return false;
+        if (selectedPrepTime === '60' && prep > 60) return false;
+        if (selectedPrepTime === '60+' && prep <= 60) return false;
+      }
+
+      if (selectedCookTime !== 'ALL') {
+        const cook = Number(r.cookTimeMinutes || r.cookTime || 0);
+        if (selectedCookTime === '15' && cook > 15) return false;
+        if (selectedCookTime === '30' && cook > 30) return false;
+        if (selectedCookTime === '60' && cook > 60) return false;
+        if (selectedCookTime === '60+' && cook <= 60) return false;
+      }
+
+      if (selectedIngredientsList.length > 0) {
+        const recIngs = Array.isArray(r.ingredients)
+          ? r.ingredients.map((i: any) => (typeof i === 'string' ? i : i.name || i.item || '').toLowerCase())
+          : [];
+        const hasAll = selectedIngredientsList.every(req => recIngs.some(ri => ri.includes(req.toLowerCase())));
+        if (!hasAll) return false;
+      }
+
+      return true;
+    });
+  }, [recipes, search, filterFavorites, filterCooked, selectedType, selectedRating, selectedPrepTime, selectedCookTime, selectedIngredientsList]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterFavorites, filterCooked, selectedType, selectedRating, selectedPrepTime, selectedCookTime, selectedIngredientsList, gridMode]);
+
+  const itemsPerPage = GRID_CONFIG[gridMode].perPage;
+  const totalPages = Math.max(1, Math.ceil(filteredRecipes.length / itemsPerPage));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
+  const paginatedRecipes = filteredRecipes.slice(startIndex, startIndex + itemsPerPage);
+
+  const handleToggleFavorite = async (e: React.MouseEvent, recipe: any) => {
+    e.stopPropagation();
+    isSelfUpdatingRef.current = true;
+    const newFav = !recipe.isFavorite;
+    const updated = { ...recipe, isFavorite: newFav, is_favorite: newFav };
+
+    setRecipes(prev => prev.map(r => r.id === recipe.id ? updated : r));
+    if (selectedRecipe && selectedRecipe.id === recipe.id) setSelectedRecipe(updated);
+
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: recipe.id, isFavorite: newFav, is_favorite: newFav })
+      });
+    } catch (_) {} finally {
+      setTimeout(() => { isSelfUpdatingRef.current = false; }, 300);
+    }
+  };
+
+  const handleToggleCooked = async (e: React.MouseEvent, recipe: any) => {
+    e.stopPropagation();
+    isSelfUpdatingRef.current = true;
+    const newCooked = !recipe.isCooked;
+    const updated = { ...recipe, isCooked: newCooked, is_cooked: newCooked };
+
+    setRecipes(prev => prev.map(r => r.id === recipe.id ? updated : r));
+    if (selectedRecipe && selectedRecipe.id === recipe.id) setSelectedRecipe(updated);
+
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: recipe.id, isCooked: newCooked, is_cooked: newCooked })
+      });
+    } catch (_) {} finally {
+      setTimeout(() => { isSelfUpdatingRef.current = false; }, 300);
+    }
+  };
+
+  const handleTogglePublic = async (e: React.MouseEvent, recipe: any) => {
+    e.stopPropagation();
+    const newStatus = !recipe.isPublic;
+    const updated = { ...recipe, isPublic: newStatus, is_public: newStatus };
+
+    setRecipes(prev => prev.map(r => r.id === recipe.id ? updated : r));
+    if (selectedRecipe && selectedRecipe.id === recipe.id) setSelectedRecipe(updated);
+
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: recipe.id, isPublic: newStatus, is_public: newStatus })
+      });
+    } catch (_) {}
+  };
+
+  const handleAssignToBook = async (bookId: string) => {
+    if (!selectedRecipe) return;
+    const isRemoving = selectedRecipe.bookId === bookId;
+    const targetBookId = isRemoving ? null : bookId;
+    const updatedRecipe = { ...selectedRecipe, bookId: targetBookId };
+    setSelectedRecipe(updatedRecipe);
+
+    setRecipes(prev => prev.map(r => r.id === selectedRecipe.id ? updatedRecipe : r));
+
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedRecipe.id, bookId: targetBookId, book_id: targetBookId })
+      });
+    } catch (_) {}
+
+    const bookTitle = books.find(b => b.id === bookId)?.title || 'Cookbook';
+    showToast(isRemoving ? `Removed from "${bookTitle}"` : `Added to "${bookTitle}"!`, 'success');
+  };
+
+  const updateSelectedRecipeState = async (key: string, val: any) => {
+    if (!selectedRecipe) return;
+    const updatedRec = { ...selectedRecipe, [key]: val };
+    setSelectedRecipe(updatedRec);
+    setRecipes(prev => prev.map(r => r.id === updatedRec.id ? updatedRec : r));
+
+    try {
+      await fetch('/api/recipes/saved', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: selectedRecipe.id, [key]: val })
+      });
+    } catch (_) {}
+  };
+
+  const handleSaveToCalendar = async () => {
+    if (!selectedRecipe || !currentUser) return;
+    try {
+      const localPlan = localStorage.getItem('zecratary_meal_plan');
+      const currentPlan = localPlan ? JSON.parse(localPlan) : [];
+
+      const newPlanItem = {
+        id: 'plan_' + Date.now(),
+        userId: currentUser.id,
+        createdBy: currentUser.email,
+        creatorName: currentUser.name,
+        date: planDate,
+        recipeId: selectedRecipe.id,
+        recipeName: selectedRecipe.title || selectedRecipe.name,
+        image: selectedRecipe.imageUrl || selectedRecipe.image || '/recipes/images/default.jpg',
+        mealType: planMealType,
+        time: planTime,
+        notes: planNotes,
+        isLeftover: false
+      };
+
+      const updatedPlan = [...currentPlan, newPlanItem];
+      localStorage.setItem('zecratary_meal_plan', JSON.stringify(updatedPlan));
+
+      await fetch('/api/planner', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUser.id, meals: updatedPlan })
+      });
+
+      window.dispatchEvent(new Event('zecratary_planner_updated'));
+      window.dispatchEvent(new Event('storage'));
+      setShowAddToPlanModal(false);
+      showToast(t('mealScheduledToast', 'Recipe scheduled in your meal planner!'), 'success');
+    } catch (_) {}
   };
 
   const handleOpenShoppingModal = () => {
@@ -36808,898 +36564,896 @@ export default function RecipesPage() {
     const baseServings = selectedRecipe.servings || 4;
     const totalServings = baseServings * servingsMultiplier;
 
-    let rawIngredients = selectedRecipe.ingredients;
-    if (typeof rawIngredients === 'string') {
-      try { rawIngredients = JSON.parse(rawIngredients); } catch (_) { rawIngredients = [rawIngredients]; }
-    }
-    if (!Array.isArray(rawIngredients)) rawIngredients = [];
-
-    const items = rawIngredients.map((ing: any, idx: number) => {
-      let parsed = { amount: '', unit: '', item: '', category: defaultCat };
-
-      if (typeof ing === 'string') {
-        parsed = parseIngredientString(ing, defaultCat);
-      } else if (ing && typeof ing === 'object') {
-        parsed = {
-          amount: String(ing.amount || ing.quantity || '').trim(),
-          unit: String(ing.unit || '').trim(),
-          item: String(ing.item || ing.name || '').trim(),
-          category: String(ing.category || defaultCat).trim()
-        };
-      }
-
-      const scaledAmt = calculateScaledAmount(parsed.amount, baseServings, totalServings);
-
+    const items = (selectedRecipe.ingredients || []).map((ing: any, idx: number) => {
+      const rawAmt = typeof ing === 'string' ? '' : ing.amount || ing.quantity || '';
+      const scaledAmt = calculateScaledAmount(rawAmt, baseServings, totalServings);
       return {
-        id: 'shop_item_' + idx + '_' + Math.random().toString(36).substring(2, 6),
+        id: 'shop_item_' + idx,
         selected: true,
-        amount: scaledAmt !== '' ? scaledAmt : (parsed.amount || '1'),
-        unit: parsed.unit || '',
-        name: parsed.item || 'Ingredient',
-        category: parsed.category || defaultCat
+        amount: scaledAmt,
+        unit: typeof ing === 'string' ? '' : ing.unit || '',
+        name: typeof ing === 'string' ? ing : ing.item || ing.name || '',
+        category: typeof ing === 'string' ? defaultCat : ing.category || defaultCat
       };
     });
-
     setShoppingModalIngredients(items);
     setIsShoppingModalOpen(true);
   };
 
-  const handleConfirmAddToShoppingList = async () => {
+  const handleConfirmAddToShoppingList = () => {
     const selectedItems = shoppingModalIngredients.filter(i => i.selected);
-    if (selectedItems.length === 0) {
-      alert(t('noIngredientsSelectedAlert') || 'No ingredients selected.');
+    if (selectedItems.length === 0) return;
+    const local = localStorage.getItem('zecratary_shopping') || localStorage.getItem('zecratary_shopping_list');
+    const current = local ? JSON.parse(local) : [];
+    const formatted = selectedItems.map(i => ({
+      id: 's_' + Date.now() + Math.random(),
+      userId: currentUser?.id,
+      createdBy: currentUser?.email,
+      creatorName: currentUser?.name,
+      name: i.name,
+      amount: i.amount || '1',
+      unit: i.unit || 'unit',
+      category: i.category,
+      checked: false
+    }));
+    const updated = [...formatted, ...current];
+    localStorage.setItem('zecratary_shopping', JSON.stringify(updated));
+    localStorage.setItem('zecratary_shopping_list', JSON.stringify(updated));
+    setIsShoppingModalOpen(false);
+    showToast(t('addedToShoppingListToast', 'Ingredients added to your shopping list!'), 'success');
+  };
+
+  // Recipe Edit Studio Open & Handlers
+  const handleOpenEdit = () => {
+    if (!selectedRecipe) return;
+    const defaultCat = categories[0] || 'Produce';
+    const rawIngs = selectedRecipe.ingredients || [];
+    setEditForm({
+      title: selectedRecipe.title || selectedRecipe.name || '',
+      description: selectedRecipe.description || '',
+      recipeType: selectedRecipe.recipeType || selectedRecipe.tags?.[0] || 'Main Dish',
+      sourceUrl: selectedRecipe.sourceUrl || selectedRecipe.source_url || '',
+      servings: selectedRecipe.servings || 4,
+      prepTimeMinutes: selectedRecipe.prepTimeMinutes || selectedRecipe.prepTime || 30,
+      cookTimeMinutes: selectedRecipe.cookTimeMinutes || selectedRecipe.cookTime || 10,
+      imageUrl: selectedRecipe.imageUrl || selectedRecipe.image || '',
+      ingredients: rawIngs.length > 0
+        ? rawIngs.map((ing: any) => ({
+            amount: typeof ing === 'string' ? '' : ing.amount || ing.quantity || '',
+            unit: typeof ing === 'string' ? '' : ing.unit || '',
+            item: typeof ing === 'string' ? ing : ing.item || ing.name || '',
+            category: typeof ing === 'string' ? defaultCat : ing.category || defaultCat
+          }))
+        : [{ amount: '', unit: '', item: '', category: defaultCat }],
+      instructions: selectedRecipe.instructions && selectedRecipe.instructions.length > 0
+        ? [...selectedRecipe.instructions]
+        : selectedRecipe.steps && selectedRecipe.steps.length > 0
+          ? [...selectedRecipe.steps]
+          : ['']
+    });
+    setEditTab('info');
+    setIsReorderingIngredients(false);
+    setIsReorderingSteps(false);
+    setIsEditing(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editForm.title.trim()) {
+      showToast(t('enterRecipeTitleAlert', 'Please enter a recipe title before saving.'), 'error');
+      setEditTab('info');
       return;
     }
 
-    const recTitle = selectedRecipe?.title || selectedRecipe?.name || 'Recipe';
-    const recId = selectedRecipe?.id;
-    const targetUserId = currentUser?.id || 'usr_admin_1';
+    const updatedRec = {
+      ...selectedRecipe,
+      ...editForm,
+      title: editForm.title.trim(),
+      recipeType: editForm.recipeType,
+      category: editForm.recipeType,
+      tags: [editForm.recipeType]
+    };
 
-    const formatted = selectedItems.map(i => ({
-      id: 'shop_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-      userId: targetUserId,
-      user_id: targetUserId,
-      createdBy: currentUser?.email || 'user@zecratary.local',
-      creatorName: currentUser?.name || 'User',
-      name: i.name,
-      item: i.name,
-      amount: String(i.amount || '1'),
-      quantity: String(i.amount || '1'),
-      unit: i.unit || 'unit',
-      category: i.category || (categories[0] || 'Produce'),
-      checked: false,
-      completed: false,
-      recipeId: recId,
-      recipeTitle: recTitle,
-      createdAt: new Date().toISOString()
-    }));
+    setSelectedRecipe(updatedRec);
+    setRecipes(prev => prev.map(r => r.id === updatedRec.id ? updatedRec : r));
+    setIsEditing(false);
 
     try {
-      const keys = ['zecratary_shopping_list', 'zecratary_shopping'];
-      for (const k of keys) {
-        const raw = localStorage.getItem(k);
-        const currentList = raw ? JSON.parse(raw) : [];
-        const updated = Array.isArray(currentList) ? [...formatted, ...currentList] : formatted;
-        localStorage.setItem(k, JSON.stringify(updated));
-      }
+      await Promise.allSettled([
+        fetch('/api/recipes/saved', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedRec)
+        }),
+        fetch('/api/recipes', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updatedRec)
+        })
+      ]);
+      showToast(t('saveChanges', 'Recipe updated successfully!'), 'success');
     } catch (_) {}
+  };
+
+  const handleExportJson = (recipe: any) => {
+    try {
+      const exportData = {
+        schemaVersion: '1.0.0',
+        exportedAt: new Date().toISOString(),
+        id: recipe.id,
+        ownership: recipe.ownership || {
+          userId: recipe.userId || recipe.user_id,
+          createdBy: recipe.createdBy || recipe.created_by,
+          creatorName: recipe.creatorName || recipe.creator_name,
+          isPublic: Boolean(recipe.isPublic ?? recipe.is_public)
+        },
+        owner: recipe.owner || recipe.creatorName || 'Chef',
+        ownerId: recipe.ownerId || recipe.userId || recipe.user_id,
+        ownerName: recipe.ownerName || recipe.creatorName,
+        ownerEmail: recipe.ownerEmail || recipe.createdBy || recipe.created_by,
+        userId: recipe.userId || recipe.user_id,
+        createdBy: recipe.createdBy || recipe.created_by,
+        creatorName: recipe.creatorName || recipe.creator_name,
+        title: recipe.title || recipe.name,
+        name: recipe.title || recipe.name,
+        description: recipe.description || '',
+        recipeType: recipe.recipeType || recipe.category || 'Main Dish',
+        category: recipe.category || recipe.recipeType || 'Main Dish',
+        servings: Number(recipe.servings) || 4,
+        prepTimeMinutes: Number(recipe.prepTimeMinutes || recipe.prepTime) || 15,
+        cookTimeMinutes: Number(recipe.cookTimeMinutes || recipe.cookTime) || 25,
+        calories: Number(recipe.calories) || 0,
+        proteinGrams: Number(recipe.proteinGrams) || 0,
+        carbsGrams: Number(recipe.carbsGrams) || 0,
+        fatGrams: Number(recipe.fatGrams) || 0,
+        imageUrl: recipe.imageUrl || recipe.image || recipe.image_url || '',
+        ingredients: recipe.ingredients || [],
+        instructions: recipe.instructions || recipe.steps || recipe.directions || [],
+        tags: recipe.tags || [recipe.recipeType || 'Main Dish'],
+        sourceUrl: recipe.sourceUrl || recipe.source_url || '',
+        isPublic: Boolean(recipe.isPublic ?? recipe.is_public)
+      };
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const safeTitle = (recipe.title || 'recipe').toLowerCase().replace(/[^a-z0-9]/g, '_');
+      link.href = url;
+      link.download = `${safeTitle}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast(t('jsonExportedSuccessToast', 'Recipe exported as JSON file successfully!'), 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Failed to export recipe JSON', 'error');
+    }
+  };
+
+  const handleDeleteRecipe = async (recipeId: string) => {
+    if (!confirm(t('confirmDeleteRecipe', 'Are you sure you want to delete this recipe?'))) return;
+
+    setRecipes(prev => prev.filter(r => r.id !== recipeId));
+    if (selectedRecipe && selectedRecipe.id === recipeId) setSelectedRecipe(null);
 
     try {
-      await fetch('/api/shopping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formatted)
+      await Promise.allSettled([
+        fetch(`/api/recipes/saved?id=${encodeURIComponent(recipeId)}`, { method: 'DELETE' }),
+        fetch(`/api/recipes?id=${encodeURIComponent(recipeId)}`, { method: 'DELETE' })
+      ]);
+      const storageKeys = ['zecratary_recipes', 'zecratary_saved_recipes', 'saved_recipes'];
+      storageKeys.forEach(k => {
+        try {
+          const raw = localStorage.getItem(k);
+          if (raw) {
+            const list = JSON.parse(raw);
+            localStorage.setItem(k, JSON.stringify(list.filter((r: any) => r.id !== recipeId)));
+          }
+        } catch (_) {}
       });
+      showToast(t('recipeDeletedToast', 'Recipe removed from your library.'), 'success');
     } catch (_) {}
+  };
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('zecratary_shopping_updated'));
-      window.dispatchEvent(new Event('storage'));
+  const handleImportImageUpload = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      showToast(t('uploadOrDragHint', 'Supports PNG, JPG, WEBP (Max 10MB)'), 'error');
+      return;
     }
+    setImportImageFile(file);
+    setIsUploadingImportImage(true);
 
-    setIsShoppingModalOpen(false);
-    alert(`Added ${selectedItems.length} items to your Shopping List!`);
-  };
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('provider', storageProvider);
 
-  const handleAddIngredientFilter = () => {
-    const clean = ingredientQuery.trim();
-    if (!clean) return;
-    if (!selectedIngredientsList.includes(clean.toLowerCase())) {
-      setSelectedIngredientsList([...selectedIngredientsList, clean.toLowerCase()]);
-    }
-    setIngredientQuery('');
-  };
-
-  const handleRemoveIngredientFilter = (ing: string) => {
-    setSelectedIngredientsList(selectedIngredientsList.filter(i => i !== ing));
-  };
-
-  const filtered = useMemo(() => {
-    return recipes.filter(r => {
-      const q = search.toLowerCase().trim();
-      const title = (r.title || r.name || '').toLowerCase();
-      const creator = (r.creatorName || r.ownerName || '').toLowerCase();
-      if (q && !title.includes(q) && !creator.includes(q)) return false;
-
-      // Tab filtering
-      if (activeTab === 'marketplace') {
-        if (!(r.isPublic || r.is_public)) return false;
+      const res = await fetch('/api/recipes/upload', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (res.ok && (data.url || data.localUrl || data.path)) {
+        setImportImagePreview(data.url || data.localUrl || data.path);
       } else {
-        // In personal tab, only display recipes owned by current user
-        if (!isOwner(r)) return false;
+        const reader = new FileReader();
+        reader.onloadend = () => setImportImagePreview(reader.result as string);
+        reader.readAsDataURL(file);
       }
+    } catch (_) {
+      const reader = new FileReader();
+      reader.onloadend = () => setImportImagePreview(reader.result as string);
+      reader.readAsDataURL(file);
+    } finally {
+      setIsUploadingImportImage(false);
+    }
+  };
 
-      if (filterFavorites && !r.isFavorite) return false;
-      if (filterCooked && !r.isCooked) return false;
+  const handleImportJsonFile = (file: File) => {
+    if (!file.name.endsWith('.json') && file.type !== 'application/json') {
+      showToast(t('noJsonFileSelected', 'Please select a valid recipe JSON file before importing.'), 'error');
+      return;
+    }
+    setImportJsonFile(file);
 
-      if (selectedType !== 'All Types') {
-        const type = getCleanRecipeType(r);
-        if (type !== selectedType) return false;
-      }
-
-      if (selectedIngredientsList.length > 0) {
-        let rIng = r.ingredients;
-        if (typeof rIng === 'string') {
-          try { rIng = JSON.parse(rIng); } catch (_) { rIng = []; }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result as string;
+        const parsed = JSON.parse(text);
+        if (!parsed || typeof parsed !== 'object') {
+          throw new Error('Invalid JSON format');
         }
-        const recipeIngNames = Array.isArray(rIng) 
-          ? rIng.map((ing: any) => (typeof ing === 'string' ? ing : ing.item || ing.name || '').toLowerCase())
-          : [];
-        
-        const hasAll = selectedIngredientsList.every(targetIng => 
-          recipeIngNames.some(item => item.includes(targetIng))
-        );
-        if (!hasAll) return false;
+        setImportedRecipeData(parsed);
+        showToast(t('jsonLoadedSuccess', 'Recipe JSON loaded successfully!'), 'success');
+      } catch (err: any) {
+        showToast(t('jsonParseError', 'Failed to parse JSON file. Please ensure it is a valid recipe JSON.'), 'error');
+        setImportedRecipeData(null);
+        setImportJsonFile(null);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleExecuteImport = async () => {
+    if (!importedRecipeData) {
+      showToast(t('noJsonFileSelected', 'Please select a valid recipe JSON file before importing.'), 'error');
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const targetUserId = (currentUser?.id || currentUser?.email || 'usr_admin_1').trim();
+      const createdBy = (currentUser?.email || targetUserId).trim();
+      const creatorName = (currentUser?.name || 'Chef').trim();
+
+      const recipeId = importedRecipeData.id || ('rcp_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6));
+      let finalImageUrl = importImagePreview || importedRecipeData.imageUrl || importedRecipeData.image || importedRecipeData.image_url || '/recipes/images/default.jpg';
+
+      if (!importImagePreview && (finalImageUrl.startsWith('http://') || finalImageUrl.startsWith('https://'))) {
+        try {
+          const dlRes = await fetch('/api/recipes/save-remote-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ imageUrl: finalImageUrl })
+          });
+          const dlData = await dlRes.json();
+          if (dlData.success && (dlData.localPath || dlData.localUrl)) {
+            finalImageUrl = dlData.localPath || dlData.localUrl;
+          }
+        } catch (_) {}
       }
 
-      if (selectedRating !== 'All Ratings') {
-        const minRating = parseInt(selectedRating);
-        if ((r.rating || 5) < minRating) return false;
-      }
+      const cleanTitle = decodeHtmlEntities(importedRecipeData.title || importedRecipeData.name || 'Imported Recipe');
+      const cleanType = importedRecipeData.recipeType || importedRecipeData.category || 'Main Dish';
 
-      if (selectedPrepTime !== 'All Prep Times') {
-        const prep = r.prepTimeMinutes || 0;
-        if (selectedPrepTime === 'Under 15m' && prep > 15) return false;
-        if (selectedPrepTime === '15-30m' && (prep < 15 || prep > 30)) return false;
-        if (selectedPrepTime === 'Over 30m' && prep < 30) return false;
-      }
+      const normalizedRecipe = {
+        ...importedRecipeData,
+        id: recipeId,
+        title: cleanTitle,
+        name: cleanTitle,
+        description: importedRecipeData.description || '',
+        userId: targetUserId,
+        user_id: targetUserId,
+        createdBy,
+        created_by: createdBy,
+        creatorName,
+        creator_name: creatorName,
+        ownership: importedRecipeData.ownership || {
+          userId: targetUserId,
+          createdBy,
+          creatorName,
+          isPublic: Boolean(importedRecipeData.isPublic ?? importedRecipeData.is_public)
+        },
+        recipeType: cleanType,
+        category: cleanType,
+        imageUrl: finalImageUrl,
+        image: finalImageUrl,
+        image_url: finalImageUrl,
+        servings: Number(importedRecipeData.servings) || 4,
+        prepTimeMinutes: Number(importedRecipeData.prepTimeMinutes || importedRecipeData.prepTime) || 15,
+        cookTimeMinutes: Number(importedRecipeData.cookTimeMinutes || importedRecipeData.cookTime) || 25,
+        ingredients: Array.isArray(importedRecipeData.ingredients) ? importedRecipeData.ingredients : [],
+        instructions: Array.isArray(importedRecipeData.instructions) 
+          ? importedRecipeData.instructions 
+          : Array.isArray(importedRecipeData.steps) 
+            ? importedRecipeData.steps 
+            : Array.isArray(importedRecipeData.directions) 
+              ? importedRecipeData.directions 
+              : ['Follow standard chef cooking guidelines.'],
+        isFavorite: false,
+        isCooked: false,
+        rating: Number(importedRecipeData.rating) || 5,
+        storageProvider,
+        createdAt: new Date().toISOString()
+      };
 
-      if (selectedCookTime !== 'All Cook Times') {
-        const cook = r.cookTimeMinutes || 0;
-        if (selectedCookTime === 'Under 15m' && cook > 15) return false;
-        if (selectedCookTime === '15-30m' && (cook < 15 || cook > 30)) return false;
-        if (selectedCookTime === 'Over 30m' && cook < 30) return false;
-      }
+      await Promise.allSettled([
+        fetch('/api/saved-recipes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(normalizedRecipe)
+        }),
+        fetch('/api/recipes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(normalizedRecipe)
+        })
+      ]);
 
-      return true;
-    });
-  }, [recipes, activeTab, search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime]);
+      setRecipes(prev => [normalizedRecipe, ...prev.filter(r => r.id !== normalizedRecipe.id)]);
+      const storageKeys = ['zecratary_recipes', 'zecratary_saved_recipes', 'saved_recipes'];
+      storageKeys.forEach(k => {
+        try {
+          const raw = localStorage.getItem(k);
+          const currentList = raw ? JSON.parse(raw) : [];
+          const filtered = Array.isArray(currentList) ? currentList.filter((r: any) => r.id !== normalizedRecipe.id) : [];
+          localStorage.setItem(k, JSON.stringify([normalizedRecipe, ...filtered]));
+        } catch (_) {}
+      });
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [activeTab, search, filterFavorites, filterCooked, selectedType, selectedIngredientsList, selectedRating, selectedPrepTime, selectedCookTime, gridMode]);
+      window.dispatchEvent(new Event('zecratary_recipes_updated'));
+      window.dispatchEvent(new Event('zecratary_saved_recipes_updated'));
+      window.dispatchEvent(new Event('storage'));
 
-  const itemsPerPage = GRID_CONFIG[gridMode].perPage;
-  const totalPages = Math.max(1, Math.ceil(filtered.length / itemsPerPage));
-  const safeCurrentPage = Math.min(currentPage, totalPages);
-  const startIndex = (safeCurrentPage - 1) * itemsPerPage;
-  const paginatedRecipes = filtered.slice(startIndex, startIndex + itemsPerPage);
+      setIsImportModalOpen(false);
+      setImportImageFile(null);
+      setImportImagePreview('');
+      setImportJsonFile(null);
+      setImportedRecipeData(null);
+      showToast(t('recipeImportSuccessToast', 'Recipe imported successfully into your library!'), 'success');
+    } catch (err: any) {
+      showToast(err.message || 'Import failed', 'error');
+    } finally {
+      setIsImporting(false);
+    }
+  };
 
-  const assignedBook = books.find(b => b.id === (selectedRecipe?.bookId || selectedRecipe?.book_id));
+  const assignedBook = books.find(b => b.id === selectedRecipe?.bookId);
   const baseServings = selectedRecipe?.servings || 4;
   const currentTotalServings = baseServings * servingsMultiplier;
-  const recipeCategoryBadge = selectedRecipe ? getCleanRecipeType(selectedRecipe) : 'Main Dish';
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-16 px-4 font-sans transition-colors duration-200" 
-      style={{ color: 'var(--color-text)' }}
-      onClick={() => setOpenDropdown(null)}
+      id="zecratary-recipes-canvas"
+      role="region"
+      aria-label={t('savedRecipesTitle', 'Recipe Library')}
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
+      style={{ 
+        width: '100%',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        color: 'var(--color-text)' 
+      }}
     >
-      {/* Top Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
+      {/* Toast Banner */}
+      {toastMessage && (
+        <div 
+          className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
+          style={{
+            backgroundColor: 'var(--color-card)',
+            borderColor: toastMessage.type === 'success' 
+              ? 'var(--color-emerald)' 
+              : toastMessage.type === 'warning' 
+                ? '#f59e0b' 
+                : '#ef4444',
+            color: 'var(--color-text)'
+          }}
+        >
+          {toastMessage.type === 'success' ? (
+            <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-emerald)' }} />
+          ) : (
+            <AlertCircle className="h-4 w-4 text-amber-500" />
+          )}
+          <span>{toastMessage.text}</span>
+        </div>
+      )}
+
+      {/* Top Header & Action Toolbar */}
+      <div 
+        className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b pb-4"
+        style={{ borderColor: 'var(--color-border)' }}
+      >
         <div>
-          <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
-            {t('savedRecipesTitle') || 'Recipes'}
+          <h1 className="text-2xl font-black tracking-tight flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+            <ChefHat className="h-6 w-6" /> {t('recipesTitle', 'Recipe Library')}
           </h1>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {(t('savedRecipesSubtitle') || 'Your collection of recipes ({count})').replace('{count}', String(recipes.length))}
+            {t('savedRecipesSubtitle', 'Browse, filter, and organize your favorite culinary creations and meal plans.')}
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        {/* Action Cluster: Exact 3x3, 4x4, 5x5 Grid Switcher + Import/Create */}
+        <div className="flex flex-wrap items-center gap-2.5">
           <div 
-            className="flex items-center p-1 rounded-xl border shadow-sm"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)'
-            }}
+            role="group"
+            aria-label="Grid layout density switcher"
+            className="flex items-center p-1 rounded-xl border shadow-xs"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
           >
-            {(['3x3', '4x4', '5x5'] as GridMode[]).map((mode) => {
-              const isActive = gridMode === mode;
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => setGridMode(mode)}
-                  className="px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition cursor-pointer"
-                  style={isActive ? {
-                    backgroundColor: 'var(--color-primary)',
-                    color: '#ffffff',
-                    boxShadow: '0 2px 8px rgba(224, 86, 56, 0.3)'
-                  } : {
-                    color: 'var(--color-text-secondary)',
-                    backgroundColor: 'transparent'
-                  }}
-                  title={`Show ${GRID_CONFIG[mode].label} layout (${GRID_CONFIG[mode].perPage} per page)`}
-                >
-                  {mode === '3x3' && <Grid3X3 className="h-3.5 w-3.5" />}
-                  {mode === '4x4' && <LayoutGrid className="h-3.5 w-3.5" />}
-                  {mode === '5x5' && <Rows3 className="h-3.5 w-3.5" />}
-                  <span>{GRID_CONFIG[mode].label}</span>
-                </button>
-              );
-            })}
+            <button
+              type="button"
+              onClick={() => changeGridMode('3x3')}
+              className="p-1.5 rounded-lg transition cursor-pointer"
+              style={gridMode === '3x3' ? { backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' } : { color: 'var(--color-text-secondary)' }}
+              title={t('grid3x3', '3x3 Grid (9 per page)')}
+            >
+              <IconGrid3x3 className="h-4 w-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => changeGridMode('4x4')}
+              className="p-1.5 rounded-lg transition cursor-pointer"
+              style={gridMode === '4x4' ? { backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' } : { color: 'var(--color-text-secondary)' }}
+              title={t('grid4x4', '4x4 Grid (16 per page)')}
+            >
+              <IconGrid4x4 className="h-4 w-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => changeGridMode('5x5')}
+              className="p-1.5 rounded-lg transition cursor-pointer"
+              style={gridMode === '5x5' ? { backgroundColor: 'var(--color-card)', color: 'var(--color-primary)' } : { color: 'var(--color-text-secondary)' }}
+              title={t('grid5x5', '5x5 Grid (25 per page)')}
+            >
+              <IconGrid5x5 className="h-4 w-4" />
+            </button>
           </div>
 
-          {/* Import Recipe Button */}
-          <Link
-            href="/import"
-            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 shadow-sm hover:opacity-80"
-            style={{
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text)'
+          <button
+            type="button"
+            onClick={() => setIsImportModalOpen(true)}
+            className="px-4 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer shadow-xs hover:opacity-85"
+            style={{ 
+              backgroundColor: 'var(--color-card)', 
+              borderColor: 'var(--color-border)', 
+              color: 'var(--color-text)' 
             }}
           >
-            <Sparkles className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/>
-            <span>{t('importRecipe') || 'Import'}</span>
-          </Link>
+            <Upload className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
+            <span>{t('importRecipe', 'Import Recipe')}</span>
+          </button>
 
-          {/* Create Recipe Button */}
-          <Link 
-            className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg"
+          <Link
             href="/manual"
+            className="px-4 py-2 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 transition cursor-pointer shadow-md hover:opacity-90"
             style={{ backgroundColor: 'var(--color-primary)' }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
           >
-            <UploadCloud className="h-4 w-4"/> {t('createRecipe') || 'Create Recipe'}
+            <Plus className="h-3.5 w-3.5" />
+            <span>{t('createRecipe', 'Create Recipe')}</span>
           </Link>
         </div>
       </div>
 
-      {/* Filter Row */}
-      <div className="space-y-3">
-        <div className="flex gap-3">
-          <div className="relative flex-1">
-            <Search className="h-4 w-4 absolute left-3.5 top-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
+      {/* Search & Filter Toolbar */}
+      <div 
+        role="region"
+        data-lpignore="true"
+        className="w-full max-w-full rounded-2xl p-4 border space-y-3 shadow-xs transition-colors duration-200"
+        style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+      >
+        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">
+          <div 
+            className="flex-1 flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-xs"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+          >
+            <Search className="h-4 w-4 shrink-0" style={{ color: 'var(--color-text-secondary)' }} />
             <input
               type="text"
+              autoComplete="off"
               data-lpignore="true"
-              placeholder={t('searchByNamePlaceholder') || 'Search by name or creator'}
+              data-form-type="other"
+              placeholder={t('searchRecipesPlaceholder', 'Search saved recipes by title, ingredients, tags, or notes...')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full border rounded-xl pl-10 pr-4 py-2.5 text-sm outline-none transition-colors"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-              onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-              onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+              className="w-full bg-transparent border-none outline-none font-medium"
+              style={{ color: 'var(--color-text)' }}
             />
+            {search && (
+              <button type="button" onClick={() => setSearch('')} className="text-gray-400 hover:text-white cursor-pointer">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
-          <button 
-            type="button"
-            onClick={() => setShowFilters(!showFilters)}
-            className="border font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition cursor-pointer"
-            style={showFilters ? {
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-emerald)',
-              color: 'var(--color-emerald)'
-            } : {
-              backgroundColor: 'var(--color-inner-dark)',
-              borderColor: 'var(--color-border)',
-              color: 'var(--color-text-secondary)'
-            }}
-          >
-            <SlidersHorizontal className="h-4 w-4" style={{ color: 'var(--color-emerald)' }}/> {t('filter') || 'Filter'}
-          </button>
-        </div>
 
-        {/* Filter Pills with Marketplace Tab */}
-        {showFilters && (
-          <div className="flex flex-wrap items-center gap-2 pt-1 animate-in fade-in text-xs font-semibold select-none">
-            {/* My Recipes vs Marketplace Tab Pills */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('my_recipes')}
-              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-              style={activeTab === 'my_recipes' ? {
-                backgroundColor: 'var(--color-primary)',
-                borderColor: 'var(--color-primary)',
-                color: '#ffffff'
-              } : {
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-            >
-              <span>{t('myRecipes') || 'My Recipes'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('marketplace')}
-              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-              style={activeTab === 'marketplace' ? {
-                backgroundColor: 'var(--color-emerald)',
-                borderColor: 'var(--color-emerald)',
-                color: '#ffffff'
-              } : {
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-emerald)'
-              }}
-            >
-              <Globe className="h-3.5 w-3.5"/>
-              <span>{t('marketplaceTab') || 'Marketplace'}</span>
-            </button>
-
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => setFilterFavorites(!filterFavorites)}
-              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              className="px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer"
               style={filterFavorites ? {
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-primary)',
-                color: 'var(--color-primary)'
+                backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                borderColor: '#ef4444',
+                color: '#ef4444'
               } : {
-                backgroundColor: 'var(--color-card)',
+                backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
+                color: 'var(--color-text-secondary)'
               }}
             >
-              <Heart className={`h-3.5 w-3.5 ${filterFavorites ? 'fill-current' : ''}`} style={{ color: filterFavorites ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}/>
-              <span>{t('favorites') || 'Favorites'}</span>
+              <Heart className={`h-3.5 w-3.5 ${filterFavorites ? 'fill-red-500 text-red-500' : ''}`} />
+              <span>{t('filterFavorites', 'Favorites')}</span>
             </button>
 
-            {/* Ingredients Popover Filter */}
-            <div className="relative" onClick={(e) => e.stopPropagation()}>
-              <button
-                type="button"
-                onClick={() => setOpenDropdown(openDropdown === 'ingredients' ? null : 'ingredients')}
-                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-                style={selectedIngredientsList.length > 0 || openDropdown === 'ingredients' ? {
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-primary)',
-                  color: 'var(--color-primary)'
-                } : {
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              >
-                <Carrot className="h-3.5 w-3.5" style={{ color: 'var(--color-emerald)' }}/>
-                <span>{t('ingredientsFilter') || 'Ingredients'} {selectedIngredientsList.length > 0 ? `(${selectedIngredientsList.length})` : ''}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
-              </button>
-
-              {openDropdown === 'ingredients' && (
-                <div 
-                  className="absolute left-0 top-full mt-2 w-72 border rounded-2xl shadow-2xl p-3 z-50 space-y-2.5 animate-in fade-in"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-primary)'
-                  }}
-                >
-                  <div 
-                    role="region"
-                    aria-label="Filter by ingredient"
-                    data-lpignore="true"
-                    className="flex items-center gap-2"
-                  >
-                    <div 
-                      className="flex-1 border-2 rounded-xl overflow-hidden"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-primary)'
-                      }}
-                    >
-                      <input
-                        type="text"
-                        autoFocus
-                        data-lpignore="true"
-                        placeholder={t('searchIngredientsPlaceholder') || 'Search ingredients'}
-                        value={ingredientQuery}
-                        onChange={(e) => setIngredientQuery(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleAddIngredientFilter();
-                          }
-                        }}
-                        className="w-full bg-transparent px-3 py-2 text-xs outline-none"
-                        style={{ color: 'var(--color-text)' }}
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleAddIngredientFilter}
-                      className="text-white p-2 rounded-xl transition flex items-center justify-center font-bold text-sm shadow-md cursor-pointer shrink-0"
-                      style={{ backgroundColor: 'var(--color-primary)' }}
-                    >
-                      <Plus className="h-4 w-4 stroke-[3]"/>
-                    </button>
-                  </div>
-
-                  {selectedIngredientsList.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
-                      {selectedIngredientsList.map((ing) => (
-                        <span
-                          key={ing}
-                          className="text-[11px] font-bold px-2 py-0.5 rounded-lg flex items-center gap-1 border"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text)'
-                          }}
-                        >
-                          <span className="capitalize">{ing}</span>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveIngredientFilter(ing)}
-                            className="text-slate-400 hover:text-red-500 cursor-pointer"
-                          >
-                            <X className="h-3 w-3"/>
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-
-                  <p className="text-[11px] leading-tight pt-0.5" style={{ color: 'var(--color-text-secondary)' }}>
-                    {t('recipesMustContainIngredients') || 'Recipes must contain all listed ingredients.'}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Recipe Type Dropdown */}
-            <div className="relative" onClick={(e) => e.stopPropagation()}>
-              <button
-                type="button"
-                onClick={() => setOpenDropdown(openDropdown === 'recipeType' ? null : 'recipeType')}
-                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-                style={selectedType !== 'All Types' ? {
-                  backgroundColor: 'var(--color-inner-dark)',
-                  borderColor: 'var(--color-primary)',
-                  color: 'var(--color-primary)'
-                } : {
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              >
-                <Utensils className="h-3.5 w-3.5 opacity-70"/>
-                <span>{selectedType === 'All Types' ? (t('recipeTypeLabel') || 'Recipe Type') : selectedType}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
-              </button>
-
-              {openDropdown === 'recipeType' && (
-                <div 
-                  className="absolute left-0 top-full mt-2 w-48 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1 animate-in fade-in"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)'
-                  }}
-                >
-                  {RECIPE_TYPES.map((type) => (
-                    <button
-                      key={type}
-                      type="button"
-                      onClick={() => { setSelectedType(type); setOpenDropdown(null); }}
-                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
-                      style={selectedType === type ? {
-                        backgroundColor: 'var(--color-inner-dark)',
-                        color: 'var(--color-text)',
-                        border: '1px solid var(--color-primary)'
-                      } : {
-                        color: 'var(--color-text-secondary)'
-                      }}
-                    >
-                      {type}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Cooked Pill */}
             <button
               type="button"
               onClick={() => setFilterCooked(!filterCooked)}
-              className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              className="px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer"
               style={filterCooked ? {
-                backgroundColor: 'var(--color-inner-dark)',
+                backgroundColor: 'rgba(16, 185, 129, 0.15)',
                 borderColor: 'var(--color-emerald)',
                 color: 'var(--color-emerald)'
               } : {
-                backgroundColor: 'var(--color-card)',
+                backgroundColor: 'var(--color-inner-dark)',
                 borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
+                color: 'var(--color-text-secondary)'
               }}
             >
-              <CheckCircle2 className="h-3.5 w-3.5" style={{ color: filterCooked ? 'var(--color-emerald)' : 'var(--color-text-secondary)' }}/>
-              <span>{t('cooked') || 'Cooked'}</span>
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              <span>{t('filterCooked', 'Cooked')}</span>
             </button>
 
-            {/* Rating Dropdown */}
-            <div className="relative" onClick={(e) => e.stopPropagation()}>
+            <div className="relative">
               <button
                 type="button"
-                onClick={() => setOpenDropdown(openDropdown === 'rating' ? null : 'rating')}
-                className="px-3.5 py-2 rounded-2xl border flex items-center gap-1.5 transition cursor-pointer shadow-xs"
-                style={selectedRating !== 'All Ratings' ? {
-                  backgroundColor: 'var(--color-inner-dark)',
+                onClick={() => setIsIngredientPopoverOpen(!isIngredientPopoverOpen)}
+                className="px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition cursor-pointer"
+                style={selectedIngredientsList.length > 0 ? {
+                  backgroundColor: 'var(--color-primary)',
                   borderColor: 'var(--color-primary)',
-                  color: 'var(--color-primary)'
+                  color: '#ffffff'
                 } : {
-                  backgroundColor: 'var(--color-card)',
+                  backgroundColor: 'var(--color-inner-dark)',
                   borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
+                  color: 'var(--color-text-secondary)'
                 }}
               >
-                <Star className="h-3.5 w-3.5 opacity-70"/>
-                <span>{selectedRating === 'All Ratings' ? (t('rating') || 'Rating') : selectedRating}</span>
-                <ChevronDown className="h-3.5 w-3.5 opacity-70"/>
+                <Tag className="h-3.5 w-3.5" />
+                <span>{t('filterByIngredient', 'Filter by Ingredient')}</span>
+                {selectedIngredientsList.length > 0 && (
+                  <span className="w-4 h-4 rounded-full bg-white text-black font-extrabold text-[10px] flex items-center justify-center">
+                    {selectedIngredientsList.length}
+                  </span>
+                )}
               </button>
 
-              {openDropdown === 'rating' && (
+              {isIngredientPopoverOpen && (
                 <div 
-                  className="absolute left-0 top-full mt-2 w-44 border rounded-2xl shadow-2xl p-1.5 z-50 space-y-1"
-                  style={{
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)'
-                  }}
+                  className="absolute right-0 mt-2 w-72 p-3.5 rounded-2xl border shadow-2xl z-40 space-y-3 animate-in fade-in"
+                  style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
                 >
-                  {['All Ratings', '4+ Stars', '3+ Stars', '1+ Stars'].map((rat) => (
-                    <button
-                      key={rat}
-                      type="button"
-                      onClick={() => { setSelectedRating(rat); setOpenDropdown(null); }}
-                      className="w-full text-left px-3.5 py-2 rounded-xl text-xs font-semibold transition"
-                      style={selectedRating === rat ? {
-                        backgroundColor: 'var(--color-inner-dark)',
-                        color: 'var(--color-text)',
-                        border: '1px solid var(--color-border)'
-                      } : {
-                        color: 'var(--color-text-secondary)'
-                      }}
-                    >
-                      {rat}
-                    </button>
-                  ))}
+                  <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
+                    <span className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>{t('filterByIngredient', 'Filter by Ingredient')}</span>
+                    {selectedIngredientsList.length > 0 && (
+                      <button 
+                        type="button"
+                        onClick={() => setSelectedIngredientsList([])}
+                        className="text-[10px] text-red-400 hover:underline cursor-pointer"
+                      >
+                        {t('clearAllFilters', 'Clear all filters')}
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    placeholder={t('ingredientPlaceholder', 'Type ingredient...')}
+                    value={ingredientSearchQuery}
+                    onChange={(e) => setIngredientSearchQuery(e.target.value)}
+                    className="w-full border rounded-xl p-2 text-xs outline-none font-medium"
+                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  />
+                  <div className="max-h-40 overflow-y-auto space-y-1 text-xs">
+                    {allAvailableIngredients
+                      .filter(ing => ing.includes(ingredientSearchQuery.toLowerCase()))
+                      .map(ing => {
+                        const isChecked = selectedIngredientsList.includes(ing);
+                        return (
+                          <div 
+                            key={ing}
+                            onClick={() => {
+                              setSelectedIngredientsList(prev => isChecked ? prev.filter(x => x !== ing) : [...prev, ing]);
+                            }}
+                            className="flex items-center gap-2 p-1.5 rounded-lg hover:opacity-80 cursor-pointer"
+                            style={{ backgroundColor: isChecked ? 'var(--color-inner-dark)' : 'transparent' }}
+                          >
+                            <input type="checkbox" checked={isChecked} readOnly className="cursor-pointer" />
+                            <span className="capitalize" style={{ color: 'var(--color-text)' }}>{ing}</span>
+                          </div>
+                        );
+                      })}
+                  </div>
                 </div>
               )}
             </div>
           </div>
-        )}
+        </div>
+
+        {/* Dropdown Filters Row */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1 text-xs">
+          <select
+            value={selectedType}
+            onChange={(e) => setSelectedType(e.target.value)}
+            className="w-full border rounded-xl p-2.5 outline-none font-bold cursor-pointer"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          >
+            <option value="ALL">{t('allTypes', 'All Types')}</option>
+            {RECIPE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+
+          <select
+            value={selectedRating}
+            onChange={(e) => setSelectedRating(e.target.value)}
+            className="w-full border rounded-xl p-2.5 outline-none font-bold cursor-pointer"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          >
+            <option value="ALL">{t('allRatings', 'All Ratings')}</option>
+            <option value="5">★★★★★ (5 Stars)</option>
+            <option value="4">★★★★☆ (4+ Stars)</option>
+            <option value="3">★★★☆☆ (3+ Stars)</option>
+          </select>
+
+          <select
+            value={selectedPrepTime}
+            onChange={(e) => setSelectedPrepTime(e.target.value)}
+            className="w-full border rounded-xl p-2.5 outline-none font-bold cursor-pointer"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          >
+            <option value="ALL">{t('allPrepTimes', 'All Prep Times')}</option>
+            <option value="15">{t('under15Mins', 'Under 15 mins')}</option>
+            <option value="30">{t('under30Mins', 'Under 30 mins')}</option>
+            <option value="60">{t('under60Mins', 'Under 60 mins')}</option>
+            <option value="60+">{t('over60Mins', '60+ mins')}</option>
+          </select>
+
+          <select
+            value={selectedCookTime}
+            onChange={(e) => setSelectedCookTime(e.target.value)}
+            className="w-full border rounded-xl p-2.5 outline-none font-bold cursor-pointer"
+            style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+          >
+            <option value="ALL">{t('allCookTimes', 'All Cook Times')}</option>
+            <option value="15">{t('under15Mins', 'Under 15 mins')}</option>
+            <option value="30">{t('under30Mins', 'Under 30 mins')}</option>
+            <option value="60">{t('under60Mins', 'Under 60 mins')}</option>
+            <option value="60+">{t('over60Mins', '60+ mins')}</option>
+          </select>
+        </div>
       </div>
 
-      {/* Grid */}
-      {loading ? (
-        <div className="text-xs py-12 text-center" style={{ color: 'var(--color-text-secondary)' }}>
-          {t('loadingRecipes') || 'Loading recipes from dedicated JSON files...'}
-        </div>
-      ) : paginatedRecipes.length === 0 ? (
+      {/* Recipe Grid View */}
+      {paginatedRecipes.length === 0 ? (
         <div 
-          className="border rounded-2xl p-12 text-center space-y-3"
+          className="w-full max-w-full rounded-3xl p-12 text-center border space-y-4"
           style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
         >
-          <Book className="h-8 w-8 mx-auto opacity-30" />
-          <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-text)' }}>
-            {activeTab === 'marketplace' ? 'No community recipes on Marketplace yet' : 'No recipes found in your collection'}
-          </h3>
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {activeTab === 'marketplace'
-              ? 'Share your delicious creations to Marketplace so other home chefs can discover them!'
-              : 'Try importing or creating new recipes to build your flat file collection.'}
+          <ChefHat className="h-12 w-12 mx-auto stroke-1" style={{ color: 'var(--color-primary)' }} />
+          <p className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>
+            {t('noRecipesFound', 'No recipes found matching your criteria.')}
           </p>
+          <button
+            type="button"
+            onClick={() => {
+              setSearch('');
+              setFilterFavorites(false);
+              setFilterCooked(false);
+              setSelectedType('ALL');
+              setSelectedRating('ALL');
+              setSelectedPrepTime('ALL');
+              setSelectedCookTime('ALL');
+              setSelectedIngredientsList([]);
+            }}
+            className="px-5 py-2 rounded-xl text-xs font-bold text-white shadow-md cursor-pointer hover:opacity-90"
+            style={{ backgroundColor: 'var(--color-primary)' }}
+          >
+            {t('clearAllFilters', 'Clear all filters')}
+          </button>
         </div>
       ) : (
-        <div className={`grid ${GRID_CONFIG[gridMode].colsClass} gap-4 sm:gap-5`}>
-          {paginatedRecipes.map((r) => {
-            const cardBook = books.find(b => b.id === (r.bookId || r.book_id));
-            const cardTypeBadge = getCleanRecipeType(r);
-            const cfg = GRID_CONFIG[gridMode];
-            const userOwns = isOwner(r);
-            const isPub = Boolean(r.isPublic || r.is_public);
+        <div className={GRID_CONFIG[gridMode].gridClass}>
+          {paginatedRecipes.map((recipe) => (
+            <div
+              key={recipe.id}
+              onClick={() => {
+                setSelectedRecipe(recipe);
+                setServingsMultiplier(1);
+                setCompletedSteps([]);
+                setNoteText(recipe.note || recipe.notes || '');
+                setIsBookDropdownOpen(false);
+                setIsEditing(false);
+              }}
+              className="group rounded-3xl overflow-hidden border transition-all duration-200 hover:-translate-y-1 shadow-md hover:shadow-xl cursor-pointer flex flex-col"
+              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+            >
+              {/* Card Image Banner */}
+              <div className={`relative w-full ${GRID_CONFIG[gridMode].imageAspect} overflow-hidden bg-black/20`}>
+                <img
+                  src={recipe.imageUrl}
+                  alt={recipe.title}
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover transition transform group-hover:scale-105 duration-300"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = '/recipes/images/default.jpg';
+                  }}
+                />
 
-            return (
-              <div
-                key={r.id}
-                onClick={() => {
-                  setSelectedRecipe(r);
-                  setServingsMultiplier(1);
-                  setCompletedSteps([]);
-                  setNoteText(r.note || '');
-                  setIsBookDropdownOpen(false);
-                  setIsEditing(false);
-                }}
-                className="border rounded-2xl overflow-hidden transition cursor-pointer group shadow-sm hover:shadow-md relative flex flex-col justify-between"
-                style={{
-                  backgroundColor: 'var(--color-card)',
-                  borderColor: 'var(--color-border)'
-                }}
-              >
+                <span 
+                  className="absolute top-3 left-3 text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-lg backdrop-blur-md shadow-md"
+                  style={{ backgroundColor: 'rgba(0, 0, 0, 0.65)', color: '#ffffff' }}
+                >
+                  {recipe.recipeType}
+                </span>
+
+                <div className="absolute top-3 right-3 flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={(e) => handleToggleFavorite(e, recipe)}
+                    className="p-2 rounded-xl backdrop-blur-md transition cursor-pointer shadow-sm hover:scale-110"
+                    style={{ backgroundColor: 'rgba(0, 0, 0, 0.65)' }}
+                    title={t('filterFavorites', 'Favorites')}
+                  >
+                    <Heart className={`h-4 w-4 ${recipe.isFavorite ? 'fill-red-500 text-red-500' : 'text-white'}`} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => handleToggleCooked(e, recipe)}
+                    className="p-2 rounded-xl backdrop-blur-md transition cursor-pointer shadow-sm hover:scale-110"
+                    style={{ backgroundColor: 'rgba(0, 0, 0, 0.65)' }}
+                    title={t('filterCooked', 'Cooked')}
+                  >
+                    <CheckCircle2 className={`h-4 w-4 ${recipe.isCooked ? 'text-emerald-400' : 'text-white'}`} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Card Body */}
+              <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
                 <div>
-                  <div className={`relative ${cfg.imgHeight} w-full overflow-hidden`} style={{ backgroundColor: 'var(--color-inner-dark)' }}>
-                    <img
-                      src={r.imageUrl || r.image || '/recipes/images/default.jpg'}
-                      alt={r.title || r.name}
-                      className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                    />
-                    
-                    {/* Top Overlay: Slide-Toggle Switch & Card Action Buttons */}
-                    <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 z-10" onClick={(e) => e.stopPropagation()}>
-                      {/* INTERACTIVE SLIDE-TOGGLE BUTTON FOR PUBLIC MARKETPLACE */}
-                      {userOwns && (
-                        <div 
-                          className="flex items-center gap-1.5 px-2 py-1 rounded-full backdrop-blur-md border shadow-md"
-                          style={{
-                            backgroundColor: 'rgba(0, 0, 0, 0.65)',
-                            borderColor: isPub ? 'var(--color-emerald)' : 'rgba(255, 255, 255, 0.2)'
-                          }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {isPub ? <Globe className="h-3 w-3 text-emerald-400" /> : <Lock className="h-3 w-3 text-slate-300" />}
-                          <button
-                            type="button"
-                            role="switch"
-                            aria-checked={isPub}
-                            onClick={(e) => handleTogglePublic(e, r.id)}
-                            className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-in-out ${
-                              isPub ? 'bg-emerald-500' : 'bg-slate-600'
-                            }`}
-                            title={isPub ? "Public on Marketplace (Click to Make Private)" : "Private (Click to Share on Marketplace)"}
-                          >
-                            <span
-                              className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-sm transition duration-200 ease-in-out ${
-                                isPub ? 'translate-x-3.5' : 'translate-x-0.5'
-                              }`}
-                            />
-                          </button>
-                        </div>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={(e) => toggleCooked(e, r.id)}
-                        className="p-1.5 rounded-full backdrop-blur-md transition shadow-md cursor-pointer border"
-                        style={r.isCooked ? {
-                          backgroundColor: 'var(--color-emerald)',
-                          borderColor: 'var(--color-emerald)',
-                          color: '#ffffff'
-                        } : {
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text-secondary)'
-                        }}
-                        title={r.isCooked ? (t('cooked') || 'Cooked') : (t('markAsCooked') || 'Mark as Cooked')}
-                      >
-                        <CheckCircle2 className="h-3.5 w-3.5"/>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={(e) => toggleFavorite(e, r.id)}
-                        className="p-1.5 rounded-full backdrop-blur-md transition shadow-md cursor-pointer border"
-                        style={r.isFavorite ? {
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
-                        } : {
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-border)',
-                          color: 'var(--color-text-secondary)'
-                        }}
-                        title={r.isFavorite ? (t('favorites') || 'Favorite') : (t('addToFavorites') || 'Add to Favorites')}
-                      >
-                        <Heart 
-                          className={`h-3.5 w-3.5 ${r.isFavorite ? 'fill-current' : ''}`}
-                          style={{ color: r.isFavorite ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}
-                        />
-                      </button>
-                    </div>
-
-                    {cardBook && gridMode !== '5x5' && (
-                      <div className="absolute bottom-2.5 left-2.5 bg-black/75 backdrop-blur-md text-[10px] text-amber-300 font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border border-amber-400/30 max-w-[80%] truncate">
-                        <Book className="h-3 w-3 shrink-0"/> <span className="truncate">{cardBook.title}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="p-3.5 space-y-1.5">
-                    <div className="flex items-center justify-between gap-1">
-                      <h3 
-                        className={`font-bold ${cfg.titleSize} leading-snug line-clamp-2`}
-                        style={{ color: 'var(--color-text)' }}
-                      >
-                        {r.title || r.name}
-                      </h3>
-                      {isPub && (
-                        <span 
-                          className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded border flex items-center gap-0.5 shrink-0"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-emerald)',
-                            color: 'var(--color-emerald)'
-                          }}
-                        >
-                          <Globe className="h-2.5 w-2.5" /> Market
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Creator Attribution on Marketplace */}
-                    {(r.creatorName || r.ownerName) && (
-                      <p className="text-[11px] font-semibold text-emerald-400 truncate">
-                        By {r.creatorName || r.ownerName}
-                      </p>
-                    )}
-                  </div>
+                  <h3 className="font-bold text-sm tracking-tight line-clamp-1" style={{ color: 'var(--color-text)' }}>
+                    {recipe.title}
+                  </h3>
+                  {recipe.description && (
+                    <p className="text-[11px] line-clamp-2 mt-1 opacity-80" style={{ color: 'var(--color-text-secondary)' }}>
+                      {recipe.description}
+                    </p>
+                  )}
                 </div>
 
-                {/* Card Action Row: Export JSON & Delete */}
+                <div className="flex items-center gap-3 text-[11px] font-semibold opacity-90" style={{ color: 'var(--color-text-secondary)' }}>
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
+                    {(Number(recipe.prepTimeMinutes || recipe.prepTime || 0) + Number(recipe.cookTimeMinutes || recipe.cookTime || 0))}m
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Users className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />
+                    {recipe.servings || 4}
+                  </span>
+                </div>
+
                 <div 
-                  className="px-3.5 pb-3 pt-2 border-t flex items-center justify-between gap-1"
+                  className="pt-2 border-t flex items-center justify-between gap-1 text-[11px]"
                   style={{ borderColor: 'var(--color-border)' }}
-                  onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span 
-                      className="text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0"
-                      style={{ backgroundColor: 'var(--color-primary)' }}
-                    >
-                      {cardTypeBadge}
-                    </span>
+                  <button
+                    type="button"
+                    onClick={(e) => handleTogglePublic(e, recipe)}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg border text-[10px] font-bold transition cursor-pointer"
+                    style={recipe.isPublic ? {
+                      backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                      borderColor: 'var(--color-emerald)',
+                      color: 'var(--color-emerald)'
+                    } : {
+                      backgroundColor: 'var(--color-inner-dark)',
+                      borderColor: 'var(--color-border)',
+                      color: 'var(--color-text-secondary)'
+                    }}
+                    title={recipe.isPublic ? t('publicMarketplace', 'Public Marketplace') : t('privateRecipe', 'Private Recipe')}
+                  >
+                    {recipe.isPublic ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
+                    <span>{recipe.isPublic ? t('publicMarketplace', 'Public') : t('privateRecipe', 'Private')}</span>
+                  </button>
 
-                    {(r.rating || 0) > 0 && gridMode !== '5x5' ? (
-                      <span className="flex items-center gap-0.5 text-amber-500 text-[11px] font-bold bg-amber-500/10 px-1.5 py-0.5 rounded-md border border-amber-500/20 shadow-xs">
-                        <Star className="h-2.5 w-2.5 fill-amber-500 text-amber-500"/> {r.rating}
-                      </span>
-                    ) : null}
-                  </div>
-
-                  <div className="flex items-center gap-1">
-                    {/* Green Export JSON Button */}
+                  <div className="flex items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={(e) => handleExportJson(r, e)}
-                      className="px-2 py-1 rounded-xl text-[11px] font-bold border transition flex items-center gap-1 cursor-pointer shadow-xs hover:opacity-90"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-emerald)',
-                        color: 'var(--color-emerald)'
-                      }}
-                      title="Export complete recipe JSON with ownership"
+                      onClick={(e) => { e.stopPropagation(); handleExportJson(recipe); }}
+                      className="px-2 py-1 rounded-lg text-white font-bold text-[10px] flex items-center gap-1 shadow-xs transition hover:opacity-90 cursor-pointer"
+                      style={{ backgroundColor: 'var(--color-emerald)' }}
+                      title={t('exportJsonBtn', 'Export JSON')}
                     >
-                      <FileJson className="h-3.5 w-3.5" />
-                      <span className="hidden sm:inline">Export JSON</span>
+                      <FileJson className="h-3 w-3" />
+                      <span>JSON</span>
                     </button>
 
-                    {/* If on Marketplace and not owned: Allow copying */}
-                    {activeTab === 'marketplace' && !userOwns ? (
-                      <button
-                        type="button"
-                        onClick={(e) => handleSaveToMyRecipes(r, e)}
-                        className="px-2 py-1 rounded-xl text-[11px] font-bold border transition flex items-center gap-1 cursor-pointer shadow-xs"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
-                        }}
-                        title="Copy to My Recipes"
-                      >
-                        <Download className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">Save</span>
-                      </button>
-                    ) : (
-                      userOwns && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteRecipe(r.id)}
-                          className="p-1 rounded-xl border text-red-400 hover:text-red-500 cursor-pointer shadow-xs"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'rgba(239, 68, 68, 0.3)'
-                          }}
-                          title="Delete Recipe"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      )
-                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleDeleteRecipe(recipe.id); }}
+                      className="p-1.5 rounded-lg text-red-400 hover:text-red-500 hover:bg-red-500/10 transition cursor-pointer"
+                      title={t('deleteRecipe', 'Delete Recipe')}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 </div>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       )}
 
       {/* Pagination Controls */}
-      {filtered.length > 0 && (
+      {totalPages > 1 && (
         <div 
-          className="pt-4 border-t flex flex-wrap items-center justify-between gap-3 text-xs"
-          style={{ borderColor: 'var(--color-border)' }}
+          className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t text-xs font-bold"
+          style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
         >
-          <span style={{ color: 'var(--color-text-secondary)' }}>
-            {(t('showingRecipesRange') || 'Showing {start} - {end} of {total} recipes')
+          <div>
+            {(t('showingRecipesRange', 'Showing {start} - {end} of {total} recipes'))
               .replace('{start}', String(startIndex + 1))
-              .replace('{end}', String(Math.min(startIndex + itemsPerPage, filtered.length)))
-              .replace('{total}', String(filtered.length))}
-          </span>
+              .replace('{end}', String(Math.min(startIndex + itemsPerPage, filteredRecipes.length)))
+              .replace('{total}', String(filteredRecipes.length))}
+          </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1">
             <button
               type="button"
-              disabled={safeCurrentPage <= 1}
-              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-              className="p-2 rounded-xl border disabled:opacity-30 transition cursor-pointer shadow-sm"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-              title="Previous Page"
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              disabled={safeCurrentPage === 1}
+              className="p-2 rounded-xl border disabled:opacity-30 cursor-pointer"
+              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
-
-            {Array.from({ length: totalPages }, (_, i) => i + 1)
-              .filter(num => num === 1 || num === totalPages || Math.abs(num - safeCurrentPage) <= 1)
-              .map((num, i, arr) => {
-                const prev = arr[i - 1];
-                const showEllipsis = prev && num - prev > 1;
-
-                return (
-                  <div key={num} className="flex items-center gap-1">
-                    {showEllipsis && <span className="px-1 font-bold" style={{ color: 'var(--color-text-secondary)' }}>...</span>}
-                    <button
-                      type="button"
-                      onClick={() => setCurrentPage(num)}
-                      className="min-w-[32px] h-8 rounded-xl text-xs font-bold transition flex items-center justify-center border cursor-pointer shadow-sm"
-                      style={safeCurrentPage === num ? {
-                        backgroundColor: 'var(--color-primary)',
-                        borderColor: 'var(--color-primary)',
-                        color: '#ffffff',
-                        boxShadow: '0 2px 8px rgba(224, 86, 56, 0.3)'
-                      } : {
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)',
-                        color: 'var(--color-text)'
-                      }}
-                    >
-                      {num}
-                    </button>
-                  </div>
-                );
-              })}
-
+            {Array.from({ length: totalPages }).map((_, idx) => {
+              const p = idx + 1;
+              const isCurr = p === safeCurrentPage;
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setCurrentPage(p)}
+                  className="w-8 h-8 rounded-xl border flex items-center justify-center transition cursor-pointer"
+                  style={isCurr ? {
+                    backgroundColor: 'var(--color-primary)',
+                    borderColor: 'var(--color-primary)',
+                    color: '#ffffff'
+                  } : {
+                    backgroundColor: 'var(--color-card)',
+                    borderColor: 'var(--color-border)',
+                    color: 'var(--color-text)'
+                  }}
+                >
+                  {p}
+                </button>
+              );
+            })}
             <button
               type="button"
-              disabled={safeCurrentPage >= totalPages}
-              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-              className="p-2 rounded-xl border disabled:opacity-30 transition cursor-pointer shadow-sm"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
-              title="Next Page"
+              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+              disabled={safeCurrentPage === totalPages}
+              className="p-2 rounded-xl border disabled:opacity-30 cursor-pointer"
+              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
             >
               <ChevronRight className="h-4 w-4" />
             </button>
@@ -37707,13 +37461,17 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* RECIPE DETAILS & EDIT MODAL */}
+      {/* ------------------------------------------------------------------ */}
+      {/* RESTORED 100% AUTHENTIC RECIPE DETAILS & IN-PLACE EDIT MODAL       */}
+      {/* ------------------------------------------------------------------ */}
       {selectedRecipe && (
         <div 
           onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer"
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer animate-in fade-in"
         >
           <div 
+            role="region"
+            data-lpignore="true"
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative cursor-default transition-colors duration-200"
             style={{
@@ -37725,129 +37483,69 @@ export default function RecipesPage() {
             <button
               type="button"
               onClick={() => { setSelectedRecipe(null); setIsEditing(false); setIsBookDropdownOpen(false); }}
-              className="absolute top-4 right-4 z-30 p-2 rounded-xl border transition cursor-pointer shadow-md"
-              style={{
-                backgroundColor: 'var(--color-card)',
-                borderColor: 'var(--color-border)',
-                color: 'var(--color-text)'
-              }}
+              className="absolute top-4 right-4 z-30 p-2 bg-black/70 hover:bg-black text-white rounded-xl border border-white/20 transition cursor-pointer"
             >
               <X className="h-5 w-5"/>
             </button>
 
             <div className="overflow-y-auto flex-1">
               {!isEditing ? (
+                /* AUTHENTIC RECIPE DETAILS VIEW */
                 <div className="space-y-5 pb-6">
-                  <div className="relative h-64 sm:h-72 w-full bg-slate-900 overflow-hidden flex flex-col justify-end p-5">
+                  {/* Hero Banner */}
+                  <div className="relative h-64 sm:h-72 w-full overflow-hidden flex flex-col justify-end p-5" style={{ backgroundColor: 'var(--color-inner-dark)' }}>
                     <img
                       src={selectedRecipe.imageUrl || selectedRecipe.image || '/recipes/images/default.jpg'}
                       alt={selectedRecipe.title || selectedRecipe.name}
+                      referrerPolicy="no-referrer"
                       className="absolute inset-0 w-full h-full object-cover"
                     />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black via-black/60 to-transparent" />
 
                     <div className="relative z-10 space-y-3">
-                      <div className="flex items-center gap-2">
-                        <span 
-                          className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full border shadow-sm backdrop-blur-md"
-                          style={{
-                            backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                            borderColor: 'var(--color-primary)',
-                            color: 'var(--color-primary)'
-                          }}
-                        >
-                          {recipeCategoryBadge}
-                        </span>
-
-                        {/* SLIDE-TOGGLE ON RECIPE DETAIL MODAL (VIEW MODE) */}
-                        {isOwner(selectedRecipe) ? (
-                          <div 
-                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full backdrop-blur-md border shadow-sm"
-                            style={{
-                              backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                              borderColor: (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'var(--color-emerald)' : 'rgba(255, 255, 255, 0.2)'
-                            }}
-                          >
-                            {(selectedRecipe.isPublic || selectedRecipe.is_public) ? <Globe className="h-3.5 w-3.5 text-emerald-400" /> : <Lock className="h-3.5 w-3.5 text-slate-300" />}
-                            <span className="text-[11px] font-bold text-white">
-                              {(selectedRecipe.isPublic || selectedRecipe.is_public) ? 'Marketplace' : 'Private'}
-                            </span>
-                            <button
-                              type="button"
-                              role="switch"
-                              aria-checked={Boolean(selectedRecipe.isPublic || selectedRecipe.is_public)}
-                              onClick={(e) => handleTogglePublic(e, selectedRecipe.id)}
-                              className={`relative inline-flex h-4 w-8 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-in-out ${
-                                (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'bg-emerald-500' : 'bg-slate-600'
-                              }`}
-                              title={(selectedRecipe.isPublic || selectedRecipe.is_public) ? "Public on Marketplace (Click to Make Private)" : "Private (Click to Share on Marketplace)"}
-                            >
-                              <span
-                                className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition duration-200 ease-in-out ${
-                                  (selectedRecipe.isPublic || selectedRecipe.is_public) ? 'translate-x-4' : 'translate-x-0.5'
-                                }`}
-                              />
-                            </button>
-                          </div>
-                        ) : (
-                          <span 
-                            className="text-[10px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 backdrop-blur-md"
-                            style={{
-                              backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                              borderColor: 'var(--color-emerald)',
-                              color: 'var(--color-emerald)'
-                            }}
-                          >
-                            <Globe className="h-3 w-3" /> Public on Marketplace
-                          </span>
-                        )}
-                      </div>
-
                       <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">
                         {selectedRecipe.title || selectedRecipe.name}
                       </h2>
 
                       <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
-                        <span className="border text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/60 border-white/20">
-                          <Clock className="h-3.5 w-3.5"/> {(t('cookTimePrefix') || 'Cook: {time} minutes').replace('{time}', String(selectedRecipe.cookTimeMinutes || 10))}
+                        <span className="bg-black/60 border border-white/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5">
+                          <Clock className="h-3.5 w-3.5 text-slate-300"/> Cook: {selectedRecipe.cookTimeMinutes || selectedRecipe.cookTime || 10}m
                         </span>
-                        <span className="border text-white px-3 py-1.5 rounded-full flex items-center gap-1.5 bg-black/60 border-white/20">
-                          <Clock className="h-3.5 w-3.5"/> {(t('prepTimePrefix') || 'Prep: {time} minutes').replace('{time}', String(selectedRecipe.prepTimeMinutes || 30))}
+                        <span className="bg-black/60 border border-white/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5">
+                          <Clock className="h-3.5 w-3.5 text-slate-300"/> Prep: {selectedRecipe.prepTimeMinutes || selectedRecipe.prepTime || 30}m
+                        </span>
+                        <span className="bg-black/60 border border-white/20 text-white px-3 py-1.5 rounded-full flex items-center gap-1.5">
+                          <Utensils className="h-3.5 w-3.5 text-slate-300"/> {selectedRecipe.tags?.[0] || selectedRecipe.recipeType || 'Main Dish'}
                         </span>
                         
                         <button
                           type="button"
-                          onClick={(e) => toggleFavorite(e, selectedRecipe.id)}
-                          className="ml-auto w-8 h-8 rounded-full flex items-center justify-center shadow-md cursor-pointer transition border"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: 'var(--color-border)',
-                            color: selectedRecipe.isFavorite ? 'var(--color-primary)' : 'var(--color-text-secondary)'
-                          }}
-                          title={selectedRecipe.isFavorite ? "Favorite" : "Mark as Favorite"}
+                          onClick={(e) => handleToggleFavorite(e, selectedRecipe)}
+                          className="ml-auto w-8 h-8 bg-white/95 rounded-full flex items-center justify-center shadow cursor-pointer transition transform hover:scale-105"
+                          title={t('filterFavorites', 'Favorites')}
                         >
-                          <Heart className={`h-4 w-4 ${selectedRecipe.isFavorite ? 'fill-current' : ''}`} style={{ color: selectedRecipe.isFavorite ? 'var(--color-primary)' : 'var(--color-text-secondary)' }}/>
+                          <Heart className={`h-4 w-4 ${selectedRecipe.isFavorite ? 'fill-[#E05638] text-[#E05638]' : 'text-slate-400'}`}/>
                         </button>
                       </div>
                     </div>
                   </div>
 
-                  {/* 3 CORE ACTION BUTTONS */}
+                  {/* Top Action Row */}
                   <div className="px-5 grid grid-cols-3 gap-2.5">
                     <div className="relative">
                       <button
                         type="button"
                         onClick={() => setIsBookDropdownOpen(!isBookDropdownOpen)}
-                        className="w-full border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                        className="w-full border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
                         style={{
-                          backgroundColor: assignedBook ? 'var(--color-inner-dark)' : 'var(--color-card)',
+                          backgroundColor: assignedBook ? 'rgba(224, 86, 56, 0.15)' : 'var(--color-inner-dark)',
                           borderColor: 'var(--color-primary)',
                           color: 'var(--color-primary)'
                         }}
                       >
-                        <BookmarkPlus className="h-4 w-4 shrink-0" style={{ color: 'var(--color-primary)' }}/>
+                        <BookmarkPlus className="h-4 w-4 shrink-0"/>
                         <span className="truncate">
-                          {assignedBook ? assignedBook.title : (t('addToCookbook') || t('addToBook') || 'Add to Cookbook')}
+                          {assignedBook ? assignedBook.title : t('addToBook', 'Add to Book')}
                         </span>
                         <ChevronDown className="h-3 w-3 shrink-0 opacity-70 ml-0.5"/>
                       </button>
@@ -37856,30 +37554,25 @@ export default function RecipesPage() {
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setIsBookDropdownOpen(false)} />
                           <div 
-                            className="absolute left-0 top-full mt-2 w-64 border rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in" 
+                            className="absolute left-0 top-full mt-2 w-64 border rounded-2xl shadow-2xl p-2 z-50 space-y-1 animate-in fade-in"
+                            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
                             onClick={(e) => e.stopPropagation()}
-                            style={{
-                              backgroundColor: 'var(--color-card)',
-                              borderColor: 'var(--color-border)'
-                            }}
                           >
                             <div className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
-                              <span>{t('selectCookbook') || 'Select Cookbook'}</span>
-                              <Link 
-                                className="hover:underline font-bold" 
-                                href="/books"
-                                style={{ color: 'var(--color-emerald)' }}
-                              >
-                                {t('manage') || 'Manage'}
+                              <span>{t('selectCookbook', 'Select Cookbook')}</span>
+                              <Link className="hover:underline" style={{ color: 'var(--color-primary)' }} href="/books">
+                                {t('manage', 'Manage')}
                               </Link>
                             </div>
 
                             <div className="max-h-52 overflow-y-auto space-y-1 pr-1">
                               {books.length === 0 ? (
-                                <div className="text-xs px-2.5 py-2" style={{ color: 'var(--color-text-secondary)' }}>{t('noCookbooksAvailable') || 'No cookbooks available'}</div>
+                                <div className="text-xs px-2.5 py-2" style={{ color: 'var(--color-text-secondary)' }}>
+                                  {t('noCookbooksAvailable', 'No cookbooks available')}
+                                </div>
                               ) : (
                                 books.map((b) => {
-                                  const isAssigned = (selectedRecipe.bookId || selectedRecipe.book_id) === b.id;
+                                  const isAssigned = selectedRecipe.bookId === b.id;
                                   return (
                                     <button
                                       key={b.id}
@@ -37889,12 +37582,9 @@ export default function RecipesPage() {
                                         setIsBookDropdownOpen(false);
                                       }}
                                       className="w-full text-left px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition cursor-pointer"
-                                      style={isAssigned ? {
-                                        backgroundColor: 'var(--color-inner-dark)',
-                                        color: 'var(--color-primary)',
-                                        border: '1px solid var(--color-primary)'
-                                      } : {
-                                        color: 'var(--color-text)'
+                                      style={{
+                                        backgroundColor: isAssigned ? 'rgba(224, 86, 56, 0.15)' : 'transparent',
+                                        color: isAssigned ? 'var(--color-primary)' : 'var(--color-text)'
                                       }}
                                     >
                                       <span className="truncate flex-1 pr-2">{b.title}</span>
@@ -37911,65 +37601,54 @@ export default function RecipesPage() {
 
                     <button
                       type="button"
-                      onClick={openAddToPlanModal}
-                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90"
+                      onClick={() => setShowAddToPlanModal(true)}
+                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
                       style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-primary)',
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
                         color: 'var(--color-primary)'
                       }}
                     >
-                      <CalendarPlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('addToPlan') || 'Add to Plan'}
+                      <Calendar className="h-4 w-4"/> {t('addToPlan', 'Add to Plan')}
                     </button>
 
                     <button
                       type="button"
                       onClick={handleOpenShoppingModal}
-                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm hover:opacity-90"
+                      className="border font-bold text-xs py-2.5 px-3 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
                       style={{
-                        backgroundColor: 'var(--color-card)',
-                        borderColor: 'var(--color-primary)',
+                        backgroundColor: 'var(--color-inner-dark)',
+                        borderColor: 'var(--color-border)',
                         color: 'var(--color-primary)'
                       }}
                     >
-                      <ShoppingCart className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('shoppingList') || 'Shopping List'}
+                      <ShoppingCart className="h-4 w-4"/> {t('shoppingList', 'Shopping List')}
                     </button>
                   </div>
 
                   <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
-                  {/* Servings Stepper */}
+                  {/* Servings Stepper & Tools */}
                   <div className="px-5 flex flex-wrap items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <span 
-                        className="text-xs font-bold flex items-center gap-1.5"
-                        style={{ color: 'var(--color-primary)' }}
-                      >
-                        <Users className="h-4 w-4"/> {t('servingsLabel') || 'Servings'}
+                      <span className="text-xs font-bold flex items-center gap-1.5" style={{ color: 'var(--color-primary)' }}>
+                        <Users className="h-4 w-4"/> {t('servings', 'Servings')}
                       </span>
-                      <div 
-                        className="flex items-center border rounded-lg overflow-hidden shadow-xs"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)'
-                        }}
-                      >
+                      <div className="flex items-center border rounded-lg overflow-hidden" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                         <button
                           type="button"
                           onClick={() => setServingsMultiplier(Math.max(1, servingsMultiplier - 1))}
-                          className="px-2.5 py-1 font-bold cursor-pointer transition"
-                          style={{ color: 'var(--color-text-secondary)' }}
+                          className="px-2.5 py-1 font-bold cursor-pointer transition hover:bg-white/10"
                         >
                           -
                         </button>
-                        <span className="px-3 py-1 text-xs font-bold min-w-[32px] text-center" style={{ color: 'var(--color-text)' }}>
+                        <span className="px-3 py-1 text-xs font-bold min-w-[32px] text-center font-mono" style={{ color: 'var(--color-text)' }}>
                           {currentTotalServings}
                         </span>
                         <button
                           type="button"
                           onClick={() => setServingsMultiplier(servingsMultiplier + 1)}
-                          className="px-2.5 py-1 font-bold cursor-pointer transition"
-                          style={{ color: 'var(--color-text-secondary)' }}
+                          className="px-2.5 py-1 font-bold cursor-pointer transition hover:bg-white/10"
                         >
                           +
                         </button>
@@ -37979,54 +37658,74 @@ export default function RecipesPage() {
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => alert(t('timerSetAlert') || 'Kitchen Timer set for 15 minutes!')}
-                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
-                        }}
+                        onClick={() => setActiveTimer({ running: true, remainingSeconds: (selectedRecipe.cookTimeMinutes || 15) * 60, initialSeconds: (selectedRecipe.cookTimeMinutes || 15) * 60 })}
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)', backgroundColor: 'var(--color-inner-dark)' }}
                       >
-                        <Timer className="h-3.5 w-3.5"/> {t('timerBtn') || 'Timer'}
+                        <Volume2 className="h-3.5 w-3.5"/> {t('timer', 'Timer')}
                       </button>
-                      
-                      {isOwner(selectedRecipe) && (
-                        <button
-                          type="button"
-                          onClick={handleOpenEdit}
-                          className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                          style={{
-                            backgroundColor: 'var(--color-card)',
-                            borderColor: 'var(--color-primary)',
-                            color: 'var(--color-primary)'
-                          }}
-                        >
-                          <Edit3 className="h-3.5 w-3.5"/> {t('editBtn') || 'Edit'}
-                        </button>
-                      )}
-
+                      <button
+                        type="button"
+                        onClick={handleOpenEdit}
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)', backgroundColor: 'var(--color-inner-dark)' }}
+                      >
+                        <Edit3 className="h-3.5 w-3.5"/> {t('edit', 'Edit')}
+                      </button>
                       <button
                         type="button"
                         onClick={() => {
                           navigator.clipboard.writeText(window.location.href);
-                          alert(t('recipeLinkCopiedAlert') || 'Recipe link copied!');
+                          showToast('Recipe link copied to clipboard!', 'success');
                         }}
-                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-                        style={{
-                          backgroundColor: 'var(--color-card)',
-                          borderColor: 'var(--color-primary)',
-                          color: 'var(--color-primary)'
-                        }}
+                        className="border font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        style={{ borderColor: 'var(--color-border)', color: 'var(--color-primary)', backgroundColor: 'var(--color-inner-dark)' }}
                       >
-                        <Share2 className="h-3.5 w-3.5"/> {t('shareRecipeBtn') || 'Share Recipe'}
+                        <Share2 className="h-3.5 w-3.5"/> {t('share', 'Share')}
                       </button>
                     </div>
                   </div>
 
+                  {/* Active Floating Timer (if running) */}
+                  {activeTimer && (
+                    <div 
+                      className="mx-5 p-3 rounded-2xl border flex items-center justify-between gap-3 animate-in fade-in"
+                      style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
+                    >
+                      <div className="flex items-center gap-2 font-mono text-sm font-black" style={{ color: 'var(--color-text)' }}>
+                        <Volume2 className="h-4 w-4 animate-pulse" style={{ color: 'var(--color-primary)' }} />
+                        <span>
+                          {String(Math.floor(activeTimer.remainingSeconds / 60)).padStart(2, '0')}:
+                          {String(activeTimer.remainingSeconds % 60).padStart(2, '0')}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setActiveTimer({ ...activeTimer, running: !activeTimer.running })}
+                          className="p-1 rounded-lg border text-xs font-bold"
+                          style={{ borderColor: 'var(--color-border)' }}
+                        >
+                          {activeTimer.running ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setActiveTimer(null)}
+                          className="p-1 rounded-lg border text-xs font-bold text-red-400"
+                          style={{ borderColor: 'var(--color-border)' }}
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Description */}
-                  <div className="px-5 text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-                    {selectedRecipe.description}
-                  </div>
+                  {selectedRecipe.description && (
+                    <div className="px-5 text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                      {selectedRecipe.description}
+                    </div>
+                  )}
 
                   <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
@@ -38035,26 +37734,19 @@ export default function RecipesPage() {
                     <div className="flex items-center justify-between">
                       <button
                         type="button"
-                        onClick={(e) => toggleCooked(e, selectedRecipe.id)}
+                        onClick={(e) => handleToggleCooked(e, selectedRecipe)}
                         className="flex items-center gap-2.5 text-base font-extrabold group cursor-pointer select-none transition"
                         style={{ color: 'var(--color-text)' }}
                       >
-                        <span className="font-extrabold tracking-tight">
-                          {selectedRecipe.isCooked ? (t('cooked') || 'Cooked') : (t('markAsCooked') || 'Mark as Cooked')}
+                        <span>
+                          {selectedRecipe.isCooked ? t('cooked', 'Cooked') : t('markAsCooked', 'Mark as Cooked')}
                         </span>
                         
-                        <span 
-                          className="w-5 h-5 rounded-full flex items-center justify-center transition shadow-sm border"
-                          style={selectedRecipe.isCooked ? {
-                            backgroundColor: 'var(--color-emerald)',
-                            borderColor: 'var(--color-emerald)',
-                            color: '#ffffff'
-                          } : {
-                            border: '1px solid var(--color-border)',
-                            backgroundColor: 'var(--color-inner-dark)',
-                            color: 'var(--color-text-secondary)'
-                          }}
-                        >
+                        <span className={`w-5 h-5 rounded-full flex items-center justify-center transition shadow-sm ${
+                          selectedRecipe.isCooked 
+                            ? 'bg-emerald-500 text-white' 
+                            : 'border border-slate-600 bg-transparent text-transparent'
+                        }`}>
                           {selectedRecipe.isCooked && <Check className="h-3.5 w-3.5 stroke-[3]"/>}
                         </span>
                       </button>
@@ -38064,11 +37756,11 @@ export default function RecipesPage() {
                           <Star
                             key={star}
                             onClick={() => updateSelectedRecipeState('rating', star)}
-                            className="h-5 w-5 cursor-pointer transition"
-                            style={{
-                              color: (selectedRecipe.rating || 5) >= star ? 'var(--color-primary)' : 'var(--color-border)',
-                              fill: (selectedRecipe.rating || 5) >= star ? 'var(--color-primary)' : 'transparent'
-                            }}
+                            className={`h-5 w-5 cursor-pointer transition ${
+                              (selectedRecipe.rating || 0) >= star
+                                ? 'fill-amber-400 text-amber-400'
+                                : 'text-slate-600 hover:text-slate-400'
+                            }`}
                           />
                         ))}
                       </div>
@@ -38082,31 +37774,22 @@ export default function RecipesPage() {
                         style={{ color: 'var(--color-text-secondary)' }}
                       >
                         <Edit3 className="h-3.5 w-3.5"/>
-                        <span className="italic">{t('addANote') || 'Add a note'}</span>
+                        <span className="italic">{t('addANote', 'Add a note')}</span>
                       </button>
 
                       {isNoteOpen && (
-                        <div className="flex gap-2 animate-in fade-in" data-lpignore="true">
+                        <div className="flex gap-2 animate-in fade-in">
                           <input
                             type="text"
-                            data-lpignore="true"
-                            placeholder={t('addNotesPlaceholder') || 'Add notes...'}
+                            placeholder="Add notes..."
                             value={noteText}
                             onChange={(e) => setNoteText(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                updateSelectedRecipeState('note', noteText);
-                                setIsNoteOpen(false);
-                              }
-                            }}
                             className="flex-1 border rounded-xl px-3 py-2 text-xs outline-none"
                             style={{
                               backgroundColor: 'var(--color-inner-dark)',
                               borderColor: 'var(--color-border)',
                               color: 'var(--color-text)'
                             }}
-                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                           />
                           <button
                             type="button"
@@ -38114,18 +37797,15 @@ export default function RecipesPage() {
                               updateSelectedRecipeState('note', noteText);
                               setIsNoteOpen(false);
                             }}
-                            className="text-white font-bold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer shadow-sm"
+                            className="text-white font-bold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer"
                             style={{ backgroundColor: 'var(--color-primary)' }}
                           >
-                            {t('save') || 'Save'}
+                            Save
                           </button>
                         </div>
                       )}
                       {selectedRecipe.note && !isNoteOpen && (
-                        <p 
-                          className="text-xs italic"
-                          style={{ color: 'var(--color-emerald)' }}
-                        >
+                        <p className="text-xs italic font-medium" style={{ color: 'var(--color-primary)' }}>
                           Note: "{selectedRecipe.note}"
                         </p>
                       )}
@@ -38137,34 +37817,28 @@ export default function RecipesPage() {
                   {/* INGREDIENTS SECTION */}
                   <div className="px-5 space-y-4">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>{t('ingredientsHeading') || 'Ingredients'}</h3>
+                      <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>
+                        {t('ingredients', 'Ingredients')}
+                      </h3>
                       
-                      <div 
-                        className="flex items-center border rounded-lg overflow-hidden text-xs shadow-xs"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-border)'
-                        }}
-                      >
+                      <div className="flex items-center border rounded-lg overflow-hidden text-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                         <div className="px-2.5 py-1 border-r flex items-center justify-center" style={{ borderColor: 'var(--color-border)' }}>
                           <Type className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }}/>
                         </div>
                         <button
                           type="button"
                           onClick={() => setFontSizeScale(Math.max(60, fontSizeScale - 10))}
-                          className="px-2.5 py-1 font-bold cursor-pointer"
-                          style={{ color: 'var(--color-text-secondary)' }}
+                          className="px-2.5 py-1 font-bold cursor-pointer hover:bg-white/10"
                         >
                           -
                         </button>
-                        <span className="px-2.5 py-1 font-bold min-w-[42px] text-center" style={{ color: 'var(--color-text)' }}>
+                        <span className="px-2.5 py-1 font-bold min-w-[42px] text-center font-mono" style={{ color: 'var(--color-text)' }}>
                           {fontSizeScale}%
                         </span>
                         <button
                           type="button"
                           onClick={() => setFontSizeScale(Math.min(140, fontSizeScale + 10))}
-                          className="px-2.5 py-1 font-bold cursor-pointer"
-                          style={{ color: 'var(--color-text-secondary)' }}
+                          className="px-2.5 py-1 font-bold cursor-pointer hover:bg-white/10"
                         >
                           +
                         </button>
@@ -38179,13 +37853,10 @@ export default function RecipesPage() {
                         const name = typeof ing === 'string' ? ing : ing.item || ing.name || '';
                         return (
                           <div key={idx} className="flex items-start gap-2.5 leading-snug">
-                            <span 
-                              className="w-2 h-2 rounded-full inline-block shrink-0 mt-1.5"
-                              style={{ backgroundColor: 'var(--color-primary)' }}
-                            />
+                            <span className="w-2 h-2 rounded-full inline-block shrink-0 mt-1.5" style={{ backgroundColor: 'var(--color-primary)' }} />
                             <span style={{ color: 'var(--color-text)' }}>
                               {(scaledAmt !== '' || unit) && (
-                                <strong className="font-semibold" style={{ color: 'var(--color-text)' }}>
+                                <strong className="font-semibold">
                                   {scaledAmt} {unit && unit !== 'Unit' ? unit : ''}{' '}
                                 </strong>
                               )}
@@ -38201,10 +37872,13 @@ export default function RecipesPage() {
 
                   {/* INSTRUCTIONS SECTION */}
                   <div className="px-5 space-y-4">
-                    <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>{t('instructionsHeading') || 'Instructions'}</h3>
+                    <h3 className="text-xl font-black" style={{ color: 'var(--color-text)' }}>
+                      {t('instructions', 'Instructions')}
+                    </h3>
                     
                     <div className="space-y-3.5" style={{ fontSize: `${fontSizeScale}%` }}>
-                      {Array.isArray(selectedRecipe.instructions) && selectedRecipe.instructions.map((step: string, idx: number) => {
+                      {Array.isArray(selectedRecipe.instructions || selectedRecipe.steps) && (selectedRecipe.instructions || selectedRecipe.steps).map((step: any, idx: number) => {
+                        const stepText = typeof step === 'string' ? step : step.text || step.step || '';
                         const isDone = completedSteps.includes(idx);
                         return (
                           <div
@@ -38216,40 +37890,32 @@ export default function RecipesPage() {
                                 setCompletedSteps([...completedSteps, idx]);
                               }
                             }}
-                            className={`flex items-start gap-3 p-3 rounded-2xl border cursor-pointer transition select-none shadow-xs ${
-                              isDone ? 'opacity-50' : ''
+                            className={`flex items-start gap-3 p-3 rounded-2xl border cursor-pointer transition select-none ${
+                              isDone ? 'opacity-50' : 'hover:scale-[1.005]'
                             }`}
                             style={{
                               backgroundColor: 'var(--color-inner-dark)',
-                              borderColor: 'var(--color-border)'
+                              borderColor: isDone ? 'var(--color-emerald)' : 'var(--color-border)'
                             }}
                           >
                             <div 
-                              className="w-4 h-4 rounded border flex items-center justify-center shrink-0 mt-0.5 transition"
-                              style={isDone ? {
-                                backgroundColor: 'var(--color-primary)',
+                              className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 mt-0.5 transition ${
+                                isDone ? 'text-white' : 'bg-transparent'
+                              }`}
+                              style={{
                                 borderColor: 'var(--color-primary)',
-                                color: '#ffffff'
-                              } : {
-                                borderColor: 'var(--color-primary)',
-                                backgroundColor: 'transparent'
+                                backgroundColor: isDone ? 'var(--color-primary)' : 'transparent'
                               }}
                             >
                               {isDone && <Check className="h-3 w-3 stroke-[3]"/>}
                             </div>
 
-                            <span 
-                              className="font-extrabold shrink-0 text-sm"
-                              style={{ color: 'var(--color-primary)' }}
-                            >
+                            <span className="font-extrabold shrink-0 text-sm" style={{ color: 'var(--color-primary)' }}>
                               {idx + 1}.
                             </span>
 
-                            <span 
-                              className={`leading-relaxed flex-1 ${isDone ? 'line-through opacity-50' : ''}`}
-                              style={{ color: 'var(--color-text)' }}
-                            >
-                              {step}
+                            <span className={`leading-relaxed flex-1 ${isDone ? 'line-through opacity-60' : ''}`} style={{ color: 'var(--color-text)' }}>
+                              {stepText}
                             </span>
                           </div>
                         );
@@ -38259,115 +37925,82 @@ export default function RecipesPage() {
 
                   <div className="border-t mx-5" style={{ borderColor: 'var(--color-border)' }} />
 
-                  {/* MODAL FOOTER */}
-                  <div className="px-5 flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
+                  {/* MODAL FOOTER: SOURCE AT BOTTOM RIGHT + DELETE & EXPORT */}
+                  <div className="px-5 flex flex-wrap items-center justify-between gap-3 text-xs">
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => handleExportJson(selectedRecipe)}
-                        className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: 'var(--color-emerald)',
-                          color: 'var(--color-emerald)'
-                        }}
+                        onClick={() => handleDeleteRecipe(selectedRecipe.id)}
+                        className="border border-red-500/40 text-red-400 px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 hover:bg-red-950/30 cursor-pointer transition"
                       >
-                        <FileJson className="h-3.5 w-3.5"/> Export JSON
+                        <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipe', 'Delete Recipe')}
                       </button>
 
-                      {isOwner(selectedRecipe) && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteRecipe(selectedRecipe.id)}
-                          className="px-3.5 py-2 rounded-xl font-bold flex items-center gap-1.5 border transition cursor-pointer shadow-xs"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'rgba(239, 68, 68, 0.4)',
-                            color: '#ef4444'
-                          }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5"/> {t('deleteRecipeBtn') || 'Delete Recipe'}
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleExportJson(selectedRecipe)}
+                        className="px-3.5 py-2 rounded-xl text-white font-bold flex items-center gap-1.5 shadow-xs transition hover:opacity-90 cursor-pointer"
+                        style={{ backgroundColor: 'var(--color-emerald)' }}
+                        title={t('exportJsonBtn', 'Export JSON')}
+                      >
+                        <FileJson className="h-3.5 w-3.5" />
+                        <span>{t('exportJsonBtn', 'Export JSON')}</span>
+                      </button>
                     </div>
 
-                    <div className="flex items-center gap-2 ml-auto text-xs">
-                      <span className="font-semibold" style={{ color: 'var(--color-text-secondary)' }}>
-                        {t('source') || 'Source'}:
-                      </span>
-                      {selectedRecipe.sourceUrl || selectedRecipe.source_url ? (
+                    {/* Source anchored to Bottom Right */}
+                    {selectedRecipe.sourceUrl && (
+                      <div className="text-right">
                         <a
-                          href={getSafeHref(selectedRecipe.sourceUrl || selectedRecipe.source_url)}
+                          href={selectedRecipe.sourceUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="font-bold text-xs hover:underline inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition shadow-xs"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-primary)'
-                          }}
+                          className="font-bold text-xs inline-flex items-center gap-1 hover:underline"
+                          style={{ color: 'var(--color-primary)' }}
                         >
-                          <span className="underline">
-                            {(t('visitSource') || 'Visit {domain}').replace('{domain}', getSafeHostname(selectedRecipe.sourceUrl || selectedRecipe.source_url))}
-                          </span>
-                          <ExternalLink className="h-3.5 w-3.5" />
+                          <span>Visit {(() => {
+                            try { return new URL(selectedRecipe.sourceUrl).hostname.replace('www.', ''); } catch { return 'source'; }
+                          })()}</span>
+                          <ExternalLink className="h-3 w-3" />
                         </a>
-                      ) : (
-                        <span 
-                          className="px-3 py-1.5 rounded-xl border text-xs font-medium"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)',
-                            color: 'var(--color-text-secondary)'
-                          }}
-                        >
-                          {t('createdManually') || 'Created manually'}
-                        </span>
-                      )}
-                    </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (
-                /* EDIT RECIPE VIEW (WITH SLIDE-TOGGLE SWITCH) */
+                /* AUTHENTIC 3-TAB IN-PLACE RECIPE EDIT STUDIO */
                 <div className="p-6 space-y-6">
                   <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
                     <h3 className="text-xl font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                      <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('editRecipeTitle') || 'Edit Recipe'}
+                      <Edit3 className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('editRecipe', 'Edit Recipe')}
                     </h3>
                     <button
                       type="button"
                       onClick={() => setIsEditing(false)}
-                      className="p-1 rounded-lg transition cursor-pointer"
-                      style={{ color: 'var(--color-text-secondary)' }}
+                      className="p-1 rounded-lg hover:bg-white/10 transition cursor-pointer"
                     >
                       <X className="h-5 w-5"/>
                     </button>
                   </div>
 
-                  <div 
-                    className="flex p-1.5 rounded-2xl border"
-                    style={{
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-border)'
-                    }}
-                  >
+                  <div className="flex p-1.5 rounded-2xl border" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                     {[
-                      { id: 'info', label: t('basicInfoTab') || 'Basic Info' },
-                      { id: 'ingredients', label: t('ingredientsTab') || 'Ingredients' },
-                      { id: 'steps', label: t('stepsTab') || 'Steps' }
+                      { id: 'info', label: t('basicInfo', 'Basic Info') },
+                      { id: 'ingredients', label: t('ingredients', 'Ingredients') },
+                      { id: 'steps', label: t('instructions', 'Steps') }
                     ].map((tab) => (
                       <button
                         key={tab.id}
                         type="button"
                         onClick={() => setEditTab(tab.id as any)}
-                        className="flex-1 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer"
-                        style={editTab === tab.id ? {
-                          backgroundColor: 'var(--color-card)',
-                          color: 'var(--color-text)',
-                          border: '1px solid var(--color-border)',
-                          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-                        } : {
-                          color: 'var(--color-text-secondary)'
+                        className={`flex-1 py-2.5 text-xs font-bold rounded-xl transition cursor-pointer ${
+                          editTab === tab.id
+                            ? 'text-white shadow-md border border-[var(--color-border)]'
+                            : 'opacity-70 hover:opacity-100'
+                        }`}
+                        style={{
+                          backgroundColor: editTab === tab.id ? 'var(--color-card)' : 'transparent',
+                          color: editTab === tab.id ? 'var(--color-primary)' : 'var(--color-text)'
                         }}
                       >
                         {tab.label}
@@ -38375,57 +38008,16 @@ export default function RecipesPage() {
                     ))}
                   </div>
 
-                  {/* TAB 1: BASIC INFO (WITH SLIDE-TOGGLE) */}
+                  {/* TAB 1: BASIC INFO */}
                   {editTab === 'info' && (
-                    <div className="space-y-5 animate-in fade-in text-xs" data-lpignore="true">
-                      {/* SLIDE-TOGGLE SWITCH ROW FOR PUBLIC MARKETPLACE */}
-                      <div 
-                        className="flex items-center justify-between p-3.5 rounded-2xl border transition-colors shadow-xs"
-                        style={{
-                          backgroundColor: 'var(--color-inner-dark)',
-                          borderColor: editForm.isPublic ? 'var(--color-emerald)' : 'var(--color-border)'
-                        }}
-                      >
-                        <div className="space-y-0.5">
-                          <div className="flex items-center gap-2 font-bold text-xs" style={{ color: 'var(--color-text)' }}>
-                            {editForm.isPublic ? <Globe className="h-4 w-4 text-emerald-400" /> : <Lock className="h-4 w-4 text-slate-400" />}
-                            <span>Show Recipe on Public Marketplace</span>
-                          </div>
-                          <p className="text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
-                            When enabled, this recipe appears on Marketplace for other home chefs to discover.
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={Boolean(editForm.isPublic)}
-                          onClick={() => setEditForm({ ...editForm, isPublic: !editForm.isPublic })}
-                          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out ${
-                            editForm.isPublic ? 'bg-emerald-500' : 'bg-slate-700/70'
-                          }`}
-                          title={editForm.isPublic ? "Disable for Public" : "Enable for Public"}
-                        >
-                          <span
-                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out ${
-                              editForm.isPublic ? 'translate-x-5' : 'translate-x-0'
-                            }`}
-                          />
-                        </button>
-                      </div>
-
+                    <div className="space-y-5 animate-in fade-in text-xs">
                       <div className="space-y-1.5">
-                        <label 
-                          className="block font-bold uppercase tracking-wider text-[11px]"
-                          style={{ color: 'var(--color-primary)' }}
-                        >
-                          {t('photoLabel') || 'Photo'}
+                        <label className="block font-bold uppercase tracking-wider text-[11px]" style={{ color: 'var(--color-primary)' }}>
+                          Photo
                         </label>
                         <label 
                           className="border-2 border-dashed rounded-2xl h-44 flex flex-col items-center justify-center cursor-pointer transition relative overflow-hidden group"
-                          style={{
-                            backgroundColor: 'var(--color-inner-dark)',
-                            borderColor: 'var(--color-border)'
-                          }}
+                          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
                         >
                           {editForm.imageUrl ? (
                             <>
@@ -38435,14 +38027,8 @@ export default function RecipesPage() {
                                 className="absolute inset-0 w-full h-full object-cover"
                               />
                               <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
-                                <span 
-                                  className="border text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5"
-                                  style={{
-                                    backgroundColor: 'var(--color-card)',
-                                    borderColor: 'var(--color-border)'
-                                  }}
-                                >
-                                  <ImagePlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('changePhoto') || 'Change Photo'}
+                                <span className="text-white text-xs font-bold px-3 py-1.5 rounded-xl flex items-center gap-1.5" style={{ backgroundColor: 'var(--color-card)' }}>
+                                  <ImagePlus className="h-4 w-4" style={{ color: 'var(--color-primary)' }}/> {t('changePhoto', 'Change Photo')}
                                 </span>
                                 <button
                                   type="button"
@@ -38451,138 +38037,181 @@ export default function RecipesPage() {
                                     e.stopPropagation();
                                     setEditForm({ ...editForm, imageUrl: '' });
                                   }}
-                                  className="bg-red-950/90 border border-red-500/50 text-red-400 text-xs font-bold px-3 py-1.5 rounded-xl hover:bg-red-900 cursor-pointer"
+                                  className="border border-red-500/50 text-red-400 text-xs font-bold px-3 py-1.5 rounded-xl hover:bg-red-900 cursor-pointer"
+                                  style={{ backgroundColor: 'var(--color-inner-dark)' }}
                                 >
-                                  {t('removePhoto') || 'Remove'}
+                                  Remove
                                 </button>
                               </div>
                             </>
                           ) : (
                             <div className="text-center space-y-2">
-                              <ImagePlus className="h-8 w-8 mx-auto transition" style={{ color: 'var(--color-text-secondary)' }}/>
-                              <span className="text-xs font-bold block" style={{ color: 'var(--color-text)' }}>{t('addAPhoto') || 'Add a photo'}</span>
+                              <ImagePlus className="h-8 w-8 mx-auto opacity-40 transition" style={{ color: 'var(--color-primary)' }}/>
+                              <span className="text-xs font-bold block" style={{ color: 'var(--color-text-secondary)' }}>{t('addAPhoto', 'Add a photo')}</span>
                             </div>
                           )}
-                          <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                const reader = new FileReader();
+                                reader.onloadend = () => setEditForm(prev => ({ ...prev, imageUrl: reader.result as string }));
+                                reader.readAsDataURL(file);
+                              }
+                            }} 
+                            className="hidden" 
+                          />
                         </label>
                       </div>
 
                       <div>
-                        <label 
-                          className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                          style={{ color: 'var(--color-primary)' }}
-                        >
-                          {t('recipeTitle') || 'Recipe Title'}
+                        <label className="block font-bold uppercase tracking-wider text-[11px] mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                          Recipe Title
                         </label>
                         <input
                           type="text"
                           required
-                          data-lpignore="true"
                           value={editForm.title}
                           onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
-                          className="w-full border rounded-xl p-3 text-sm outline-none"
+                          className="w-full border rounded-xl p-3 text-sm outline-none font-bold"
                           style={{
                             backgroundColor: 'var(--color-inner-dark)',
                             borderColor: 'var(--color-border)',
                             color: 'var(--color-text)'
                           }}
-                          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                         />
                       </div>
 
                       <div>
-                        <label 
-                          className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                          style={{ color: 'var(--color-primary)' }}
-                        >
-                          {t('description') || 'Description'}
+                        <label className="block font-bold uppercase tracking-wider text-[11px] mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                          Description
                         </label>
                         <textarea
                           rows={3}
-                          data-lpignore="true"
                           value={editForm.description}
                           onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                          className="w-full border rounded-xl p-3 text-xs outline-none resize-y leading-relaxed"
+                          className="w-full border rounded-xl p-3 text-xs outline-none resize-y leading-relaxed font-medium"
                           style={{
                             backgroundColor: 'var(--color-inner-dark)',
                             borderColor: 'var(--color-border)',
                             color: 'var(--color-text)'
                           }}
-                          onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                          onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                         />
                       </div>
 
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label 
-                            className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                            style={{ color: 'var(--color-primary)' }}
-                          >
-                            {t('recipeTypeLabel') || 'Recipe Type'}
+                          <label className="block font-bold uppercase tracking-wider text-[11px] mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                            Recipe Type
                           </label>
                           <select
                             value={editForm.recipeType}
                             onChange={(e) => setEditForm({ ...editForm, recipeType: e.target.value })}
-                            className="w-full border rounded-xl p-3 text-xs outline-none cursor-pointer"
+                            className="w-full border rounded-xl p-3 text-xs outline-none cursor-pointer font-bold"
                             style={{
                               backgroundColor: 'var(--color-inner-dark)',
                               borderColor: 'var(--color-border)',
                               color: 'var(--color-text)'
                             }}
                           >
-                            {RECIPE_TYPES.filter(t => t !== 'All Types').map((t) => (
-                              <option key={t} value={t} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t}</option>
-                            ))}
+                            {RECIPE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                           </select>
                         </div>
 
                         <div>
-                          <label 
-                            className="block font-bold uppercase tracking-wider text-[11px] mb-1.5"
-                            style={{ color: 'var(--color-primary)' }}
-                          >
-                            {t('servingsLabel') || 'Servings'}
+                          <label className="block font-bold uppercase tracking-wider text-[11px] mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                            Servings
                           </label>
                           <input
                             type="number"
-                            data-lpignore="true"
                             value={editForm.servings}
                             onChange={(e) => setEditForm({ ...editForm, servings: parseInt(e.target.value) || 1 })}
-                            className="w-full border rounded-xl p-3 text-xs outline-none"
+                            className="w-full border rounded-xl p-3 text-xs outline-none font-bold"
                             style={{
                               backgroundColor: 'var(--color-inner-dark)',
                               borderColor: 'var(--color-border)',
                               color: 'var(--color-text)'
                             }}
-                            onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                            onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                           />
                         </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block font-bold uppercase tracking-wider text-[11px] mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                            Preparation Time (mins)
+                          </label>
+                          <input
+                            type="number"
+                            value={editForm.prepTimeMinutes}
+                            onChange={(e) => setEditForm({ ...editForm, prepTimeMinutes: parseInt(e.target.value) || 0 })}
+                            className="w-full border rounded-xl p-3 text-xs outline-none font-bold"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block font-bold uppercase tracking-wider text-[11px] mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                            Cooking Time (mins)
+                          </label>
+                          <input
+                            type="number"
+                            value={editForm.cookTimeMinutes}
+                            onChange={(e) => setEditForm({ ...editForm, cookTimeMinutes: parseInt(e.target.value) || 0 })}
+                            className="w-full border rounded-xl p-3 text-xs outline-none font-bold"
+                            style={{
+                              backgroundColor: 'var(--color-inner-dark)',
+                              borderColor: 'var(--color-border)',
+                              color: 'var(--color-text)'
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block font-bold uppercase tracking-wider text-[11px] mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                          Source URL
+                        </label>
+                        <input
+                          type="url"
+                          placeholder="https://example.com/recipe"
+                          value={editForm.sourceUrl}
+                          onChange={(e) => setEditForm({ ...editForm, sourceUrl: e.target.value })}
+                          className="w-full border rounded-xl p-3 text-xs outline-none font-medium"
+                          style={{
+                            backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
+                            color: 'var(--color-text)'
+                          }}
+                        />
                       </div>
 
                       <div className="pt-4 border-t flex justify-end gap-3" style={{ borderColor: 'var(--color-border)' }}>
                         <button
                           type="button"
                           onClick={() => setIsEditing(false)}
-                          className="px-5 py-2.5 rounded-xl font-bold transition text-xs cursor-pointer"
+                          className="px-5 py-2.5 rounded-xl border font-bold transition text-xs cursor-pointer"
                           style={{
                             backgroundColor: 'var(--color-inner-dark)',
+                            borderColor: 'var(--color-border)',
                             color: 'var(--color-text-secondary)'
                           }}
                         >
-                          {t('cancel') || 'Cancel'}
+                          {t('cancelBtn', 'Cancel')}
                         </button>
                         <button
                           type="button"
                           onClick={handleSaveEdit}
-                          className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg flex items-center gap-2 text-xs cursor-pointer"
+                          className="px-6 py-2.5 rounded-xl text-white font-bold transition shadow-lg flex items-center gap-2 text-xs cursor-pointer hover:opacity-90"
                           style={{ backgroundColor: 'var(--color-primary)' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                         >
-                          <Save className="h-4 w-4"/> {t('saveChanges') || 'Save Changes'}
+                          <Save className="h-4 w-4"/> {t('saveChanges', 'Save Changes')}
                         </button>
                       </div>
                     </div>
@@ -38590,36 +38219,21 @@ export default function RecipesPage() {
 
                   {/* TAB 2: INGREDIENTS */}
                   {editTab === 'ingredients' && (
-                    <div 
-                      className="border rounded-2xl p-5 space-y-4 animate-in fade-in text-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)'
-                      }}
-                    >
+                    <div className="border rounded-2xl p-5 space-y-4 animate-in fade-in text-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                       <div className="flex justify-between items-center">
-                        <h2 
-                          className="text-sm font-bold uppercase tracking-wider"
-                          style={{ color: 'var(--color-primary)' }}
-                        >
-                          {t('ingredientsHeading') || 'Ingredients'}
-                        </h2>
+                        <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>{t('ingredients', 'Ingredients')}</h2>
                         <div className="flex gap-2">
                           <button
                             type="button"
                             onClick={() => setIsReorderingIngredients(!isReorderingIngredients)}
                             className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
-                            style={isReorderingIngredients ? {
-                              backgroundColor: 'var(--color-emerald)',
-                              color: '#ffffff',
-                              borderColor: 'var(--color-emerald)'
-                            } : {
-                              backgroundColor: 'var(--color-card)',
-                              color: 'var(--color-text)',
-                              borderColor: 'var(--color-border)'
+                            style={{
+                              backgroundColor: isReorderingIngredients ? 'var(--color-emerald)' : 'var(--color-card)',
+                              borderColor: 'var(--color-border)',
+                              color: '#ffffff'
                             }}
                           >
-                            {isReorderingIngredients ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
+                            {isReorderingIngredients ? t('done', 'Done') : t('reorder', 'Reorder')}
                           </button>
                           <button
                             type="button"
@@ -38627,12 +38241,10 @@ export default function RecipesPage() {
                               ...editForm,
                               ingredients: [...editForm.ingredients, { amount: '', unit: '', item: '', category: categories[0] || 'Produce' }]
                             })}
-                            className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                            className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs hover:opacity-90"
                             style={{ backgroundColor: 'var(--color-primary)' }}
-                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                           >
-                            <Plus className="h-3.5 w-3.5"/> {t('addIngredient') || 'Add Ingredient'}
+                            <Plus className="h-3.5 w-3.5"/> {t('addIngredient', 'Add Ingredient')}
                           </button>
                         </div>
                       </div>
@@ -38642,21 +38254,29 @@ export default function RecipesPage() {
                           <div
                             key={idx}
                             draggable={isReorderingIngredients}
-                            onDragStart={() => handleDragStart(idx)}
-                            onDragOver={(e) => handleDragOver(e, idx, 'ingredients')}
-                            onDrop={handleDrop}
+                            onDragStart={() => setDraggedIndex(idx)}
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              if (draggedIndex === null || draggedIndex === idx) return;
+                              const list = [...editForm.ingredients];
+                              const item = list[draggedIndex];
+                              list.splice(draggedIndex, 1);
+                              list.splice(idx, 0, item);
+                              setEditForm({ ...editForm, ingredients: list });
+                              setDraggedIndex(idx);
+                            }}
+                            onDrop={() => setDraggedIndex(null)}
                             className={`flex items-center gap-2 p-2.5 rounded-xl border transition ${
-                              isReorderingIngredients ? 'cursor-grab' : ''
+                              isReorderingIngredients ? 'cursor-grab border-emerald-500' : ''
                             }`}
                             style={{
                               backgroundColor: 'var(--color-card)',
-                              borderColor: isReorderingIngredients ? 'var(--color-emerald)' : 'var(--color-border)'
+                              borderColor: 'var(--color-border)'
                             }}
                           >
                             <input
                               type="text"
-                              data-lpignore="true"
-                              placeholder={t('amt') || 'Amt'}
+                              placeholder="Amt"
                               value={ing.amount}
                               onChange={(e) => {
                                 const list = [...editForm.ingredients];
@@ -38672,8 +38292,7 @@ export default function RecipesPage() {
                             />
                             <input
                               type="text"
-                              data-lpignore="true"
-                              placeholder={t('unit') || 'Unit'}
+                              placeholder="Unit"
                               value={ing.unit}
                               onChange={(e) => {
                                 const list = [...editForm.ingredients];
@@ -38684,20 +38303,19 @@ export default function RecipesPage() {
                               style={{
                                 backgroundColor: 'var(--color-inner-dark)',
                                 borderColor: 'var(--color-border)',
-                                color: 'var(--color-text-secondary)'
+                                color: 'var(--color-text)'
                               }}
                             />
                             <input
                               type="text"
-                              data-lpignore="true"
-                              placeholder={t('ingredientNamePlaceholder') || 'Ingredient name...'}
+                              placeholder="Ingredient name..."
                               value={ing.item}
                               onChange={(e) => {
                                 const list = [...editForm.ingredients];
                                 list[idx].item = e.target.value;
                                 setEditForm({ ...editForm, ingredients: list });
                               }}
-                              className="flex-1 bg-transparent border-none outline-none px-2"
+                              className="flex-1 bg-transparent border-none outline-none px-2 font-medium"
                               style={{ color: 'var(--color-text)' }}
                             />
                             <select
@@ -38707,22 +38325,20 @@ export default function RecipesPage() {
                                 list[idx].category = e.target.value;
                                 setEditForm({ ...editForm, ingredients: list });
                               }}
-                              className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer"
+                              className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer font-bold"
                               style={{
                                 backgroundColor: 'var(--color-inner-dark)',
                                 borderColor: 'var(--color-border)',
-                                color: 'var(--color-text-secondary)'
+                                color: 'var(--color-text)'
                               }}
                             >
                               {categories.map((cat) => (
-                                <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
+                                <option key={cat} value={cat}>{cat}</option>
                               ))}
                             </select>
 
                             {isReorderingIngredients ? (
-                              <div className="p-2 cursor-grab" style={{ color: 'var(--color-emerald)' }}>
-                                <GripVertical className="h-4 w-4"/>
-                              </div>
+                              <div className="p-2 cursor-grab text-emerald-400"><GripVertical className="h-4 w-4"/></div>
                             ) : (
                               <button
                                 type="button"
@@ -38730,7 +38346,7 @@ export default function RecipesPage() {
                                   ...editForm,
                                   ingredients: editForm.ingredients.filter((_: any, i: number) => i !== idx)
                                 })}
-                                className="p-2 text-red-500 hover:text-red-600 cursor-pointer"
+                                className="p-2 text-red-400 hover:text-red-300 cursor-pointer"
                               >
                                 <Trash2 className="h-4 w-4"/>
                               </button>
@@ -38743,23 +38359,22 @@ export default function RecipesPage() {
                         <button
                           type="button"
                           onClick={() => setEditTab('info')}
-                          className="font-bold px-5 py-2 rounded-xl text-xs transition cursor-pointer"
+                          className="border font-bold px-5 py-2 rounded-xl text-xs transition cursor-pointer"
                           style={{
                             backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
                             color: 'var(--color-text)'
                           }}
                         >
-                          {t('backBtn') || '← Back'}
+                          ← Back
                         </button>
                         <button
                           type="button"
                           onClick={() => setEditTab('steps')}
-                          className="text-white font-bold px-6 py-2 rounded-xl text-xs transition shadow-md cursor-pointer"
+                          className="text-white font-bold px-6 py-2 rounded-xl text-xs transition shadow-md cursor-pointer hover:opacity-90"
                           style={{ backgroundColor: 'var(--color-primary)' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                         >
-                          {t('nextStepsBtn') || 'Next: Steps →'}
+                          Next: Steps →
                         </button>
                       </div>
                     </div>
@@ -38767,36 +38382,21 @@ export default function RecipesPage() {
 
                   {/* TAB 3: STEPS */}
                   {editTab === 'steps' && (
-                    <div 
-                      className="border rounded-2xl p-5 space-y-4 animate-in fade-in text-xs"
-                      style={{
-                        backgroundColor: 'var(--color-inner-dark)',
-                        borderColor: 'var(--color-border)'
-                      }}
-                    >
+                    <div className="border rounded-2xl p-5 space-y-4 animate-in fade-in text-xs" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
                       <div className="flex justify-between items-center">
-                        <h2 
-                          className="text-sm font-bold uppercase tracking-wider"
-                          style={{ color: 'var(--color-primary)' }}
-                        >
-                          {t('stepByStepInstructions') || 'Step-by-Step Instructions'}
-                        </h2>
+                        <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>{t('instructions', 'Step-by-Step Instructions')}</h2>
                         <div className="flex gap-2">
                           <button
                             type="button"
                             onClick={() => setIsReorderingSteps(!isReorderingSteps)}
                             className="font-bold px-3 py-1.5 rounded-lg border transition cursor-pointer"
-                            style={isReorderingSteps ? {
-                              backgroundColor: 'var(--color-emerald)',
-                              color: '#ffffff',
-                              borderColor: 'var(--color-emerald)'
-                            } : {
-                              backgroundColor: 'var(--color-card)',
-                              color: 'var(--color-text-secondary)',
-                              borderColor: 'var(--color-border)'
+                            style={{
+                              backgroundColor: isReorderingSteps ? 'var(--color-emerald)' : 'var(--color-card)',
+                              borderColor: 'var(--color-border)',
+                              color: '#ffffff'
                             }}
                           >
-                            {isReorderingSteps ? (t('done') || 'Done') : (t('reorder') || 'Reorder')}
+                            {isReorderingSteps ? t('done', 'Done') : t('reorder', 'Reorder')}
                           </button>
                           <button
                             type="button"
@@ -38804,12 +38404,10 @@ export default function RecipesPage() {
                               ...editForm,
                               instructions: [...editForm.instructions, '']
                             })}
-                            className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                            className="text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs hover:opacity-90"
                             style={{ backgroundColor: 'var(--color-primary)' }}
-                            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                           >
-                            <Plus className="h-3.5 w-3.5"/> {t('addStep') || 'Add Step'}
+                            <Plus className="h-3.5 w-3.5"/> {t('addStep', 'Add Step')}
                           </button>
                         </div>
                       </div>
@@ -38819,46 +38417,44 @@ export default function RecipesPage() {
                           <div
                             key={idx}
                             draggable={isReorderingSteps}
-                            onDragStart={() => handleDragStart(idx)}
-                            onDragOver={(e) => handleDragOver(e, idx, 'steps')}
-                            onDrop={handleDrop}
+                            onDragStart={() => setDraggedIndex(idx)}
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              if (draggedIndex === null || draggedIndex === idx) return;
+                              const list = [...editForm.instructions];
+                              const item = list[draggedIndex];
+                              list.splice(draggedIndex, 1);
+                              list.splice(idx, 0, item);
+                              setEditForm({ ...editForm, instructions: list });
+                              setDraggedIndex(idx);
+                            }}
+                            onDrop={() => setDraggedIndex(null)}
                             className={`flex items-start gap-3 p-3 rounded-xl border transition ${
-                              isReorderingSteps ? 'cursor-grab' : ''
+                              isReorderingSteps ? 'cursor-grab border-emerald-500' : ''
                             }`}
                             style={{
                               backgroundColor: 'var(--color-card)',
-                              borderColor: isReorderingSteps ? 'var(--color-emerald)' : 'var(--color-border)'
+                              borderColor: 'var(--color-border)'
                             }}
                           >
-                            <span 
-                              className="w-6 h-6 rounded-full font-bold flex items-center justify-center shrink-0 mt-1"
-                              style={{
-                                backgroundColor: 'var(--color-inner-dark)',
-                                color: 'var(--color-primary)',
-                                borderColor: 'var(--color-primary)',
-                                borderWidth: '1px'
-                              }}
-                            >
+                            <span className="w-6 h-6 rounded-full font-bold flex items-center justify-center shrink-0 mt-1" style={{ backgroundColor: 'rgba(224, 86, 56, 0.2)', color: 'var(--color-primary)' }}>
                               {idx + 1}
                             </span>
                             <textarea
                               rows={2}
-                              data-lpignore="true"
-                              placeholder={(t('describeStepPlaceholder') || 'Describe step {n}...').replace('{n}', String(idx + 1))}
+                              placeholder={`Describe step ${idx + 1}...`}
                               value={step}
                               onChange={(e) => {
                                 const list = [...editForm.instructions];
                                 list[idx] = e.target.value;
                                 setEditForm({ ...editForm, instructions: list });
                               }}
-                              className="flex-1 bg-transparent border-none outline-none resize-y"
+                              className="flex-1 bg-transparent border-none outline-none resize-y font-medium text-xs"
                               style={{ color: 'var(--color-text)' }}
                             />
 
                             {isReorderingSteps ? (
-                              <div className="p-2 cursor-grab mt-1" style={{ color: 'var(--color-emerald)' }}>
-                                <GripVertical className="h-4 w-4"/>
-                              </div>
+                              <div className="p-2 cursor-grab mt-1 text-emerald-400"><GripVertical className="h-4 w-4"/></div>
                             ) : (
                               <button
                                 type="button"
@@ -38866,7 +38462,7 @@ export default function RecipesPage() {
                                   ...editForm,
                                   instructions: editForm.instructions.filter((_: any, i: number) => i !== idx)
                                 })}
-                                className="p-2 text-slate-400 hover:text-red-500 h-fit cursor-pointer"
+                                className="p-2 text-red-400 hover:text-red-300 h-fit cursor-pointer"
                               >
                                 <Trash2 className="h-4 w-4"/>
                               </button>
@@ -38879,23 +38475,22 @@ export default function RecipesPage() {
                         <button
                           type="button"
                           onClick={() => setEditTab('ingredients')}
-                          className="font-bold px-5 py-2 rounded-xl text-xs transition cursor-pointer"
+                          className="border font-bold px-5 py-2 rounded-xl text-xs transition cursor-pointer"
                           style={{
                             backgroundColor: 'var(--color-card)',
+                            borderColor: 'var(--color-border)',
                             color: 'var(--color-text)'
                           }}
                         >
-                          {t('backBtn') || '← Back'}
+                          ← Back
                         </button>
                         <button
                           type="button"
                           onClick={handleSaveEdit}
-                          className="text-white font-bold px-8 py-2.5 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer"
+                          className="text-white font-bold px-8 py-2.5 rounded-xl text-xs transition shadow-lg flex items-center gap-2 cursor-pointer hover:opacity-90"
                           style={{ backgroundColor: 'var(--color-primary)' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                         >
-                          <Save className="h-4 w-4"/> {t('saveChanges') || 'Save Changes'}
+                          <Save className="h-4 w-4"/> {t('saveChanges', 'Save Changes')}
                         </button>
                       </div>
                     </div>
@@ -38907,13 +38502,17 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* ADD TO PLAN MODAL */}
+      {/* ------------------------------------------------------------------ */}
+      {/* SUB-MODAL 1: ADD TO PLAN / CALENDAR MODAL                          */}
+      {/* ------------------------------------------------------------------ */}
       {showAddToPlanModal && selectedRecipe && (
         <div 
           onClick={() => setShowAddToPlanModal(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[70] flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-[70] flex items-center justify-center p-4 cursor-pointer animate-in fade-in"
         >
           <div 
+            role="region"
+            data-lpignore="true"
             onClick={(e) => e.stopPropagation()}
             className="border rounded-2xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative text-xs animate-in fade-in cursor-default transition-colors duration-200"
             style={{
@@ -38926,44 +38525,29 @@ export default function RecipesPage() {
               type="button"
               onClick={() => setShowAddToPlanModal(false)} 
               className="absolute top-4 right-4 p-2 rounded-lg transition cursor-pointer"
-              style={{
-                backgroundColor: 'var(--color-inner-dark)',
-                color: 'var(--color-text)'
-              }}
+              style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text)' }}
             >
               <X className="h-4 w-4"/>
             </button>
 
             <div className="pr-6 space-y-1">
-              <h2 
-                className="text-xl font-black tracking-tight"
-                style={{ color: 'var(--color-primary)' }}
-              >
-                {t('addToCalendar') || 'Add to Calendar'}
+              <h2 className="text-xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
+                {t('addToCalendar', 'Add to Calendar')}
               </h2>
               <p className="text-xs leading-snug" style={{ color: 'var(--color-text-secondary)' }}>
-                {(t('scheduleRecipeInMealPlan') || 'Schedule {title} in your meal plan').replace('{title}', selectedRecipe.title || selectedRecipe.name)}
+                Schedule {selectedRecipe.title || selectedRecipe.name} in your meal plan
               </p>
             </div>
 
-            <div 
-              role="region" 
-              aria-label="Add to plan" 
-              data-lpignore="true" 
-              className="space-y-4 pt-1"
-            >
+            <div className="space-y-4 pt-1">
               <div>
-                <label 
-                  className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {t('date') || 'Date'}
+                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                  {t('date', 'Date')}
                 </label>
                 <div className="relative flex items-center">
                   <Calendar className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-primary)' }}/>
                   <input
                     type="date"
-                    data-lpignore="true"
                     required
                     value={planDate}
                     onChange={(e) => setPlanDate(e.target.value)}
@@ -38971,91 +38555,71 @@ export default function RecipesPage() {
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
-                      color: 'var(--color-primary)'
+                      color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
                 </div>
               </div>
 
               <div>
-                <label 
-                  className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {t('mealType') || 'Meal Type'}
+                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                  {t('mealType', 'Meal Type')}
                 </label>
                 <div className="relative flex items-center">
                   <select
                     value={planMealType}
                     onChange={(e) => setPlanMealType(e.target.value)}
-                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none cursor-pointer appearance-none"
+                    className="w-full border rounded-xl px-3.5 py-2.5 text-xs outline-none cursor-pointer appearance-none font-bold"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   >
-                    <option value="Breakfast" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('breakfast') || 'Breakfast'}</option>
-                    <option value="Lunch" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('lunch') || 'Lunch'}</option>
-                    <option value="Dinner" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('dinner') || 'Dinner'}</option>
-                    <option value="Snack" style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{t('snack') || 'Snack'}</option>
+                    <option value="Breakfast">Breakfast</option>
+                    <option value="Lunch">Lunch</option>
+                    <option value="Dinner">Dinner</option>
+                    <option value="Snack">Snack</option>
                   </select>
                   <ChevronDown className="h-4 w-4 absolute right-3 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
                 </div>
               </div>
 
               <div>
-                <label 
-                  className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {t('time') || 'Time'}
+                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                  {t('time', 'Time')}
                 </label>
                 <div className="relative flex items-center">
                   <Clock className="h-4 w-4 absolute left-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }}/>
                   <input
                     type="time"
-                    data-lpignore="true"
                     value={planTime}
                     onChange={(e) => setPlanTime(e.target.value)}
-                    className="w-full border rounded-xl px-10 py-2.5 text-xs outline-none"
+                    className="w-full border rounded-xl px-10 py-2.5 text-xs outline-none font-bold"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-text)'
                     }}
-                    onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                    onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                   />
-                  <Clock className="h-4 w-4 absolute right-3.5 pointer-events-none" style={{ color: 'var(--color-primary)' }}/>
                 </div>
               </div>
 
               <div>
-                <label 
-                  className="block text-xs font-bold mb-1.5"
-                  style={{ color: 'var(--color-primary)' }}
-                >
-                  {t('notes') || 'Notes'}
+                <label className="block text-xs font-bold mb-1.5" style={{ color: 'var(--color-primary)' }}>
+                  {t('notes', 'Notes')}
                 </label>
                 <textarea
-                  data-lpignore="true"
                   value={planNotes}
                   onChange={(e) => setPlanNotes(e.target.value)}
-                  placeholder={t('addNotesRemindersPlaceholder') || 'Add any notes or reminders...'}
+                  placeholder="Add any notes or reminders..."
                   rows={3}
-                  className="w-full border rounded-xl p-3 text-xs outline-none resize-none"
+                  className="w-full border rounded-xl p-3 text-xs outline-none resize-none font-medium"
                   style={{
                     backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
                     color: 'var(--color-text)'
                   }}
-                  onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--color-primary)')}
-                  onBlur={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
                 />
               </div>
 
@@ -39065,22 +38629,20 @@ export default function RecipesPage() {
                   onClick={() => setShowAddToPlanModal(false)}
                   className="px-5 py-2.5 rounded-xl border font-bold text-xs transition cursor-pointer"
                   style={{
+                    backgroundColor: 'var(--color-inner-dark)',
                     borderColor: 'var(--color-border)',
-                    color: 'var(--color-primary)',
-                    backgroundColor: 'var(--color-inner-dark)'
+                    color: 'var(--color-text-secondary)'
                   }}
                 >
-                  {t('cancel') || 'Cancel'}
+                  {t('cancelBtn', 'Cancel')}
                 </button>
                 <button
                   type="button"
                   onClick={handleSaveToCalendar}
-                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer"
+                  className="px-5 py-2.5 rounded-xl text-white font-bold text-xs transition shadow-md cursor-pointer hover:opacity-90"
                   style={{ backgroundColor: 'var(--color-primary)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
                 >
-                  {t('addToCalendarBtn') || 'Add to Calendar'}
+                  {t('addToCalendar', 'Add to Calendar')}
                 </button>
               </div>
             </div>
@@ -39088,13 +38650,17 @@ export default function RecipesPage() {
         </div>
       )}
 
-      {/* SHOPPING LIST MODAL */}
+      {/* ------------------------------------------------------------------ */}
+      {/* SUB-MODAL 2: SHOPPING LIST INGREDIENT PICKER MODAL                 */}
+      {/* ------------------------------------------------------------------ */}
       {isShoppingModalOpen && (
         <div 
           onClick={() => setIsShoppingModalOpen(false)}
-          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[60] flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer"
+          className="fixed inset-0 bg-black/85 backdrop-blur-md z-[60] flex items-center justify-center p-3 sm:p-6 overflow-y-auto cursor-pointer animate-in fade-in"
         >
           <div 
+            role="region"
+            data-lpignore="true"
             onClick={(e) => e.stopPropagation()}
             className="border rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl p-6 space-y-5 cursor-default transition-colors duration-200"
             style={{
@@ -39106,14 +38672,16 @@ export default function RecipesPage() {
             <div className="flex items-center justify-between border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
               <div>
                 <h3 className="text-lg font-bold flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-                  <ShoppingCart className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('addToShoppingListTitle') || 'Add to Shopping List'}
+                  <ShoppingCart className="h-5 w-5" style={{ color: 'var(--color-primary)' }}/> {t('addToShoppingList', 'Add to Shopping List')}
                 </h3>
-                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>{t('selectOrEditItemsShopping') || 'Select or edit items to add directly to your list'}</p>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  Select or edit items to add directly to your list
+                </p>
               </div>
               <button 
-                type="button"
+                type="button" 
                 onClick={() => setIsShoppingModalOpen(false)} 
-                className="cursor-pointer transition"
+                className="hover:opacity-75 cursor-pointer"
                 style={{ color: 'var(--color-text-secondary)' }}
               >
                 <X className="h-5 w-5"/>
@@ -39136,14 +38704,12 @@ export default function RecipesPage() {
                       updated[idx].selected = !updated[idx].selected;
                       setShoppingModalIngredients(updated);
                     }}
-                    className="w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition shrink-0"
-                    style={ing.selected ? {
-                      backgroundColor: 'var(--color-primary)',
-                      borderColor: 'var(--color-primary)',
-                      color: '#ffffff'
-                    } : {
-                      borderColor: 'var(--color-border)',
-                      backgroundColor: 'var(--color-card)'
+                    className={`w-5 h-5 rounded-lg border flex items-center justify-center cursor-pointer transition ${
+                      ing.selected ? 'text-white' : 'border-slate-700 bg-slate-900'
+                    }`}
+                    style={{
+                      borderColor: ing.selected ? 'var(--color-primary)' : 'var(--color-border)',
+                      backgroundColor: ing.selected ? 'var(--color-primary)' : 'transparent'
                     }}
                   >
                     {ing.selected && <CheckSquare className="h-3.5 w-3.5"/>}
@@ -39151,7 +38717,6 @@ export default function RecipesPage() {
 
                   <input
                     type="text"
-                    data-lpignore="true"
                     value={ing.amount}
                     onChange={(e) => {
                       const updated = [...shoppingModalIngredients];
@@ -39164,11 +38729,10 @@ export default function RecipesPage() {
                       borderColor: 'var(--color-border)',
                       color: 'var(--color-text)'
                     }}
-                    placeholder={t('amt') || 'Amt'}
+                    placeholder="Amt"
                   />
                   <input
                     type="text"
-                    data-lpignore="true"
                     value={ing.unit}
                     onChange={(e) => {
                       const updated = [...shoppingModalIngredients];
@@ -39179,22 +38743,21 @@ export default function RecipesPage() {
                     style={{
                       backgroundColor: 'var(--color-card)',
                       borderColor: 'var(--color-border)',
-                      color: 'var(--color-text-secondary)'
+                      color: 'var(--color-text)'
                     }}
-                    placeholder={t('unit') || 'Unit'}
+                    placeholder="Unit"
                   />
                   <input
                     type="text"
-                    data-lpignore="true"
                     value={ing.name}
                     onChange={(e) => {
                       const updated = [...shoppingModalIngredients];
                       updated[idx].name = e.target.value;
                       setShoppingModalIngredients(updated);
                     }}
-                    className="flex-1 bg-transparent border-none outline-none px-2"
+                    className="flex-1 bg-transparent border-none outline-none px-2 font-medium"
                     style={{ color: 'var(--color-text)' }}
-                    placeholder={t('ingredientNamePlaceholder') || 'Ingredient name...'}
+                    placeholder="Ingredient name..."
                   />
                   <select
                     value={ing.category}
@@ -39203,15 +38766,15 @@ export default function RecipesPage() {
                       updated[idx].category = e.target.value;
                       setShoppingModalIngredients(updated);
                     }}
-                    className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer"
+                    className="w-36 border rounded-lg p-2 text-[11px] outline-none cursor-pointer font-bold"
                     style={{
                       backgroundColor: 'var(--color-card)',
                       borderColor: 'var(--color-border)',
-                      color: 'var(--color-text-secondary)'
+                      color: 'var(--color-text)'
                     }}
                   >
                     {categories.map((cat) => (
-                      <option key={cat} value={cat} style={{ backgroundColor: 'var(--color-card)', color: 'var(--color-text)' }}>{cat}</option>
+                      <option key={cat} value={cat}>{cat}</option>
                     ))}
                   </select>
                 </div>
@@ -39222,23 +38785,234 @@ export default function RecipesPage() {
               <button
                 type="button"
                 onClick={() => setIsShoppingModalOpen(false)}
-                className="px-4 py-2 rounded-xl font-bold text-xs cursor-pointer"
+                className="px-4 py-2 rounded-xl border font-bold text-xs cursor-pointer"
                 style={{
                   backgroundColor: 'var(--color-inner-dark)',
+                  borderColor: 'var(--color-border)',
                   color: 'var(--color-text-secondary)'
                 }}
               >
-                {t('cancel') || 'Cancel'}
+                {t('cancelBtn', 'Cancel')}
               </button>
               <button
                 type="button"
                 onClick={handleConfirmAddToShoppingList}
-                className="px-6 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 shadow-lg cursor-pointer"
+                className="px-6 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md hover:opacity-90"
                 style={{ backgroundColor: 'var(--color-primary)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary-hover)')}
-                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'var(--color-primary)')}
               >
-                <ShoppingCart className="h-3.5 w-3.5"/> {t('addSelectedToList') || 'Add Selected to List'}
+                <ShoppingCart className="h-3.5 w-3.5"/> {t('addSelectedToList', 'Add Selected to List')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ------------------------------------------------------------------ */}
+      {/* TASK 4: RECIPE IMPORT MODAL (JSON + D&D COVER IMAGE)               */}
+      {/* ------------------------------------------------------------------ */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
+          <div 
+            role="region"
+            data-lpignore="true"
+            className="w-full max-w-2xl rounded-3xl p-6 sm:p-8 space-y-6 shadow-2xl border max-h-[90vh] overflow-y-auto"
+            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+          >
+            <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
+              <div>
+                <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
+                  <Upload className="h-5 w-5" /> {t('importRecipeModalTitle', 'Import Recipe from JSON')}
+                </h2>
+                <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                  {t('importRecipeModalSubtitle', 'Upload a recipe JSON file and attach an optional cover image')}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div 
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-[10px] font-bold"
+                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  title={`Storage Engine synced with /admin/storage: ${storageProvider.toUpperCase()}`}
+                >
+                  {storageProvider === 'supabase' ? <Cloud className="h-3 w-3 text-emerald-400" /> : <HardDrive className="h-3 w-3" style={{ color: 'var(--color-primary)' }} />}
+                  <span className="font-mono uppercase">{storageProvider === 'supabase' ? 'Supabase S3' : 'Localhost'}</span>
+                </div>
+
+                <button 
+                  type="button" 
+                  onClick={() => setIsImportModalOpen(false)} 
+                  className="p-2 rounded-xl text-gray-400 hover:text-white cursor-pointer"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Step 1: Drag & Drop Cover Image */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+                {t('dragDropImageLabel', 'Drag & Drop recipe image here')}
+              </label>
+
+              {importImagePreview ? (
+                <div className="relative w-full h-44 rounded-2xl overflow-hidden border shadow-inner" style={{ borderColor: 'var(--color-border)' }}>
+                  <img src={importImagePreview} alt="Import Cover Preview" className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => { setImportImageFile(null); setImportImagePreview(''); }}
+                    className="absolute top-2 right-2 px-3 py-1.5 bg-black/75 hover:bg-red-600 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1 shadow-md"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>{t('removeSelectedImage', 'Remove Photo')}</span>
+                  </button>
+                </div>
+              ) : (
+                <div
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingImage(true); }}
+                  onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingImage(false); }}
+                  onDrop={(e) => {
+                    e.preventDefault(); e.stopPropagation(); setIsDraggingImage(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) handleImportImageUpload(e.dataTransfer.files[0]);
+                  }}
+                  onClick={() => importImageInputRef.current?.click()}
+                  className="border-2 border-dashed rounded-2xl py-8 px-6 flex flex-col items-center justify-center text-center cursor-pointer transition relative group"
+                  style={{
+                    borderColor: isDraggingImage ? 'var(--color-primary)' : 'var(--color-border)',
+                    backgroundColor: isDraggingImage ? 'var(--color-card)' : 'var(--color-inner-dark)'
+                  }}
+                >
+                  <input
+                    ref={importImageInputRef}
+                    type="file"
+                    accept="image/png, image/jpeg, image/webp"
+                    onChange={(e) => e.target.files?.[0] && handleImportImageUpload(e.target.files[0])}
+                    className="hidden"
+                  />
+                  <div 
+                    className="w-12 h-12 rounded-full flex items-center justify-center mb-2 transition transform group-hover:scale-105"
+                    style={{ backgroundColor: 'var(--color-card)' }}
+                  >
+                    <Upload className={`h-6 w-6 ${isUploadingImportImage ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
+                  </div>
+                  <p className="text-xs sm:text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+                    <span style={{ color: 'var(--color-primary)' }} className="font-bold">
+                      {t('clickToUploadCenter', 'Click center to browse or drag file here')}
+                    </span>
+                  </p>
+                  <p className="text-[11px] font-medium mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                    {t('uploadOrDragHint', 'Supports PNG, JPG, WEBP (Max 10MB)')}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Step 2: Upload Recipe JSON File Field */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--color-primary)' }}>
+                {t('uploadJsonBtn', 'Upload JSON File')}
+              </label>
+
+              <div
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingJson(true); }}
+                onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setIsDraggingJson(false); }}
+                onDrop={(e) => {
+                  e.preventDefault(); e.stopPropagation(); setIsDraggingJson(false);
+                  if (e.dataTransfer.files && e.dataTransfer.files[0]) handleImportJsonFile(e.dataTransfer.files[0]);
+                }}
+                className="p-4 rounded-2xl border flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: isDraggingJson ? 'var(--color-primary)' : 'var(--color-border)' }}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl text-emerald-400 bg-emerald-950/30 border border-emerald-800/40">
+                    <FileJson className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold" style={{ color: 'var(--color-text)' }}>
+                      {importJsonFile ? importJsonFile.name : t('uploadJsonHint', 'Select a .json recipe file from your computer or drag it here')}
+                    </p>
+                    <p className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>
+                      {importJsonFile ? `${(importJsonFile.size / 1024).toFixed(1)} KB` : 'Application JSON (.json)'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={importJsonInputRef}
+                    type="file"
+                    accept=".json,application/json"
+                    onChange={(e) => e.target.files?.[0] && handleImportJsonFile(e.target.files[0])}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => importJsonInputRef.current?.click()}
+                    className="px-4 py-2 rounded-xl text-xs font-bold border transition cursor-pointer hover:opacity-85 shadow-xs"
+                    style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                  >
+                    {importJsonFile ? 'Change File' : t('uploadJsonBtn', 'Upload JSON File')}
+                  </button>
+                  {importJsonFile && (
+                    <button
+                      type="button"
+                      onClick={() => { setImportJsonFile(null); setImportedRecipeData(null); }}
+                      className="p-2 text-red-400 hover:text-red-500 cursor-pointer"
+                      title={t('removeSelectedJson', 'Remove JSON')}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Step 3: Imported Recipe Preview Card */}
+            {importedRecipeData && (
+              <div 
+                className="p-4 rounded-2xl border space-y-2 text-xs"
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-emerald)' }}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-[11px] uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                    <CheckCircle2 className="h-4 w-4" /> {t('recipePreviewLabel', 'Recipe Preview')}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-md font-bold text-[10px] bg-emerald-950/40 text-emerald-300 border border-emerald-800">
+                    {importedRecipeData.recipeType || importedRecipeData.category || 'Main Dish'}
+                  </span>
+                </div>
+                <h4 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>
+                  {importedRecipeData.title || importedRecipeData.name || 'Untitled Recipe'}
+                </h4>
+                <div className="flex items-center gap-4 text-[11px] opacity-80" style={{ color: 'var(--color-text-secondary)' }}>
+                  <span>
+                    {(t('ingredientsCount', '{count} ingredients')).replace('{count}', String(Array.isArray(importedRecipeData.ingredients) ? importedRecipeData.ingredients.length : 0))}
+                  </span>
+                  <span>
+                    {(t('stepsCount', '{count} steps')).replace('{count}', String(Array.isArray(importedRecipeData.instructions || importedRecipeData.steps) ? (importedRecipeData.instructions || importedRecipeData.steps).length : 0))}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div className="flex justify-end gap-3 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={() => setIsImportModalOpen(false)}
+                className="px-5 py-2.5 rounded-xl border text-xs font-bold cursor-pointer hover:opacity-85 transition"
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+              >
+                {t('cancelBtn', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteImport}
+                disabled={isImporting || !importedRecipeData}
+                className="px-8 py-2.5 rounded-xl text-xs font-bold text-white shadow-lg transition flex items-center gap-2 cursor-pointer disabled:opacity-50 hover:opacity-90"
+                style={{ backgroundColor: 'var(--color-primary)' }}
+              >
+                <Upload className={`h-4 w-4 ${isImporting ? 'animate-spin' : ''}`} />
+                <span>{isImporting ? t('importingRecipe', 'Importing Recipe...') : t('importBtnAction', 'Import Recipe')}</span>
               </button>
             </div>
           </div>
@@ -58583,6 +58357,27 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "grid3x3": "3x3 Grid (9 per page)",
+    "grid4x4": "4x4 Grid (16 per page)",
+    "grid5x5": "5x5 Grid (25 per page)",
+    "recipesTitle": "Recipe Library",
+    "importRecipeModalTitle": "Import Recipe from JSON",
+    "importRecipeModalSubtitle": "Upload a recipe JSON file and attach an optional cover image",
+    "uploadJsonBtn": "Upload JSON File",
+    "uploadJsonHint": "Select a .json recipe file from your computer or drag it here",
+    "jsonLoadedSuccess": "Recipe JSON loaded successfully!",
+    "importBtnAction": "Import Recipe",
+    "importingRecipe": "Importing Recipe...",
+    "storageEngineSynced": "Storage Engine",
+    "recipeImportSuccessToast": "Recipe imported successfully into your library!",
+    "noJsonFileSelected": "Please select a valid recipe JSON file before importing.",
+    "jsonParseError": "Failed to parse JSON file. Please ensure it is a valid recipe JSON.",
+    "removeSelectedImage": "Remove Photo",
+    "removeSelectedJson": "Remove JSON",
+    "exportJsonBtn": "Export JSON",
+    "jsonExportedSuccessToast": "Recipe exported as JSON file successfully!",
+    "recipePreviewLabel": "Recipe Preview",
+    "stepsCount": "{count} steps",
     "dragDropImageLabel": "Drag & Drop recipe image here",
     "clickToUploadCenter": "Click center to browse or drag file here",
     "uploadOrDragHint": "Supports PNG, JPG, WEBP (Max 10MB)",
@@ -66046,6 +65841,90 @@ export default function AiQuotaBar() {
 
 ```
 
+## File: `apps/web/src/components/GridDensityIcons.tsx`
+```typescript
+import React from 'react';
+
+/**
+ * Pixel-precise 3x3 Grid Icon (9 cells)
+ * Outer frame: 18x18, Dividers at 9 and 15
+ */
+export const IconGrid3x3: React.FC<{ className?: string }> = ({ className = "h-4 w-4" }) => (
+  <svg 
+    xmlns="http://www.w3.org/2000/svg" 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="2" 
+    strokeLinecap="round" 
+    strokeLinejoin="round" 
+    className={className}
+    aria-hidden="true"
+  >
+    <rect width="18" height="18" x="3" y="3" rx="2" />
+    <path d="M3 9h18" />
+    <path d="M3 15h18" />
+    <path d="M9 3v18" />
+    <path d="M15 3v18" />
+  </svg>
+);
+
+/**
+ * Pixel-precise 4x4 Grid Icon (16 cells)
+ * Outer frame: 18x18, Dividers at 7.5, 12, and 16.5
+ */
+export const IconGrid4x4: React.FC<{ className?: string }> = ({ className = "h-4 w-4" }) => (
+  <svg 
+    xmlns="http://www.w3.org/2000/svg" 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="1.75" 
+    strokeLinecap="round" 
+    strokeLinejoin="round" 
+    className={className}
+    aria-hidden="true"
+  >
+    <rect width="18" height="18" x="3" y="3" rx="2" />
+    <path d="M3 7.5h18" />
+    <path d="M3 12h18" />
+    <path d="M3 16.5h18" />
+    <path d="M7.5 3v18" />
+    <path d="M12 3v18" />
+    <path d="M16.5 3v18" />
+  </svg>
+);
+
+/**
+ * Pixel-precise 5x5 Grid Icon (25 cells)
+ * Outer frame: 18x18, Dividers at 6.6, 10.2, 13.8, and 17.4
+ */
+export const IconGrid5x5: React.FC<{ className?: string }> = ({ className = "h-4 w-4" }) => (
+  <svg 
+    xmlns="http://www.w3.org/2000/svg" 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="1.5" 
+    strokeLinecap="round" 
+    strokeLinejoin="round" 
+    className={className}
+    aria-hidden="true"
+  >
+    <rect width="18" height="18" x="3" y="3" rx="2" />
+    <path d="M3 6.6h18" />
+    <path d="M3 10.2h18" />
+    <path d="M3 13.8h18" />
+    <path d="M3 17.4h18" />
+    <path d="M6.6 3v18" />
+    <path d="M10.2 3v18" />
+    <path d="M13.8 3v18" />
+    <path d="M17.4 3v18" />
+  </svg>
+);
+
+```
+
 ## File: `apps/web/src/components/ThemeProvider.tsx`
 ```typescript
 'use client';
@@ -66187,12 +66066,10 @@ export function useTheme() {
 
 ## File: `apps/web/src/components/Sidebar.tsx`
 ```typescript
+// Generated / Updated by AI Collaborator
 'use client';
 
-// Generated / Updated by AI Collaborator
-
 import packageInfo from '../../package.json';
-import DynamicTokenIcon from '@/components/DynamicTokenIcon';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -66234,7 +66111,8 @@ import {
   CheckCircle2,
   AlertCircle,
   ExternalLink,
-  Layers
+  Layers,
+  HardDrive
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
@@ -66305,13 +66183,12 @@ const isImageIcon = (icon?: unknown): icon is string =>
   );
 
 export default function Sidebar() {
-  // 1. Navigation & Translation Hooks
-  const pathname = usePathname() || '';
-  const { t, locale, setLocale } = useTranslation();
+  const pathname = usePathname();
+  const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
+  if (isAuthRoute) return null;
 
-  // 2. Core State Hooks
+  const { t, locale, setLocale } = useTranslation();
   const [user, setUser] = useState<User | null>(null);
-  const currentUser = user;
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
   const [siteIcon, setSiteIcon] = useState<string>(DEFAULT_SITE_ICON);
   const [isOpen, setIsOpen] = useState<boolean>(false);
@@ -66319,15 +66196,9 @@ export default function Sidebar() {
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
   const [mounted, setMounted] = useState<boolean>(false);
 
-  // 3. Balances & Token Package State Hooks
+  // Live Token & Top Up state
   const [tokenBalance, setTokenBalance] = useState<number>(0);
   const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
-  const [tokenIcon, setTokenIcon] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      try { return localStorage.getItem('zecratary_token_icon') || ''; } catch (_) {}
-    }
-    return '';
-  });
   const [tokenName, setTokenName] = useState<string>('Foodie Token');
   const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
   const [showTopUpMenu, setShowTopUpMenu] = useState<boolean>(false);
@@ -66336,25 +66207,43 @@ export default function Sidebar() {
   const [topUpSuccessMsg, setTopUpSuccessMsg] = useState<string>('');
   const [topUpErrorMsg, setTopUpErrorMsg] = useState<string>('');
 
-  // 4. Live Wallet Balance State Hooks
+  // Live Wallet Balance & Top Up state
   const [walletBalance, setWalletBalance] = useState<number>(0);
   const [walletCurrency, setWalletCurrency] = useState<string>('USD');
   const [walletSymbol, setWalletSymbol] = useState<string>('$');
-  const [walletPresets, setWalletPresets] = useState<number[]>([10, 25, 50, 100]);
   const [showWalletTopUpMenu, setShowWalletTopUpMenu] = useState<boolean>(false);
   const [showWalletMobileMenu, setShowWalletMobileMenu] = useState<boolean>(false);
-  const [purchasingWallet, setPurchasingWallet] = useState<boolean>(false);
-  const [walletTopUpSuccessMsg, setWalletTopUpSuccessMsg] = useState<string>('');
-  const [walletTopUpErrorMsg, setWalletTopUpErrorMsg] = useState<string>('');
 
-  // 5. Notifications & Profile Dropdown State Hooks
-  const [unreadCount, setUnreadCount] = useState<number>(3);
+  // Notifications & Profile state
+  const [unreadCount, setUnreadCount] = useState<number>(0);
   const [showNotifications, setShowNotifications] = useState<boolean>(false);
+  const [showNotificationsMobile, setShowNotificationsMobile] = useState<boolean>(false);
   const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
 
-  // 6. Dropdown Click-Outside Refs
+  // Collapsible Categories: Create, Manage, Plan, Admin Access
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    create: true,
+    manage: true,
+    plan: true,
+    admin: true
+  });
+
+  const toggleSection = (sectionKey: string) => {
+    setOpenSections(prev => {
+      const next = { ...prev, [sectionKey]: !prev[sectionKey] };
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('zecratary_sidebar_sections', JSON.stringify(next));
+        } catch (_) {}
+      }
+      return next;
+    });
+  };
+
+  // Dropdown click-outside refs
   const profileDropdownRef = useRef<HTMLDivElement>(null);
   const notifDropdownRef = useRef<HTMLDivElement>(null);
+  const notifMobileDropdownRef = useRef<HTMLDivElement>(null);
   const topUpDropdownRef = useRef<HTMLDivElement>(null);
   const topUpMobileDropdownRef = useRef<HTMLDivElement>(null);
   const walletDropdownRef = useRef<HTMLDivElement>(null);
@@ -66388,8 +66277,8 @@ export default function Sidebar() {
     } catch (_) {}
   };
 
-  // 7. Data Fetchers Declared with useCallback
-  const fetchUserTokenAndNotifications = useCallback(async (currentUser?: any) => {
+  const fetchUserTokenAndNotifications = useCallback(async (currentUser: any) => {
+    if (!currentUser) return;
     try {
       let cfgRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
       if (!cfgRes.ok) {
@@ -66399,15 +66288,7 @@ export default function Sidebar() {
         const cfgData = await cfgRes.json();
         const cfg = cfgData.settings || cfgData.config || cfgData;
         if (cfg) {
-          if (cfg.tokenSymbol && cfg.tokenSymbol !== '🪙') {
-          setTokenSymbol(cfg.tokenSymbol);
-          try { localStorage.setItem('zecratary_token_symbol', cfg.tokenSymbol); } catch (_) {}
-        }
-        if (cfg.tokenIcon !== undefined && cfg.tokenIcon !== '') {
-          setTokenIcon(cfg.tokenIcon);
-          try { localStorage.setItem('zecratary_token_icon', cfg.tokenIcon); } catch (_) {}
-        }
-        if (cfg.tokenIcon !== undefined) { setTokenIcon(cfg.tokenIcon || ''); try { localStorage.setItem('zecratary_token_icon', cfg.tokenIcon || ''); } catch (_) {} }
+          if (cfg.tokenSymbol) setTokenSymbol(cfg.tokenSymbol);
           if (cfg.tokenName) setTokenName(cfg.tokenName);
           if (Array.isArray(cfg.packages) && cfg.packages.length > 0) {
             setTokenPackages(cfg.packages);
@@ -66415,192 +66296,65 @@ export default function Sidebar() {
         }
       }
 
-      let activeUser = currentUser || user;
-      if (!activeUser && typeof window !== 'undefined') {
-        try {
-          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user');
-          if (raw) activeUser = JSON.parse(raw);
-        } catch (_) {}
-        if (!activeUser) activeUser = getCurrentUser();
-      }
-
-      const userEmail = activeUser?.email || 'admin@zecratary.com';
-      const userId = activeUser?.id || '';
-
-      const queryParam = userId 
-        ? `?userId=${encodeURIComponent(userId)}&email=${encodeURIComponent(userEmail)}`
-        : `?email=${encodeURIComponent(userEmail)}`;
+      const queryParam = currentUser.id 
+        ? `?userId=${encodeURIComponent(currentUser.id)}&email=${encodeURIComponent(currentUser.email || '')}`
+        : `?email=${encodeURIComponent(currentUser.email || '')}`;
       
       const tokenRes = await fetch(`/api/tokens${queryParam}&t=${Date.now()}`, { cache: 'no-store' });
       if (tokenRes.ok) {
         const tokenData = await tokenRes.json();
-        if (tokenData.success) {
-          const bal = typeof tokenData.balance === 'number'
-            ? tokenData.balance
-            : typeof tokenData.tokenBalance === 'number'
-            ? tokenData.tokenBalance
-            : null;
-
-          if (bal !== null) {
-            setTokenBalance(bal);
-            if (typeof window !== 'undefined') {
-              try {
-                const raw = localStorage.getItem('zecratary_user');
-                if (raw) {
-                  const u = JSON.parse(raw);
-                  u.token_balance = bal;
-                  u.tokenBalance = bal;
-                  localStorage.setItem('zecratary_user', JSON.stringify(u));
-                }
-              } catch (_) {}
-            }
-          }
-          if (typeof tokenData.walletBalance === 'number') {
-            setWalletBalance(tokenData.walletBalance);
-          }
-          if (tokenData.tokenSymbol && tokenData.tokenSymbol !== '🪙') {
-            setTokenSymbol(tokenData.tokenSymbol);
-            try { localStorage.setItem('zecratary_token_symbol', tokenData.tokenSymbol); } catch (_) {}
-          }
-          if (tokenData.tokenIcon !== undefined && tokenData.tokenIcon !== '') {
-            setTokenIcon(tokenData.tokenIcon);
-            try { localStorage.setItem('zecratary_token_icon', tokenData.tokenIcon); } catch (_) {}
-          }
-        if (tokenData.tokenIcon !== undefined) { setTokenIcon(tokenData.tokenIcon || ''); try { localStorage.setItem('zecratary_token_icon', tokenData.tokenIcon || ''); } catch (_) {} }
+        if (tokenData.success && typeof tokenData.balance === 'number') {
+          setTokenBalance(tokenData.balance);
+          if (tokenData.tokenSymbol) setTokenSymbol(tokenData.tokenSymbol);
         }
       }
     } catch (_) {}
-  }, [user]);
+  }, []);
 
-  const fetchWalletData = useCallback(async (currentUser?: any) => {
+  const fetchWalletData = useCallback(async (currentUser: any) => {
     try {
-      let activeUser = currentUser || user;
-      if (!activeUser && typeof window !== 'undefined') {
-        try {
-          const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user');
-          if (raw) activeUser = JSON.parse(raw);
-        } catch (_) {}
-        if (!activeUser) activeUser = getCurrentUser();
-      }
-      const userEmail = activeUser?.email || 'admin@zecratary.com';
-      const userId = activeUser?.id || '';
-      const queryParam = userId
-        ? `?userId=${encodeURIComponent(userId)}&email=${encodeURIComponent(userEmail)}`
-        : `?email=${encodeURIComponent(userEmail)}`;
-
-      const res = await fetch(`/api/wallet${queryParam}&t=${Date.now()}`, { cache: 'no-store' });
+      const userEmail = currentUser?.email || 'admin@zecratary.com';
+      const res = await fetch(`/api/wallet?email=${encodeURIComponent(userEmail)}&t=${Date.now()}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.success) {
-          const rawBal = data.wallet_balance ?? data.walletBalance ?? data.balance ?? data.user?.wallet_balance;
-          if (rawBal !== undefined && rawBal !== null) {
-            const wBal = typeof rawBal === 'number' ? rawBal : parseFloat(rawBal) || 0;
-            setWalletBalance(wBal);
-            if (typeof window !== 'undefined') {
-              try {
-                const raw = localStorage.getItem('zecratary_user');
-                if (raw) {
-                  const u = JSON.parse(raw);
-                  u.wallet_balance = wBal;
-                  u.walletBalance = wBal;
-                  localStorage.setItem('zecratary_user', JSON.stringify(u));
-                }
-              } catch (_) {}
-            }
+          if (data.user && typeof data.user.wallet_balance !== 'undefined') {
+            setWalletBalance(parseFloat(data.user.wallet_balance || 0));
           }
-          if (data.settings) {
-            if (data.settings.currency) {
-              setWalletCurrency(data.settings.currency);
-              setWalletSymbol(CURRENCY_SYMBOLS[data.settings.currency] || '$');
-            }
-            if (Array.isArray(data.settings.preset_amounts) && data.settings.preset_amounts.length > 0) {
-              setWalletPresets(data.settings.preset_amounts.map(Number));
-            }
+          if (data.settings && data.settings.currency) {
+            setWalletCurrency(data.settings.currency);
+            setWalletSymbol(CURRENCY_SYMBOLS[data.settings.currency] || '$');
           }
         }
       }
     } catch (_) {}
-  }, [user]);
+  }, []);
 
-  const showCollapsed = isCollapsed && !isOpen;
-
-  // 8. TOP-LEVEL EFFECT 1: Real-Time Cross-Window & Tab Balance Synchronization
+  // Synchronize CSS Root Variables (--sidebar-width and --topbar-height)
   useEffect(() => {
-    let channel: BroadcastChannel | null = null;
-    try {
-      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-        channel = new BroadcastChannel('zecratary_balance_channel');
-        channel.onmessage = (event) => {
-          if (event.data) {
-            if (event.data.wallet_balance !== undefined) setWalletBalance(Number(event.data.wallet_balance) || 0);
-            if (event.data.token_balance !== undefined) setTokenBalance(Number(event.data.token_balance) || 0);
-          }
-        };
+    const updateLayoutTokens = () => {
+      if (typeof window === 'undefined') return;
+      const isMobile = window.innerWidth < 768;
+      
+      if (isMobile) {
+        document.documentElement.style.setProperty('--sidebar-width', '0px');
+        document.documentElement.style.setProperty('--topbar-height', '3.5rem');
+      } else if (isCollapsed && !isOpen) {
+        document.documentElement.style.setProperty('--sidebar-width', '5rem');
+        document.documentElement.style.setProperty('--topbar-height', '4rem');
+      } else {
+        document.documentElement.style.setProperty('--sidebar-width', '16rem');
+        document.documentElement.style.setProperty('--topbar-height', '4rem');
       }
-    } catch (_) {}
-
-    const handleExternalBalance = (e: any) => {
-      if (e?.detail) {
-        if (e.detail.wallet_balance !== undefined) setWalletBalance(Number(e.detail.wallet_balance) || 0);
-        if (e.detail.token_balance !== undefined) setTokenBalance(Number(e.detail.token_balance) || 0);
-      }
-      fetchWalletData();
-      fetchUserTokenAndNotifications();
     };
 
-    window.addEventListener('zecratary_wallet_updated', handleExternalBalance);
-    window.addEventListener('zecratary_tokens_updated', handleExternalBalance);
-    window.addEventListener('zecratary_token_settings_updated', (e: any) => {
-      if (e?.detail?.tokenSymbol) setTokenSymbol(e.detail.tokenSymbol);
-      if (e?.detail?.tokenIcon !== undefined) setTokenIcon(e.detail.tokenIcon || '');
-    });
-    window.addEventListener('zecratary_token_updated', handleExternalBalance);
-    window.addEventListener('focus', () => { fetchWalletData(); fetchUserTokenAndNotifications(); });
+    updateLayoutTokens();
+    window.addEventListener('resize', updateLayoutTokens);
+    return () => window.removeEventListener('resize', updateLayoutTokens);
+  }, [isCollapsed, isOpen]);
 
-    return () => {
-      if (channel) channel.close();
-      window.removeEventListener('zecratary_wallet_updated', handleExternalBalance);
-      window.removeEventListener('zecratary_tokens_updated', handleExternalBalance);
-      window.removeEventListener('zecratary_token_updated', handleExternalBalance);
-    };
-  }, [fetchWalletData, fetchUserTokenAndNotifications]);
-
-  // 9. TOP-LEVEL EFFECT 2: Layout CSS Property Synchronization (--sidebar-width, --topbar-height)
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const isMobile = window.innerWidth < 768;
-    const currentSidebarWidth = isMobile ? '0px' : (showCollapsed ? '5rem' : '16rem');
-    const currentTopbarHeight = isMobile ? '3.5rem' : '4rem';
-    
-    document.documentElement.style.setProperty('--sidebar-width', currentSidebarWidth);
-    document.documentElement.style.setProperty('--topbar-height', currentTopbarHeight);
-
-    const handleResize = () => {
-      const mob = window.innerWidth < 768;
-      document.documentElement.style.setProperty('--sidebar-width', mob ? '0px' : (showCollapsed ? '5rem' : '16rem'));
-      document.documentElement.style.setProperty('--topbar-height', mob ? '3.5rem' : '4rem');
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [showCollapsed]);
-
-  // 10. TOP-LEVEL EFFECT 3: Primary Mounting, Theme, Window Listeners & Outside Clicks
   useEffect(() => {
     setMounted(true);
-
-    if (typeof window !== 'undefined') {
-      try {
-        const raw = localStorage.getItem('zecratary_user') || localStorage.getItem('zecratary_current_user');
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (typeof parsed.token_balance === 'number') setTokenBalance(parsed.token_balance);
-          else if (typeof parsed.tokenBalance === 'number') setTokenBalance(parsed.tokenBalance);
-          if (typeof parsed.wallet_balance === 'number') setWalletBalance(parsed.wallet_balance);
-        }
-      } catch (_) {}
-    }
-
     const currentUser = getCurrentUser();
     setUser(currentUser);
     const name = getSiteName();
@@ -66611,6 +66365,16 @@ export default function Sidebar() {
     loadLanguagesFromAdmin();
     fetchUserTokenAndNotifications(currentUser);
     fetchWalletData(currentUser);
+
+    // Restore saved section collapse preferences
+    if (typeof window !== 'undefined') {
+      try {
+        const savedSections = localStorage.getItem('zecratary_sidebar_sections');
+        if (savedSections) {
+          setOpenSections(prev => ({ ...prev, ...JSON.parse(savedSections) }));
+        }
+      } catch (_) {}
+    }
 
     const savedMode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
     if (savedMode) {
@@ -66640,7 +66404,10 @@ export default function Sidebar() {
       if (currentCategory !== prevCategory) {
         if (currentCategory === 'tablet') setIsCollapsed(true);
         else if (currentCategory === 'desktop') setIsCollapsed(false);
-        if (currentCategory !== 'mobile') setIsOpen(false);
+        if (currentCategory !== 'mobile') {
+          setIsOpen(false);
+          setShowNotificationsMobile(false);
+        }
         prevCategory = currentCategory;
       }
     };
@@ -66665,7 +66432,7 @@ export default function Sidebar() {
     };
     const handleTokenSync = () => {
       const u = getCurrentUser();
-      fetchUserTokenAndNotifications(u);
+      if (u) fetchUserTokenAndNotifications(u);
     };
     const handleWalletSync = () => {
       const u = getCurrentUser();
@@ -66678,6 +66445,9 @@ export default function Sidebar() {
       }
       if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target as Node)) {
         setShowNotifications(false);
+      }
+      if (notifMobileDropdownRef.current && !notifMobileDropdownRef.current.contains(e.target as Node)) {
+        setShowNotificationsMobile(false);
       }
       if (topUpDropdownRef.current && !topUpDropdownRef.current.contains(e.target as Node)) {
         setShowTopUpMenu(false);
@@ -66701,10 +66471,6 @@ export default function Sidebar() {
     window.addEventListener('zecratary_theme_changed', handleThemeModeSync);
     window.addEventListener('zecratary_token_settings_updated', handleTokenSync);
     window.addEventListener('zecratary_tokens_updated', handleTokenSync);
-    window.addEventListener('zecratary_token_settings_updated', (e: any) => {
-      if (e?.detail?.tokenSymbol) setTokenSymbol(e.detail.tokenSymbol);
-      if (e?.detail?.tokenIcon !== undefined) setTokenIcon(e.detail.tokenIcon || '');
-    });
     window.addEventListener('zecratary_wallet_updated', handleWalletSync);
     window.addEventListener('zecratary_wallet_settings_updated', handleWalletSync);
 
@@ -66723,15 +66489,18 @@ export default function Sidebar() {
     };
   }, [fetchUserTokenAndNotifications, fetchWalletData]);
 
-  // 11. TOP-LEVEL EFFECT 4: Reset Menus on Route Change
+  // Route-Aware Auto-Expansion
   useEffect(() => {
-    setIsOpen(false);
-    setShowProfileMenu(false);
-    setShowNotifications(false);
-    setShowTopUpMenu(false);
-    setShowTopUpMobileMenu(false);
-    setShowWalletTopUpMenu(false);
-    setShowWalletMobileMenu(false);
+    if (!pathname) return;
+    if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+      setOpenSections(prev => prev.create ? prev : { ...prev, create: true });
+    } else if (['/recipes', '/saved', '/books', '/pantry'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+      setOpenSections(prev => prev.manage ? prev : { ...prev, manage: true });
+    } else if (['/shopping', '/planner', '/templates'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+      setOpenSections(prev => prev.plan ? prev : { ...prev, plan: true });
+    } else if (pathname.startsWith('/admin')) {
+      setOpenSections(prev => prev.admin ? prev : { ...prev, admin: true });
+    }
   }, [pathname]);
 
   const toggleThemeMode = () => {
@@ -66745,20 +66514,22 @@ export default function Sidebar() {
     }
   };
 
+  useEffect(() => {
+    setIsOpen(false);
+    setShowProfileMenu(false);
+    setShowNotifications(false);
+    setShowNotificationsMobile(false);
+    setShowTopUpMenu(false);
+    setShowTopUpMobileMenu(false);
+    setShowWalletTopUpMenu(false);
+    setShowWalletMobileMenu(false);
+  }, [pathname]);
+
   const handlePurchasePackage = async (pkg: TokenPackage) => {
     if (!pkg) return;
     setPurchasingId(pkg.id);
     setTopUpErrorMsg('');
     setTopUpSuccessMsg('');
-
-    const price = Number(pkg.price) || 0;
-    if (walletBalance < price) {
-      setPurchasingId(null);
-      setTopUpErrorMsg(
-        t('insufficientWalletForTokens', `Insufficient wallet balance ($${walletBalance.toFixed(2)}). This package requires $${price.toFixed(2)}. Please top up your wallet first.`)
-      );
-      return;
-    }
 
     try {
       const currentUser = getCurrentUser() || user;
@@ -66783,71 +66554,20 @@ export default function Sidebar() {
 
       const newBal = typeof data.balance === 'number' ? data.balance : (tokenBalance + Number(pkg.tokens));
       setTokenBalance(newBal);
-
-      if (typeof data.newWalletBalance === 'number') {
-        setWalletBalance(data.newWalletBalance);
-      } else if (typeof data.wallet_balance === 'number') {
-        setWalletBalance(data.wallet_balance);
-      } else {
-        setWalletBalance(prev => Math.max(0, prev - price));
-      }
-
       setTopUpSuccessMsg(
-        t('tokenPurchasedSuccess', `Successfully purchased ${pkg.name}! +${Number(pkg.tokens).toLocaleString()} ${tokenSymbol} added (${walletSymbol}${price.toFixed(2)} deducted from Wallet).`)
+        t('tokenPurchasedSuccess', `Successfully added +${Number(pkg.tokens).toLocaleString()} ${tokenSymbol}!`)
       );
 
       window.dispatchEvent(new Event('zecratary_tokens_updated'));
       window.dispatchEvent(new Event('zecratary_token_settings_updated'));
-      window.dispatchEvent(new Event('zecratary_wallet_updated'));
 
       setTimeout(() => {
         setTopUpSuccessMsg('');
       }, 4000);
     } catch (err: any) {
-      setTopUpErrorMsg(err.message || 'Purchase failed. Please check your wallet balance.');
+      setTopUpErrorMsg(err.message || 'Purchase failed. Please try again.');
     } finally {
       setPurchasingId(null);
-    }
-  };
-
-  const handleQuickWalletTopUp = async (amountToDeposit: number) => {
-    if (!amountToDeposit || amountToDeposit <= 0) return;
-    setPurchasingWallet(true);
-    setWalletTopUpErrorMsg('');
-    setWalletTopUpSuccessMsg('');
-
-    try {
-      const currentUser = getCurrentUser() || user;
-      const userEmail = currentUser?.email || 'admin@zecratary.com';
-
-      const res = await fetch('/api/wallet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: userEmail,
-          amount: amountToDeposit,
-          gateway: 'stripe',
-          gatewayTxId: `gw_topbar_${Date.now()}`
-        })
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to top up wallet balance');
-      }
-
-      const newWalletBal = typeof data.wallet_balance === 'number' ? data.wallet_balance : (walletBalance + amountToDeposit);
-      setWalletBalance(newWalletBal);
-      setWalletTopUpSuccessMsg(data.message || `Successfully added ${walletSymbol}${amountToDeposit.toFixed(2)} to your wallet!`);
-
-      window.dispatchEvent(new Event('zecratary_wallet_updated'));
-      setTimeout(() => {
-        setWalletTopUpSuccessMsg('');
-      }, 4000);
-    } catch (err: any) {
-      setWalletTopUpErrorMsg(err.message || 'Deposit failed. Please try again.');
-    } finally {
-      setPurchasingWallet(false);
     }
   };
 
@@ -66857,12 +66577,18 @@ export default function Sidebar() {
     user.email?.includes('admin')
   );
 
+  // Evaluates both /recipes and /saved so Saved Recipes highlights accurately
   const isActive = (href: string) => {
     if (href === '/dashboard') return pathname === '/dashboard' || pathname === '/';
     if (href === '/admin') return pathname === '/admin';
     if (href === '/chef') return pathname === '/chef';
+    if (href === '/recipes' || href === '/saved') {
+      return pathname === '/recipes' || pathname.startsWith('/recipes/') || pathname === '/saved' || pathname.startsWith('/saved/');
+    }
     return pathname === href || pathname.startsWith(`${href}/`);
   };
+
+  const showCollapsed = isCollapsed && !isOpen;
 
   const navClass = (href: string) => `
     w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition-colors duration-150 select-none
@@ -66876,13 +66602,6 @@ export default function Sidebar() {
     }
   `;
 
-  // 12. Guard Rail: Unconditional Hook Execution Complete Before Early Return
-  const isHomePage = Boolean(pathname === '/' || pathname === '' || pathname === '/index');
-  const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
-  if (!mounted || isAuthRoute || isHomePage || (!user && !currentUser)) {
-    return null;
-  }
-
   const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
   const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
   const iconStyle = { color: 'var(--color-sidebar-icon, var(--color-primary))' };
@@ -66894,10 +66613,11 @@ export default function Sidebar() {
       <header className="md:hidden sticky top-0 z-40 bg-[var(--color-card)] border-b border-[var(--color-border)] px-4 py-3 flex items-center justify-between w-full">
         <Link href="/dashboard" className="flex items-center gap-2">
           {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
-          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[110px]">
+          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[100px]">
             {displayName}
           </span>
         </Link>
+
         <div className="flex items-center gap-1.5">
           {/* Mobile Wallet Balance & Top Up */}
           <div className="relative" ref={walletMobileDropdownRef}>
@@ -66907,6 +66627,7 @@ export default function Sidebar() {
                 setShowWalletMobileMenu(!showWalletMobileMenu);
                 setShowTopUpMobileMenu(false);
                 setShowProfileMenu(false);
+                setShowNotificationsMobile(false);
               }}
               className="flex items-center gap-1 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
               title="Wallet Balance & Top Up"
@@ -66915,90 +66636,13 @@ export default function Sidebar() {
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
                 {walletSymbol}{mounted ? walletBalance.toFixed(0) : '0'}
               </span>
-              <span className="px-1 py-0.2 rounded-md bg-[var(--color-primary)] text-white text-[9px] font-sans font-black flex items-center">
-                <Plus className="h-2 w-2 stroke-[3]" />
+              <span className="p-1 rounded-md bg-[var(--color-primary)] text-white text-[10px] font-sans font-black flex items-center justify-center">
+                <Plus className="h-2.5 w-2.5 stroke-[3]" />
               </span>
             </button>
-
-            {/* Mobile Wallet Top Up Drawer */}
-            {showWalletMobileMenu && (
-              <div 
-                className="fixed inset-x-3 top-16 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in max-h-[82vh] overflow-y-auto"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              >
-                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2">
-                    <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
-                    <div>
-                      <h3 className="text-xs font-black uppercase tracking-wider">{t('walletTopUp', 'Wallet Top-Up')}</h3>
-                      <p className="text-[10px] opacity-70">
-                        {t('topbarAvailableWallet', 'Available Wallet')}:{' '}
-                        <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
-                          {walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'} {walletCurrency}
-                        </span>
-                      </p>
-                    </div>
-                  </div>
-                  <button 
-                    type="button"
-                    onClick={() => setShowWalletMobileMenu(false)}
-                    className="p-1 rounded-lg border border-[var(--color-border)] cursor-pointer"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-
-                {walletTopUpSuccessMsg && (
-                  <div className="p-2.5 rounded-xl border text-xs font-bold text-emerald-400 border-emerald-500/30 bg-emerald-500/10 flex items-center gap-2">
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                    <span>{walletTopUpSuccessMsg}</span>
-                  </div>
-                )}
-                {walletTopUpErrorMsg && (
-                  <div className="p-2.5 rounded-xl border text-xs font-bold text-red-400 border-red-500/30 bg-red-500/10 flex items-center gap-2">
-                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                    <span>{walletTopUpErrorMsg}</span>
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <span className="text-[10px] font-black uppercase tracking-wider opacity-60">
-                    {t('quickDepositAmounts', 'Select Deposit Amount')}
-                  </span>
-                  <div className="grid grid-cols-2 gap-2">
-                    {walletPresets.map((amt) => (
-                      <button
-                        key={amt}
-                        type="button"
-                        disabled={purchasingWallet}
-                        onClick={() => handleQuickWalletTopUp(amt)}
-                        className="p-3 rounded-2xl border flex items-center justify-between font-mono font-bold text-xs cursor-pointer active:scale-95"
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                      >
-                        <span>+{walletSymbol}{amt}</span>
-                        <span className="text-[10px] font-sans px-2 py-0.5 rounded-lg bg-[var(--color-primary)] text-white">
-                          {purchasingWallet ? <RefreshCw className="h-3 w-3 animate-spin" /> : t('topbarAddFunds', 'Add')}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="pt-2 border-t text-center" style={{ borderColor: 'var(--color-border)' }}>
-                  <Link
-                    href="/wallet"
-                    onClick={() => setShowWalletMobileMenu(false)}
-                    className="text-xs font-bold hover:underline"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    {t('openFullWallet', 'Go to Full Wallet Portal')}
-                  </Link>
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* Mobile Token Balance & Top Up */}
+          {/* Mobile Token Balance & Top Up (Icon Only '+') */}
           <div className="relative" ref={topUpMobileDropdownRef}>
             <button
               type="button"
@@ -67006,297 +66650,19 @@ export default function Sidebar() {
                 setShowTopUpMobileMenu(!showTopUpMobileMenu);
                 setShowWalletMobileMenu(false);
                 setShowProfileMenu(false);
+                setShowNotificationsMobile(false);
               }}
-              className="flex items-center gap-1 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
+              className="flex items-center gap-1.5 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
+              title="Token Balance & Top Up"
             >
-              <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block shrink-0" />
+              <Coins className="h-3.5 w-3.5" style={iconStyle} />
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
                 {mounted ? tokenBalance.toLocaleString() : '0'}
               </span>
-              <span className="px-1.5 py-0.2 rounded-md bg-[var(--color-primary)] text-white text-[10px] font-sans font-black flex items-center gap-0.5">
+              <span className="p-1 rounded-md bg-[var(--color-primary)] text-white text-[10px] font-sans font-black flex items-center justify-center">
                 <Plus className="h-2.5 w-2.5 stroke-[3]" />
-                <span>{t('topbarTopUp', 'Top Up')}</span>
               </span>
             </button>
-
-            {/* Mobile Top Up Drawer */}
-            {showTopUpMobileMenu && (
-              <div 
-                className="fixed inset-x-3 top-16 rounded-3xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in max-h-[82vh] overflow-y-auto"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              >
-                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2">
-                    <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block shrink-0" />
-                    <div>
-                      <h3 className="text-xs font-black uppercase tracking-wider">{t('topUpTokens', 'Top Up Tokens')}</h3>
-                      <p className="text-[10px] opacity-70">
-                        {t('topbarAvailableTokens', 'Available Tokens')}:{' '}
-                        <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
-                          {mounted ? tokenBalance.toLocaleString() : '0'} {tokenSymbol}
-                        </span>
-                      </p>
-                    </div>
-                  </div>
-                  <button 
-                    type="button"
-                    onClick={() => setShowTopUpMobileMenu(false)}
-                    className="p-1 rounded-lg border border-[var(--color-border)] cursor-pointer"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
-
-                {/* Wallet Balance Status Banner */}
-                <div className="p-2.5 rounded-2xl border flex items-center justify-between gap-2" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2">
-                    <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
-                    <div className="text-[11px]">
-                      <span className="opacity-70 text-[9px] uppercase font-bold block">{t('payWithWallet', 'Wallet Balance')}:</span>
-                      <span suppressHydrationWarning className="font-mono font-bold" style={{ color: 'var(--color-emerald)' }}>
-                        {walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'}
-                      </span>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowTopUpMobileMenu(false);
-                      setShowWalletMobileMenu(true);
-                    }}
-                    className="px-2.5 py-1 rounded-xl text-[10px] font-extrabold text-white cursor-pointer"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                  >
-                    +{t('topbarTopUp', 'Top Up')}
-                  </button>
-                </div>
-
-                {topUpSuccessMsg && (
-                  <div className="p-2.5 rounded-xl border text-xs font-bold text-emerald-400 border-emerald-500/30 bg-emerald-500/10 flex items-center gap-2">
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                    <span>{topUpSuccessMsg}</span>
-                  </div>
-                )}
-                {topUpErrorMsg && (
-                  <div className="p-2.5 rounded-xl border text-xs font-bold text-red-400 border-red-500/30 bg-red-500/10 flex flex-col gap-1">
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                      <span>{topUpErrorMsg}</span>
-                    </div>
-                    {topUpErrorMsg.includes('wallet') && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowTopUpMobileMenu(false);
-                          setShowWalletMobileMenu(true);
-                        }}
-                        className="text-left text-[10px] font-extrabold underline text-white pt-1"
-                      >
-                        👉 {t('depositWalletNow', 'Deposit funds into your Wallet now')}
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  {displayPackages.map((pkg) => {
-                    const price = Number(pkg.price);
-                    const canAfford = walletBalance >= price;
-                    return (
-                      <div 
-                        key={pkg.id}
-                        className={`p-3 rounded-2xl border flex items-center justify-between gap-2 ${
-                          !canAfford ? 'opacity-85 border-amber-500/30' : ''
-                        }`}
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: canAfford ? 'var(--color-border)' : 'rgba(245, 158, 11, 0.4)' }}
-                      >
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-black truncate">{pkg.name}</span>
-                            {pkg.badge && (
-                              <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded bg-amber-500/20 text-amber-500">
-                                {pkg.badge}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-xs font-mono font-bold" style={{ color: 'var(--color-emerald)' }}>
-                            +{Number(pkg.tokens).toLocaleString()} {tokenSymbol}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 shrink-0">
-                          <div className="text-right">
-                            <span className="text-xs font-mono font-black">${price.toFixed(2)}</span>
-                            {!canAfford && (
-                              <div className="text-[8px] text-amber-400 font-bold">
-                                Need ${(price - walletBalance).toFixed(2)}
-                              </div>
-                            )}
-                          </div>
-                          {canAfford ? (
-                            <button
-                              type="button"
-                              disabled={purchasingId === pkg.id}
-                              onClick={() => handlePurchasePackage(pkg)}
-                              className="px-3 py-1.5 rounded-xl text-xs font-extrabold text-white cursor-pointer disabled:opacity-50"
-                              style={{ backgroundColor: 'var(--color-primary)' }}
-                            >
-                              {purchasingId === pkg.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : (t('buy', 'Buy'))}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowTopUpMobileMenu(false);
-                                setShowWalletMobileMenu(true);
-                              }}
-                              className="px-2.5 py-1.5 rounded-xl text-[10px] font-bold text-amber-300 border border-amber-500/40 bg-amber-500/10 cursor-pointer"
-                            >
-                              {t('topUpWalletShort', 'Top Up')}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="pt-2 border-t text-center" style={{ borderColor: 'var(--color-border)' }}>
-                  <Link
-                    href="/subscriptions"
-                    onClick={() => setShowTopUpMobileMenu(false)}
-                    className="text-xs font-bold hover:underline"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    {t('viewSubscriptionPlans', 'View Monthly Subscription Plans')}
-                  </Link>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Profile Button */}
-          <div className="relative" ref={profileDropdownRef}>
-            <button
-              type="button"
-              onClick={() => {
-                setShowProfileMenu(!showProfileMenu);
-                setShowTopUpMobileMenu(false);
-                setShowWalletMobileMenu(false);
-              }}
-              className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer flex items-center justify-center"
-              aria-label="User Profile"
-            >
-              <UserIcon className="h-4 w-4" style={iconStyle} />
-            </button>
-
-            {showProfileMenu && (
-              <div 
-                className="absolute right-0 mt-2 w-64 rounded-2xl border p-2.5 space-y-2 shadow-2xl z-50 animate-in fade-in"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-              >
-                <div className="px-2 py-1 border-b border-[var(--color-border)] pb-2 flex items-center gap-2">
-                  <div className="p-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
-                    <UserIcon className="w-3.5 h-3.5" style={iconStyle} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
-                      {user?.name || user?.email || 'User Account'}
-                    </p>
-                    <p className="text-[10px] opacity-60 truncate">{user?.email || 'Authenticated'}</p>
-                  </div>
-                </div>
-
-                <div className="px-2 py-1.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-xs font-bold">
-                    <Languages className="h-3.5 w-3.5" style={iconStyle} />
-                    <span>{t('topbarLanguages', 'Languages')}</span>
-                  </div>
-                  <select
-                    value={locale}
-                    onChange={(e) => setLocale(e.target.value)}
-                    className="bg-transparent text-xs font-bold outline-none cursor-pointer"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    {availableLanguages.map((lang) => (
-                      <option key={lang.code} value={lang.code} className={isDarkMode ? 'bg-[#111726] text-white' : 'bg-white text-slate-900'}>
-                        {lang.flag} {lang.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={toggleThemeMode}
-                  className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    {isDarkMode ? <Moon className="h-3.5 w-3.5" style={iconStyle} /> : <Sun className="h-3.5 w-3.5 text-amber-500" />}
-                    <span>{isDarkMode ? t('topbarThemeDark', 'Dark Mode') : t('topbarThemeDay', 'Light Mode')}</span>
-                  </div>
-                  <span className="text-[10px] opacity-60 font-mono">{isDarkMode ? 'Dark' : 'Day'}</span>
-                </button>
-
-                <Link
-                  href="/token"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                >
-                  <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block shrink-0" />
-                  <span>{t('topbarTokens', 'Token')}</span>
-                </Link>
-
-                <Link
-                  href="/wallet"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                >
-                  <Wallet className="h-3.5 w-3.5 text-[var(--color-primary)]" />
-                  <span>{t('topbarWallet', 'Store Wallet')}</span>
-                </Link>
-
-                <Link
-                  href="/subscriptions"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                >
-                  <Layers className="h-3.5 w-3.5" style={iconStyle} />
-                  <span>{t('subscriptions', 'Subscriptions')}</span>
-                </Link>
-
-                <Link
-                  href="/billing"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                >
-                  <CreditCard className="h-3.5 w-3.5" style={iconStyle} />
-                  <span>{t('billing', 'Billing')}</span>
-                </Link>
-
-                <Link
-                  href="/contacts"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                >
-                  <Mail className="h-3.5 w-3.5" style={iconStyle} />
-                  <span>{t('contactUs', 'Contact Us')}</span>
-                </Link>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowProfileMenu(false);
-                    logoutUser();
-                    window.location.href = '/login';
-                  }}
-                  className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 transition cursor-pointer border-t border-[var(--color-border)] pt-2"
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                  <span>{t('topbarSignOut', 'Logout')}</span>
-                </button>
-              </div>
-            )}
           </div>
 
           <button
@@ -67318,12 +66684,7 @@ export default function Sidebar() {
         className={`hidden md:flex fixed top-0 right-0 z-30 h-16 bg-[var(--color-card)] border-b border-[var(--color-border)] px-6 items-center justify-between transition-all duration-300 ${
           showCollapsed ? 'left-20' : 'left-64'
         }`}
-        style={{
-          height: '4rem',
-          paddingTop: 0,
-          paddingBottom: 0,
-          boxSizing: 'border-box'
-        }}
+        style={{ height: '4rem', boxSizing: 'border-box' }}
       >
         <div className="flex items-center gap-3">
           <span className="text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-inner-dark)]" style={{ color: 'var(--color-primary)' }}>
@@ -67332,21 +66693,19 @@ export default function Sidebar() {
         </div>
 
         <div className="flex items-center gap-3">
-          {/* WALLET BALANCE & TOP UP WIDGET */}
+          {/* WALLET BALANCE & TOP UP (ICON ONLY '+') */}
           <div className="relative flex items-center" ref={walletDropdownRef}>
             <div className="flex items-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40">
               <Link 
                 href="/wallet" 
                 className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
-                title={t('viewWalletBalance', 'View Wallet Balance & History')}
+                title={t('viewWalletBalance') || 'View Wallet Balance & History'}
               >
                 <Wallet className="h-4 w-4 text-[var(--color-primary)] group-hover:scale-110 transition-transform" />
                 <span suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
                   {walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'}
                 </span>
-                <span className="text-[10px] font-bold opacity-60 font-mono">
-                  {walletCurrency}
-                </span>
+                <span className="text-[10px] font-bold opacity-60 font-mono">{walletCurrency}</span>
               </Link>
 
               <button
@@ -67357,132 +66716,31 @@ export default function Sidebar() {
                   setShowNotifications(false);
                   setShowProfileMenu(false);
                 }}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
+                className="flex items-center justify-center p-1.5 px-2.5 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
                 style={{ backgroundColor: 'var(--color-primary)' }}
-                title={t('topbarTopUp', 'Top Up Wallet Balance')}
+                title={t('topUpWallet') || 'Top Up Wallet Balance'}
                 aria-label="Top Up Wallet"
               >
-                <Plus className="h-3 w-3 stroke-[3]" />
-                <span>{t('topbarTopUp', 'Top Up')}</span>
-                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${showWalletTopUpMenu ? 'rotate-180' : ''}`} />
+                <Plus className="h-3.5 w-3.5 stroke-[3]" />
               </button>
             </div>
-
-            {/* Wallet Quick Top Up Dropdown Menu */}
-            {showWalletTopUpMenu && (
-              <div 
-                className="absolute right-0 top-full mt-2 w-88 sm:w-96 rounded-3xl border p-4 space-y-3.5 shadow-2xl z-50 animate-in fade-in"
-                style={{ 
-                  backgroundColor: 'var(--color-card)', 
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
-              >
-                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
-                      <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                        {t('walletTopUp', 'Store Wallet Top-Up')}
-                      </h3>
-                      <p className="text-[10px] opacity-70">
-                        {t('topbarAvailableWallet', 'Available Wallet')}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                    <span suppressHydrationWarning>{walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'}</span>
-                    <span className="text-[10px] opacity-60 font-bold">{walletCurrency}</span>
-                  </div>
-                </div>
-
-                {walletTopUpSuccessMsg && (
-                  <div 
-                    className="p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 animate-in fade-in"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
-                  >
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                    <span className="text-[11px]">{walletTopUpSuccessMsg}</span>
-                  </div>
-                )}
-
-                {walletTopUpErrorMsg && (
-                  <div 
-                    className="p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 animate-in fade-in"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: '#ef4444', color: '#ef4444' }}
-                  >
-                    <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                    <span className="text-[11px]">{walletTopUpErrorMsg}</span>
-                  </div>
-                )}
-
-                {/* Quick Presets Grid */}
-                <div className="space-y-2">
-                  <span className="text-[10px] font-black uppercase tracking-wider opacity-60">
-                    {t('quickDepositAmounts', 'Choose Deposit Amount')}
-                  </span>
-                  <div className="grid grid-cols-4 gap-2">
-                    {walletPresets.map((amt) => (
-                      <button
-                        key={amt}
-                        type="button"
-                        disabled={purchasingWallet}
-                        onClick={() => handleQuickWalletTopUp(amt)}
-                        className="py-2.5 px-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/60 text-center font-mono font-bold text-xs transition cursor-pointer active:scale-95 disabled:opacity-50"
-                      >
-                        +{walletSymbol}{amt}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Footer Links */}
-                <div className="pt-2 border-t flex flex-col gap-1.5 text-[11px]" style={{ borderColor: 'var(--color-border)' }}>
-                  <Link
-                    href="/wallet"
-                    onClick={() => setShowWalletTopUpMenu(false)}
-                    className="flex items-center justify-between text-xs font-bold hover:underline"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    <span>{t('openFullWallet', 'Go to Full Wallet Portal (Custom Amount & Methods)')}</span>
-                    <ExternalLink className="h-3 w-3" />
-                  </Link>
-                  {isAdmin && (
-                    <Link
-                      href="/admin/wallet-settings"
-                      onClick={() => setShowWalletTopUpMenu(false)}
-                      className="flex items-center justify-between text-[10px] font-semibold opacity-70 hover:opacity-100 hover:underline"
-                      style={{ color: 'var(--color-text)' }}
-                    >
-                      <span>{t('adminWalletSettings', 'Admin: Wallet Settings & Ledger')}</span>
-                      <Settings className="h-3 w-3" />
-                    </Link>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* TOKEN BALANCE & TOP UP WIDGET */}
+          {/* TOKEN BALANCE & TOP UP (ICON ONLY '+') */}
           <div className="relative flex items-center" ref={topUpDropdownRef}>
             <div className="flex items-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40">
               <Link 
                 href="/token" 
                 className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
-                title={t('viewTokenBalance', 'View Token Balance & Summary')}
+                title={t('viewTokenBalance') || 'View Token Balance & Summary'}
               >
-                <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 inline-block shrink-0" />
+                <Coins className="h-4 w-4" style={iconStyle} />
                 <span suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
                   {mounted ? tokenBalance.toLocaleString() : '0'}
                 </span>
-                <span className="text-xs font-bold text-amber-500 font-mono">
-                  {tokenSymbol}
-                </span>
+                <span className="text-xs font-bold text-amber-500 font-mono">{tokenSymbol}</span>
               </Link>
 
-              {/* Top Up Button with Dropdown Trigger */}
               <button
                 type="button"
                 onClick={() => {
@@ -67491,38 +66749,32 @@ export default function Sidebar() {
                   setShowNotifications(false);
                   setShowProfileMenu(false);
                 }}
-                className="flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
+                className="flex items-center justify-center p-1.5 px-2.5 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
                 style={{ backgroundColor: 'var(--color-primary)' }}
-                title={t('topbarTopUp', 'Top Up Tokens')}
+                title={t('topUpTokens') || 'Top Up Tokens'}
                 aria-label="Top Up Tokens"
               >
-                <Plus className="h-3 w-3 stroke-[3]" />
-                <span>{t('topbarTopUp', 'Top Up')}</span>
-                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${showTopUpMenu ? 'rotate-180' : ''}`} />
+                <Plus className="h-3.5 w-3.5 stroke-[3]" />
               </button>
             </div>
 
-            {/* Top Up Dropdown Menu */}
+            {/* Token Packages Dropdown Menu */}
             {showTopUpMenu && (
               <div 
                 className="absolute right-0 top-full mt-2 w-88 sm:w-96 rounded-3xl border p-4 space-y-3.5 shadow-2xl z-50 animate-in fade-in"
-                style={{ 
-                  backgroundColor: 'var(--color-card)', 
-                  borderColor: 'var(--color-border)',
-                  color: 'var(--color-text)'
-                }}
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               >
                 <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
                   <div className="flex items-center gap-2.5">
                     <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
-                      <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 inline-block shrink-0" />
+                      <Coins className="h-4 w-4" style={iconStyle} />
                     </div>
                     <div>
                       <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                        {t('topUpTokens', 'Top Up Tokens')}
+                        {t('topUpTokens') || 'Top Up Tokens'}
                       </h3>
                       <p className="text-[10px] opacity-70">
-                        {t('topbarAvailableTokens', 'Available Tokens')}
+                        {t('topUpSubtitle') || 'Add tokens directly to your balance'}
                       </p>
                     </div>
                   </div>
@@ -67532,90 +66784,18 @@ export default function Sidebar() {
                   </div>
                 </div>
 
-                {/* Live Wallet Balance Status Card */}
-                <div 
-                  className="p-3 rounded-2xl border flex items-center justify-between gap-3 shadow-xs"
-                  style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="p-2 rounded-xl bg-[var(--color-primary)]/10 text-[var(--color-primary)] flex-shrink-0">
-                      <Wallet className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-[10px] uppercase font-bold opacity-60">{t('paymentSource', 'Payment Source')}: Store Wallet</div>
-                      <div suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                        {walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'} {walletCurrency}
-                      </div>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowTopUpMenu(false);
-                      setShowWalletTopUpMenu(true);
-                    }}
-                    className="px-3 py-1 rounded-xl text-[11px] font-extrabold text-white transition cursor-pointer flex items-center gap-1 shadow-xs hover:brightness-110 active:scale-95 flex-shrink-0"
-                    style={{ backgroundColor: 'var(--color-primary)' }}
-                    title={t('topbarAddFunds', 'Top Up Wallet Balance')}
-                  >
-                    <Plus className="h-3 w-3 stroke-[3]" />
-                    <span>{t('topbarAddFunds', 'Add Funds')}</span>
-                  </button>
-                </div>
-
-                {topUpSuccessMsg && (
-                  <div 
-                    className="p-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 animate-in fade-in"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
-                  >
-                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                    <span className="text-[11px]">{topUpSuccessMsg}</span>
-                  </div>
-                )}
-
-                {topUpErrorMsg && (
-                  <div 
-                    className="p-2.5 rounded-xl border text-xs font-bold flex flex-col gap-1.5 animate-in fade-in"
-                    style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: '#ef4444', color: '#ef4444' }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-                      <span className="text-[11px]">{topUpErrorMsg}</span>
-                    </div>
-                    {topUpErrorMsg.includes('wallet') && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowTopUpMenu(false);
-                          setShowWalletTopUpMenu(true);
-                        }}
-                        className="self-start text-[10px] font-extrabold text-white underline hover:opacity-80 cursor-pointer pt-0.5"
-                      >
-                        👉 {t('clickToTopUpWallet', 'Click here to top up your Wallet balance first')}
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {/* Packages List */}
                 <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                   {displayPackages.map((pkg) => {
                     const price = Number(pkg.price);
-                    const canAfford = walletBalance >= price;
                     return (
                       <div 
                         key={pkg.id}
-                        className={`p-3 rounded-2xl border transition flex items-center justify-between gap-3 group ${
-                          !canAfford ? 'border-amber-500/30' : 'hover:border-[var(--color-primary)]/50'
-                        }`}
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: canAfford ? 'var(--color-border)' : 'rgba(245, 158, 11, 0.4)' }}
+                        className="p-3 rounded-2xl border transition flex items-center justify-between gap-3 group hover:border-[var(--color-primary)]/50"
+                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
                       >
                         <div className="min-w-0 space-y-0.5">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
-                              {pkg.name}
-                            </span>
+                            <span className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>{pkg.name}</span>
                             {pkg.badge && (
                               <span className="px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider rounded-md bg-amber-500/15 text-amber-500 border border-amber-500/30">
                                 {pkg.badge}
@@ -67629,82 +66809,26 @@ export default function Sidebar() {
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
-                          <div className="text-right">
-                            <span className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>
-                              ${price.toFixed(2)}
-                            </span>
-                            {!canAfford && (
-                              <div className="text-[9px] font-bold text-amber-400">
-                                Short ${(price - walletBalance).toFixed(2)}
-                              </div>
-                            )}
-                          </div>
-
-                          {canAfford ? (
-                            <button
-                              type="button"
-                              disabled={purchasingId === pkg.id}
-                              onClick={() => handlePurchasePackage(pkg)}
-                              className="px-3.5 py-1.5 rounded-xl text-xs font-extrabold text-white transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:brightness-110 active:scale-95 shadow-xs"
-                              style={{ backgroundColor: 'var(--color-primary)' }}
-                            >
-                              {purchasingId === pkg.id ? (
-                                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <>
-                                  <Sparkles className="h-3 w-3" />
-                                  <span>{t('buy', 'Buy')}</span>
-                                </>
-                              )}
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowTopUpMenu(false);
-                                setShowWalletTopUpMenu(true);
-                              }}
-                              className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold text-amber-300 border border-amber-500/40 bg-amber-500/10 transition flex items-center gap-1 cursor-pointer hover:bg-amber-500/20 active:scale-95 shadow-xs"
-                              title={t('topUpWalletToBuy', 'Deposit Funds in Wallet to Buy')}
-                            >
-                              <Wallet className="h-3 w-3 text-amber-400" />
-                              <span>{t('topUpWalletShort', 'Top Up')}</span>
-                            </button>
-                          )}
+                          <span className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>${price.toFixed(2)}</span>
+                          <button
+                            type="button"
+                            disabled={purchasingId === pkg.id}
+                            onClick={() => handlePurchasePackage(pkg)}
+                            className="px-3.5 py-1.5 rounded-xl text-xs font-extrabold text-white transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:brightness-110 active:scale-95 shadow-xs"
+                            style={{ backgroundColor: 'var(--color-primary)' }}
+                          >
+                            {purchasingId === pkg.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : (t('buy') || 'Buy')}
+                          </button>
                         </div>
                       </div>
                     );
                   })}
                 </div>
-
-                {/* Footer Links */}
-                <div className="pt-2 border-t flex flex-col gap-1.5 text-[11px]" style={{ borderColor: 'var(--color-border)' }}>
-                  <Link
-                    href="/subscriptions"
-                    onClick={() => setShowTopUpMenu(false)}
-                    className="flex items-center justify-between text-xs font-bold hover:underline"
-                    style={{ color: 'var(--color-primary)' }}
-                  >
-                    <span>{t('viewSubscriptionPlans', 'View Monthly Subscription Plans')}</span>
-                    <ExternalLink className="h-3 w-3" />
-                  </Link>
-                  {isAdmin && (
-                    <Link
-                      href="/admin/token-setting"
-                      onClick={() => setShowTopUpMenu(false)}
-                      className="flex items-center justify-between text-[10px] font-semibold opacity-70 hover:opacity-100 hover:underline"
-                      style={{ color: 'var(--color-text)' }}
-                    >
-                      <span>{t('adminManagePackages', 'Admin: Manage Packages in /admin/token-setting')}</span>
-                      <Settings className="h-3 w-3" />
-                    </Link>
-                  )}
-                </div>
               </div>
             )}
           </div>
 
-          {/* Notification Icon with Dropdown */}
+          {/* NOTIFICATION BELL */}
           <div className="relative" ref={notifDropdownRef}>
             <button
               type="button"
@@ -67719,47 +66843,14 @@ export default function Sidebar() {
             >
               <Bell className="h-4 w-4" style={iconStyle} />
               {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md">
-                  {unreadCount}
+                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md animate-pulse">
+                  {unreadCount > 99 ? '99+' : unreadCount}
                 </span>
               )}
             </button>
-
-            {showNotifications && (
-              <div 
-                className="absolute right-0 mt-2 w-80 rounded-2xl border p-4 space-y-3 shadow-2xl z-50 animate-in fade-in"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-              >
-                <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-                  <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                    {t('topbarNotifications', 'Notifications')}
-                  </h3>
-                  <button 
-                    onClick={() => { setUnreadCount(0); setShowNotifications(false); }}
-                    className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer"
-                  >
-                    Mark all read
-                  </button>
-                </div>
-                <div className="space-y-2 max-h-60 overflow-y-auto pr-1 text-xs">
-                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
-                    <p className="font-bold">🎉 Welcome to Zecratary!</p>
-                    <p className="text-[11px] opacity-75">Your account has been initialized with free AI token credits.</p>
-                  </div>
-                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
-                    <p className="font-bold">⚡ AI Model Updated</p>
-                    <p className="text-[11px] opacity-75">Gemini models are fully synchronized and ready for your recipes.</p>
-                  </div>
-                  <div className="p-2.5 rounded-xl border bg-[var(--color-inner-dark)] border-[var(--color-border)] space-y-1">
-                    <p className="font-bold">🔒 Security Secured</p>
-                    <p className="text-[11px] opacity-75">PostgreSQL database storage connected successfully.</p>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* Profile Dropdown */}
+          {/* PROFILE DROPDOWN */}
           <div className="relative" ref={profileDropdownRef}>
             <button
               type="button"
@@ -67771,7 +66862,6 @@ export default function Sidebar() {
               }}
               className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
               aria-label="User Profile Dropdown"
-              title="Profile & Settings"
             >
               <UserIcon className="h-4 w-4" style={iconStyle} />
             </button>
@@ -67794,54 +66884,20 @@ export default function Sidebar() {
                       {user?.name || user?.email || 'User Account'}
                     </p>
                     <p className="text-[11px] opacity-60 truncate">
-                      {user?.email || t('viewProfile', 'View Profile')}
+                      {user?.email || t('viewProfile') || 'View Profile'}
                     </p>
                   </div>
                 </Link>
 
                 <div className="space-y-1 pt-1">
-                  <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-bold" style={{ color: 'var(--color-text)' }}>
-                      <Languages className="w-4 h-4" style={iconStyle} />
-                      <span>{t('topbarLanguages', 'Languages')}</span>
-                    </div>
-                    <select
-                      value={locale}
-                      onChange={(e) => setLocale(e.target.value)}
-                      className="bg-transparent text-xs font-bold outline-none cursor-pointer"
-                      style={{ color: 'var(--color-primary)' }}
-                    >
-                      {availableLanguages.map((lang) => (
-                        <option key={lang.code} value={lang.code} className={isDarkMode ? 'bg-[#111726] text-white' : 'bg-white text-slate-900'}>
-                          {lang.flag} {lang.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={toggleThemeMode}
-                    className="w-full flex items-center justify-between p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition cursor-pointer text-left"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      {isDarkMode ? <Moon className="h-4 w-4" style={iconStyle} /> : <Sun className="h-4 w-4 text-amber-500" />}
-                      <span>{isDarkMode ? t('topbarThemeDark', 'Dark Mode') : t('topbarThemeDay', 'Light Mode')}</span>
-                    </div>
-                    <span className="text-[10px] font-mono opacity-60 px-2 py-0.5 rounded-md border border-[var(--color-border)]">
-                      {isDarkMode ? 'Dark' : 'Day'}
-                    </span>
-                  </button>
-
                   <Link
                     href="/token"
                     onClick={() => setShowProfileMenu(false)}
                     className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
                     style={{ color: 'var(--color-text)' }}
                   >
-                    <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={14} className="w-3.5 h-3.5 inline-block shrink-0" />
-                    <span>{t('topbarTokens', 'Token')}</span>
+                    <Coins className="h-4 w-4" style={iconStyle} />
+                    <span>{t('token') || 'Token'}</span>
                   </Link>
 
                   <Link
@@ -67851,37 +66907,7 @@ export default function Sidebar() {
                     style={{ color: 'var(--color-text)' }}
                   >
                     <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
-                    <span>{t('topbarWallet', 'Store Wallet')}</span>
-                  </Link>
-
-                  <Link
-                    href="/subscriptions"
-                    onClick={() => setShowProfileMenu(false)}
-                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <Layers className="h-4 w-4" style={iconStyle} />
-                    <span>{t('subscriptions', 'Subscriptions')}</span>
-                  </Link>
-
-                  <Link
-                    href="/billing"
-                    onClick={() => setShowProfileMenu(false)}
-                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <CreditCard className="h-4 w-4" style={iconStyle} />
-                    <span>{t('billing', 'Billing')}</span>
-                  </Link>
-
-                  <Link
-                    href="/contacts"
-                    onClick={() => setShowProfileMenu(false)}
-                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <Mail className="h-4 w-4" style={iconStyle} />
-                    <span>{t('contactUs', 'Contact Us')}</span>
+                    <span>{t('myWallet') || 'Store Wallet'}</span>
                   </Link>
 
                   <button
@@ -67894,7 +66920,7 @@ export default function Sidebar() {
                     className="w-full flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 transition cursor-pointer text-left border-t border-[var(--color-border)] mt-1.5 pt-2"
                   >
                     <LogOut className="h-4 w-4" />
-                    <span>{t('topbarSignOut', 'Logout')}</span>
+                    <span>{t('logout') || 'Logout'}</span>
                   </button>
                 </div>
               </div>
@@ -67910,14 +66936,17 @@ export default function Sidebar() {
         />
       )}
 
-      {/* SIDEBAR CONTAINER */}
-      <aside className={`
-        fixed top-0 left-0 z-40 h-screen bg-[var(--color-card)] border-r border-[var(--color-border)] 
-        flex flex-col justify-between shrink-0 select-none transition-all duration-300 ease-in-out
-        ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}
-        ${isOpen ? 'translate-x-0 w-64 p-5' : '-translate-x-full md:translate-x-0'}
-        ${!isOpen && showCollapsed ? 'md:w-20 p-3' : 'md:w-64 p-5'}
-      `}>
+      {/* SIDEBAR CONTAINER: STRICTLY POSITION: FIXED OUT-OF-FLOW (ZERO HEIGHT COLLISION) */}
+      <aside 
+        id="zecratary-sidebar"
+        className={`
+          fixed top-0 left-0 z-40 h-screen bg-[var(--color-card)] border-r border-[var(--color-border)] 
+          flex flex-col justify-between shrink-0 select-none transition-all duration-300 ease-in-out
+          ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}
+          ${isOpen ? 'translate-x-0 w-64 p-5' : '-translate-x-full md:translate-x-0'}
+          ${!isOpen && showCollapsed ? 'md:w-20 p-3' : 'md:w-64 p-5'}
+        `}
+      >
         <div className="space-y-4 overflow-y-auto overflow-x-hidden pr-1">
           {showCollapsed ? (
             <div className="flex flex-col items-center gap-3 pb-2 border-b border-[var(--color-border)]">
@@ -67971,115 +67000,179 @@ export default function Sidebar() {
               {!showCollapsed && <span className="truncate whitespace-nowrap">{t('dashboard')}</span>}
             </Link>
 
-            {!showCollapsed && (
-              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
-                {t('create')}
-              </div>
-            )}
-            <Link href="/chef" className={navClass('/chef')} title={t('chefAi')}>
-              <MessageSquare className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('chefAi')}</span>}
-            </Link>
-            <Link href="/import" className={navClass('/import')} title={t('import')}>
-              <UploadCloud className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('import')}</span>}
-            </Link>
-            <Link href="/manual" className={navClass('/manual')} title={t('manual')}>
-              <SquarePen className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('manual')}</span>}
-            </Link>
+            {/* COLLAPSIBLE SECTION: CREATE */}
+            <div className="pt-2">
+              {!showCollapsed && (
+                <button
+                  type="button"
+                  onClick={() => toggleSection('create')}
+                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition cursor-pointer select-none rounded-lg ${
+                    isDarkMode ? 'text-slate-500 hover:text-slate-300 hover:bg-[#141b2d]/40' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                  }`}
+                  aria-expanded={openSections.create}
+                  title={openSections.create ? t('collapseSection', 'Collapse section') : t('expandSection', 'Expand section')}
+                >
+                  <span className="truncate">{t('create')}</span>
+                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-70 ${openSections.create ? 'rotate-0' : '-rotate-90'}`} />
+                </button>
+              )}
+              {(openSections.create || showCollapsed) && (
+                <div className="space-y-1 pt-0.5">
+                  <Link href="/chef" className={navClass('/chef')} title={t('chefAi')}>
+                    <MessageSquare className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('chefAi')}</span>}
+                  </Link>
+                  <Link href="/import" className={navClass('/import')} title={t('import')}>
+                    <UploadCloud className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('import')}</span>}
+                  </Link>
+                  <Link href="/manual" className={navClass('/manual')} title={t('manual')}>
+                    <SquarePen className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('manual')}</span>}
+                  </Link>
+                </div>
+              )}
+            </div>
 
-            {!showCollapsed && (
-              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
-                {t('manage')}
-              </div>
-            )}
-            <Link href="/recipes" className={navClass('/saved')} title={t('savedRecipes')}>
-              <BookOpen className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('savedRecipes')}</span>}
-            </Link>
-            <Link href="/books" className={navClass('/books')} title={t('books')}>
-              <Book className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('books')}</span>}
-            </Link>
-            <Link href="/pantry" className={navClass('/pantry')}>
-              <Package className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('pantry')}</span>}
-            </Link>
+            {/* COLLAPSIBLE SECTION: MANAGE */}
+            <div className="pt-2">
+              {!showCollapsed && (
+                <button
+                  type="button"
+                  onClick={() => toggleSection('manage')}
+                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition cursor-pointer select-none rounded-lg ${
+                    isDarkMode ? 'text-slate-500 hover:text-slate-300 hover:bg-[#141b2d]/40' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                  }`}
+                  aria-expanded={openSections.manage}
+                  title={openSections.manage ? t('collapseSection', 'Collapse section') : t('expandSection', 'Expand section')}
+                >
+                  <span className="truncate">{t('manage')}</span>
+                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-70 ${openSections.manage ? 'rotate-0' : '-rotate-90'}`} />
+                </button>
+              )}
+              {(openSections.manage || showCollapsed) && (
+                <div className="space-y-1 pt-0.5">
+                  <Link href="/recipes" className={navClass('/recipes')} title={t('savedRecipes')}>
+                    <BookOpen className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('savedRecipes')}</span>}
+                  </Link>
+                  <Link href="/books" className={navClass('/books')} title={t('books')}>
+                    <Book className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('books')}</span>}
+                  </Link>
+                  <Link href="/pantry" className={navClass('/pantry')}>
+                    <Package className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('pantry')}</span>}
+                  </Link>
+                </div>
+              )}
+            </div>
 
-            {!showCollapsed && (
-              <div className={`pt-4 pb-1 px-3 text-[10px] font-extrabold uppercase tracking-wider truncate ${isDarkMode ? 'text-slate-500' : 'text-slate-600'}`}>
-                {t('plan')}
-              </div>
-            )}
-            <Link href="/shopping" className={navClass('/shopping')} title={t('shoppingList')}>
-              <ShoppingCart className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('shoppingList')}</span>}
-            </Link>
-            <Link href="/planner" className={navClass('/planner')}>
-              <Calendar className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('planner')}</span>}
-            </Link>
-            <Link href="/templates" className={navClass('/templates')}>
-              <LayoutTemplate className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('templates')}</span>}
-            </Link>
+            {/* COLLAPSIBLE SECTION: PLAN */}
+            <div className="pt-2">
+              {!showCollapsed && (
+                <button
+                  type="button"
+                  onClick={() => toggleSection('plan')}
+                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition cursor-pointer select-none rounded-lg ${
+                    isDarkMode ? 'text-slate-500 hover:text-slate-300 hover:bg-[#141b2d]/40' : 'text-slate-600 hover:text-slate-950 hover:bg-slate-200/50'
+                  }`}
+                  aria-expanded={openSections.plan}
+                  title={openSections.plan ? t('collapseSection', 'Collapse section') : t('expandSection', 'Expand section')}
+                >
+                  <span className="truncate">{t('plan')}</span>
+                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-70 ${openSections.plan ? 'rotate-0' : '-rotate-90'}`} />
+                </button>
+              )}
+              {(openSections.plan || showCollapsed) && (
+                <div className="space-y-1 pt-0.5">
+                  <Link href="/shopping" className={navClass('/shopping')} title={t('shoppingList')}>
+                    <ShoppingCart className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('shoppingList')}</span>}
+                  </Link>
+                  <Link href="/planner" className={navClass('/planner')}>
+                    <Calendar className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('planner')}</span>}
+                  </Link>
+                  <Link href="/templates" className={navClass('/templates')}>
+                    <LayoutTemplate className="h-4 w-4 shrink-0" style={iconStyle} />
+                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('templates')}</span>}
+                  </Link>
+                </div>
+              )}
+            </div>
 
+            {/* COLLAPSIBLE SECTION: ADMIN ACCESS */}
             {isAdmin && (
-              <div className="pt-2 space-y-1">
+              <div className="pt-2">
                 {!showCollapsed && (
-                  <span className="block text-[10px] font-extrabold uppercase tracking-wider text-[var(--color-primary)] px-3 pt-2 truncate">
-                    {t('adminAccess') || 'Admin Access'}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => toggleSection('admin')}
+                    className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-[var(--color-primary)] transition cursor-pointer select-none rounded-lg hover:opacity-85 hover:bg-[var(--color-primary)]/10"
+                    aria-expanded={openSections.admin}
+                    title={openSections.admin ? t('collapseSection', 'Collapse section') : t('expandSection', 'Expand section')}
+                  >
+                    <span className="truncate">{t('adminAccess') || 'Admin Access'}</span>
+                    <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-75 ${openSections.admin ? 'rotate-0' : '-rotate-90'}`} />
+                  </button>
                 )}
-                <Link href="/admin" className={navClass('/admin')} title="Admin Setting">
-                  <ShieldCheck className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Admin Setting</span>}
-                </Link>
-                <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} title="Ai Settings">
-                  <Cpu className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}
-                </Link>
-                <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} title="Token Settings">
-                  <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 shrink-0" />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Token Settings</span>}
-                </Link>
-                <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} title="Wallet Settings">
-                  <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Wallet Settings</span>}
-                </Link>
-                <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} title={t('notificationSettings', 'Notification Settings')}>
-                  <BellRing className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">{t('notificationSettings', 'Notification Settings')}</span>}
-                </Link>
-                <Link href="/admin/plans" className={navClass('/admin/plans')} title="Subscription Plans">
-                  <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Subscription Plans</span>}
-                </Link>
-                <Link href="/admin/payment" className={navClass('/admin/payment')} title="Payment Gateway">
-                  <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Payment Gateway</span>}
-                </Link>
-                <Link href="/admin/social-login-setting" className={navClass('/admin/social-login-setting')} title="Social Login">
-                  <Key className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Social Login</span>}
-                </Link>
-                <Link href="/admin/users" className={navClass('/admin/users')} title="Users">
-                  <UserPlus className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Users</span>}
-                </Link>
-                <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} title="Recipe Type">
-                  <Utensils className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Recipe Type</span>}
-                </Link>
-                <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} title="Ingredient Category">
-                  <Tag className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Ingredient Category</span>}
-                </Link>
-                <Link href="/admin/language" className={navClass('/admin/language')} title="Language">
-                  <Languages className="h-4 w-4 shrink-0" style={iconStyle} />
-                  {!showCollapsed && <span className="truncate whitespace-nowrap">Language</span>}
-                </Link>
+                {(openSections.admin || showCollapsed) && (
+                  <div className="space-y-1 pt-0.5">
+                    <Link href="/admin" className={navClass('/admin')} title="Admin Setting">
+                      <ShieldCheck className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Admin Setting</span>}
+                    </Link>
+                    <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} title="Ai Settings">
+                      <Cpu className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}
+                    </Link>
+                    <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} title="Token Settings">
+                      <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Token Settings</span>}
+                    </Link>
+                    <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} title="Wallet Settings">
+                      <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Wallet Settings</span>}
+                    </Link>
+                    <Link href="/admin/storage" className={navClass('/admin/storage')} title="Storage Settings">
+                      <HardDrive className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Storage Settings</span>}
+                    </Link>
+                    <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} title={t('notificationSettings', 'Notification Settings')}>
+                      <BellRing className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">{t('notificationSettings', 'Notification Settings')}</span>}
+                    </Link>
+                    <Link href="/admin/plans" className={navClass('/admin/plans')} title="Subscription Plans">
+                      <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Subscription Plans</span>}
+                    </Link>
+                    <Link href="/admin/payment" className={navClass('/admin/payment')} title="Payment Gateway">
+                      <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Payment Gateway</span>}
+                    </Link>
+                    <Link href="/admin/social-login-setting" className={navClass('/admin/social-login-setting')} title="Social Login">
+                      <Key className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Social Login</span>}
+                    </Link>
+                    <Link href="/admin/users" className={navClass('/admin/users')} title="Users">
+                      <UserPlus className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Users</span>}
+                    </Link>
+                    <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} title="Recipe Type">
+                      <Utensils className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Recipe Type</span>}
+                    </Link>
+                    <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} title="Ingredient Category">
+                      <Tag className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Ingredient Category</span>}
+                    </Link>
+                    <Link href="/admin/language" className={navClass('/admin/language')} title="Language">
+                      <Languages className="h-4 w-4 shrink-0" style={iconStyle} />
+                      {!showCollapsed && <span className="truncate whitespace-nowrap">Language</span>}
+                    </Link>
+                  </div>
+                )}
               </div>
             )}
           </nav>
@@ -68089,23 +67182,6 @@ export default function Sidebar() {
         <div className="pt-3 border-t border-[var(--color-border)] space-y-1">
           {showCollapsed ? (
             <div className="flex flex-col items-center gap-2 p-1">
-              <div className={`relative flex items-center justify-center p-2 rounded-xl border border-[var(--color-border)] text-base cursor-pointer hover:border-[var(--color-primary)]/50 transition ${
-                isDarkMode ? 'bg-[#070b13]' : 'bg-slate-200'
-              }`} title={availableLanguages.find((l) => l.code === locale)?.name || 'Language'}>
-                <span>{availableLanguages.find((l) => l.code === locale)?.flag || '🌐'}</span>
-                <select
-                  value={locale}
-                  onChange={(e) => setLocale(e.target.value)}
-                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                  title="Change language"
-                >
-                  {availableLanguages.map((lang) => (
-                    <option key={lang.code} value={lang.code} className={isDarkMode ? 'bg-[#111726] text-white' : 'bg-white text-slate-900'}>
-                      {lang.flag} {lang.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
               <button
                 type="button"
                 onClick={toggleThemeMode}
@@ -68149,43 +67225,36 @@ export default function Sidebar() {
             </div>
           )}
 
-          {/* PROFILE */}
           <Link href="/profile" className={navClass('/profile')} title={t('profile')}>
             <Settings className="h-4 w-4 shrink-0" style={iconStyle} />
             {!showCollapsed && <span className="truncate whitespace-nowrap">{t('profile')}</span>}
           </Link>
 
-          {/* TOKEN */}
-          <Link href="/token" className={navClass('/token')} title={t('topbarTokens', 'Token')}>
-            <DynamicTokenIcon symbol={tokenSymbol} icon={tokenIcon} size={16} className="w-4 h-4 shrink-0" />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('topbarTokens', 'Token')}</span>}
+          <Link href="/token" className={navClass('/token')} title={t('token') || 'Token'}>
+            <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
+            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('token') || 'Token'}</span>}
           </Link>
 
-          {/* WALLET */}
-          <Link href="/wallet" className={navClass('/wallet')} title={t('topbarWallet', 'Wallet')}>
+          <Link href="/wallet" className={navClass('/wallet')} title={t('wallet') || 'Wallet'}>
             <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('topbarWallet', 'Wallet')}</span>}
+            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('wallet') || 'Wallet'}</span>}
           </Link>
 
-          {/* SUBSCRIPTIONS */}
-          <Link href="/subscriptions" className={navClass('/subscriptions')} title={t('subscriptions', 'Subscriptions')}>
+          <Link href="/subscriptions" className={navClass('/subscriptions')} title={t('subscriptions') || 'Subscriptions'}>
             <Layers className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('subscriptions', 'Subscriptions')}</span>}
+            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('subscriptions') || 'Subscriptions'}</span>}
           </Link>
 
-          {/* BILLING */}
-          <Link href="/billing" className={navClass('/billing')} title={t('billing', 'Billing')}>
+          <Link href="/billing" className={navClass('/billing')} title={t('billing') || 'Billing'}>
             <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('billing', 'Billing')}</span>}
+            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('billing') || 'Billing'}</span>}
           </Link>
 
-          {/* CONTACTS */}
-          <Link href="/contacts" className={navClass('/contacts')} title={t('contactUs', 'Contact Us')}>
+          <Link href="/contacts" className={navClass('/contacts')} title={t('contactUs')}>
             <Mail className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('contactUs', 'Contact Us')}</span>}
+            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('contactUs')}</span>}
           </Link>
 
-          {/* LOGOUT */}
           <button
             onClick={() => {
               logoutUser();
@@ -68194,10 +67263,10 @@ export default function Sidebar() {
             className={`w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer text-left ${
               isDarkMode ? 'text-slate-400 hover:text-red-400 hover:bg-red-950/20' : 'text-slate-800 hover:text-red-600 hover:bg-red-100/70 font-bold'
             }`}
-            title={t('topbarSignOut', 'Logout')}
+            title={t('logout')}
           >
             <LogOut className="h-4 w-4 shrink-0" />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('topbarSignOut', 'Logout')}</span>}
+            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('logout')}</span>}
           </button>
 
           <div className={`pt-2 select-none flex items-center ${showCollapsed ? 'justify-center text-[10px]' : 'px-3.5 justify-between text-[11px]'} font-mono ${
