@@ -48,6 +48,11 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "durationDaysLabel": "Duration (Days)",
+    "goToDashboardBtn": "Go to Dashboard",
+    "authenticatingSession": "Authenticating session...",
+    "removeMealTitle": "Remove meal",
+    "schedulingSummaryText": "Scheduling {count} meals across {days} days starting on {date}.",
     "topbarTopUpWallet": "Add Funds",
     "topbarGetTokens": "Get Tokens",
     "topbarContactSupport": "Contact Support",

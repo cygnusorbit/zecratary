@@ -1,130 +1,160 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { query } from '@/lib/db';
+// @ts-nocheck
+import { NextResponse } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+function getTemplatesFilePath() {
+  const dataDir = path.join(process.cwd(), 'data');
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+  return path.join(dataDir, 'meal_templates.json');
+}
 
-async function ensureTable() {
+function readLocalTemplates(): any[] {
   try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS meal_templates (
-        id VARCHAR(128) PRIMARY KEY,
-        user_id VARCHAR(100),
-        created_by VARCHAR(255),
-        title VARCHAR(255) NOT NULL,
-        description TEXT DEFAULT '',
-        category VARCHAR(100) DEFAULT 'General',
-        total_days INT DEFAULT 7,
-        meals JSONB DEFAULT '[]'::jsonb,
-        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-      );
-      CREATE INDEX IF NOT EXISTS idx_meal_templates_user ON meal_templates(user_id);
-    `);
+    const p = getTemplatesFilePath();
+    if (fs.existsSync(p)) {
+      const raw = fs.readFileSync(p, 'utf-8');
+      return JSON.parse(raw) || [];
+    }
+  } catch (_) {}
+  return [];
+}
+
+function writeLocalTemplates(items: any[]) {
+  try {
+    const p = getTemplatesFilePath();
+    fs.writeFileSync(p, JSON.stringify(items, null, 2), 'utf-8');
   } catch (_) {}
 }
 
-export async function GET(req: NextRequest) {
-  await ensureTable();
+export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId')?.trim() || '';
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('userId') || '';
 
-    let sql = 'SELECT * FROM meal_templates';
-    const params: any[] = [];
+    // 1. Try PostgreSQL if pool configured
+    try {
+      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
+      if (typeof query === 'function') {
+        await query(`
+          CREATE TABLE IF NOT EXISTS meal_templates (
+            id VARCHAR(120) PRIMARY KEY,
+            user_id VARCHAR(120) NOT NULL,
+            created_by VARCHAR(255),
+            title VARCHAR(255) NOT NULL,
+            description TEXT,
+            category VARCHAR(120) DEFAULT 'General',
+            total_days INT DEFAULT 7,
+            meals JSONB,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_meal_templates_user ON meal_templates(user_id);
+        `);
 
-    if (userId) {
-      params.push(userId);
-      sql += ' WHERE user_id = $1 OR created_by = $1 OR user_id = \'usr_admin_1\' OR user_id IS NULL';
-    }
+        const sql = userId
+          ? 'SELECT * FROM meal_templates WHERE user_id = $1 ORDER BY created_at DESC'
+          : 'SELECT * FROM meal_templates ORDER BY created_at DESC';
+        const params = userId ? [userId] : [];
+        const result = await query(sql, params);
 
-    sql += ' ORDER BY created_at DESC';
+        if (result && Array.isArray(result.rows)) {
+          const templates = result.rows.map(r => ({
+            id: r.id,
+            userId: r.user_id,
+            createdBy: r.created_by,
+            title: r.title,
+            description: r.description,
+            category: r.category,
+            totalDays: r.total_days || 7,
+            meals: typeof r.meals === 'string' ? JSON.parse(r.meals) : (r.meals || [])
+          }));
+          return NextResponse.json({ success: true, templates });
+        }
+      }
+    } catch (_) {}
 
-    const rows: any = await query(sql, params);
-    const rawItems = Array.isArray(rows) ? rows : (rows?.rows || []);
-
-    const formatted = rawItems.map((r: any) => ({
-      id: r.id,
-      userId: r.user_id || 'usr_admin_1',
-      createdBy: r.created_by || '',
-      title: r.title,
-      description: r.description || '',
-      category: r.category || 'General',
-      totalDays: Number(r.total_days || 7),
-      meals: Array.isArray(r.meals) ? r.meals : (typeof r.meals === 'string' ? JSON.parse(r.meals) : []),
-      createdAt: r.created_at || new Date().toISOString()
-    }));
-
-    return NextResponse.json(
-      { success: true, templates: formatted },
-      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } }
-    );
+    // 2. Fallback to Local JSON store
+    const all = readLocalTemplates();
+    const filtered = userId ? all.filter(t => !t.userId || t.userId === userId) : all;
+    return NextResponse.json({ success: true, templates: filtered });
   } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message, templates: [] }, { status: 500 });
+    return NextResponse.json({ success: false, templates: [], error: err.message }, { status: 200 });
   }
 }
 
-export async function POST(req: NextRequest) {
-  await ensureTable();
+export async function POST(request: Request) {
   try {
-    const body = await req.json();
-    const targetUserId = body.userId || body.user_id || 'usr_admin_1';
-    const userEmail = body.createdBy || body.created_by || 'admin@zecratary.com';
+    const body = await request.json().catch(() => ({}));
+    const { userId, createdBy, templates } = body;
 
-    const items = Array.isArray(body) ? body : (body.templates || [body.template || body]);
-
-    for (const t of items) {
-      if (!t || !t.title) continue;
-      const tId = t.id || ('tpl_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6));
-
-      await query(`
-        INSERT INTO meal_templates (
-          id, user_id, created_by, title, description, category, total_days, meals, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-          title = EXCLUDED.title,
-          description = EXCLUDED.description,
-          category = EXCLUDED.category,
-          total_days = EXCLUDED.total_days,
-          meals = EXCLUDED.meals,
-          updated_at = NOW();
-      `, [
-        tId,
-        targetUserId,
-        userEmail,
-        t.title.trim(),
-        t.description || '',
-        t.category || 'General',
-        Number(t.totalDays || 7),
-        JSON.stringify(Array.isArray(t.meals) ? t.meals : [])
-      ]);
+    if (!Array.isArray(templates)) {
+      return NextResponse.json({ success: false, error: 'Templates array required' }, { status: 400 });
     }
 
-    return NextResponse.json({ success: true, message: 'Meal template(s) saved in PostgreSQL.' });
+    // 1. Try PostgreSQL persistence
+    try {
+      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
+      if (typeof query === 'function' && userId) {
+        await query('DELETE FROM meal_templates WHERE user_id = $1', [userId]);
+        for (const t of templates) {
+          await query(`
+            INSERT INTO meal_templates (id, user_id, created_by, title, description, category, total_days, meals, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, CURRENT_TIMESTAMP)
+            ON CONFLICT (id) DO UPDATE SET
+              title = EXCLUDED.title,
+              description = EXCLUDED.description,
+              category = EXCLUDED.category,
+              total_days = EXCLUDED.total_days,
+              meals = EXCLUDED.meals,
+              updated_at = CURRENT_TIMESTAMP
+          `, [
+            t.id,
+            userId,
+            createdBy || userId,
+            t.title,
+            t.description || '',
+            t.category || 'General',
+            Number(t.totalDays || 7),
+            JSON.stringify(t.meals || [])
+          ]);
+        }
+      }
+    } catch (_) {}
+
+    // 2. Update local fallback JSON
+    const existing = readLocalTemplates();
+    const retained = userId ? existing.filter(i => i.userId && i.userId !== userId) : [];
+    writeLocalTemplates([...retained, ...templates]);
+
+    return NextResponse.json({ success: true, count: templates.length });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
 
-export async function DELETE(req: NextRequest) {
-  await ensureTable();
+export async function DELETE(request: Request) {
   try {
-    const { searchParams } = new URL(req.url);
-    let id = searchParams.get('id');
+    const { searchParams } = new URL(request.url);
+    const id = searchParams.get('id');
 
     if (!id) {
-      try {
-        const body = await req.json();
-        id = body?.id || id;
-      } catch (_) {}
+      return NextResponse.json({ success: false, error: 'Template ID required' }, { status: 400 });
     }
 
-    if (!id) {
-      return NextResponse.json({ success: false, error: 'Template ID is required' }, { status: 400 });
-    }
+    try {
+      const { query } = await import('@/lib/db').catch(() => ({ query: null }));
+      if (typeof query === 'function') {
+        await query('DELETE FROM meal_templates WHERE id = $1', [id]);
+      }
+    } catch (_) {}
 
-    await query('DELETE FROM meal_templates WHERE id = $1', [id.trim()]);
-    return NextResponse.json({ success: true, message: 'Template deleted from PostgreSQL.' });
+    const existing = readLocalTemplates();
+    writeLocalTemplates(existing.filter(t => t.id !== id));
+
+    return NextResponse.json({ success: true, id });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

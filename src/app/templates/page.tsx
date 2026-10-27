@@ -1,22 +1,21 @@
-'use client';
 // @ts-nocheck
+'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
-  LayoutTemplate, Search, Plus, Trash2, Edit3, CalendarPlus, 
-  Sparkles, Clock, Users, ArrowRight, Check, X, BookOpen, 
-  RefreshCw, CheckCircle2, AlertCircle, Utensils, Calendar,
-  ChevronRight, Layers, Bookmark
+  Search, Plus, Trash2, Edit3, CalendarPlus, 
+  Sparkles, Check, X, BookOpen, RefreshCw, 
+  CheckCircle2, AlertCircle, ChevronRight
 } from 'lucide-react';
-import { getCurrentUser, User, initAuthStorage } from '@/lib/auth';
+import { getCurrentUser, User, initAuthStorage, setCurrentUser } from '@/lib/auth';
 import { useTranslation } from '@/components/LanguageProvider';
 
 interface TemplateMeal {
   id: string;
-  dayIndex: number; // 0 to 6 (Monday to Sunday)
-  mealType: string; // Breakfast | Lunch | Dinner | Snack
+  dayIndex: number;
+  mealType: string;
   recipeId?: string;
   recipeName: string;
   image?: string;
@@ -74,7 +73,8 @@ const DEFAULT_TEMPLATES: MealTemplate[] = [
 export default function TemplatesPage() {
   const router = useRouter();
   const { t } = useTranslation();
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUserState] = useState<User | null>(null);
+  const [authHydrated, setAuthHydrated] = useState<boolean>(false);
 
   const [templates, setTemplates] = useState<MealTemplate[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
@@ -91,7 +91,7 @@ export default function TemplatesPage() {
   const [templateCategory, setTemplateCategory] = useState<string>('General');
   const [templateDays, setTemplateDays] = useState<number>(7);
 
-  // Modal 2: Add / Edit Meal in Blueprint Day
+  // Modal 2: Add Meal in Blueprint Day
   const [showMealModal, setShowMealModal] = useState<boolean>(false);
   const [targetDayIndex, setTargetDayIndex] = useState<number>(0);
   const [targetMealType, setTargetMealType] = useState<string>('Dinner');
@@ -115,7 +115,21 @@ export default function TemplatesPage() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // 1. Fetch live templates from PostgreSQL /api/templates
+  // Close modals on Escape key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowTemplateModal(false);
+        setShowMealModal(false);
+        setShowRecipePicker(false);
+        setShowApplyModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Fetch live templates from /api/templates
   const loadTemplatesData = useCallback(async (user: User | null) => {
     const targetUserId = user?.id || 'usr_admin_1';
     setLoading(true);
@@ -130,7 +144,6 @@ export default function TemplatesPage() {
         }
       }
 
-      // Offline localStorage fallback
       if (fetchedTemplates.length === 0 && typeof window !== 'undefined') {
         const raw = localStorage.getItem('zecratary_meal_templates');
         if (raw) {
@@ -148,7 +161,6 @@ export default function TemplatesPage() {
         setSelectedTemplateId(fetchedTemplates[0].id);
       }
 
-      // Hydrate Saved Recipes for the Recipe Picker
       try {
         const rRes = await fetch(`/api/saved-recipes?userId=${encodeURIComponent(targetUserId)}&t=${Date.now()}`, { cache: 'no-store' });
         if (rRes.ok) {
@@ -165,21 +177,40 @@ export default function TemplatesPage() {
     }
   }, [selectedTemplateId]);
 
+  // Robust session resolution
   useEffect(() => {
     document.title = `${t('mealBlueprintsTitle', 'Meal Blueprints')} - Zecratary`;
     initAuthStorage();
-    const user = getCurrentUser();
-    if (!user) {
+
+    let resolvedUser = getCurrentUser();
+
+    if (!resolvedUser && typeof document !== 'undefined') {
+      const match = document.cookie.match(/(?:^|;\s*)(?:zecratary_session|zecratary_current_user|currentUser)=([^;]+)/);
+      if (match && match[1]) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(match[1]));
+          if (parsed && parsed.email) {
+            resolvedUser = parsed;
+            setCurrentUser(parsed);
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (!resolvedUser) {
+      setAuthHydrated(true);
       router.replace('/login');
       return;
     }
-    setCurrentUser(user);
-    loadTemplatesData(user);
+
+    setCurrentUserState(resolvedUser);
+    setAuthHydrated(true);
+    loadTemplatesData(resolvedUser);
 
     const handleSync = () => {
       const active = getCurrentUser();
       if (active) {
-        setCurrentUser(active);
+        setCurrentUserState(active);
         loadTemplatesData(active);
       }
     };
@@ -224,7 +255,6 @@ export default function TemplatesPage() {
     window.dispatchEvent(new Event('storage'));
   };
 
-  // Create or Update Template
   const handleSaveTemplateModal = async () => {
     if (!templateTitle.trim() || !currentUser) return;
 
@@ -291,7 +321,6 @@ export default function TemplatesPage() {
     showToast(t('blueprintDeletedToast', 'Blueprint deleted successfully.'));
   };
 
-  // Add / Edit Meal inside a Blueprint Day
   const handleOpenAddMeal = (dayIdx: number, slot: string = 'Dinner') => {
     setTargetDayIndex(dayIdx);
     setTargetMealType(slot);
@@ -338,7 +367,6 @@ export default function TemplatesPage() {
     await persistTemplatesList(updated);
   };
 
-  // Apply Blueprint to Weekly Calendar (/api/planner)
   const handleApplyToCalendar = async () => {
     if (!activeTemplate || !activeTemplate.meals || activeTemplate.meals.length === 0) return;
     const targetUserId = currentUser?.id || 'usr_admin_1';
@@ -403,12 +431,32 @@ export default function TemplatesPage() {
     );
   }, [savedRecipes, pickerSearch]);
 
+  if (!authHydrated) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-3">
+        <div 
+          className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin"
+          style={{ borderColor: 'var(--color-primary)', borderTopColor: 'transparent' }}
+        />
+        <p className="text-xs opacity-60">{t('authenticatingSession', 'Authenticating session...')}</p>
+      </div>
+    );
+  }
+
   return (
     <div 
-      className="max-w-7xl mx-auto space-y-6 pb-24 px-4 font-sans transition-colors duration-200"
-      style={{ color: 'var(--color-text)' }}
+      id="zecratary-templates-canvas"
+      role="region"
+      aria-label={t('mealBlueprintsTitle', 'Meal Blueprints')}
+      data-lpignore="true"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 font-sans transition-colors duration-200"
+      style={{ 
+        width: '100%',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        color: 'var(--color-text)' 
+      }}
     >
-      {/* Toast Alert Banner */}
       {toastMessage && (
         <div 
           className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-top-3 border"
@@ -439,6 +487,19 @@ export default function TemplatesPage() {
         </div>
 
         <div className="flex items-center gap-2.5">
+          <Link
+            href="/dashboard"
+            className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs hover:opacity-80"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+          >
+            <span>{t('goToDashboardBtn', 'Go to Dashboard')}</span>
+            <ChevronRight className="h-3.5 w-3.5" />
+          </Link>
+
           <button
             type="button"
             onClick={() => loadTemplatesData(currentUser)}
@@ -473,19 +534,22 @@ export default function TemplatesPage() {
         </div>
       </div>
 
-      {/* Main 2-Column Responsive Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* LEFT COLUMN: BLUEPRINTS CATALOG (4 Cols) */}
-        <div className="lg:col-span-4 space-y-4">
-          {/* Search Box (Autofill Safe) */}
+      {/* Main Fluid 2-Column Responsive Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 xl:grid-cols-12 gap-6 items-start">
+        {/* LEFT COLUMN: BLUEPRINTS CATALOG */}
+        <div className="lg:col-span-4 xl:col-span-3 space-y-4">
           <div role="region" data-lpignore="true" className="relative">
             <Search className="h-4 w-4 absolute left-3.5 top-3 pointer-events-none opacity-60" />
             <input
               type="text"
               autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               data-lpignore="true"
+              data-1p-ignore="true"
+              data-bwignore="true"
               data-form-type="other"
-              spellCheck="false"
               placeholder={t('searchBlueprintsPlaceholder', 'Search blueprints by title or category...')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -498,7 +562,6 @@ export default function TemplatesPage() {
             />
           </div>
 
-          {/* Templates Selection List */}
           <div className="space-y-3">
             {filteredTemplates.length === 0 ? (
               <div className="p-8 text-center text-xs opacity-50 border rounded-2xl" style={{ borderColor: 'var(--color-border)' }}>
@@ -566,14 +629,19 @@ export default function TemplatesPage() {
           </div>
         </div>
 
-        {/* RIGHT COLUMN: BLUEPRINT WORKBENCH CANVAS (8 Cols) */}
-        <div className="lg:col-span-8 space-y-4">
+        {/* RIGHT COLUMN: WORKBENCH CANVAS */}
+        <div className="lg:col-span-8 xl:col-span-9 space-y-4">
           {activeTemplate ? (
             <div 
-              className="border rounded-3xl p-6 space-y-6 shadow-sm transition-colors duration-200"
-              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
+              role="region"
+              data-lpignore="true"
+              className="w-full max-w-full border rounded-3xl p-6 space-y-6 shadow-sm transition-colors duration-200"
+              style={{ 
+                backgroundColor: 'var(--color-card)', 
+                borderColor: 'var(--color-border)',
+                boxSizing: 'border-box'
+              }}
             >
-              {/* Active Blueprint Banner & Apply Action */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" style={{ borderColor: 'var(--color-border)' }}>
                 <div>
                   <div className="flex items-center gap-2">
@@ -604,7 +672,7 @@ export default function TemplatesPage() {
                 </button>
               </div>
 
-              {/* 7-Day Blueprint Day Cards Breakdown */}
+              {/* Day Breakdown Cards */}
               <div className="space-y-4">
                 {DAY_NAMES.slice(0, activeTemplate.totalDays || 7).map((dayName, dayIdx) => {
                   const dayMeals = (activeTemplate.meals || []).filter(m => m.dayIndex === dayIdx);
@@ -641,7 +709,7 @@ export default function TemplatesPage() {
                           {t('emptyDayDesc', 'No meals planned for this day.')}
                         </div>
                       ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                           {dayMeals.map(meal => (
                             <div 
                               key={meal.id}
@@ -672,7 +740,7 @@ export default function TemplatesPage() {
                                 type="button"
                                 onClick={() => handleRemoveMealFromBlueprint(meal.id)}
                                 className="p-1 rounded text-red-400 hover:text-red-300 opacity-0 group-hover:opacity-100 transition cursor-pointer"
-                                title="Remove meal"
+                                title={t('removeMealTitle', 'Remove meal')}
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </button>
@@ -693,7 +761,7 @@ export default function TemplatesPage() {
         </div>
       </div>
 
-      {/* MODAL 1: CREATE / EDIT BLUEPRINT (Autofill Safe Container) */}
+      {/* MODAL 1: CREATE / EDIT BLUEPRINT */}
       {showTemplateModal && (
         <div 
           onClick={() => setShowTemplateModal(false)}
@@ -701,13 +769,15 @@ export default function TemplatesPage() {
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            role="region"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="template-modal-title"
             data-lpignore="true"
             className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+              <h3 id="template-modal-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
                 {editingTemplateId ? t('editBlueprint', 'Edit Blueprint') : t('newBlueprintBtn', 'New Blueprint')}
               </h3>
               <button type="button" onClick={() => setShowTemplateModal(false)} className="p-1 rounded-lg">
@@ -721,12 +791,22 @@ export default function TemplatesPage() {
                 <input
                   type="text"
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
-                  spellCheck="false"
                   placeholder={t('blueprintTitlePlaceholder', 'e.g. High-Protein Muscle Gain...')}
                   value={templateTitle}
                   onChange={(e) => setTemplateTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveTemplateModal();
+                    }
+                  }}
                   className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
@@ -748,7 +828,7 @@ export default function TemplatesPage() {
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1 opacity-80">Duration (Days)</label>
+                  <label className="block font-bold mb-1 opacity-80">{t('durationDaysLabel', 'Duration (Days)')}</label>
                   <select
                     value={templateDays}
                     onChange={(e) => setTemplateDays(Number(e.target.value))}
@@ -767,9 +847,13 @@ export default function TemplatesPage() {
                 <textarea
                   rows={2}
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
-                  spellCheck="false"
                   placeholder={t('blueprintDescPlaceholder', 'Short summary of this meal plan blueprint...')}
                   value={templateDesc}
                   onChange={(e) => setTemplateDesc(e.target.value)}
@@ -802,7 +886,7 @@ export default function TemplatesPage() {
         </div>
       )}
 
-      {/* MODAL 2: ADD MEAL TO BLUEPRINT DAY (Autofill Safe Container) */}
+      {/* MODAL 2: ADD MEAL TO BLUEPRINT DAY */}
       {showMealModal && (
         <div 
           onClick={() => setShowMealModal(false)}
@@ -810,13 +894,15 @@ export default function TemplatesPage() {
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            role="region"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="meal-modal-title"
             data-lpignore="true"
             className="border rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+              <h3 id="meal-modal-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
                 {(t('addMealToDay', 'Add Dish to {day}')).replace('{day}', t(`day${DAY_NAMES[targetDayIndex]}`, DAY_NAMES[targetDayIndex]))}
               </h3>
               <button type="button" onClick={() => setShowMealModal(false)} className="p-1 rounded-lg">
@@ -835,7 +921,7 @@ export default function TemplatesPage() {
                   <BookOpen className="h-4 w-4" />
                   {selectedRecipeForMeal ? selectedRecipeForMeal.title : t('selectFromSavedRecipes', 'Select from Saved Recipes')}
                 </span>
-                <ArrowRight className="h-4 w-4" />
+                <ChevronRight className="h-4 w-4" />
               </button>
 
               <div>
@@ -843,12 +929,22 @@ export default function TemplatesPage() {
                 <input
                   type="text"
                   autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
                   data-form-type="other"
-                  spellCheck="false"
                   placeholder={t('dishTitlePlaceholder', 'e.g. Grilled Salmon with Asparagus')}
                   value={targetDishTitle}
                   onChange={(e) => setTargetDishTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleSaveMealToBlueprint();
+                    }
+                  }}
                   className="w-full border rounded-xl p-2.5 text-xs outline-none font-medium"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
@@ -876,8 +972,17 @@ export default function TemplatesPage() {
                     min="1"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-bwignore="true"
+                    data-form-type="other"
                     value={targetServings}
                     onChange={(e) => setTargetServings(parseInt(e.target.value) || 1)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSaveMealToBlueprint();
+                      }
+                    }}
                     className="w-full border rounded-xl p-2.5 text-xs outline-none font-bold"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
@@ -900,7 +1005,7 @@ export default function TemplatesPage() {
                   className="px-5 py-2 text-white font-bold rounded-xl shadow cursor-pointer hover:opacity-90 disabled:opacity-40"
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
-                  {t('confirmScheduleBtn', 'Confirm Schedule')}
+                  {t('saveBlueprintBtn', 'Save Blueprint')}
                 </button>
               </div>
             </div>
@@ -916,13 +1021,15 @@ export default function TemplatesPage() {
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            role="region"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="recipe-picker-title"
             data-lpignore="true"
             className="border rounded-3xl max-w-lg w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl relative p-5 space-y-3 cursor-default"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <div className="flex justify-between items-center border-b pb-2" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+              <h3 id="recipe-picker-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
                 {t('selectFromSavedRecipes', 'Select from Saved Recipes')}
               </h3>
               <button type="button" onClick={() => setShowRecipePicker(false)} className="p-1 rounded-lg">
@@ -935,7 +1042,12 @@ export default function TemplatesPage() {
               <input
                 type="text"
                 autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
                 data-lpignore="true"
+                data-1p-ignore="true"
+                data-bwignore="true"
                 data-form-type="other"
                 placeholder={t('searchRecipesPlaceholder', 'Search saved recipes...')}
                 value={pickerSearch}
@@ -985,7 +1097,7 @@ export default function TemplatesPage() {
         </div>
       )}
 
-      {/* MODAL 4: APPLY TO CALENDAR (Autofill Safe Container) */}
+      {/* MODAL 4: APPLY TO CALENDAR */}
       {showApplyModal && (
         <div 
           onClick={() => setShowApplyModal(false)}
@@ -993,13 +1105,15 @@ export default function TemplatesPage() {
         >
           <div 
             onClick={(e) => e.stopPropagation()}
-            role="region"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="apply-modal-title"
             data-lpignore="true"
             className="border rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-xs cursor-default"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: 'var(--color-border)' }}>
-              <h3 className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
+              <h3 id="apply-modal-title" className="font-extrabold text-sm" style={{ color: 'var(--color-primary)' }}>
                 {t('applyModalTitle', 'Schedule Blueprint onto Calendar')}
               </h3>
               <button type="button" onClick={() => setShowApplyModal(false)} className="p-1 rounded-lg">
@@ -1014,6 +1128,9 @@ export default function TemplatesPage() {
                   type="date"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-bwignore="true"
+                  data-form-type="other"
                   value={applyStartDate}
                   onChange={(e) => setApplyStartDate(e.target.value)}
                   className="w-full border rounded-xl p-2.5 text-xs outline-none cursor-pointer"
@@ -1022,7 +1139,10 @@ export default function TemplatesPage() {
               </div>
 
               <div className="p-3 rounded-2xl border text-[11px] opacity-80" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}>
-                Scheduling {(activeTemplate?.meals || []).length} meals across {activeTemplate?.totalDays || 7} days starting on {applyStartDate}.
+                {(t('schedulingSummaryText', 'Scheduling {count} meals across {days} days starting on {date}.'))
+                  .replace('{count}', String((activeTemplate?.meals || []).length))
+                  .replace('{days}', String(activeTemplate?.totalDays || 7))
+                  .replace('{date}', applyStartDate)}
               </div>
 
               <div className="flex justify-end gap-2.5 pt-3 border-t" style={{ borderColor: 'var(--color-border)' }}>
