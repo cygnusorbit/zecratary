@@ -1,2 +1,4 @@
-// Compatibility forwarder for legacy and mobile clients
-export { GET, POST, OPTIONS, dynamic, revalidate } from '../tokens/route';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+export { GET, POST, OPTIONS } from '../tokens/route';

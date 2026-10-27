@@ -1,235 +1,325 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { queryMysql } from '@/lib/mysql';
-import { getTokenSettings } from '@/lib/tokenService';
+import fs from 'fs';
+import path from 'path';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-async function resolveUserFromReq(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  let rawUserId = searchParams.get('userId')?.trim() || '';
-  let rawEmail = searchParams.get('email')?.trim().toLowerCase() || '';
-
-  if (rawUserId === 'undefined' || rawUserId === 'null') rawUserId = '';
-  if (rawEmail === 'undefined' || rawEmail === 'null') rawEmail = '';
-
-  if (!rawUserId && !rawEmail) {
-    const authCookies = ['zecratary_session', 'currentUser', 'zecratary_user', 'zecratary_current_user'];
-    for (const cName of authCookies) {
-      const cVal = req.cookies.get(cName)?.value;
-      if (cVal) {
-        try {
-          const parsed = JSON.parse(decodeURIComponent(cVal));
-          if (parsed?.id) rawUserId = String(parsed.id);
-          if (parsed?.email) rawEmail = String(parsed.email).toLowerCase();
-          if (rawUserId || rawEmail) break;
-        } catch (_) {}
-      }
-    }
-  }
-
-  return { userId: rawUserId, email: rawEmail };
-}
-
-export async function GET(req: NextRequest) {
-  try {
-    const { userId, email } = await resolveUserFromReq(req);
-    const tokenSettings = await getTokenSettings();
-
-    let userRow: any = null;
-    let tokenBalance = 100;
-    let walletBalance = 0.00;
-
-    if (userId || email) {
-      const userRes = await query(
-        `SELECT id, email, name, 
-                COALESCE(token_balance, 0) as token_balance, 
-                COALESCE(wallet_balance, 0) as wallet_balance 
-         FROM users 
-         WHERE ($1 != '' AND id::text = $1) 
-            OR ($2 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($2))) 
-         LIMIT 1`,
-        [userId, email]
-      );
-      if (userRes && userRes.length > 0) {
-        userRow = userRes[0];
-        tokenBalance = Number(userRow.token_balance || 0);
-        walletBalance = parseFloat(userRow.wallet_balance || 0);
-      }
-    }
-
-    if (!userRow) {
-      const firstUserRes = await query(
-        `SELECT id, email, name, 
-                COALESCE(token_balance, 0) as token_balance, 
-                COALESCE(wallet_balance, 0) as wallet_balance 
-         FROM users 
-         ORDER BY created_at ASC LIMIT 1`
-      );
-      if (firstUserRes && firstUserRes.length > 0) {
-        userRow = firstUserRes[0];
-        tokenBalance = Number(userRow.token_balance || 0);
-        walletBalance = parseFloat(userRow.wallet_balance || 0);
-      }
-    }
-
-    const tSymbol = tokenSettings.tokenSymbol || '🪙';
-    const tIcon = tokenSettings.tokenIcon || tSymbol;
-
-    return NextResponse.json({
-      success: true,
-      balance: tokenBalance,
-      tokenBalance: tokenBalance,
-      token_balance: tokenBalance,
-      wallet_balance: walletBalance,
-      walletBalance: walletBalance,
-      tokenSymbol: tSymbol,
-      tokenIcon: tIcon,
-      tokenName: tokenSettings.tokenName || 'Foodie Token',
-      isEnabled: tokenSettings.isEnabled !== false,
-      user: userRow
-    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const { userId, email } = await resolveUserFromReq(req);
-    const body = await req.json().catch(() => ({}));
-    const action = body?.action || body?.type || 'purchase';
-    const packageId = body?.packageId || body?.package_id;
-    const tokens = Number(body?.tokens || body?.tokenCount || body?.amount || 0);
-    const cost = Number(body?.cost || body?.price || 0);
-    const paymentMethod = body?.paymentMethod || body?.payment_method || 'wallet';
-    const description = body?.description || 'Token Transaction';
-
-    const targetUserId = body?.userId || userId;
-    const targetEmail = body?.userEmail || body?.email || email;
-
-    if (!targetUserId && !targetEmail) {
-      return NextResponse.json({ success: false, error: 'User identifier required' }, { status: 400 });
-    }
-
-    // Attempt purchaseTokenPackage via tokenService if present
-    try {
-      const tokenService = await import('@/lib/tokenService');
-      if (typeof tokenService.purchaseTokenPackage === 'function') {
-        const result = await tokenService.purchaseTokenPackage({
-          userId: targetUserId,
-          userEmail: targetEmail,
-          packageId,
-          tokens,
-          amount: cost,
-          paymentMethod,
-          description
-        });
-        if (result && result.success) {
-          return NextResponse.json(result);
+function readServerTokenSettings(): any {
+  const candidatePaths = [
+    path.join(process.cwd(), 'apps/web/data/admin_settings.json'),
+    path.join(process.cwd(), 'data/admin_settings.json')
+  ];
+  for (const p of candidatePaths) {
+    if (fs.existsSync(p)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+        if (parsed?.tokenSettings || parsed?.token_settings) {
+          return parsed.tokenSettings || parsed.token_settings;
         }
-      }
-    } catch (_) {}
-
-    // Direct Database Execution (PostgreSQL & MySQL - Constraint 8)
-    let currentTokens = 100;
-    let currentWallet = 0.00;
-
-    const uRes = await query(
-      `SELECT id, email, COALESCE(token_balance, 0) as token_balance, COALESCE(wallet_balance, 0) as wallet_balance
-       FROM users
-       WHERE ($1 != '' AND id::text = $1) OR ($2 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($2)))
-       LIMIT 1`,
-      [targetUserId || '', targetEmail || '']
-    ).catch(() => []);
-
-    if (uRes && uRes.length > 0) {
-      currentTokens = Number(uRes[0].token_balance || 0);
-      currentWallet = parseFloat(uRes[0].wallet_balance || 0);
+      } catch (_) {}
     }
-
-    let newTokens = currentTokens;
-    let newWallet = currentWallet;
-
-    if (action === 'deduct') {
-      if (currentTokens < tokens) {
-        return NextResponse.json({ success: false, error: 'Insufficient tokens' }, { status: 400 });
-      }
-      newTokens = currentTokens - tokens;
-    } else {
-      if (paymentMethod === 'wallet' && cost > 0) {
-        if (currentWallet < cost) {
-          return NextResponse.json({ success: false, error: 'Insufficient wallet balance' }, { status: 400 });
-        }
-        newWallet = currentWallet - cost;
-      }
-      newTokens = currentTokens + (tokens > 0 ? tokens : 100);
-    }
-
-    // Update PostgreSQL
-    try {
-      await query(
-        `UPDATE users SET token_balance = $1, wallet_balance = $2, updated_at = NOW()
-         WHERE ($3 != '' AND id::text = $3) OR ($4 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($4)))`,
-        [newTokens, newWallet, targetUserId || '', targetEmail || '']
-      );
-
-      await query(`
-        CREATE TABLE IF NOT EXISTS token_transactions (
-          id VARCHAR(64) PRIMARY KEY,
-          user_id VARCHAR(64),
-          user_email VARCHAR(255),
-          package_id VARCHAR(64),
-          amount INT NOT NULL,
-          type VARCHAR(32) DEFAULT 'purchase',
-          cost NUMERIC(10,2) DEFAULT 0,
-          payment_method VARCHAR(50) DEFAULT 'wallet',
-          description TEXT,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-      `).catch(() => {});
-
-      const txId = `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      await query(
-        `INSERT INTO token_transactions (id, user_id, user_email, package_id, amount, type, cost, payment_method, description, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
-        [txId, targetUserId || '', targetEmail || '', packageId || '', tokens || 100, action, cost, paymentMethod, description]
-      ).catch(() => {});
-    } catch (pgErr) {
-      console.warn('[tokens:POST] PostgreSQL update notice:', pgErr);
-    }
-
-    // Update MySQL (Constraint 8)
-    try {
-      await queryMysql(
-        `UPDATE users SET token_balance = ?, wallet_balance = ?, updated_at = NOW()
-         WHERE (? != '' AND id = ?) OR (? != '' AND LOWER(TRIM(email)) = LOWER(TRIM(?)))`,
-        [newTokens, newWallet, targetUserId || '', targetUserId || '', targetEmail || '', targetEmail || '']
-      );
-    } catch (_) {}
-
-    return NextResponse.json({
-      success: true,
-      tokenBalance: newTokens,
-      tokensAdded: tokens,
-      newBalance: newTokens,
-      walletBalance: newWallet,
-      newWalletBalance: newWallet
-    });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
+  return null;
 }
 
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 204,
     headers: {
-      'Allow': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With'
-    }
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
   });
+}
+
+export async function GET(req: Request) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const userId = searchParams.get('userId');
+    const email = searchParams.get('email');
+    const page = parseInt(searchParams.get('page') || '1', 10);
+    const limit = parseInt(searchParams.get('limit') || '10', 10);
+    const search = searchParams.get('search') || '';
+    const type = searchParams.get('type') || 'all';
+
+    let userBalance = 100;
+    let walletBalance = 0.00;
+    let tokenSymbol = '🪙';
+    let tokenIcon = '';
+    let tokenName = 'Foodie Token';
+    let isEnabled = true;
+    let costs = {
+      chef: 2,
+      import_url: 5,
+      import_text: 2,
+      import_photo: 10,
+      meal_planner: 5,
+      macro_analysis: 3
+    };
+    let packages: any[] = [];
+    let transactions: any[] = [];
+    let totalPages = 1;
+    let stats = { totalDeducted: 0, totalGranted: 0, totalEvents: 0 };
+
+    // 1. Fetch token settings from PostgreSQL / MySQL or local JSON
+    try {
+      const sRes: any = await Promise.race([
+        query(`SELECT * FROM token_settings WHERE id::text = 'primary_settings' OR id::text = '1' LIMIT 1`),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 3000))
+      ]).catch(() => null);
+
+      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
+      const fallback = readServerTokenSettings();
+
+      if (sRow) {
+        tokenName = sRow.token_name || sRow.tokenName || tokenName;
+        tokenSymbol = sRow.token_symbol || sRow.tokenSymbol || tokenSymbol;
+        tokenIcon = sRow.token_icon || sRow.tokenIcon || '';
+        isEnabled = sRow.is_enabled !== undefined ? sRow.is_enabled : (sRow.isEnabled !== undefined ? sRow.isEnabled : true);
+        costs = {
+          chef: sRow.ai_chef_cost ?? sRow.aiChefCost ?? 2,
+          import_url: sRow.import_url_cost ?? sRow.importUrlCost ?? 5,
+          import_text: sRow.import_text_cost ?? sRow.importTextCost ?? 2,
+          import_photo: sRow.import_photo_cost ?? sRow.importPhotoCost ?? 10,
+          meal_planner: sRow.meal_planner_cost ?? sRow.mealPlannerCost ?? 5,
+          macro_analysis: sRow.macro_analysis_cost ?? sRow.macroAnalysisCost ?? 3
+        };
+        const rawPkgs = typeof sRow.packages === 'string' ? JSON.parse(sRow.packages) : sRow.packages;
+        if (Array.isArray(rawPkgs)) packages = rawPkgs;
+      } else if (fallback) {
+        tokenName = fallback.tokenName || tokenName;
+        tokenSymbol = fallback.tokenSymbol || tokenSymbol;
+        tokenIcon = fallback.tokenIcon || '';
+        isEnabled = fallback.isEnabled !== undefined ? fallback.isEnabled : true;
+        if (fallback.packages && Array.isArray(fallback.packages)) packages = fallback.packages;
+        costs = {
+          chef: fallback.aiChefCost ?? 2,
+          import_url: fallback.importUrlCost ?? 5,
+          import_text: fallback.importTextCost ?? 2,
+          import_photo: fallback.importPhotoCost ?? 10,
+          meal_planner: fallback.mealPlannerCost ?? 5,
+          macro_analysis: fallback.macroAnalysisCost ?? 3
+        };
+      }
+    } catch (_) {}
+
+    // Fallback default packages if none configured
+    if (!packages || packages.length === 0) {
+      packages = [
+        { id: 'pkg_starter', name: 'Starter Spark', tokens: 250, tokenAmount: 250, price: 4.99, priceDollars: 4.99, badge: 'Popular', bonusTokens: 0, isPopular: true },
+        { id: 'pkg_chef', name: 'Culinary Master', tokens: 1000, tokenAmount: 1000, price: 14.99, priceDollars: 14.99, badge: 'Best Value', bonusTokens: 150, isPopular: false },
+        { id: 'pkg_executive', name: 'Kitchen Enterprise', tokens: 5000, tokenAmount: 5000, price: 49.99, priceDollars: 49.99, badge: 'VIP', bonusTokens: 1000, isPopular: false }
+      ];
+    } else {
+      // Normalize dual property schema
+      packages = packages.map((pkg) => {
+        const tok = Number(pkg.tokens ?? pkg.tokenAmount ?? 0);
+        const prc = Number(pkg.price ?? pkg.priceDollars ?? 0);
+        const isPop = Boolean(pkg.popular ?? pkg.isPopular ?? (pkg.badge && String(pkg.badge).toLowerCase().includes('popular')));
+        const isBest = Boolean(pkg.bestValue ?? (pkg.badge && String(pkg.badge).toLowerCase().includes('value')));
+        return {
+          id: pkg.id,
+          name: pkg.name,
+          tokens: tok,
+          tokenAmount: tok,
+          price: prc,
+          priceDollars: prc,
+          badge: pkg.badge,
+          bonusTokens: Number(pkg.bonusTokens || 0),
+          popular: isPop,
+          isPopular: isPop,
+          bestValue: isBest,
+          description: pkg.description || undefined
+        };
+      });
+    }
+
+    // 2. Fetch User Balances (Safe across PostgreSQL & MySQL)
+    if (email || userId) {
+      try {
+        let uRow = null;
+        if (email) {
+          const byEmail: any = await query(`SELECT id, email, token_balance, wallet_balance FROM users WHERE email = $1 LIMIT 1`, [email]).catch(() => null);
+          uRow = Array.isArray(byEmail) ? byEmail[0] : byEmail?.rows?.[0];
+        }
+        if (!uRow && userId) {
+          const isUuidOrInt = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId) || /^\d+$/.test(userId);
+          if (isUuidOrInt) {
+            const byId: any = await query(`SELECT id, email, token_balance, wallet_balance FROM users WHERE id = $1 LIMIT 1`, [userId]).catch(() => null);
+            uRow = Array.isArray(byId) ? byId[0] : byId?.rows?.[0];
+          }
+        }
+
+        if (uRow) {
+          if (uRow.token_balance !== null && uRow.token_balance !== undefined) {
+            userBalance = Number(uRow.token_balance);
+          }
+          if (uRow.wallet_balance !== null && uRow.wallet_balance !== undefined) {
+            walletBalance = parseFloat(String(uRow.wallet_balance));
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. Fetch User Audit Ledger & Stats
+    if (email || userId) {
+      try {
+        const cleanEmail = email || '';
+        let whereClauses = [`user_email = $1`];
+        let params: any[] = [cleanEmail];
+
+        const isUuidOrInt = userId && (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId) || /^\d+$/.test(userId));
+        if (isUuidOrInt) {
+          whereClauses = [`(user_id = $1 OR user_email = $2)`];
+          params = [userId, cleanEmail];
+        }
+
+        if (search) {
+          params.push(`%${search}%`);
+          whereClauses.push(`(description ILIKE $${params.length} OR id ILIKE $${params.length})`);
+        }
+        if (type && type !== 'all') {
+          params.push(`%${type}%`);
+          whereClauses.push(`type ILIKE $${params.length}`);
+        }
+
+        const countQuery = `SELECT COUNT(*) as total FROM token_transactions WHERE ${whereClauses.join(' AND ')}`;
+        const cRes: any = await query(countQuery, params);
+        const total = parseInt((Array.isArray(cRes) ? cRes[0] : cRes?.rows?.[0])?.total || '0', 10);
+        totalPages = Math.max(1, Math.ceil(total / limit));
+
+        const offset = (page - 1) * limit;
+        params.push(limit, offset);
+        const txQuery = `
+          SELECT id, user_id, user_email, amount, balance_after, type, description, created_at
+          FROM token_transactions
+          WHERE ${whereClauses.join(' AND ')}
+          ORDER BY created_at DESC
+          LIMIT $${params.length - 1} OFFSET $${params.length}
+        `;
+        const txRes: any = await query(txQuery, params);
+        transactions = Array.isArray(txRes) ? txRes : (txRes?.rows || []);
+
+        const statsParams = isUuidOrInt ? [userId, cleanEmail] : [cleanEmail];
+        const statsWhere = isUuidOrInt ? `(user_id = $1 OR user_email = $2)` : `user_email = $1`;
+        const statsRes: any = await query(`
+          SELECT 
+            COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_deducted,
+            COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) as total_granted,
+            COUNT(*) as total_events
+          FROM token_transactions
+          WHERE ${statsWhere}
+        `, statsParams);
+        const sRow = Array.isArray(statsRes) ? statsRes[0] : statsRes?.rows?.[0];
+        if (sRow) {
+          stats = {
+            totalDeducted: Number(sRow.total_deducted || 0),
+            totalGranted: Number(sRow.total_granted || 0),
+            totalEvents: Number(sRow.total_events || 0)
+          };
+        }
+      } catch (_) {}
+    }
+
+    return NextResponse.json({
+      success: true,
+      balance: userBalance,
+      tokenBalance: userBalance,
+      walletBalance,
+      tokenSymbol,
+      tokenIcon,
+      tokenName,
+      isEnabled,
+      costs,
+      packages,
+      transactions,
+      page,
+      totalPages,
+      stats
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const action = body.action || 'purchase';
+    const userId = body.userId;
+    const userEmail = body.userEmail;
+
+    if (action === 'purchase' || action === 'purchase_package') {
+      const tokensToAdd = Number(body.tokens ?? body.tokenAmount ?? 0);
+      const priceToDeduct = Number(body.price ?? body.priceDollars ?? 0);
+      const packageName = body.packageName || 'Token Bundle';
+
+      if (!userId && !userEmail) {
+        return NextResponse.json({ success: false, error: 'User identifier required' }, { status: 400 });
+      }
+
+      let user = null;
+      if (userEmail) {
+        const byEmail: any = await query(`SELECT id, email, token_balance, wallet_balance FROM users WHERE email = $1 LIMIT 1`, [userEmail]).catch(() => null);
+        user = Array.isArray(byEmail) ? byEmail[0] : byEmail?.rows?.[0];
+      }
+      if (!user && userId) {
+        const isUuidOrInt = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId) || /^\d+$/.test(userId);
+        if (isUuidOrInt) {
+          const byId: any = await query(`SELECT id, email, token_balance, wallet_balance FROM users WHERE id = $1 LIMIT 1`, [userId]).catch(() => null);
+          user = Array.isArray(byId) ? byId[0] : byId?.rows?.[0];
+        }
+      }
+
+      if (!user) {
+        return NextResponse.json({ success: false, error: 'User account not found' }, { status: 404 });
+      }
+
+      const currentWallet = parseFloat(String(user.wallet_balance || 0));
+      if (currentWallet < priceToDeduct) {
+        return NextResponse.json({ 
+          success: false, 
+          error: `Insufficient wallet balance. Short by $${(priceToDeduct - currentWallet).toFixed(2)}.` 
+        }, { status: 400 });
+      }
+
+      const newWallet = currentWallet - priceToDeduct;
+      const newTokens = (Number(user.token_balance) || 0) + tokensToAdd;
+
+      await query(`
+        UPDATE users 
+        SET token_balance = $1, wallet_balance = $2, updated_at = NOW() 
+        WHERE id = $3
+      `, [newTokens, newWallet, user.id]);
+
+      const txId = 'tx_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+      await query(`
+        INSERT INTO token_transactions (id, user_id, user_email, amount, balance_after, type, description, created_at)
+        VALUES ($1, $2, $3, $4, $5, 'purchase', $6, NOW())
+      `, [txId, String(user.id), user.email, tokensToAdd, newTokens, `Purchased bundle: ${packageName}`]);
+
+      return NextResponse.json({
+        success: true,
+        message: 'Tokens purchased successfully!',
+        balance: newTokens,
+        walletBalance: newWallet,
+        tokensAdded: tokensToAdd,
+        amountDeducted: priceToDeduct
+      }, {
+        headers: { 'Access-Control-Allow-Origin': '*' }
+      });
+    }
+
+    return NextResponse.json({ success: false, error: 'Unsupported action' }, { status: 400 });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
 }
