@@ -47,5 +47,6 @@
   "rating": 5,
   "bookId": "book_healthy_prep",
   "createdAt": "2026-10-25T17:11:30.946Z",
-  "updatedAt": "2026-10-25T18:53:22.957Z"
+  "updatedAt": "2026-10-25T18:53:22.957Z",
+  "storageSettings": "Настройки хранилища"
 }

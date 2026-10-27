@@ -12,7 +12,7 @@ import {
   Menu, X, Wallet, Languages, Cpu, Moon, Sun, Key, Coins, 
   Bell, BellRing, User as UserIcon, ChevronDown, 
   Layers, Check, Database, Receipt, Globe, Mail, ChevronRight,
-  Plus, CheckCheck
+  Plus, CheckCheck, HardDrive
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
@@ -233,6 +233,18 @@ export default function Sidebar() {
           } catch (_) {}
         }
       }
+
+      if (u?.id || u?.email) {
+        fetch(`/api/user/sidebar-settings?userId=${encodeURIComponent(u.id || u.email)}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data?.success && data?.sections) {
+              setOpenSections(prev => ({ ...prev, ...data.sections }));
+            }
+          })
+          .catch(() => {});
+      }
+
       fetchBalancesAndTelemetry(u);
     } catch (_) {}
   }, [fetchBalancesAndTelemetry]);
@@ -355,6 +367,15 @@ export default function Sidebar() {
           localStorage.setItem('zecratary_sidebar_sections', JSON.stringify(next));
         } catch (_) {}
       }
+      const u = getCurrentUser();
+      const uId = u?.id || u?.email;
+      if (uId) {
+        fetch('/api/user/sidebar-settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: uId, sections: next })
+        }).catch(() => {});
+      }
       return next;
     });
   };
@@ -430,15 +451,26 @@ export default function Sidebar() {
     currentUser?.email?.includes('admin')
   );
 
+  const isRouteActive = (route: string): boolean => {
+    if (!pathname) return false;
+    const cleanPath = pathname === '/' ? '/' : pathname.replace(/\/+$/, '');
+    const cleanRoute = route === '/' ? '/' : route.replace(/\/+$/, '');
+
+    if (cleanRoute === '/' || cleanRoute === '/admin') {
+      return cleanPath === cleanRoute;
+    }
+    return cleanPath === cleanRoute || cleanPath.startsWith(`${cleanRoute}/`);
+  };
+
   const navClass = (route: string) => {
-    const active = pathname === route || (route !== '/' && pathname.startsWith(route));
+    const active = isRouteActive(route);
     return `flex items-center gap-3 px-3 py-2 rounded-xl font-bold text-xs transition duration-200 cursor-pointer ${
       active ? 'text-white shadow-xs' : 'hover:text-white hover:bg-slate-800/30'
     }`;
   };
 
   const navStyle = (route: string) => {
-    const active = pathname === route || (route !== '/' && pathname.startsWith(route));
+    const active = isRouteActive(route);
     return active
       ? { backgroundColor: 'var(--color-primary)', color: '#ffffff' }
       : { color: 'var(--color-text-secondary)', backgroundColor: 'transparent' };
@@ -455,6 +487,10 @@ export default function Sidebar() {
       {/* DESKTOP TOP BAR (Fixed Header with Real-Time Telemetry) */}
       <header
         id="zecratary-desktop-topbar"
+        role="banner"
+        aria-label="Application Header"
+        data-lpignore="true"
+        data-form-type="other"
         className="hidden md:flex fixed top-0 left-0 right-0 h-16 border-b z-40 items-center justify-between px-6 transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
@@ -913,6 +949,10 @@ export default function Sidebar() {
 
       {/* MOBILE APPLICATION HEADER WITH COMPACT WALLET & TOKEN WIDGETS */}
       <header
+        role="banner"
+        aria-label="Mobile Application Header"
+        data-lpignore="true"
+        data-form-type="other"
         className="md:hidden fixed top-0 left-0 right-0 h-14 border-b z-40 flex items-center justify-between px-3 transition-colors duration-200"
         style={{
           backgroundColor: 'var(--color-card)',
@@ -1012,6 +1052,10 @@ export default function Sidebar() {
 
       {/* SIDEBAR NAVIGATION DRAWER */}
       <aside
+        role="navigation"
+        aria-label="Main Navigation Sidebar"
+        data-lpignore="true"
+        data-form-type="other"
         className={`hidden md:flex flex-col fixed top-16 bottom-0 left-0 border-r z-30 transition-all duration-200 ${
           isCollapsed ? 'w-20' : 'w-64'
         }`}
@@ -1169,7 +1213,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 5. ADMIN MANAGEMENT ACCORDION */}
+          {/* 5. ADMIN MANAGEMENT ACCORDION (ALL 14 ORIGINAL + STORAGE SETTINGS) */}
           {isAdmin && (
             <div className="space-y-1 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
               {!isCollapsed ? (
@@ -1223,6 +1267,10 @@ export default function Sidebar() {
                     <Cpu className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('aiModels', 'AI Engine')}</span>}
                   </Link>
+                  <Link href="/admin/storage" className={navClass('/admin/storage')} style={navStyle('/admin/storage')} title={t('storageSettings', 'Storage Settings')}>
+                    <HardDrive className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('storageSettings', 'Storage Settings')}</span>}
+                  </Link>
                   <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} style={navStyle('/admin/recipe-type')} title={t('recipeTypes', 'Recipe Types')}>
                     <Utensils className="h-4 w-4 shrink-0" />
                     {!isCollapsed && <span>{t('recipeTypes', 'Recipe Types')}</span>}
@@ -1262,6 +1310,11 @@ export default function Sidebar() {
       {/* MOBILE APPLICATION DRAWER (CANONICAL /recipes ROUTE) */}
       {mobileMenuOpen && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mobile Navigation Drawer"
+          data-lpignore="true"
+          data-form-type="other"
           className="md:hidden fixed inset-0 z-50 flex"
           style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)' }}
           onClick={() => setMobileMenuOpen(false)}

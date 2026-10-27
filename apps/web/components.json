@@ -20,5 +20,6 @@
   "iconLibrary": "lucide",
   "registries": {
     "@supabase": "https://supabase.com/ui/r/{name}.json"
-  }
+  },
+  "storageSettings": "Storage Settings"
 }
