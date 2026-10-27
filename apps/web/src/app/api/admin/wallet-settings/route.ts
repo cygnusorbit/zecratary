@@ -37,7 +37,7 @@ export async function GET() {
       new Promise((_, reject) => setTimeout(() => reject(new Error('DB Timeout')), 3000))
     ]).catch(() => null);
 
-    const sRow = (Array.isArray(sRes) ? sRes[0] : (sRes as any)?.rows?.[0]);
+    const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
     if (sRow) {
       settings = {
         currency: sRow.currency || 'USD',
@@ -58,7 +58,7 @@ export async function GET() {
     ]).catch(() => null);
 
     if (uRes) {
-      users = (Array.isArray(uRes) ? uRes : (((uRes as any)?.rows) || []));
+      users = Array.isArray(uRes) ? uRes : (uRes.rows || []);
     }
 
     // 3. Fetch recent wallet transactions
@@ -75,7 +75,7 @@ export async function GET() {
     ]).catch(() => null);
 
     if (txRes) {
-      transactions = (Array.isArray(txRes) ? txRes : (((txRes as any)?.rows) || []));
+      transactions = Array.isArray(txRes) ? txRes : (txRes.rows || []);
     }
   } catch (err: any) {
     console.warn('[Wallet Settings API] Fallback to server JSON store:', err?.message || err);
@@ -144,7 +144,7 @@ export async function POST(req: Request) {
         [delta, email]
       );
 
-      const userRow = (Array.isArray(userRes) ? userRes[0] : (userRes as any)?.rows?.[0]);
+      const userRow = Array.isArray(userRes) ? userRes[0] : userRes?.rows?.[0];
       const newBalance = userRow ? Number(userRow.wallet_balance) : 0;
       const txId = 'wtx_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
 
@@ -172,13 +172,23 @@ export async function POST(req: Request) {
       });
     }
 
-    // 2. SAVE CONFIGURATIONS
+    // 2. SAVE COLUMN SETTINGS ACTION
+    if (body.action === 'save_column_settings') {
+      const cols = JSON.stringify(body.ledgerColumns || {});
+      await query(
+        `UPDATE wallet_settings SET ledger_columns = $1::jsonb, updated_at = NOW() WHERE id::text = 'primary_settings' OR id::text = '1'`,
+        [cols]
+      ).catch(() => {});
+      return NextResponse.json({ success: true, message: 'Column visibility preferences saved.' });
+    }
+
+    // 3. SAVE CONFIGURATIONS
     const walletSettings = body.walletSettings || body.settings || body;
     const cur = walletSettings.currency || 'USD';
-    const isEn = walletSettings.isEnabled !== undefined ? Boolean(walletSettings.isEnabled) : true;
-    const allowP = walletSettings.allowPurchases !== undefined ? Boolean(walletSettings.allowPurchases) : true;
-    const minTop = Number(walletSettings.minTopup || 5);
-    const maxTop = Number(walletSettings.maxTopup || 1000);
+    const isEn = walletSettings.isEnabled !== undefined ? Boolean(walletSettings.isEnabled) : (walletSettings.is_enabled !== undefined ? Boolean(walletSettings.is_enabled) : true);
+    const allowP = walletSettings.allowPurchases !== undefined ? Boolean(walletSettings.allowPurchases) : (walletSettings.allow_site_purchases !== undefined ? Boolean(walletSettings.allow_site_purchases) : true);
+    const minTop = Number(walletSettings.minTopup ?? walletSettings.min_topup ?? 5);
+    const maxTop = Number(walletSettings.maxTopup ?? walletSettings.max_topup ?? 1000);
     const presets = JSON.stringify(walletSettings.presetAmounts || [10, 25, 50, 100, 250]);
     const bonus = JSON.stringify(walletSettings.bonusRules || []);
     const columns = JSON.stringify(walletSettings.ledgerColumns || {});
@@ -201,6 +211,11 @@ export async function POST(req: Request) {
           updated_at = NOW()`,
         [cur, isEn, allowP, minTop, maxTop, presets, bonus, columns]
       );
+
+      await query(
+        `UPDATE admin_settings SET wallet_settings = $1::jsonb, updated_at = NOW() WHERE id::text = 'primary_settings' OR id::text = '1' OR id::text = 'current'`,
+        [JSON.stringify(walletSettings)]
+      ).catch(() => {});
     } catch (_) {}
 
     // Persist to JSON store mirror

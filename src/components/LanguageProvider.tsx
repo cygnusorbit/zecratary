@@ -48,6 +48,15 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "navPaymentGateways": "Payment Gateways",
+    "navViewStoreWallet": "Store Wallet Portal",
+    "errReasonRequired": "Please enter an administrative reason or note for this adjustment.",
+    "errSelectCustomer": "Please choose a customer from the dropdown list.",
+    "errValidAmount": "Please enter a valid positive adjustment amount.",
+    "errMinOnePreset": "You must retain at least one quick deposit preset.",
+    "errInvalidBonusTier": "Please enter valid numbers for deposit threshold and bonus percentage.",
+    "walletRegionConfig": "Wallet Configuration and Rules",
+    "walletRegionLedger": "Wallet Transactions Ledger",
     "btnUpdatePackage": "Update Package",
     "btnCancelEdit": "Cancel Edit",
     "planAllocationsHeading": "Subscription Plan Monthly Included Tokens",

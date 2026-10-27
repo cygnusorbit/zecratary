@@ -1,5 +1,5 @@
-'use client';
 // @ts-nocheck
+'use client';
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
@@ -7,7 +7,8 @@ import {
   Wallet, CreditCard, Shield, CheckCircle2, AlertCircle, Save, RefreshCw, 
   Check, Plus, Trash2, Edit3, Sliders, History, Activity, Database, 
   Coins, User as UserIcon, Columns3, ArrowUpDown, ArrowUp, ArrowDown, 
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, X, Sparkles, Gift, ArrowDownLeft, ArrowUpRight
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, X, Sparkles, Gift, ArrowDownLeft, ArrowUpRight,
+  ExternalLink, ArrowRight
 } from 'lucide-react';
 import { useTranslation } from '@/components/LanguageProvider';
 
@@ -127,6 +128,7 @@ export default function AdminWalletSettingsPage() {
 
   const isFetchingRef = useRef<boolean>(false);
   const isSavingRef = useRef<boolean>(false);
+  const columnsPopoverRef = useRef<HTMLDivElement>(null);
 
   const showToast = (type: 'success' | 'error', msg: string) => {
     setFeedback({ type, msg });
@@ -134,7 +136,7 @@ export default function AdminWalletSettingsPage() {
   };
 
   const activeCurrencySymbol = useMemo(() => {
-    const found = SUPPORTED_CURRENCIES.find(c => c.code.toUpperCase() === settings.currency.toUpperCase());
+    const found = SUPPORTED_CURRENCIES.find(c => c.code.toUpperCase() === (settings.currency || 'USD').toUpperCase());
     return found ? found.symbol : '$';
   }, [settings.currency]);
 
@@ -154,8 +156,8 @@ export default function AdminWalletSettingsPage() {
             currency: loaded.currency || 'USD',
             isEnabled: loaded.isEnabled !== undefined ? Boolean(loaded.isEnabled) : true,
             allowPurchases: loaded.allowPurchases !== undefined ? Boolean(loaded.allowPurchases) : true,
-            minTopup: Number(loaded.minTopup || 5),
-            maxTopup: Number(loaded.maxTopup || 1000),
+            minTopup: Number(loaded.minTopup ?? loaded.min_topup ?? 5),
+            maxTopup: Number(loaded.maxTopup ?? loaded.max_topup ?? 1000),
             presetAmounts: Array.isArray(loaded.presetAmounts) ? loaded.presetAmounts : DEFAULT_SETTINGS.presetAmounts,
             bonusRules: Array.isArray(loaded.bonusRules) ? loaded.bonusRules : DEFAULT_SETTINGS.bonusRules,
             ledgerColumns: loaded.ledgerColumns || DEFAULT_SETTINGS.ledgerColumns
@@ -172,6 +174,7 @@ export default function AdminWalletSettingsPage() {
     }
   }, []);
 
+  // Theme & Data Synchronization Listeners
   useEffect(() => {
     document.title = `${tr('walletSettingsDocTitle', 'Wallet Settings - Admin Console')}`;
     loadWalletData();
@@ -182,6 +185,10 @@ export default function AdminWalletSettingsPage() {
     window.addEventListener('zecratary_languages_updated', handleSync);
     window.addEventListener('zecratary_dictionary_updated', handleSync);
     window.addEventListener('zecratary_locale_changed', handleSync);
+    window.addEventListener('zecratary_theme_mode_changed', handleSync);
+    window.addEventListener('zecratary_theme_changed', handleSync);
+    window.addEventListener('zecratary_theme_updated', handleSync);
+    window.addEventListener('storage', handleSync);
 
     return () => {
       window.removeEventListener('zecratary_wallet_updated', handleSync);
@@ -189,8 +196,31 @@ export default function AdminWalletSettingsPage() {
       window.removeEventListener('zecratary_languages_updated', handleSync);
       window.removeEventListener('zecratary_dictionary_updated', handleSync);
       window.removeEventListener('zecratary_locale_changed', handleSync);
+      window.removeEventListener('zecratary_theme_mode_changed', handleSync);
+      window.removeEventListener('zecratary_theme_changed', handleSync);
+      window.removeEventListener('zecratary_theme_updated', handleSync);
+      window.removeEventListener('storage', handleSync);
     };
   }, [loadWalletData, tr]);
+
+  // Click-Outside & Escape Dismissal for Column Popover
+  useEffect(() => {
+    if (!showColumnsPopover) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (columnsPopoverRef.current && !columnsPopoverRef.current.contains(e.target as Node)) {
+        setShowColumnsPopover(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowColumnsPopover(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showColumnsPopover]);
 
   // Save Settings to Database
   const handleSaveSettings = async () => {
@@ -229,7 +259,7 @@ export default function AdminWalletSettingsPage() {
   };
 
   const handleResetDefaults = () => {
-    if (!confirm('Reset wallet settings and bonus rules to default values?')) return;
+    if (!confirm(tr('confirmResetDefaults', 'Reset wallet settings and bonus rules to default values?'))) return;
     setSettings(DEFAULT_SETTINGS);
     showToast('success', tr('toastWalletReset', 'Wallet settings reset to defaults successfully!'));
   };
@@ -249,7 +279,7 @@ export default function AdminWalletSettingsPage() {
 
   const handleRemovePreset = (val: number) => {
     if (settings.presetAmounts.length <= 1) {
-      alert('You must retain at least one quick deposit preset.');
+      showToast('error', tr('errMinOnePreset', 'You must retain at least one quick deposit preset.'));
       return;
     }
     setSettings({
@@ -262,7 +292,10 @@ export default function AdminWalletSettingsPage() {
   const handleAddBonusRule = () => {
     const thresh = parseFloat(newTierThreshold);
     const pct = parseFloat(newTierBonus);
-    if (isNaN(thresh) || thresh <= 0 || isNaN(pct) || pct <= 0) return;
+    if (isNaN(thresh) || thresh <= 0 || isNaN(pct) || pct <= 0) {
+      showToast('error', tr('errInvalidBonusTier', 'Please enter valid numbers for deposit threshold and bonus percentage.'));
+      return;
+    }
 
     const newRule: BonusRule = { threshold: thresh, bonus_percent: pct };
     const updated = [...settings.bonusRules.filter(r => r.threshold !== thresh), newRule].sort((a, b) => a.threshold - b.threshold);
@@ -281,16 +314,16 @@ export default function AdminWalletSettingsPage() {
   // Apply Manual Balance Adjustment
   const handleApplyAdjustment = async () => {
     if (!adjustEmail) {
-      alert(tr('selectCustomerPlaceholder', '-- Choose Customer --'));
+      showToast('error', tr('errSelectCustomer', 'Please choose a customer from the dropdown list.'));
       return;
     }
     const amt = parseFloat(adjustAmount);
     if (isNaN(amt) || amt <= 0) {
-      alert('Please enter a valid positive adjustment amount.');
+      showToast('error', tr('errValidAmount', 'Please enter a valid positive adjustment amount.'));
       return;
     }
     if (!adjustReason.trim()) {
-      alert(tr('adjustmentReasonLabel', 'Administrative Reason / Note *'));
+      showToast('error', tr('errReasonRequired', 'Please enter an administrative reason or note for this adjustment.'));
       return;
     }
 
@@ -330,8 +363,8 @@ export default function AdminWalletSettingsPage() {
   const handleDeleteTransactions = async (idsToDelete: string[]) => {
     if (idsToDelete.length === 0) return;
     const promptMsg = idsToDelete.length > 1
-      ? tr('confirmDeleteSelected', 'Are you sure you want to delete {count} selected transaction record(s)?').replace('{count}', String(idsToDelete.length))
-      : tr('confirmDeleteSingle', 'Are you sure you want to delete this transaction record?');
+      ? tr('confirmDeleteSelected', 'Are you sure you want to delete {count} selected transaction record(s)? This cannot be undone.').replace('{count}', String(idsToDelete.length))
+      : tr('confirmDeleteSingle', 'Are you sure you want to delete this transaction record? This cannot be undone.');
 
     if (!confirm(promptMsg)) return;
 
@@ -358,12 +391,13 @@ export default function AdminWalletSettingsPage() {
 
   // Column Visibility Handlers
   const toggleColumn = (colKey: string) => {
-    const activeCols = Object.values(settings.ledgerColumns).filter(Boolean).length;
-    if (settings.ledgerColumns[colKey] && activeCols <= 1) return; // Prevent hiding all columns
+    const currentCols = settings.ledgerColumns || DEFAULT_SETTINGS.ledgerColumns;
+    const activeCols = Object.values(currentCols).filter(Boolean).length;
+    if (currentCols[colKey] && activeCols <= 1) return;
 
     const updatedCols = {
-      ...settings.ledgerColumns,
-      [colKey]: !settings.ledgerColumns[colKey]
+      ...currentCols,
+      [colKey]: !currentCols[colKey]
     };
     setSettings({ ...settings, ledgerColumns: updatedCols });
   };
@@ -405,15 +439,26 @@ export default function AdminWalletSettingsPage() {
     setSelectedTxIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
-  // Dynamic ColSpan Calculation for Empty State
-  const activeColumnsCount = 1 + Object.values(settings.ledgerColumns).filter(Boolean).length;
+  const activeColumnsCount = 1 + Object.values(settings.ledgerColumns || DEFAULT_SETTINGS.ledgerColumns).filter(Boolean).length;
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      className="w-full max-w-full px-4 sm:px-6 lg:px-8 xl:px-10 space-y-6 pb-24 pt-2 font-sans transition-colors duration-200"
       style={{ color: 'var(--color-text)' }}
     >
-      {/* 1. Header & Actions */}
+      {/* Scoped Autofill Guardrail Style */}
+      <style jsx global>{`
+        .wallet-input:-webkit-autofill,
+        .wallet-input:-webkit-autofill:hover,
+        .wallet-input:-webkit-autofill:focus {
+          -webkit-text-fill-color: var(--color-text) !important;
+          -webkit-box-shadow: 0 0 0px 1000px var(--color-inner-dark) inset !important;
+          box-shadow: 0 0 0px 1000px var(--color-inner-dark) inset !important;
+          transition: background-color 5000s ease-in-out 0s;
+        }
+      `}</style>
+
+      {/* 1. Header & Quick Actions */}
       <div 
         className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4" 
         style={{ borderColor: 'var(--color-border)' }}
@@ -501,7 +546,7 @@ export default function AdminWalletSettingsPage() {
         </div>
       )}
 
-      {/* 2. Wallet Engine Monitor Summary Bar */}
+      {/* 2. Wallet Engine Monitor & Cross-Module Shortcuts */}
       <div 
         className="p-3.5 px-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs shadow-xs transition-colors duration-200"
         style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -523,7 +568,7 @@ export default function AdminWalletSettingsPage() {
           </span>
         </div>
 
-        <div className="flex items-center gap-4 font-semibold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
+        <div className="flex flex-wrap items-center gap-4 font-semibold text-[11px]" style={{ color: 'var(--color-text-secondary)' }}>
           <div>
             {tr('walletActiveCurrency', 'Store Currency:')}{' '}
             <span className="font-bold" style={{ color: 'var(--color-text)' }}>
@@ -535,6 +580,30 @@ export default function AdminWalletSettingsPage() {
             <span className="font-bold font-mono" style={{ color: 'var(--color-primary)' }}>
               {settings.bonusRules.length} Tiers Active
             </span>
+          </div>
+
+          <div className="flex items-center gap-2 pl-2 border-l" style={{ borderColor: 'var(--color-border)' }}>
+            <Link
+              href="/admin/payment-gateway"
+              className="flex items-center gap-1 text-[11px] font-bold hover:underline"
+              style={{ color: 'var(--color-primary)' }}
+            >
+              <CreditCard className="h-3 w-3" />
+              <span>{tr('navPaymentGateways', 'Payment Gateways')}</span>
+              <ExternalLink className="h-2.5 w-2.5" />
+            </Link>
+
+            <span className="opacity-40">•</span>
+
+            <Link
+              href="/wallet"
+              className="flex items-center gap-1 text-[11px] font-bold hover:underline"
+              style={{ color: 'var(--color-primary)' }}
+            >
+              <Wallet className="h-3 w-3" />
+              <span>{tr('navViewStoreWallet', 'Store Wallet Portal')}</span>
+              <ExternalLink className="h-2.5 w-2.5" />
+            </Link>
           </div>
         </div>
       </div>
@@ -581,7 +650,7 @@ export default function AdminWalletSettingsPage() {
       {activeTab === 'config' && (
         <div 
           role="region"
-          data-lpignore="true"
+          aria-label={tr('walletRegionConfig', 'Wallet Configuration and Rules')}
           className="space-y-6"
         >
           {/* Section 1: General Wallet Controls */}
@@ -671,7 +740,7 @@ export default function AdminWalletSettingsPage() {
                 <select
                   value={settings.currency}
                   onChange={(e) => setSettings({ ...settings, currency: e.target.value })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border font-bold outline-none cursor-pointer"
+                  className="wallet-input w-full px-3.5 py-2.5 rounded-xl border font-bold outline-none cursor-pointer"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 >
                   {SUPPORTED_CURRENCIES.map(c => (
@@ -690,9 +759,12 @@ export default function AdminWalletSettingsPage() {
                   step="0.01"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
+                  spellCheck={false}
                   value={settings.minTopup}
                   onChange={(e) => setSettings({ ...settings, minTopup: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border font-bold outline-none"
+                  className="wallet-input w-full px-3.5 py-2.5 rounded-xl border font-bold outline-none"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
@@ -707,9 +779,12 @@ export default function AdminWalletSettingsPage() {
                   step="0.01"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
+                  spellCheck={false}
                   value={settings.maxTopup}
                   onChange={(e) => setSettings({ ...settings, maxTopup: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border font-bold outline-none"
+                  className="wallet-input w-full px-3.5 py-2.5 rounded-xl border font-bold outline-none"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
@@ -725,7 +800,7 @@ export default function AdminWalletSettingsPage() {
               </p>
 
               <div className="flex flex-wrap items-center gap-2 pt-1">
-                {settings.presetAmounts.map((preset) => (
+                {(settings.presetAmounts || []).map((preset) => (
                   <div
                     key={preset}
                     className="px-3 py-1.5 rounded-xl border text-xs font-bold font-mono flex items-center gap-2 shadow-xs"
@@ -748,11 +823,14 @@ export default function AdminWalletSettingsPage() {
                     min="1"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
+                    spellCheck={false}
                     value={newPresetValue}
                     onChange={(e) => setNewPresetValue(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleAddPreset(); }}
                     placeholder={tr('placeholderNewPreset', 'e.g. 75')}
-                    className="w-24 px-3 py-1.5 rounded-xl border text-xs font-mono font-bold outline-none"
+                    className="wallet-input w-24 px-3 py-1.5 rounded-xl border text-xs font-mono font-bold outline-none"
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                   <button
@@ -768,7 +846,7 @@ export default function AdminWalletSettingsPage() {
             </div>
           </div>
 
-          {/* Section 2: Top-Up Bonus Incentives (Tiered Credit Rewards) */}
+          {/* Section 2: Top-Up Bonus Incentives */}
           <div 
             className="p-6 rounded-3xl border shadow-sm space-y-5 transition-colors duration-200"
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
@@ -785,7 +863,7 @@ export default function AdminWalletSettingsPage() {
 
             <div className="space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {settings.bonusRules.map((rule) => (
+                {(settings.bonusRules || []).map((rule) => (
                   <div
                     key={rule.threshold}
                     className="p-4 rounded-2xl border flex items-center justify-between shadow-xs transition-colors"
@@ -824,10 +902,13 @@ export default function AdminWalletSettingsPage() {
                     min="1"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
+                    spellCheck={false}
                     value={newTierThreshold}
                     onChange={(e) => setNewTierThreshold(e.target.value)}
                     placeholder="150"
-                    className="w-full px-3 py-1.5 rounded-xl border text-xs font-mono font-bold outline-none"
+                    className="wallet-input w-full px-3 py-1.5 rounded-xl border text-xs font-mono font-bold outline-none"
                     style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
@@ -842,10 +923,13 @@ export default function AdminWalletSettingsPage() {
                     max="100"
                     autoComplete="off"
                     data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
+                    spellCheck={false}
                     value={newTierBonus}
                     onChange={(e) => setNewTierBonus(e.target.value)}
                     placeholder="15"
-                    className="w-full px-3 py-1.5 rounded-xl border text-xs font-mono font-bold outline-none"
+                    className="wallet-input w-full px-3 py-1.5 rounded-xl border text-xs font-mono font-bold outline-none"
                     style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   />
                 </div>
@@ -886,7 +970,7 @@ export default function AdminWalletSettingsPage() {
                 <select
                   value={adjustEmail}
                   onChange={(e) => setAdjustEmail(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border font-bold outline-none cursor-pointer"
+                  className="wallet-input w-full px-3 py-2 rounded-xl border font-bold outline-none cursor-pointer"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 >
                   <option value="">{tr('selectCustomerPlaceholder', '-- Choose Customer --')}</option>
@@ -930,9 +1014,12 @@ export default function AdminWalletSettingsPage() {
                   step="0.01"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
+                  spellCheck={false}
                   value={adjustAmount}
                   onChange={(e) => setAdjustAmount(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
+                  className="wallet-input w-full px-3 py-2 rounded-xl border font-mono font-bold outline-none"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
@@ -945,10 +1032,13 @@ export default function AdminWalletSettingsPage() {
                   type="text"
                   autoComplete="off"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
+                  spellCheck={false}
                   value={adjustReason}
                   onChange={(e) => setAdjustReason(e.target.value)}
                   placeholder={tr('adjustmentReasonPlaceholder', 'e.g. Customer loyalty gift or refund settlement')}
-                  className="w-full px-3 py-2 rounded-xl border outline-none font-medium"
+                  className="wallet-input w-full px-3 py-2 rounded-xl border outline-none font-medium"
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                 />
               </div>
@@ -974,7 +1064,7 @@ export default function AdminWalletSettingsPage() {
       {activeTab === 'ledger' && (
         <div 
           role="region"
-          data-lpignore="true"
+          aria-label={tr('walletRegionLedger', 'Wallet Transactions Ledger')}
           className="space-y-4"
         >
           {/* Search, Filter & Columns Popover Bar */}
@@ -987,10 +1077,13 @@ export default function AdminWalletSettingsPage() {
                 type="text"
                 autoComplete="off"
                 data-lpignore="true"
+                data-1p-ignore="true"
+                data-form-type="other"
+                spellCheck={false}
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
                 placeholder={tr('ledgerSearchPlaceholder', 'Search by customer email, name, description, or transaction ID...')}
-                className="w-full px-3.5 py-2 rounded-xl border text-xs outline-none"
+                className="wallet-input w-full px-3.5 py-2 rounded-xl border text-xs outline-none"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               />
             </div>
@@ -999,7 +1092,7 @@ export default function AdminWalletSettingsPage() {
               <select
                 value={typeFilter}
                 onChange={(e) => { setTypeFilter(e.target.value); setCurrentPage(1); }}
-                className="px-3 py-2 rounded-xl border text-xs font-bold outline-none cursor-pointer"
+                className="wallet-input px-3 py-2 rounded-xl border text-xs font-bold outline-none cursor-pointer"
                 style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
               >
                 <option value="all">{tr('ledgerFilterAll', 'All Types')}</option>
@@ -1011,7 +1104,7 @@ export default function AdminWalletSettingsPage() {
               </select>
 
               {/* Columns Popover Toggle */}
-              <div className="relative">
+              <div className="relative" ref={columnsPopoverRef}>
                 <button
                   type="button"
                   onClick={() => setShowColumnsPopover(!showColumnsPopover)}
@@ -1053,9 +1146,9 @@ export default function AdminWalletSettingsPage() {
                           <span style={{ color: 'var(--color-text)' }}>{col.label}</span>
                           <input
                             type="checkbox"
-                            checked={settings.ledgerColumns[col.key] ?? true}
+                            checked={settings.ledgerColumns?.[col.key] ?? true}
                             onChange={() => toggleColumn(col.key)}
-                            className="rounded"
+                            className="rounded cursor-pointer"
                           />
                         </label>
                       ))}
@@ -1118,14 +1211,14 @@ export default function AdminWalletSettingsPage() {
                         className="rounded cursor-pointer"
                       />
                     </th>
-                    {settings.ledgerColumns.customer && <th className="px-5 py-4">{tr('colCustomer', 'Customer')}</th>}
-                    {settings.ledgerColumns.type && <th className="px-5 py-4">{tr('colType', 'Type')}</th>}
-                    {settings.ledgerColumns.amount && <th className="px-5 py-4">{tr('colAmount', 'Amount')}</th>}
-                    {settings.ledgerColumns.balanceAfter && <th className="px-5 py-4">{tr('colBalanceAfter', 'Balance After')}</th>}
-                    {settings.ledgerColumns.gateway && <th className="px-5 py-4">{tr('colGateway', 'Gateway / Ref')}</th>}
-                    {settings.ledgerColumns.description && <th className="px-5 py-4">{tr('colDescription', 'Description')}</th>}
-                    {settings.ledgerColumns.date && <th className="px-5 py-4">{tr('colDate', 'Timestamp')}</th>}
-                    {settings.ledgerColumns.actions && <th className="px-5 py-4 text-right">{tr('colActions', 'Actions')}</th>}
+                    {settings.ledgerColumns?.customer && <th className="px-5 py-4">{tr('colCustomer', 'Customer')}</th>}
+                    {settings.ledgerColumns?.type && <th className="px-5 py-4">{tr('colType', 'Type')}</th>}
+                    {settings.ledgerColumns?.amount && <th className="px-5 py-4">{tr('colAmount', 'Amount')}</th>}
+                    {settings.ledgerColumns?.balanceAfter && <th className="px-5 py-4">{tr('colBalanceAfter', 'Balance After')}</th>}
+                    {settings.ledgerColumns?.gateway && <th className="px-5 py-4">{tr('colGateway', 'Gateway / Ref')}</th>}
+                    {settings.ledgerColumns?.description && <th className="px-5 py-4">{tr('colDescription', 'Description')}</th>}
+                    {settings.ledgerColumns?.date && <th className="px-5 py-4">{tr('colDate', 'Timestamp')}</th>}
+                    {settings.ledgerColumns?.actions && <th className="px-5 py-4 text-right">{tr('colActions', 'Actions')}</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
@@ -1138,8 +1231,22 @@ export default function AdminWalletSettingsPage() {
                   ) : (
                     paginatedTxs.map((tx) => {
                       const isSelected = selectedTxIds.includes(tx.id);
-                      const amt = Number(tx.amount || 0);
-                      const isNegative = amt < 0;
+                      const rawAmt = Number(tx.amount || 0);
+                      const isTypeDebit = ['debit', 'purchase', 'withdrawal', 'fee'].includes((tx.type || '').toLowerCase());
+                      const isNegative = rawAmt < 0 || (isTypeDebit && rawAmt > 0);
+                      const displayAmt = Math.abs(rawAmt);
+
+                      let formattedDate = '—';
+                      if (tx.created_at) {
+                        try {
+                          const d = new Date(tx.created_at);
+                          if (!isNaN(d.getTime())) {
+                            formattedDate = d.toLocaleDateString(locale === 'th' ? 'th-TH' : (locale || 'en-US'), {
+                              year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                            });
+                          }
+                        } catch (_) {}
+                      }
 
                       return (
                         <tr 
@@ -1159,7 +1266,7 @@ export default function AdminWalletSettingsPage() {
                             />
                           </td>
 
-                          {settings.ledgerColumns.customer && (
+                          {settings.ledgerColumns?.customer && (
                             <td className="px-5 py-4">
                               <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>
                                 {tx.customer_name || 'Customer'}
@@ -1170,7 +1277,7 @@ export default function AdminWalletSettingsPage() {
                             </td>
                           )}
 
-                          {settings.ledgerColumns.type && (
+                          {settings.ledgerColumns?.type && (
                             <td className="px-5 py-4">
                               <span 
                                 className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border"
@@ -1185,19 +1292,19 @@ export default function AdminWalletSettingsPage() {
                             </td>
                           )}
 
-                          {settings.ledgerColumns.amount && (
+                          {settings.ledgerColumns?.amount && (
                             <td className="px-5 py-4 font-mono font-black text-sm" style={{ color: isNegative ? '#ef4444' : 'var(--color-emerald, #10b981)' }}>
-                              {isNegative ? `-${activeCurrencySymbol}${Math.abs(amt).toFixed(2)}` : `+${activeCurrencySymbol}${amt.toFixed(2)}`}
+                              {isNegative ? `-${activeCurrencySymbol}${displayAmt.toFixed(2)}` : `+${activeCurrencySymbol}${displayAmt.toFixed(2)}`}
                             </td>
                           )}
 
-                          {settings.ledgerColumns.balanceAfter && (
+                          {settings.ledgerColumns?.balanceAfter && (
                             <td className="px-5 py-4 font-mono font-bold" style={{ color: 'var(--color-text)' }}>
                               {tx.balance_after !== undefined ? `${activeCurrencySymbol}${Number(tx.balance_after).toFixed(2)}` : '—'}
                             </td>
                           )}
 
-                          {settings.ledgerColumns.gateway && (
+                          {settings.ledgerColumns?.gateway && (
                             <td className="px-5 py-4">
                               <span className="px-2 py-0.5 rounded border text-[10px] font-mono font-bold uppercase" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
                                 {tx.gateway || 'System'}
@@ -1205,19 +1312,19 @@ export default function AdminWalletSettingsPage() {
                             </td>
                           )}
 
-                          {settings.ledgerColumns.description && (
+                          {settings.ledgerColumns?.description && (
                             <td className="px-5 py-4 text-xs font-medium max-w-xs truncate" style={{ color: 'var(--color-text-secondary)' }}>
                               {tx.description || '—'}
                             </td>
                           )}
 
-                          {settings.ledgerColumns.date && (
+                          {settings.ledgerColumns?.date && (
                             <td className="px-5 py-4 text-[11px] font-mono" style={{ color: 'var(--color-text-secondary)' }}>
-                              {new Date(tx.created_at).toLocaleDateString(locale === 'th' ? 'th-TH' : (locale || 'en-US'), { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              {formattedDate}
                             </td>
                           )}
 
-                          {settings.ledgerColumns.actions && (
+                          {settings.ledgerColumns?.actions && (
                             <td className="px-5 py-4 text-right">
                               <button
                                 type="button"
@@ -1236,7 +1343,7 @@ export default function AdminWalletSettingsPage() {
               </table>
             </div>
 
-            {/* Pagination Bar */}
+            {/* Pagination Controls Bar */}
             <div 
               className="px-5 py-3.5 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs transition-colors"
               style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
@@ -1254,7 +1361,7 @@ export default function AdminWalletSettingsPage() {
                   <select
                     value={rowsPerPage}
                     onChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setCurrentPage(1); }}
-                    className="px-2 py-1 rounded-lg border text-xs font-bold outline-none cursor-pointer"
+                    className="wallet-input px-2 py-1 rounded-lg border text-xs font-bold outline-none cursor-pointer"
                     style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
                   >
                     <option value={10}>10</option>
