@@ -525,7 +525,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Saved Recipes */}
         <Link 
-          href="/saved" 
+          href="/recipes" 
           className="p-5 rounded-2xl block border transition shadow-sm group hover:scale-[1.01]"
           style={{
             backgroundColor: cCardBg,

@@ -1,3 +1,4 @@
+// Generated & Maintained by AI Collaborator - Production Build Compliant
 'use client';
 
 import packageInfo from '../../package.json';
@@ -236,12 +237,12 @@ export default function Sidebar() {
     } catch (_) {}
   }, [fetchBalancesAndTelemetry]);
 
-  // Route Auto-Expansion
+  // Route Auto-Expansion: Synchronized with canonical /recipes route
   useEffect(() => {
     if (!pathname) return;
     if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
       setOpenSections(prev => prev.create ? prev : { ...prev, create: true });
-    } else if (['/saved', '/books', '/pantry'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+    } else if (['/recipes', '/books', '/pantry'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
       setOpenSections(prev => prev.manage ? prev : { ...prev, manage: true });
     } else if (['/shopping', '/planner', '/templates'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
       setOpenSections(prev => prev.plan ? prev : { ...prev, plan: true });
@@ -1065,7 +1066,7 @@ export default function Sidebar() {
             )}
           </div>
 
-          {/* 2. MANAGE ACCORDION */}
+          {/* 2. MANAGE ACCORDION (CANONICAL /recipes ROUTE) */}
           <div className="space-y-1">
             {!isCollapsed ? (
               <button
@@ -1082,7 +1083,7 @@ export default function Sidebar() {
 
             {(openSections.manage || isCollapsed) && (
               <div className="space-y-0.5">
-                <Link href="/saved" className={navClass('/saved')} style={navStyle('/saved')} title={t('savedRecipes', 'Saved Recipes')}>
+                <Link href="/recipes" className={navClass('/recipes')} style={navStyle('/recipes')} title={t('savedRecipes', 'Saved Recipes')}>
                   <BookOpen className="h-4 w-4 shrink-0" />
                   {!isCollapsed && <span>{t('savedRecipes', 'Saved Recipes')}</span>}
                 </Link>
@@ -1258,7 +1259,7 @@ export default function Sidebar() {
         </div>
       </aside>
 
-      {/* MOBILE APPLICATION DRAWER */}
+      {/* MOBILE APPLICATION DRAWER (CANONICAL /recipes ROUTE) */}
       {mobileMenuOpen && (
         <div
           className="md:hidden fixed inset-0 z-50 flex"
@@ -1287,7 +1288,7 @@ export default function Sidebar() {
               <Link href="/chef" onClick={() => setMobileMenuOpen(false)} className={navClass('/chef')} style={navStyle('/chef')}>
                 <MessageSquare className="h-4 w-4" /> <span>{t('aiChef', 'AI Assistant')}</span>
               </Link>
-              <Link href="/saved" onClick={() => setMobileMenuOpen(false)} className={navClass('/saved')} style={navStyle('/saved')}>
+              <Link href="/recipes" onClick={() => setMobileMenuOpen(false)} className={navClass('/recipes')} style={navStyle('/recipes')}>
                 <BookOpen className="h-4 w-4" /> <span>{t('savedRecipes', 'Saved Recipes')}</span>
               </Link>
               <Link href="/books" onClick={() => setMobileMenuOpen(false)} className={navClass('/books')} style={navStyle('/books')}>

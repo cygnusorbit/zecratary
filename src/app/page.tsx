@@ -496,7 +496,7 @@ export default function DynamicHomePage() {
                         <p className="text-xs opacity-70" style={{ color: 'var(--color-text-secondary)' }}>{elem.subtitle}</p>
                       )}
                     </div>
-                    <Link href="/saved" className="text-xs font-bold flex items-center gap-1 text-[var(--color-primary)] hover:underline">
+                    <Link href="/recipes" className="text-xs font-bold flex items-center gap-1 text-[var(--color-primary)] hover:underline">
                       <span>{t('viewAllRecipes', 'View All')}</span>
                       <ChevronRight className="h-3.5 w-3.5" />
                     </Link>

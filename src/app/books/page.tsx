@@ -678,7 +678,7 @@ export default function BooksPage() {
                   <Utensils className="h-8 w-8 mx-auto opacity-30" />
                   <p>{t('noRecipesInBookYet', 'No recipes added to this cookbook yet.')}</p>
                   <Link 
-                    href="/saved"
+                    href="/recipes"
                     className="inline-block font-bold text-xs hover:underline pt-1"
                     style={{ color: 'var(--color-primary)' }}
                   >
@@ -689,7 +689,7 @@ export default function BooksPage() {
                 selectedBookRecipes.map((r) => (
                   <div
                     key={r.id}
-                    onClick={() => router.push('/saved')}
+                    onClick={() => router.push('/recipes')}
                     className="p-3 rounded-xl border flex items-center justify-between gap-3 transition cursor-pointer hover:scale-[1.01] shadow-xs"
                     style={{
                       backgroundColor: 'var(--color-inner-dark)',
@@ -717,7 +717,7 @@ export default function BooksPage() {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        router.push('/saved');
+                        router.push('/recipes');
                       }}
                       className="px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer shadow-xs hover:opacity-80"
                       style={{

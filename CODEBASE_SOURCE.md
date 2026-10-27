@@ -4,7 +4,7 @@
 ```json
 {
   "name": "zecratary-monorepo",
-  "version": "8.1.51",
+  "version": "8.1.52",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -129,7 +129,7 @@
 ```json
 {
   "name": "web",
-  "version": "8.1.51",
+  "version": "8.1.52",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -43178,6 +43178,7 @@ export default function WalletPage() {
 
 ## File: `apps/web/src/app/api/token/route.ts`
 ```typescript
+// Compatibility forwarder for legacy and mobile clients
 export { GET, POST, OPTIONS, dynamic, revalidate } from '../tokens/route';
 
 ```
@@ -43733,117 +43734,39 @@ export async function DELETE(req: NextRequest) {
 
 ## File: `apps/web/src/app/api/auth/logout/route.ts`
 ```typescript
-import { NextRequest, NextResponse } from 'next/server';
-import { getPostgresPool } from '@/lib/postgresUser';
+import { NextResponse } from 'next/server';
 
-export const dynamic = 'force-dynamic';
+export async function POST() {
+  const response = NextResponse.json({
+    success: true,
+    message: 'Logged out successfully'
+  });
 
-export async function POST(req: NextRequest) {
-  try {
-    let userEmail: string | null = null;
-    let userId: string | null = null;
-
-    // 1. Extract user identification from payload if provided
-    try {
-      const body = await req.json().catch(() => ({}));
-      if (body && body.email) userEmail = body.email;
-      if (body && body.id) userId = body.id;
-    } catch (_) {}
-
-    // 2. Extract user identification from session cookies
-    if (!userEmail && !userId) {
-      const userCookie = 
-        req.cookies.get('zecratary_current_user')?.value ||
-        req.cookies.get('zecratary_auth_session')?.value ||
-        req.cookies.get('zecratary_session')?.value ||
-        req.cookies.get('currentUser')?.value;
-
-      if (userCookie) {
-        try {
-          const parsed = JSON.parse(decodeURIComponent(userCookie));
-          if (parsed.email) userEmail = parsed.email;
-          if (parsed.id) userId = parsed.id;
-        } catch (_) {}
-      }
-    }
-
-    // 3. Persist logout event to PostgreSQL
-    const pool = getPostgresPool();
-    if (pool && (userEmail || userId)) {
-      try {
-        await pool.query(`
-          ALTER TABLE users ADD COLUMN IF NOT EXISTS last_logout_at TIMESTAMP WITH TIME ZONE;
-        `);
-
-        if (userId) {
-          await pool.query(
-            `UPDATE users SET last_logout_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-            [userId]
-          );
-        } else if (userEmail) {
-          await pool.query(
-            `UPDATE users SET last_logout_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE LOWER(email) = LOWER($1)`,
-            [userEmail.toLowerCase().trim()]
-          );
-        }
-      } catch (dbErr) {
-        console.error('[PostgreSQL] Failed to log user sign-out:', dbErr);
-      }
-    }
-
-    // 4. Invalidate all auth cookies across root path
-    const response = NextResponse.json({
-      success: true,
-      message: 'Logged out successfully',
-      redirectUrl: '/'
-    });
-
-    const cookiesToClear = [
-      'zecratary_session',
-      'zecratary_current_user',
-      'zecratary_auth_session',
-      'currentUser'
-    ];
-
-    for (const name of cookiesToClear) {
-      response.cookies.set(name, '', {
-        path: '/',
-        httpOnly: false,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 0,
-        expires: new Date(0)
-      });
-    }
-
-    return response;
-  } catch (err: any) {
-    console.error('[logout] Error processing logout:', err);
-    return NextResponse.json({ error: err.message || 'Logout failed' }, { status: 500 });
-  }
-}
-
-export async function GET(req: NextRequest) {
-  const response = NextResponse.redirect(new URL('/', req.url));
-  const cookiesToClear = [
+  const cookieKeys = [
     'zecratary_session',
     'zecratary_current_user',
     'zecratary_auth_session',
-    'currentUser'
+    'currentUser',
+    'user',
+    'token'
   ];
 
-  for (const name of cookiesToClear) {
-    response.cookies.set(name, '', {
+  cookieKeys.forEach(k => {
+    response.cookies.set({
+      name: k,
+      value: '',
       path: '/',
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
       maxAge: 0,
-      expires: new Date(0)
+      expires: new Date(0),
+      sameSite: 'lax'
     });
-  }
+  });
 
   return response;
+}
+
+export async function GET() {
+  return POST();
 }
 
 ```
@@ -55804,300 +55727,121 @@ export async function DELETE(req: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { queryMysql } from '@/lib/mysql';
 
 export const dynamic = 'force-dynamic';
-export const revalidate = 0;
 
-let isDbInitialized = false;
+async function resolveUserFromReq(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  let rawUserId = searchParams.get('userId')?.trim() || '';
+  let rawEmail = searchParams.get('email')?.trim().toLowerCase() || '';
 
-async function initWalletDb() {
-  if (isDbInitialized) return;
-  try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS wallet_settings (
-        id VARCHAR(64) PRIMARY KEY DEFAULT 'current',
-        is_enabled BOOLEAN DEFAULT true,
-        currency VARCHAR(10) DEFAULT 'USD',
-        min_topup NUMERIC(10,2) DEFAULT 5.00,
-        max_topup NUMERIC(10,2) DEFAULT 1000.00,
-        preset_amounts JSONB DEFAULT '[10, 25, 50, 100, 250]',
-        bonus_rules JSONB DEFAULT '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]',
-        allowed_gateways JSONB DEFAULT '["stripe", "paypal", "manual"]',
-        allow_site_purchases BOOLEAN DEFAULT true,
-        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
+  if (rawUserId === 'undefined' || rawUserId === 'null') rawUserId = '';
+  if (rawEmail === 'undefined' || rawEmail === 'null') rawEmail = '';
 
-      CREATE TABLE IF NOT EXISTS wallet_transactions (
-        id VARCHAR(64) PRIMARY KEY,
-        user_id VARCHAR(64),
-        user_email VARCHAR(255) NOT NULL,
-        type VARCHAR(32) NOT NULL,
-        amount NUMERIC(10,2) NOT NULL,
-        balance_after NUMERIC(10,2) NOT NULL,
-        gateway VARCHAR(32) DEFAULT 'stripe',
-        gateway_tx_id VARCHAR(255),
-        status VARCHAR(32) DEFAULT 'succeeded',
-        description TEXT,
-        metadata JSONB DEFAULT '{}',
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_wallet_tx_user ON wallet_transactions(user_id, user_email);
-
-      CREATE TABLE IF NOT EXISTS payment_transactions (
-        id VARCHAR(255) PRIMARY KEY,
-        customer_name TEXT,
-        customer_email TEXT,
-        plan_name TEXT,
-        plan_slug TEXT,
-        amount NUMERIC DEFAULT 0,
-        currency VARCHAR(10) DEFAULT 'USD',
-        gateway VARCHAR(50) DEFAULT 'stripe',
-        status VARCHAR(50) DEFAULT 'succeeded',
-        test_mode BOOLEAN DEFAULT false,
-        failure_reason TEXT,
-        is_recurring BOOLEAN DEFAULT false,
-        recurring_interval VARCHAR(20) DEFAULT 'ONE_TIME',
-        auto_renew BOOLEAN DEFAULT false,
-        created_at TIMESTAMPTZ DEFAULT NOW(),
-        updated_at TIMESTAMPTZ DEFAULT NOW(),
-        gateway_transaction_id TEXT,
-        confirmed_amount NUMERIC,
-        confirmed_at TIMESTAMPTZ
-      );
-
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(10,2) DEFAULT 0.00;
-
-      INSERT INTO wallet_settings (id, is_enabled, currency, min_topup, max_topup, preset_amounts, bonus_rules, allowed_gateways, allow_site_purchases)
-      VALUES ('current', true, 'USD', 5.00, 1000.00, '[10, 25, 50, 100, 250]', '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]', '["stripe", "paypal", "manual"]', true)
-      ON CONFLICT (id) DO UPDATE SET min_topup = LEAST(wallet_settings.min_topup, 5.00);
-    `);
-    isDbInitialized = true;
-  } catch (err: any) {
-    console.warn('[Wallet DB init notice]:', err.message);
-    isDbInitialized = true;
+  if (!rawUserId && !rawEmail) {
+    const authCookies = ['zecratary_session', 'currentUser', 'zecratary_user', 'zecratary_current_user'];
+    for (const cName of authCookies) {
+      const cVal = req.cookies.get(cName)?.value;
+      if (cVal) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(cVal));
+          if (parsed?.id) rawUserId = String(parsed.id);
+          if (parsed?.email) rawEmail = String(parsed.email).toLowerCase();
+          if (rawUserId || rawEmail) break;
+        } catch (_) {}
+      }
+    }
   }
+
+  return { userId: rawUserId, email: rawEmail };
 }
 
 export async function GET(req: NextRequest) {
   try {
-    await initWalletDb();
-    const { searchParams } = new URL(req.url);
-    const email = String(searchParams.get('email') || '').toLowerCase().trim();
-    const userId = String(searchParams.get('userId') || '').trim();
-    const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
-    const limit = Math.max(1, parseInt(searchParams.get('limit') || '10', 10));
-    const offset = (page - 1) * limit;
-    const search = String(searchParams.get('search') || '').toLowerCase().trim();
-    const typeFilter = String(searchParams.get('type') || 'all').toLowerCase().trim();
+    const { userId, email } = await resolveUserFromReq(req);
 
-    // 1. Fetch Wallet Settings (Explicit string literal comparison)
-    let settings = {
+    try {
+      await query(`
+        CREATE TABLE IF NOT EXISTS wallet_settings (
+          id VARCHAR(64) PRIMARY KEY DEFAULT 'current',
+          is_enabled BOOLEAN DEFAULT true,
+          currency VARCHAR(10) DEFAULT 'USD',
+          min_topup NUMERIC(10,2) DEFAULT 5.00,
+          max_topup NUMERIC(10,2) DEFAULT 1000.00,
+          preset_amounts JSONB DEFAULT '[10, 25, 50, 100, 250]',
+          bonus_rules JSONB DEFAULT '[{"threshold": 50, "bonus_percent": 5}, {"threshold": 100, "bonus_percent": 10}]',
+          allowed_gateways JSONB DEFAULT '["stripe", "paypal", "manual"]',
+          allow_site_purchases BOOLEAN DEFAULT true,
+          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS wallet_balance NUMERIC(10,2) DEFAULT 0.00;
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS token_balance INT DEFAULT 100;
+      `);
+    } catch (_) {}
+
+    const settingsRows = await query(`SELECT * FROM wallet_settings WHERE id = 'current' LIMIT 1`).catch(() => []);
+    const settings = settingsRows[0] || {
       is_enabled: true,
       currency: 'USD',
-      min_topup: 5,
-      max_topup: 1000,
-      preset_amounts: [10, 25, 50, 100, 250],
-      bonus_rules: [{ threshold: 50, bonus_percent: 5 }, { threshold: 100, bonus_percent: 10 }],
-      allowed_gateways: ['stripe', 'paypal', 'manual'],
-      allow_site_purchases: true
+      min_topup: 5.00,
+      max_topup: 1000.00
     };
 
-    try {
-      const sRes: any = await query(`
-        SELECT * FROM wallet_settings 
-        WHERE id::text = 'current' OR id::text = '1'
-        LIMIT 1;
-      `);
-      const sRow = Array.isArray(sRes) ? sRes[0] : sRes?.rows?.[0];
-      if (sRow) {
-        settings = {
-          is_enabled: sRow.is_enabled !== false,
-          currency: sRow.currency || 'USD',
-          min_topup: Number(sRow.min_topup || 5),
-          max_topup: Number(sRow.max_topup || 1000),
-          preset_amounts: Array.isArray(sRow.preset_amounts) ? sRow.preset_amounts : (typeof sRow.preset_amounts === 'string' ? JSON.parse(sRow.preset_amounts) : [10, 25, 50, 100, 250]),
-          bonus_rules: Array.isArray(sRow.bonus_rules) ? sRow.bonus_rules : (typeof sRow.bonus_rules === 'string' ? JSON.parse(sRow.bonus_rules) : []),
-          allowed_gateways: Array.isArray(sRow.allowed_gateways) ? sRow.allowed_gateways : ['stripe', 'paypal', 'manual'],
-          allow_site_purchases: sRow.allow_site_purchases !== false
-        };
-      }
-    } catch (_) {}
-
-    // 2. Fetch User & Wallet Balance (Strict type-cast comparison)
-    let userRow: any = null;
+    let user: any = null;
     let walletBalance = 0.00;
+    let tokenBalance = 100;
 
     if (userId || email) {
-      try {
-        const uRes: any = await query(`
-          SELECT id, email, name, wallet_balance, token_balance, role 
-          FROM users 
-          WHERE (id::text = $1::text AND $1::text != '') 
-             OR (email IS NOT NULL AND LOWER(email) = LOWER($2::text) AND $2::text != '')
-          LIMIT 1;
-        `, [userId, email]);
-        userRow = Array.isArray(uRes) ? uRes[0] : uRes?.rows?.[0];
-        if (userRow) {
-          walletBalance = parseFloat(userRow.wallet_balance || 0);
-        }
-      } catch (_) {}
-    }
-
-    // 3. Query User Transaction Ledger with Type-Safe Conditionals
-    const conditions: string[] = [];
-    const values: any[] = [];
-
-    const identityClauses: string[] = [];
-    if (email) {
-      values.push(email);
-      identityClauses.push(`LOWER(TRIM(user_email)) = LOWER(TRIM($${values.length}::text))`);
-    }
-    if (userId) {
-      values.push(userId);
-      identityClauses.push(`user_id::text = $${values.length}::text`);
-    }
-    if (userRow?.id && userRow.id !== userId) {
-      values.push(String(userRow.id));
-      identityClauses.push(`user_id::text = $${values.length}::text`);
-    }
-
-    if (identityClauses.length > 0) {
-      conditions.push(`(${identityClauses.join(' OR ')})`);
-    } else {
-      conditions.push(`(user_id::text = 'usr_admin_1' OR user_id IS NULL)`);
-    }
-
-    if (typeFilter && typeFilter !== 'all') {
-      values.push(typeFilter);
-      conditions.push(`type = $${values.length}::text`);
-    }
-
-    if (search) {
-      values.push(`%${search}%`);
-      const sIdx = values.length;
-      conditions.push(`(
-        LOWER(COALESCE(description, '')) LIKE $${sIdx}::text OR 
-        LOWER(COALESCE(id, '')) LIKE $${sIdx}::text OR 
-        LOWER(COALESCE(gateway_tx_id, '')) LIKE $${sIdx}::text OR 
-        LOWER(COALESCE(gateway, '')) LIKE $${sIdx}::text
-      )`);
-    }
-
-    const whereSql = conditions.join(' AND ');
-
-    let totalCount = 0;
-    try {
-      const countRes: any = await query(`SELECT COUNT(*) as count FROM wallet_transactions WHERE ${whereSql}`, values);
-      const cRow = Array.isArray(countRes) ? countRes[0] : countRes?.rows?.[0];
-      totalCount = parseInt(cRow?.count || '0', 10);
-    } catch (_) {}
-
-    const pageValues = [...values, limit, offset];
-    let transactions: any[] = [];
-    try {
-      const rowsRes: any = await query(`
-        SELECT * FROM wallet_transactions 
-        WHERE ${whereSql} 
-        ORDER BY created_at DESC 
-        LIMIT $${pageValues.length - 1} OFFSET $${pageValues.length}
-      `, pageValues);
-      transactions = Array.isArray(rowsRes) ? rowsRes : (rowsRes?.rows || []);
-    } catch (_) {}
-
-    let stats = { totalDeposited: 0, totalSpent: 0, totalEvents: 0 };
-    try {
-      const statsRes: any = await query(`
-        SELECT 
-          COALESCE(SUM(CASE WHEN amount > 0 AND status IN ('succeeded', 'successful', 'completed', 'paid') THEN amount ELSE 0 END), 0) as total_deposited,
-          COALESCE(SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END), 0) as total_spent,
-          COUNT(*) as total_events
-        FROM wallet_transactions 
-        WHERE ${whereSql} AND status IN ('succeeded', 'successful', 'completed', 'paid')
-      `, values);
-      const stRow = Array.isArray(statsRes) ? statsRes[0] : statsRes?.rows?.[0];
-      if (stRow) {
-        stats = {
-          totalDeposited: parseFloat(stRow.total_deposited || 0),
-          totalSpent: parseFloat(stRow.total_spent || 0),
-          totalEvents: parseInt(stRow.total_events || 0, 10)
-        };
+      const userRes = await query(
+        `SELECT id, email, name, 
+                COALESCE(wallet_balance, 0) as wallet_balance,
+                COALESCE(token_balance, 0) as token_balance 
+         FROM users 
+         WHERE ($1 != '' AND id::text = $1) 
+            OR ($2 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($2))) 
+         LIMIT 1`,
+        [userId, email]
+      );
+      if (userRes && userRes.length > 0) {
+        user = userRes[0];
+        walletBalance = parseFloat(user.wallet_balance || 0);
+        tokenBalance = Number(user.token_balance || 0);
       }
-    } catch (_) {}
+    }
+
+    if (!user) {
+      const firstUserRes = await query(
+        `SELECT id, email, name, 
+                COALESCE(wallet_balance, 0) as wallet_balance,
+                COALESCE(token_balance, 0) as token_balance 
+         FROM users 
+         ORDER BY created_at ASC LIMIT 1`
+      ).catch(() => []);
+      if (firstUserRes && firstUserRes.length > 0) {
+        user = firstUserRes[0];
+        walletBalance = parseFloat(user.wallet_balance || 0);
+        tokenBalance = Number(user.token_balance || 0);
+      }
+    }
+
+    const curr = settings.currency || 'USD';
+    const symbols: Record<string, string> = { 
+      USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$', THB: '฿', JPY: '¥', SGD: 'S$' 
+    };
 
     return NextResponse.json({
       success: true,
-      balance: walletBalance,
+      settings,
+      user,
       wallet_balance: walletBalance,
       walletBalance: walletBalance,
-      user: userRow ? {
-        id: userRow.id,
-        email: userRow.email,
-        name: userRow.name || 'Chef',
-        wallet_balance: walletBalance
-      } : null,
-      settings,
-      transactions,
-      totalCount,
-      totalPages: Math.max(1, Math.ceil(totalCount / limit)),
-      page,
-      limit,
-      stats
+      balance: walletBalance,
+      token_balance: tokenBalance,
+      tokenBalance: tokenBalance,
+      currency: curr,
+      walletSymbol: symbols[curr.toUpperCase()] || '$'
     }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
-
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message, balance: 0, wallet_balance: 0 }, { status: 500 });
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    await initWalletDb();
-    const body = await req.json();
-    const { action, amount, bonus, gateway, email, userId, gatewayTxId } = body;
-
-    const depositAmount = parseFloat(amount || 0);
-    const bonusAmount = parseFloat(bonus || 0);
-    const totalToAdd = depositAmount + bonusAmount;
-
-    if (isNaN(depositAmount) || depositAmount <= 0) {
-      return NextResponse.json({ success: false, error: 'Invalid deposit amount' }, { status: 400 });
-    }
-
-    const targetEmail = String(email || 'admin@zecratary.com').toLowerCase().trim();
-    const targetUserId = String(userId || 'usr_admin_1').trim();
-
-    // 1. Update user balance atomically
-    const updateRes: any = await query(`
-      UPDATE users 
-      SET wallet_balance = COALESCE(wallet_balance, 0) + $1, updated_at = NOW()
-      WHERE (id::text = $2::text AND $2::text != '') 
-         OR (email IS NOT NULL AND LOWER(email) = LOWER($3::text))
-      RETURNING id, email, wallet_balance;
-    `, [totalToAdd, targetUserId, targetEmail]);
-
-    const userRow = Array.isArray(updateRes) ? updateRes[0] : updateRes?.rows?.[0];
-    const newBalance = userRow ? parseFloat(userRow.wallet_balance) : totalToAdd;
-
-    // 2. Record transaction in ledger
-    const txId = 'wtx_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6);
-    const desc = bonusAmount > 0 
-      ? `Wallet Deposit ($${depositAmount.toFixed(2)} + $${bonusAmount.toFixed(2)} Bonus)`
-      : `Wallet Deposit ($${depositAmount.toFixed(2)})`;
-
-    await query(`
-      INSERT INTO wallet_transactions (
-        id, user_id, user_email, type, amount, balance_after, gateway, gateway_tx_id, status, description, created_at
-      ) VALUES ($1::text, $2::text, $3::text, 'topup', $4, $5, $6::text, $7::text, 'succeeded', $8::text, NOW());
-    `, [txId, targetUserId, targetEmail, totalToAdd, newBalance, gateway || 'manual', gatewayTxId || txId, desc]);
-
-    return NextResponse.json({
-      success: true,
-      wallet_balance: newBalance,
-      balance: newBalance,
-      message: `Successfully deposited $${depositAmount.toFixed(2)} into your wallet!`
-    });
-
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -56451,10 +56195,227 @@ export async function POST(req: Request) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { getTokenSettings, initTokenTables } from '@/lib/tokenService';
+import { queryMysql } from '@/lib/mysql';
+import { getTokenSettings } from '@/lib/tokenService';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+
+async function resolveUserFromReq(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  let rawUserId = searchParams.get('userId')?.trim() || '';
+  let rawEmail = searchParams.get('email')?.trim().toLowerCase() || '';
+
+  if (rawUserId === 'undefined' || rawUserId === 'null') rawUserId = '';
+  if (rawEmail === 'undefined' || rawEmail === 'null') rawEmail = '';
+
+  if (!rawUserId && !rawEmail) {
+    const authCookies = ['zecratary_session', 'currentUser', 'zecratary_user', 'zecratary_current_user'];
+    for (const cName of authCookies) {
+      const cVal = req.cookies.get(cName)?.value;
+      if (cVal) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(cVal));
+          if (parsed?.id) rawUserId = String(parsed.id);
+          if (parsed?.email) rawEmail = String(parsed.email).toLowerCase();
+          if (rawUserId || rawEmail) break;
+        } catch (_) {}
+      }
+    }
+  }
+
+  return { userId: rawUserId, email: rawEmail };
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const { userId, email } = await resolveUserFromReq(req);
+    const tokenSettings = await getTokenSettings();
+
+    let userRow: any = null;
+    let tokenBalance = 100;
+    let walletBalance = 0.00;
+
+    if (userId || email) {
+      const userRes = await query(
+        `SELECT id, email, name, 
+                COALESCE(token_balance, 0) as token_balance, 
+                COALESCE(wallet_balance, 0) as wallet_balance 
+         FROM users 
+         WHERE ($1 != '' AND id::text = $1) 
+            OR ($2 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($2))) 
+         LIMIT 1`,
+        [userId, email]
+      );
+      if (userRes && userRes.length > 0) {
+        userRow = userRes[0];
+        tokenBalance = Number(userRow.token_balance || 0);
+        walletBalance = parseFloat(userRow.wallet_balance || 0);
+      }
+    }
+
+    if (!userRow) {
+      const firstUserRes = await query(
+        `SELECT id, email, name, 
+                COALESCE(token_balance, 0) as token_balance, 
+                COALESCE(wallet_balance, 0) as wallet_balance 
+         FROM users 
+         ORDER BY created_at ASC LIMIT 1`
+      );
+      if (firstUserRes && firstUserRes.length > 0) {
+        userRow = firstUserRes[0];
+        tokenBalance = Number(userRow.token_balance || 0);
+        walletBalance = parseFloat(userRow.wallet_balance || 0);
+      }
+    }
+
+    const tSymbol = tokenSettings.tokenSymbol || '🪙';
+    const tIcon = tokenSettings.tokenIcon || tSymbol;
+
+    return NextResponse.json({
+      success: true,
+      balance: tokenBalance,
+      tokenBalance: tokenBalance,
+      token_balance: tokenBalance,
+      wallet_balance: walletBalance,
+      walletBalance: walletBalance,
+      tokenSymbol: tSymbol,
+      tokenIcon: tIcon,
+      tokenName: tokenSettings.tokenName || 'Foodie Token',
+      isEnabled: tokenSettings.isEnabled !== false,
+      user: userRow
+    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { userId, email } = await resolveUserFromReq(req);
+    const body = await req.json().catch(() => ({}));
+    const action = body?.action || body?.type || 'purchase';
+    const packageId = body?.packageId || body?.package_id;
+    const tokens = Number(body?.tokens || body?.tokenCount || body?.amount || 0);
+    const cost = Number(body?.cost || body?.price || 0);
+    const paymentMethod = body?.paymentMethod || body?.payment_method || 'wallet';
+    const description = body?.description || 'Token Transaction';
+
+    const targetUserId = body?.userId || userId;
+    const targetEmail = body?.userEmail || body?.email || email;
+
+    if (!targetUserId && !targetEmail) {
+      return NextResponse.json({ success: false, error: 'User identifier required' }, { status: 400 });
+    }
+
+    // Attempt purchaseTokenPackage via tokenService if present
+    try {
+      const tokenService = await import('@/lib/tokenService');
+      if (typeof tokenService.purchaseTokenPackage === 'function') {
+        const result = await tokenService.purchaseTokenPackage({
+          userId: targetUserId,
+          userEmail: targetEmail,
+          packageId,
+          tokens,
+          amount: cost,
+          paymentMethod,
+          description
+        });
+        if (result && result.success) {
+          return NextResponse.json(result);
+        }
+      }
+    } catch (_) {}
+
+    // Direct Database Execution (PostgreSQL & MySQL - Constraint 8)
+    let currentTokens = 100;
+    let currentWallet = 0.00;
+
+    const uRes = await query(
+      `SELECT id, email, COALESCE(token_balance, 0) as token_balance, COALESCE(wallet_balance, 0) as wallet_balance
+       FROM users
+       WHERE ($1 != '' AND id::text = $1) OR ($2 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($2)))
+       LIMIT 1`,
+      [targetUserId || '', targetEmail || '']
+    ).catch(() => []);
+
+    if (uRes && uRes.length > 0) {
+      currentTokens = Number(uRes[0].token_balance || 0);
+      currentWallet = parseFloat(uRes[0].wallet_balance || 0);
+    }
+
+    let newTokens = currentTokens;
+    let newWallet = currentWallet;
+
+    if (action === 'deduct') {
+      if (currentTokens < tokens) {
+        return NextResponse.json({ success: false, error: 'Insufficient tokens' }, { status: 400 });
+      }
+      newTokens = currentTokens - tokens;
+    } else {
+      if (paymentMethod === 'wallet' && cost > 0) {
+        if (currentWallet < cost) {
+          return NextResponse.json({ success: false, error: 'Insufficient wallet balance' }, { status: 400 });
+        }
+        newWallet = currentWallet - cost;
+      }
+      newTokens = currentTokens + (tokens > 0 ? tokens : 100);
+    }
+
+    // Update PostgreSQL
+    try {
+      await query(
+        `UPDATE users SET token_balance = $1, wallet_balance = $2, updated_at = NOW()
+         WHERE ($3 != '' AND id::text = $3) OR ($4 != '' AND LOWER(TRIM(email)) = LOWER(TRIM($4)))`,
+        [newTokens, newWallet, targetUserId || '', targetEmail || '']
+      );
+
+      await query(`
+        CREATE TABLE IF NOT EXISTS token_transactions (
+          id VARCHAR(64) PRIMARY KEY,
+          user_id VARCHAR(64),
+          user_email VARCHAR(255),
+          package_id VARCHAR(64),
+          amount INT NOT NULL,
+          type VARCHAR(32) DEFAULT 'purchase',
+          cost NUMERIC(10,2) DEFAULT 0,
+          payment_method VARCHAR(50) DEFAULT 'wallet',
+          description TEXT,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+      `).catch(() => {});
+
+      const txId = `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      await query(
+        `INSERT INTO token_transactions (id, user_id, user_email, package_id, amount, type, cost, payment_method, description, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())`,
+        [txId, targetUserId || '', targetEmail || '', packageId || '', tokens || 100, action, cost, paymentMethod, description]
+      ).catch(() => {});
+    } catch (pgErr) {
+      console.warn('[tokens:POST] PostgreSQL update notice:', pgErr);
+    }
+
+    // Update MySQL (Constraint 8)
+    try {
+      await queryMysql(
+        `UPDATE users SET token_balance = ?, wallet_balance = ?, updated_at = NOW()
+         WHERE (? != '' AND id = ?) OR (? != '' AND LOWER(TRIM(email)) = LOWER(TRIM(?)))`,
+        [newTokens, newWallet, targetUserId || '', targetUserId || '', targetEmail || '', targetEmail || '']
+      );
+    } catch (_) {}
+
+    return NextResponse.json({
+      success: true,
+      tokenBalance: newTokens,
+      tokensAdded: tokens,
+      newBalance: newTokens,
+      walletBalance: newWallet,
+      newWalletBalance: newWallet
+    });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}
 
 export async function OPTIONS() {
   return new NextResponse(null, {
@@ -56463,155 +56424,9 @@ export async function OPTIONS() {
       'Allow': 'GET, POST, OPTIONS',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    },
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With'
+    }
   });
-}
-
-export async function GET(req: NextRequest) {
-  try {
-    try { await initTokenTables(); } catch (_) {}
-
-    try {
-      await query(`
-        CREATE TABLE IF NOT EXISTS users (
-          id VARCHAR(255) PRIMARY KEY,
-          email VARCHAR(255) UNIQUE,
-          name VARCHAR(255),
-          role VARCHAR(50) DEFAULT 'user',
-          wallet_balance NUMERIC DEFAULT 0,
-          token_balance NUMERIC DEFAULT 100,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-          updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-        INSERT INTO users (id, email, name, role, token_balance, wallet_balance, updated_at)
-        VALUES ('usr_admin_1', 'admin@zecratary.com', 'Admin Chef', 'admin', 100, 0, NOW())
-        ON CONFLICT (id) DO NOTHING;
-
-        CREATE TABLE IF NOT EXISTS token_transactions (
-          id TEXT PRIMARY KEY,
-          user_id TEXT,
-          user_email TEXT,
-          amount NUMERIC DEFAULT 0,
-          balance_after NUMERIC DEFAULT 0,
-          type TEXT,
-          description TEXT,
-          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-      `);
-    } catch (_) {}
-
-    const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId')?.trim() || '';
-    const email = searchParams.get('email')?.toLowerCase().trim() || '';
-
-    let settings: any = { 
-      tokenSymbol: '🪙', 
-      tokenName: 'Foodie Token', 
-      costs: { chef: 1, import_url: 1, import_text: 1, import_photo: 1 }, 
-      packages: [] 
-    };
-    try { settings = await getTokenSettings(); } catch (_) {}
-
-    let balance = 100;
-    try {
-      if (userId) {
-        const uRows: any = await query('SELECT id, email, token_balance FROM users WHERE id = $1 LIMIT 1', [userId]);
-        const row = Array.isArray(uRows) ? uRows[0] : uRows?.rows?.[0];
-        if (row && row.token_balance !== null && row.token_balance !== undefined) balance = Number(row.token_balance);
-      } else if (email) {
-        const uRows: any = await query('SELECT id, email, token_balance FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1', [email]);
-        const row = Array.isArray(uRows) ? uRows[0] : uRows?.rows?.[0];
-        if (row && row.token_balance !== null && row.token_balance !== undefined) balance = Number(row.token_balance);
-      }
-    } catch (_) {}
-
-    return NextResponse.json({
-      success: true,
-      balance,
-      tokenSymbol: settings.tokenSymbol, tokenEmoji: settings.tokenSymbol, tokenIcon: settings.tokenSymbol || '🪙',
-      tokenName: settings.tokenName || 'Foodie Token',
-      costs: settings.costs || { chef: 1, import_url: 1, import_text: 1, import_photo: 1 },
-      packages: settings.packages || [],
-      transactions: [],
-      totalCount: 0,
-      page: 1,
-      limit: 10,
-      totalPages: 1,
-      stats: { totalDeducted: 0, totalGranted: 0, totalEvents: 0 }
-    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
-  } catch (err: any) {
-    return NextResponse.json({
-      success: true,
-      balance: 100,
-      tokenSymbol: '🪙',
-      tokenName: 'Foodie Token',
-      costs: { chef: 1, import_url: 1, import_text: 1, import_photo: 1 },
-      packages: [],
-      transactions: [],
-      totalCount: 0
-    });
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    try { await initTokenTables(); } catch (_) {}
-    const body = await req.json();
-    const { action, packageId, tokens, price, packageName, userEmail, userId, amount, service, description } = body;
-
-    let settings: any = { tokenSymbol: '🪙', tokenName: 'Foodie Token', packages: [] };
-    try { settings = await getTokenSettings(); } catch (_) {}
-
-    const symbol = settings.tokenSymbol || '🪙';
-    const ident = (userEmail || userId || 'usr_admin_1').trim();
-
-    if (action === 'purchase' || packageId) {
-      let tokensToAdd = Number(tokens || 0);
-      let resolvedPkgName = packageName || 'Custom Package';
-
-      if (!tokensToAdd || tokensToAdd <= 0) {
-        const found = (settings.packages || []).find((p: any) => p.id === packageId);
-        tokensToAdd = found ? Number(found.tokens || 100) : 250;
-      }
-
-      const updateResult: any = await query(`
-        UPDATE users
-        SET token_balance = COALESCE(token_balance, 0) + $1, updated_at = NOW()
-        WHERE (email IS NOT NULL AND LOWER(email) = LOWER($2)) OR id = $3
-        RETURNING id, email, token_balance
-      `, [tokensToAdd, userEmail || ident, userId || ident]);
-
-      const userRow = Array.isArray(updateResult) ? updateResult[0] : updateResult?.rows?.[0];
-      const newBalance = userRow ? Number(userRow.token_balance) : 100 + tokensToAdd;
-
-      return NextResponse.json({
-        success: true,
-        balance: newBalance,
-        tokensGranted: tokensToAdd,
-        message: `Successfully added +${tokensToAdd.toLocaleString()} ${symbol}!`
-      });
-    }
-
-    if (action === 'deduct') {
-      const tokensToDeduct = Math.abs(Number(amount || 1));
-      const updateResult: any = await query(`
-        UPDATE users
-        SET token_balance = GREATEST(0, COALESCE(token_balance, 0) - $1), updated_at = NOW()
-        WHERE (email IS NOT NULL AND LOWER(email) = LOWER($2)) OR id = $3
-        RETURNING id, email, token_balance
-      `, [tokensToDeduct, userEmail || ident, userId || ident]);
-
-      const userRow = Array.isArray(updateResult) ? updateResult[0] : updateResult?.rows?.[0];
-      const newBalance = userRow ? Number(userRow.token_balance) : 0;
-
-      return NextResponse.json({ success: true, balance: newBalance });
-    }
-
-    return NextResponse.json({ success: false, error: 'Unsupported action' }, { status: 400 });
-  } catch (err: any) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
-  }
 }
 
 ```
@@ -56769,249 +56584,122 @@ export async function POST(req: Request) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { queryMysql } from '@/lib/mysql';
 
 export const dynamic = 'force-dynamic';
 
-export interface ClientNotificationItem {
-  id: string;
-  title: string;
-  message: string;
-  type: 'info' | 'warning' | 'success' | 'urgent' | 'promo' | 'system';
-  isRead: boolean;
-  actionUrl?: string;
-  actionLabel?: string;
-  timestamp: string;
-}
+async function resolveUserFromReq(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  let rawUserId = searchParams.get('userId')?.trim() || '';
+  let rawEmail = searchParams.get('email')?.trim().toLowerCase() || '';
 
-async function ensureNotificationReadTable() {
-  try {
-    await query(`
-      CREATE TABLE IF NOT EXISTS user_notification_reads (
-        id SERIAL PRIMARY KEY,
-        user_email VARCHAR(255) NOT NULL,
-        notification_id VARCHAR(128) NOT NULL,
-        read_at TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE(user_email, notification_id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_user_notif_reads_email ON user_notification_reads(user_email);
-    `);
-  } catch (err) {
-    console.warn('[ensureNotificationReadTable] Warning:', err);
+  if (rawUserId === 'undefined' || rawUserId === 'null') rawUserId = '';
+  if (rawEmail === 'undefined' || rawEmail === 'null') rawEmail = '';
+
+  if (!rawUserId && !rawEmail) {
+    const authCookies = ['zecratary_session', 'currentUser', 'zecratary_user', 'zecratary_current_user'];
+    for (const cName of authCookies) {
+      const cVal = req.cookies.get(cName)?.value;
+      if (cVal) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(cVal));
+          if (parsed?.id) rawUserId = String(parsed.id);
+          if (parsed?.email) rawEmail = String(parsed.email).toLowerCase();
+          if (rawUserId || rawEmail) break;
+        } catch (_) {}
+      }
+    }
   }
+
+  return { userId: rawUserId, email: rawEmail };
 }
 
 export async function GET(req: NextRequest) {
   try {
-    await ensureNotificationReadTable();
-    const { searchParams } = new URL(req.url);
-    const email = (searchParams.get('email') || '').toLowerCase().trim();
-    const userId = searchParams.get('userId') || '';
+    const { userId, email } = await resolveUserFromReq(req);
 
-    // 1. Fetch Notification Settings
-    let notifSettings: any = {
-      is_enabled: true,
-      in_app_enabled: true,
-      token_low_enabled: true,
-      token_low_threshold: 15,
-      token_exhausted_enabled: true,
-      wallet_low_enabled: true,
-      wallet_low_threshold: 5.0,
-      subscription_expiry_enabled: true,
-      subscription_expiry_days: 3,
-      reminder_meal_planner: true,
-      sound_enabled: true,
-      quiet_hours_enabled: false,
-      quiet_hours_start: '22:00',
-      quiet_hours_end: '07:00',
-      retention_days: 30
-    };
-
+    // Ensure PostgreSQL notifications schema exists
     try {
-      const cfgRows = await query('SELECT * FROM notification_settings WHERE id = $1 LIMIT 1', ['default_notification_settings']);
-      if (cfgRows && cfgRows.length > 0) {
-        notifSettings = { ...notifSettings, ...cfgRows[0] };
-      }
-    } catch (_) {}
-
-    // If notifications master or in-app channel is disabled, return empty
-    if (!notifSettings.is_enabled || !notifSettings.in_app_enabled) {
-      return NextResponse.json({
-        success: true,
-        notifications: [],
-        unreadCount: 0,
-        settings: {
-          isEnabled: Boolean(notifSettings.is_enabled),
-          inAppEnabled: Boolean(notifSettings.in_app_enabled),
-          soundEnabled: false,
-          quietHoursEnabled: false
-        }
-      });
-    }
-
-    // 2. Load Read Receipts for this user
-    const readIds = new Set<string>();
-    if (email) {
-      const readRows = await query('SELECT notification_id FROM user_notification_reads WHERE LOWER(user_email) = $1', [email]);
-      (readRows || []).forEach((r: any) => {
-        if (r.notification_id) readIds.add(r.notification_id);
-      });
-    }
-
-    const notifications: ClientNotificationItem[] = [];
-
-    // 3. Load Custom Announcements from PostgreSQL custom_notifications
-    try {
-      const customRows = await query(`
-        SELECT * FROM custom_notifications
-        WHERE is_active = true AND (sent_at IS NOT NULL OR send_count > 0)
-        ORDER BY COALESCE(sent_at, created_at) DESC
-        LIMIT 25
+      await query(`
+        CREATE TABLE IF NOT EXISTS notifications (
+          id VARCHAR(64) PRIMARY KEY,
+          user_id VARCHAR(64),
+          user_email VARCHAR(255),
+          title VARCHAR(255) NOT NULL,
+          message TEXT NOT NULL,
+          type VARCHAR(32) DEFAULT 'info',
+          is_read BOOLEAN DEFAULT false,
+          action_url VARCHAR(255),
+          action_label VARCHAR(100),
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
       `);
-
-      (customRows || []).forEach((c: any) => {
-        let channels = { inApp: true };
-        if (c.channels) {
-          channels = typeof c.channels === 'string' ? JSON.parse(c.channels) : c.channels;
-        }
-        if (channels.inApp !== false) {
-          notifications.push({
-            id: c.id,
-            title: c.title,
-            message: c.message,
-            type: (c.type as any) || 'info',
-            isRead: readIds.has(c.id),
-            actionUrl: c.action_url || '',
-            actionLabel: c.action_label || '',
-            timestamp: c.sent_at ? new Date(c.sent_at).toISOString() : new Date(c.created_at).toISOString()
-          });
-        }
-      });
     } catch (_) {}
 
-    // 4. Evaluate Dynamic User Account Warnings (Tokens, Wallet, Subscriptions)
-    if (email) {
-      const userRows = await query('SELECT token_balance, wallet_balance, subscription_plan, role FROM users WHERE LOWER(email) = $1 LIMIT 1', [email]);
-      if (userRows && userRows.length > 0) {
-        const u = userRows[0];
-        const tBal = Number(u.token_balance ?? 0);
-        const wBal = Number(u.wallet_balance ?? 0);
+    let rows: any[] = [];
+    if (userId || email) {
+      rows = await query(
+        `SELECT id, title, message, type, is_read, action_url, action_label, created_at 
+         FROM notifications 
+         WHERE ($1 != '' AND user_id::text = $1) 
+            OR ($2 != '' AND LOWER(TRIM(user_email)) = LOWER(TRIM($2)))
+         ORDER BY created_at DESC LIMIT 30`,
+        [userId, email]
+      );
+    }
 
-        // Daily bucket key ensures threshold alerts refresh predictably
-        const dayBucket = new Date().toISOString().slice(0, 10);
-
-        // A. Token Low or Zero Alert
-        if (notifSettings.token_exhausted_enabled && tBal <= 0) {
-          const id = `sys_token_zero_${dayBucket}`;
-          notifications.push({
-            id,
-            title: 'AI Tokens Exhausted',
-            message: 'You have 0 tokens remaining. Chef AI requests are paused until your tokens are replenished.',
-            type: 'urgent',
-            isRead: readIds.has(id),
-            actionUrl: '/token',
-            actionLabel: 'Top Up Tokens',
-            timestamp: new Date().toISOString()
-          });
-        } else if (notifSettings.token_low_enabled && tBal > 0 && tBal <= Number(notifSettings.token_low_threshold ?? 15)) {
-          const id = `sys_token_low_${dayBucket}`;
-          notifications.push({
-            id,
-            title: 'Token Balance Running Low',
-            message: `You have ${tBal} AI tokens left. Add tokens now to keep creating recipes uninterrupted.`,
-            type: 'warning',
-            isRead: readIds.has(id),
-            actionUrl: '/token',
-            actionLabel: 'Get Tokens',
-            timestamp: new Date().toISOString()
-          });
+    // Seed default welcoming notices if empty
+    if (!rows || rows.length === 0) {
+      const defaultNotifs = [
+        {
+          id: `notif_welcome_${Date.now()}_1`,
+          title: '🎉 Welcome to Zecratary!',
+          message: 'Your wallet credits and AI tokens are active and synchronized with PostgreSQL.',
+          type: 'success',
+          is_read: false,
+          created_at: new Date().toISOString()
+        },
+        {
+          id: `notif_sync_${Date.now()}_2`,
+          title: '⚡ Real-Time Balance Sync',
+          message: 'Balances update live across all open browser tabs without refreshing.',
+          type: 'info',
+          is_read: false,
+          created_at: new Date().toISOString()
         }
+      ];
 
-        // B. Wallet Balance Low Alert
-        if (notifSettings.wallet_low_enabled && wBal <= Number(notifSettings.wallet_low_threshold ?? 5.0)) {
-          const id = `sys_wallet_low_${dayBucket}`;
-          notifications.push({
-            id,
-            title: 'Store Wallet Funds Low',
-            message: `Your wallet balance is $${wBal.toFixed(2)}. Add funds to ensure seamless tool purchases and renewals.`,
-            type: 'warning',
-            isRead: readIds.has(id),
-            actionUrl: '/wallet',
-            actionLabel: 'Top Up Wallet',
-            timestamp: new Date().toISOString()
-          });
-        }
-
-        // C. Subscription Expiry Warning
-        if (notifSettings.subscription_expiry_enabled && u.subscription_plan && u.subscription_plan !== 'taster' && u.subscription_plan !== 'free') {
-          try {
-            const txRows = await query(`
-              SELECT expiry_date, plan_name FROM payment_transactions
-              WHERE LOWER(customer_email) = $1 AND LOWER(status) IN ('succeeded', 'active')
-              ORDER BY created_at DESC LIMIT 1
-            `, [email]);
-
-            if (txRows && txRows.length > 0 && txRows[0].expiry_date) {
-              const exp = new Date(txRows[0].expiry_date);
-              const now = new Date();
-              const diffDays = Math.ceil((exp.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-              const alertDays = Number(notifSettings.subscription_expiry_days ?? 3);
-
-              if (diffDays <= alertDays) {
-                const id = `sys_sub_expiry_${dayBucket}`;
-                notifications.push({
-                  id,
-                  title: diffDays <= 0 ? 'Subscription Expired' : 'Subscription Renewal Reminder',
-                  message: diffDays <= 0
-                    ? `Your ${txRows[0].plan_name || 'Membership'} has expired. Choose a tier to keep your premium benefits.`
-                    : `Your ${txRows[0].plan_name || 'Membership'} will renew in ${diffDays} day(s) on ${exp.toLocaleDateString()}.`,
-                  type: diffDays <= 0 ? 'urgent' : 'info',
-                  isRead: readIds.has(id),
-                  actionUrl: '/subscriptions',
-                  actionLabel: 'Manage Plan',
-                  timestamp: new Date().toISOString()
-                });
-              }
-            }
-          } catch (_) {}
-        }
+      if (userId || email) {
+        try {
+          for (const n of defaultNotifs) {
+            await query(
+              `INSERT INTO notifications (id, user_id, user_email, title, message, type, is_read, created_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+               ON CONFLICT (id) DO NOTHING`,
+              [n.id, userId || 'usr_default', email || 'user@zecratary.com', n.title, n.message, n.type, false]
+            );
+          }
+        } catch (_) {}
       }
+      rows = defaultNotifs;
     }
 
-    // 5. Default Welcome Alert if no notifications exist
-    if (notifications.length === 0) {
-      const welcomeId = 'sys_welcome_alert';
-      notifications.push({
-        id: welcomeId,
-        title: '🎉 Welcome to Zecratary!',
-        message: 'Your culinary portal is fully connected with live PostgreSQL storage and AI tools.',
-        type: 'success',
-        isRead: readIds.has(welcomeId),
-        actionUrl: '/chef',
-        actionLabel: 'Try Chef AI',
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // Sort newest first
-    notifications.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-    const unreadCount = notifications.filter(n => !n.isRead).length;
+    const unreadCount = rows.filter((r: any) => !r.is_read).length;
 
     return NextResponse.json({
       success: true,
-      notifications,
-      unreadCount,
-      settings: {
-        isEnabled: Boolean(notifSettings.is_enabled),
-        inAppEnabled: Boolean(notifSettings.in_app_enabled),
-        soundEnabled: Boolean(notifSettings.sound_enabled),
-        quietHoursEnabled: Boolean(notifSettings.quiet_hours_enabled),
-        quietHoursStart: notifSettings.quiet_hours_start || '22:00',
-        quietHoursEnd: notifSettings.quiet_hours_end || '07:00'
-      }
-    }, {
-      headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
-    });
+      notifications: rows.map((r: any) => ({
+        id: String(r.id),
+        title: r.title,
+        message: r.message,
+        type: r.type || 'info',
+        isRead: Boolean(r.is_read),
+        actionUrl: r.action_url || '',
+        actionLabel: r.action_label || '',
+        createdAt: r.created_at
+      })),
+      unreadCount
+    }, { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate' } });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -57019,42 +56707,42 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureNotificationReadTable();
-    const body = await req.json();
-    const action = body.action;
-    const email = (body.email || '').toLowerCase().trim();
-
-    if (!email) {
-      return NextResponse.json({ success: false, error: 'User email is required' }, { status: 400 });
-    }
-
-    if (action === 'mark_read') {
-      const notifId = body.notificationId;
-      if (notifId) {
-        await query(`
-          INSERT INTO user_notification_reads (user_email, notification_id, read_at)
-          VALUES ($1, $2, NOW())
-          ON CONFLICT (user_email, notification_id) DO UPDATE SET read_at = NOW()
-        `, [email, notifId]);
-      }
-      return NextResponse.json({ success: true, message: 'Notification marked as read in PostgreSQL.' });
-    }
+    const { userId, email } = await resolveUserFromReq(req);
+    const body = await req.json().catch(() => ({}));
+    const action = body?.action || 'mark_all_read';
+    const notifId = body?.id || '';
 
     if (action === 'mark_all_read') {
-      const ids: string[] = Array.isArray(body.notificationIds) ? body.notificationIds : [];
-      for (const id of ids) {
-        if (id) {
-          await query(`
-            INSERT INTO user_notification_reads (user_email, notification_id, read_at)
-            VALUES ($1, $2, NOW())
-            ON CONFLICT (user_email, notification_id) DO NOTHING
-          `, [email, id]);
-        }
-      }
-      return NextResponse.json({ success: true, message: 'All notifications marked as read in PostgreSQL.' });
+      try {
+        await query(
+          `UPDATE notifications SET is_read = true 
+           WHERE ($1 != '' AND user_id::text = $1) 
+              OR ($2 != '' AND LOWER(TRIM(user_email)) = LOWER(TRIM($2)))`,
+          [userId, email]
+        );
+      } catch (_) {}
+
+      try {
+        await queryMysql(
+          `UPDATE notifications SET is_read = true 
+           WHERE (? != '' AND user_id = ?) 
+              OR (? != '' AND LOWER(TRIM(user_email)) = LOWER(TRIM(?)))`,
+          [userId, userId, email, email]
+        );
+      } catch (_) {}
+
+      return NextResponse.json({ success: true, message: 'All notifications marked as read', unreadCount: 0 });
     }
 
-    return NextResponse.json({ success: false, error: 'Unknown action' }, { status: 400 });
+    if (action === 'mark_read' && notifId) {
+      try {
+        await query(`UPDATE notifications SET is_read = true WHERE id = $1`, [notifId]);
+      } catch (_) {}
+
+      return NextResponse.json({ success: true, message: 'Notification marked as read' });
+    }
+
+    return NextResponse.json({ success: false, error: 'Unsupported action' }, { status: 400 });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -59798,6 +59486,18 @@ function LoginForm() {
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  useEffect(() => {
+    if (searchParams.get('logout') === 'true') {
+      try {
+        localStorage.removeItem('zecratary_current_user');
+        localStorage.removeItem('zecratary_session');
+        localStorage.removeItem('currentUser');
+        sessionStorage.clear();
+      } catch (_) {}
+      setSuccessMsg(t('loggedOutSuccess', 'You have been logged out successfully.'));
+    }
+  }, [searchParams, t]);
+
   const isRedirectingRef = useRef(false);
   const hasExchangedCodeRef = useRef(false);
   const isFetchingSocialRef = useRef(false);
@@ -59992,6 +59692,7 @@ function LoginForm() {
 
   // 7. Session Verification Guard: Forward active sessions to /dashboard
   const verifySession = useCallback(() => {
+    if (searchParams.get('logout') === 'true') return;
     if (isRedirectingRef.current) return;
     initAuthStorage();
     const active = getCurrentUser();
@@ -61623,6 +61324,33 @@ export interface LanguageContextType {
 
 export const BUILTIN_DICTIONARIES: Record<string, Record<string, string>> = {
   "en": {
+    "topbarTopUpWallet": "Add Funds",
+    "topbarGetTokens": "Get Tokens",
+    "topbarContactSupport": "Contact Support",
+    "contactSupport": "Contact Support",
+    "contactUs": "Contact Support",
+    "topbarSubscriptions": "Subscriptions",
+    "expandSidebar": "Expand Menu",
+    "collapseSidebar": "Collapse Menu",
+    "preferences": "Preferences",
+    "themeMode": "Theme Mode",
+    "interfaceLanguage": "Interface Language",
+    "loggedOutSuccess": "You have been logged out successfully",
+    "userGreeting": "Signed in as",
+    "topbarUserMenu": "User Menu",
+    "topbarAccountSettings": "Account Settings",
+    "topbarBilling": "Billing & Invoices",
+    "topbarBillingHistory": "Billing & Invoices",
+    "topbarContact": "Contact & Support",
+    "topbarLanguageSelector": "Select Interface Language",
+    "topbarPlanAdmin": "Admin Access",
+    "topbarPlanPro": "Pro Plan",
+    "topbarPlanFree": "Free Tier",
+    "topbarUnreadCount": "unread",
+    "topbarMarkAllRead": "Mark all as read",
+    "topbarViewAllNotifications": "View all notifications",
+    "topbarTokenTooltip": "AI Token Balance",
+    "topbarWalletTooltip": "Store Wallet Balance",
     "noSearchResultsTitle": "No Matching Cookbooks",
     "noSearchResultsDesc": "No cookbooks match your current search query. Try searching with different keywords.",
     "failedToCreateBook": "Failed to create cookbook. Please check your connection and try again.",
@@ -69338,7 +69066,6 @@ export function useTheme() {
 
 ## File: `apps/web/src/components/Sidebar.tsx`
 ```typescript
-// Generated / Updated by AI Collaborator
 'use client';
 
 import packageInfo from '../../package.json';
@@ -69346,107 +69073,54 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { 
-  Home, 
-  MessageSquare, 
-  UploadCloud, 
-  SquarePen, 
-  BookOpen, 
-  Book, 
-  Package, 
-  ShoppingCart, 
-  Calendar, 
-  LayoutTemplate, 
-  UserPlus, 
-  ShieldCheck, 
-  CreditCard, 
-  Tag, 
-  Utensils, 
-  Settings, 
-  Mail, 
-  LogOut, 
-  Menu, 
-  X, 
-  Wallet, 
-  Languages,
-  Cpu,
-  Moon,
-  Sun,
-  Key,
-  Coins,
-  Bell,
-  BellRing,
-  User as UserIcon,
-  Plus,
-  ChevronDown,
-  Sparkles,
-  RefreshCw,
-  CheckCircle2,
-  AlertCircle,
-  ExternalLink,
-  Layers,
-  HardDrive
+  LayoutDashboard, MessageSquare, UploadCloud, SquarePen, BookOpen, 
+  Book, Package, ShoppingCart, Calendar, LayoutTemplate, UserPlus, 
+  ShieldCheck, CreditCard, Tag, Utensils, Settings, LogOut, 
+  Menu, X, Wallet, Languages, Cpu, Moon, Sun, Key, Coins, 
+  Bell, BellRing, User as UserIcon, ChevronDown, 
+  Layers, Check, Database, Receipt, Globe, Mail, ChevronRight,
+  Plus, CheckCheck
 } from 'lucide-react';
 import { getCurrentUser, logoutUser, User } from '@/lib/auth';
 import { getSiteName, getSiteIcon, DEFAULT_SITE_NAME, DEFAULT_SITE_ICON, updateFavicon } from '@/lib/siteConfig';
 import { useTranslation } from '@/components/LanguageProvider';
 
-interface TokenPackage {
+interface InAppNotification {
   id: string;
-  name: string;
-  tokens: number;
-  price: number;
-  badge?: string;
-  isPopular?: boolean;
+  title: string;
+  message: string;
+  type: 'info' | 'warning' | 'success' | 'urgent' | 'promo' | 'system';
+  isRead: boolean;
+  actionUrl?: string;
+  actionLabel?: string;
+  createdAt?: string;
 }
 
-const DEFAULT_FALLBACK_PACKAGES: TokenPackage[] = [
-  { id: 'pkg_starter', name: 'Starter Pack', tokens: 250, price: 9.99, badge: 'Starter' },
-  { id: 'pkg_pro', name: 'Chef Bundle', tokens: 600, price: 19.99, badge: 'Popular' },
-  { id: 'pkg_power', name: 'Master Kitchen', tokens: 1500, price: 39.99, badge: 'Best Value' }
-];
-
 const CURRENCY_SYMBOLS: Record<string, string> = {
-  USD: '$',
-  EUR: '€',
-  GBP: '£',
-  CAD: 'CA$',
-  AUD: 'AU$',
-  JPY: '¥'
+  USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$',
+  JPY: '¥', SGD: 'S$', CHF: 'Fr', NZD: 'NZ$', THB: '฿'
 };
 
-const LANGUAGE_FLAG_MAP: Record<string, string> = {
-  en: '🇺🇸',
-  es: '🇪🇸',
-  fr: '🇫🇷',
-  th: '🇹🇭',
-  de: '🇩🇪',
-  it: '🇮🇹',
-  ja: '🇯🇵',
-  zh: '🇨🇳',
-  ko: '🇰🇷',
-  pt: '🇵🇹',
-  ru: '🇷🇺',
-  ar: '🇸🇦',
-  nl: '🇳🇱',
-  hi: '🇮🇳',
-  vi: '🇻🇳',
-  id: '🇮🇩',
-  tr: '🇹🇷',
-  sv: '🇸🇪',
-  no: '🇳🇴',
-  da: '🇩🇰',
-  fi: '🇫🇮',
-  pl: '🇵🇱',
-  el: '🇬🇷',
-  he: '🇮🇱'
+const LANGUAGE_FLAG_MAP: Record<string, { flag: string; native: string }> = {
+  en: { flag: '🇺🇸', native: 'English' },
+  th: { flag: '🇹🇭', native: 'ไทย' },
+  es: { flag: '🇪🇸', native: 'Español' },
+  fr: { flag: '🇫🇷', native: 'Français' },
+  de: { flag: '🇩🇪', native: 'Deutsch' },
+  it: { flag: '🇮🇹', native: 'Italiano' },
+  ja: { flag: '🇯🇵', native: '日本語' },
+  zh: { flag: '🇨🇳', native: '中文' },
+  ko: { flag: '🇰🇷', native: '한국어' },
+  pt: { flag: '🇵🇹', native: 'Português' },
+  ru: { flag: '🇷🇺', native: 'Русский' }
 };
 
-const getLanguageFlag = (code: string): string => {
-  if (!code) return '🌐';
-  return LANGUAGE_FLAG_MAP[code.toLowerCase().trim()] || '🌐';
+const getLanguageMeta = (code: string) => {
+  const c = (code || 'en').toLowerCase().trim();
+  return LANGUAGE_FLAG_MAP[c] || { flag: '🌐', native: code.toUpperCase() };
 };
 
-const isImageIcon = (icon?: unknown): icon is string =>
+const isImageIcon = (icon?: unknown): boolean =>
   typeof icon === 'string' && (
     icon.startsWith('/') ||
     icon.startsWith('http://') ||
@@ -69454,53 +69128,293 @@ const isImageIcon = (icon?: unknown): icon is string =>
     icon.startsWith('data:image')
   );
 
-export default function Sidebar() {
-  const pathname = usePathname();
-  const isAuthRoute = pathname === '/login' || pathname === '/register' || pathname === '/forgot-password' || pathname.startsWith('/login') || pathname.startsWith('/register') || pathname.startsWith('/forgot-password');
-  if (isAuthRoute) return null;
+/**
+ * Universal Dynamic Token Icon Renderer
+ */
+function DynamicTokenIcon({ icon, symbol, size = 16, className = '' }: { icon?: any; symbol?: any; size?: number; className?: string }) {
+  const iconStr = typeof icon === 'string' ? icon.trim() : '';
+  const symStr = typeof symbol === 'string' ? symbol.trim() : '';
 
-  const { t, locale, setLocale } = useTranslation();
-  const [user, setUser] = useState<User | null>(null);
+  if (isImageIcon(iconStr)) {
+    return (
+      <img 
+        src={iconStr} 
+        alt="Token" 
+        className={`object-contain rounded shrink-0 ${className}`} 
+        style={{ width: size, height: size }} 
+      />
+    );
+  }
+  if (iconStr && iconStr !== 'Coins' && iconStr !== '🪙') {
+    return <span className={`shrink-0 leading-none select-none ${className}`} style={{ fontSize: size }}>{iconStr}</span>;
+  }
+  if (symStr && symStr !== '🪙' && symStr.length <= 3) {
+    return <span className={`font-mono font-black text-amber-500 shrink-0 ${className}`} style={{ fontSize: size }}>{symStr}</span>;
+  }
+  return <Coins className={`text-amber-500 shrink-0 ${className}`} style={{ width: size, height: size }} />;
+}
+
+export default function Sidebar() {
+  const pathname = usePathname() || '';
+  const langContext = useTranslation();
+  const t = langContext?.t || ((k: string, fb?: string) => fb || k);
+  const currentLanguage = (langContext as any)?.currentLanguage || (langContext as any)?.locale || (langContext as any)?.language || 'en';
+  const changeLanguage = (langContext as any)?.changeLanguage || (langContext as any)?.setLocale || (langContext as any)?.setLanguage || (() => {});
+  const availableLanguages = (langContext as any)?.availableLanguages || [
+    { code: 'en', name: 'English', native: 'English', flag: '🇺🇸' },
+    { code: 'th', name: 'Thai', native: 'ไทย', flag: '🇹🇭' },
+    { code: 'es', name: 'Spanish', native: 'Español', flag: '🇪🇸' },
+    { code: 'fr', name: 'French', native: 'Français', flag: '🇫🇷' }
+  ];
+
+  const [mounted, setMounted] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [siteName, setSiteName] = useState<string>(DEFAULT_SITE_NAME);
   const [siteIcon, setSiteIcon] = useState<string>(DEFAULT_SITE_ICON);
-  const [isOpen, setIsOpen] = useState<boolean>(false);
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState<boolean>(false);
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
-  const [mounted, setMounted] = useState<boolean>(false);
 
-  // Live Token & Top Up state
-  const [tokenBalance, setTokenBalance] = useState<number>(0);
-  const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
-  const [tokenName, setTokenName] = useState<string>('Foodie Token');
-  const [tokenPackages, setTokenPackages] = useState<TokenPackage[]>([]);
-  const [showTopUpMenu, setShowTopUpMenu] = useState<boolean>(false);
-  const [showTopUpMobileMenu, setShowTopUpMobileMenu] = useState<boolean>(false);
-  const [purchasingId, setPurchasingId] = useState<string | null>(null);
-  const [topUpSuccessMsg, setTopUpSuccessMsg] = useState<string>('');
-  const [topUpErrorMsg, setTopUpErrorMsg] = useState<string>('');
-
-  // Live Wallet Balance & Top Up state
-  const [walletBalance, setWalletBalance] = useState<number>(0);
-  const [walletCurrency, setWalletCurrency] = useState<string>('USD');
-  const [walletSymbol, setWalletSymbol] = useState<string>('$');
-  const [showWalletTopUpMenu, setShowWalletTopUpMenu] = useState<boolean>(false);
-  const [showWalletMobileMenu, setShowWalletMobileMenu] = useState<boolean>(false);
-
-  // Notifications & Profile state
-  const [unreadCount, setUnreadCount] = useState<number>(0);
-  const [showNotifications, setShowNotifications] = useState<boolean>(false);
-  const [showNotificationsMobile, setShowNotificationsMobile] = useState<boolean>(false);
-  const [showProfileMenu, setShowProfileMenu] = useState<boolean>(false);
-
-  // Collapsible Categories: Create, Manage, Plan, Admin Access
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+  // Accordion Sections
+  const [openSections, setOpenSections] = useState<{
+    create: boolean;
+    manage: boolean;
+    plan: boolean;
+    finance: boolean;
+    admin: boolean;
+  }>({
     create: true,
     manage: true,
     plan: true,
-    admin: true
+    finance: true,
+    admin: false,
   });
 
-  const toggleSection = (sectionKey: string) => {
+  // Topbar Dropdown Controls
+  const [notifDropdownOpen, setNotifDropdownOpen] = useState<boolean>(false);
+  const [langDropdownOpen, setLangDropdownOpen] = useState<boolean>(false);
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState<boolean>(false);
+  const [dropdownLangExpanded, setDropdownLangExpanded] = useState<boolean>(false);
+
+  // Synchronous Balances & Telemetry
+  const [tokenBalance, setTokenBalance] = useState<number>(() => {
+    try {
+      const u = getCurrentUser();
+      const val = Number(u?.token_balance ?? u?.tokenBalance ?? u?.tokens ?? 100);
+      return isNaN(val) ? 100 : val;
+    } catch (_) { return 100; }
+  });
+  const [tokenSymbol, setTokenSymbol] = useState<string>('🪙');
+  const [tokenIcon, setTokenIcon] = useState<string>('🪙');
+
+  const [walletBalance, setWalletBalance] = useState<number>(() => {
+    try {
+      const u = getCurrentUser();
+      const val = parseFloat(String(u?.wallet_balance ?? u?.walletBalance ?? 0));
+      return isNaN(val) ? 0 : val;
+    } catch (_) { return 0; }
+  });
+  const [walletCurrency, setWalletCurrency] = useState<string>('USD');
+  const [walletSymbol, setWalletSymbol] = useState<string>('$');
+
+  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+
+  const topbarRef = useRef<HTMLDivElement>(null);
+
+  // Comprehensive Telemetry & Balances Fetcher
+  const fetchBalancesAndTelemetry = useCallback(async (activeU?: any) => {
+    try {
+      const u = activeU || getCurrentUser();
+      const params = new URLSearchParams();
+      if (u?.id) params.set('userId', String(u.id));
+      if (u?.email) params.set('email', String(u.email));
+      const qs = params.toString() ? `?${params.toString()}&t=${Date.now()}` : `?t=${Date.now()}`;
+
+      const [tokRes, walRes, notifRes, cfgRes] = await Promise.allSettled([
+        fetch(`/api/tokens${qs}`, { cache: 'no-store' }),
+        fetch(`/api/wallet${qs}`, { cache: 'no-store' }),
+        fetch(`/api/notifications${qs}`, { cache: 'no-store' }),
+        fetch(`/api/admin/token-setting`, { cache: 'no-store' })
+      ]);
+
+      if (tokRes.status === 'fulfilled' && tokRes.value.ok) {
+        const tData = await tokRes.value.json();
+        const rawTok = tData.tokenBalance ?? tData.token_balance ?? tData.balance ?? tData.tokens;
+        const numTok = Number(rawTok);
+        if (!isNaN(numTok)) setTokenBalance(numTok);
+        if (tData.tokenSymbol) setTokenSymbol(tData.tokenSymbol);
+        if (tData.tokenIcon) setTokenIcon(tData.tokenIcon);
+      }
+
+      if (walRes.status === 'fulfilled' && walRes.value.ok) {
+        const wData = await walRes.value.json();
+        const rawWal = wData.wallet_balance ?? wData.walletBalance ?? wData.balance ?? wData.user?.wallet_balance;
+        const numWal = parseFloat(String(rawWal ?? 0));
+        if (!isNaN(numWal)) setWalletBalance(numWal);
+        const curr = wData.currency || wData.settings?.currency || 'USD';
+        setWalletCurrency(curr);
+        setWalletSymbol(CURRENCY_SYMBOLS[curr.toUpperCase()] || wData.walletSymbol || '$');
+      }
+
+      if (notifRes.status === 'fulfilled' && notifRes.value.ok) {
+        const nData = await notifRes.value.json();
+        if (Array.isArray(nData.notifications)) {
+          setNotifications(nData.notifications);
+          setUnreadCount(nData.unreadCount ?? nData.notifications.filter((x: any) => !x.isRead).length);
+        }
+      }
+
+      if (cfgRes.status === 'fulfilled' && cfgRes.value.ok) {
+        const cData = await cfgRes.value.json();
+        const cfg = cData.settings || cData.config || cData;
+        if (cfg?.tokenIcon) setTokenIcon(cfg.tokenIcon);
+        if (cfg?.tokenSymbol) setTokenSymbol(cfg.tokenSymbol);
+      }
+    } catch (_) {}
+  }, []);
+
+  const syncUserState = useCallback(() => {
+    try {
+      const u = getCurrentUser();
+      setCurrentUser(u);
+      if (typeof getSiteName === 'function') setSiteName(getSiteName());
+      if (typeof getSiteIcon === 'function') {
+        const icon = getSiteIcon();
+        setSiteIcon(icon);
+        updateFavicon(icon);
+      }
+
+      if (typeof window !== 'undefined') {
+        const themeMode = localStorage.getItem('zecratary_theme_mode') || 'dark';
+        setIsDarkMode(themeMode === 'dark');
+
+        const cur = localStorage.getItem('zecratary_currency') || 'USD';
+        setWalletCurrency(cur);
+        setWalletSymbol(CURRENCY_SYMBOLS[cur] || '$');
+
+        const storedSections = localStorage.getItem('zecratary_sidebar_sections');
+        if (storedSections) {
+          try {
+            setOpenSections(prev => ({ ...prev, ...JSON.parse(storedSections) }));
+          } catch (_) {}
+        }
+      }
+      fetchBalancesAndTelemetry(u);
+    } catch (_) {}
+  }, [fetchBalancesAndTelemetry]);
+
+  // Route Auto-Expansion
+  useEffect(() => {
+    if (!pathname) return;
+    if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+      setOpenSections(prev => prev.create ? prev : { ...prev, create: true });
+    } else if (['/saved', '/books', '/pantry'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+      setOpenSections(prev => prev.manage ? prev : { ...prev, manage: true });
+    } else if (['/shopping', '/planner', '/templates'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+      setOpenSections(prev => prev.plan ? prev : { ...prev, plan: true });
+    } else if (['/token', '/wallet', '/subscriptions', '/billing'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
+      setOpenSections(prev => prev.finance ? prev : { ...prev, finance: true });
+    } else if (pathname.startsWith('/admin')) {
+      setOpenSections(prev => prev.admin ? prev : { ...prev, admin: true });
+    }
+  }, [pathname]);
+
+  // Real-Time Event & Cross-Tab Subscriptions
+  useEffect(() => {
+    setMounted(true);
+    syncUserState();
+
+    const handleSync = () => syncUserState();
+    const handleWalletUpdate = (e?: any) => {
+      if (e?.detail) {
+        const b = e.detail.wallet_balance ?? e.detail.walletBalance ?? e.detail.balance;
+        if (b !== undefined && b !== null) {
+          const parsed = parseFloat(String(b));
+          if (!isNaN(parsed)) setWalletBalance(parsed);
+        }
+      }
+      fetchBalancesAndTelemetry();
+    };
+    const handleTokensUpdate = (e?: any) => {
+      if (e?.detail) {
+        const b = e.detail.token_balance ?? e.detail.tokenBalance ?? e.detail.balance;
+        if (b !== undefined && b !== null) {
+          const parsed = Number(b);
+          if (!isNaN(parsed)) setTokenBalance(parsed);
+        }
+      }
+      fetchBalancesAndTelemetry();
+    };
+
+    window.addEventListener('storage', handleSync);
+    window.addEventListener('zecratary_auth_changed', handleSync);
+    window.addEventListener('zecratary_site_settings_changed', handleSync);
+    window.addEventListener('zecratary_theme_mode_changed', handleSync);
+    window.addEventListener('zecratary_wallet_updated', handleWalletUpdate);
+    window.addEventListener('zecratary_tokens_updated', handleTokensUpdate);
+    window.addEventListener('zecratary_token_settings_updated', handleSync);
+    window.addEventListener('focus', () => fetchBalancesAndTelemetry());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') fetchBalancesAndTelemetry();
+    });
+
+    let balanceChannel: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        balanceChannel = new BroadcastChannel('zecratary_balance_channel');
+        balanceChannel.onmessage = (msg) => {
+          if (msg.data?.wallet_balance !== undefined) {
+            setWalletBalance(parseFloat(String(msg.data.wallet_balance)));
+          }
+          if (msg.data?.token_balance !== undefined || msg.data?.tokens !== undefined) {
+            setTokenBalance(Number(msg.data.token_balance ?? msg.data.tokens));
+          }
+        };
+      } catch (_) {}
+    }
+
+    return () => {
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('zecratary_auth_changed', handleSync);
+      window.removeEventListener('zecratary_site_settings_changed', handleSync);
+      window.removeEventListener('zecratary_theme_mode_changed', handleSync);
+      window.removeEventListener('zecratary_wallet_updated', handleWalletUpdate);
+      window.removeEventListener('zecratary_tokens_updated', handleTokensUpdate);
+      window.removeEventListener('zecratary_token_settings_updated', handleSync);
+      if (balanceChannel) balanceChannel.close();
+    };
+  }, [syncUserState, fetchBalancesAndTelemetry]);
+
+  // Click Outside & Escape Key Listener
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (topbarRef.current && !topbarRef.current.contains(e.target as Node)) {
+        setNotifDropdownOpen(false);
+        setLangDropdownOpen(false);
+        setProfileDropdownOpen(false);
+        setDropdownLangExpanded(false);
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setNotifDropdownOpen(false);
+        setLangDropdownOpen(false);
+        setProfileDropdownOpen(false);
+        setDropdownLangExpanded(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  const toggleSection = (sectionKey: keyof typeof openSections) => {
     setOpenSections(prev => {
       const next = { ...prev, [sectionKey]: !prev[sectionKey] };
       if (typeof window !== 'undefined') {
@@ -69512,1043 +69426,977 @@ export default function Sidebar() {
     });
   };
 
-  // Dropdown click-outside refs
-  const profileDropdownRef = useRef<HTMLDivElement>(null);
-  const notifDropdownRef = useRef<HTMLDivElement>(null);
-  const notifMobileDropdownRef = useRef<HTMLDivElement>(null);
-  const topUpDropdownRef = useRef<HTMLDivElement>(null);
-  const topUpMobileDropdownRef = useRef<HTMLDivElement>(null);
-  const walletDropdownRef = useRef<HTMLDivElement>(null);
-  const walletMobileDropdownRef = useRef<HTMLDivElement>(null);
-
-  const [availableLanguages, setAvailableLanguages] = useState<{ code: string; name: string; flag: string }[]>([
-    { code: 'en', name: 'English', flag: '🇺🇸' },
-    { code: 'es', name: 'Español', flag: '🇪🇸' },
-    { code: 'fr', name: 'Français', flag: '🇫🇷' },
-    { code: 'th', name: 'ไทย', flag: '🇹🇭' },
-  ]);
-
-  const loadLanguagesFromAdmin = () => {
-    try {
-      const raw = localStorage.getItem('zecratary_languages');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const activeOnly = parsed
-            .filter((item: any) => item.status === 'active')
-            .map((item: any) => ({
-              code: item.code,
-              name: item.nativeName || item.name,
-              flag: item.flag || getLanguageFlag(item.code)
-            }));
-          if (activeOnly.length > 0) {
-            setAvailableLanguages(activeOnly);
-          }
-        }
-      }
-    } catch (_) {}
-  };
-
-  const fetchUserTokenAndNotifications = useCallback(async (currentUser: any) => {
-    if (!currentUser) return;
-    try {
-      let cfgRes = await fetch('/api/admin/token-setting', { cache: 'no-store' });
-      if (!cfgRes.ok) {
-        cfgRes = await fetch('/api/admin/token-settings', { cache: 'no-store' });
-      }
-      if (cfgRes.ok) {
-        const cfgData = await cfgRes.json();
-        const cfg = cfgData.settings || cfgData.config || cfgData;
-        if (cfg) {
-          if (cfg.tokenSymbol) setTokenSymbol(cfg.tokenSymbol);
-          if (cfg.tokenName) setTokenName(cfg.tokenName);
-          if (Array.isArray(cfg.packages) && cfg.packages.length > 0) {
-            setTokenPackages(cfg.packages);
-          }
-        }
-      }
-
-      const queryParam = currentUser.id 
-        ? `?userId=${encodeURIComponent(currentUser.id)}&email=${encodeURIComponent(currentUser.email || '')}`
-        : `?email=${encodeURIComponent(currentUser.email || '')}`;
-      
-      const tokenRes = await fetch(`/api/tokens${queryParam}&t=${Date.now()}`, { cache: 'no-store' });
-      if (tokenRes.ok) {
-        const tokenData = await tokenRes.json();
-        if (tokenData.success && typeof tokenData.balance === 'number') {
-          setTokenBalance(tokenData.balance);
-          if (tokenData.tokenSymbol) setTokenSymbol(tokenData.tokenSymbol);
-        }
-      }
-    } catch (_) {}
-  }, []);
-
-  const fetchWalletData = useCallback(async (currentUser: any) => {
-    try {
-      const userEmail = currentUser?.email || 'admin@zecratary.com';
-      const res = await fetch(`/api/wallet?email=${encodeURIComponent(userEmail)}&t=${Date.now()}`, { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          if (data.user && typeof data.user.wallet_balance !== 'undefined') {
-            setWalletBalance(parseFloat(data.user.wallet_balance || 0));
-          }
-          if (data.settings && data.settings.currency) {
-            setWalletCurrency(data.settings.currency);
-            setWalletSymbol(CURRENCY_SYMBOLS[data.settings.currency] || '$');
-          }
-        }
-      }
-    } catch (_) {}
-  }, []);
-
-  // Synchronize CSS Root Variables (--sidebar-width and --topbar-height)
-  useEffect(() => {
-    const updateLayoutTokens = () => {
-      if (typeof window === 'undefined') return;
-      const isMobile = window.innerWidth < 768;
-      
-      if (isMobile) {
-        document.documentElement.style.setProperty('--sidebar-width', '0px');
-        document.documentElement.style.setProperty('--topbar-height', '3.5rem');
-      } else if (isCollapsed && !isOpen) {
-        document.documentElement.style.setProperty('--sidebar-width', '5rem');
-        document.documentElement.style.setProperty('--topbar-height', '4rem');
-      } else {
-        document.documentElement.style.setProperty('--sidebar-width', '16rem');
-        document.documentElement.style.setProperty('--topbar-height', '4rem');
-      }
-    };
-
-    updateLayoutTokens();
-    window.addEventListener('resize', updateLayoutTokens);
-    return () => window.removeEventListener('resize', updateLayoutTokens);
-  }, [isCollapsed, isOpen]);
-
-  useEffect(() => {
-    setMounted(true);
-    const currentUser = getCurrentUser();
-    setUser(currentUser);
-    const name = getSiteName();
-    const icon = getSiteIcon();
-    setSiteName(name);
-    setSiteIcon(icon);
-    updateFavicon(icon);
-    loadLanguagesFromAdmin();
-    fetchUserTokenAndNotifications(currentUser);
-    fetchWalletData(currentUser);
-
-    // Restore saved section collapse preferences
-    if (typeof window !== 'undefined') {
-      try {
-        const savedSections = localStorage.getItem('zecratary_sidebar_sections');
-        if (savedSections) {
-          setOpenSections(prev => ({ ...prev, ...JSON.parse(savedSections) }));
-        }
-      } catch (_) {}
-    }
-
-    const savedMode = typeof window !== 'undefined' ? localStorage.getItem('zecratary_theme_mode') : null;
-    if (savedMode) {
-      const isDark = savedMode === 'dark';
-      setIsDarkMode(isDark);
-      document.documentElement.classList.toggle('dark', isDark);
-    } else {
-      const hasDarkClass = document.documentElement.classList.contains('dark');
-      setIsDarkMode(hasDarkClass);
-    }
-
-    const initialWidth = window.innerWidth;
-    if (initialWidth >= 768 && initialWidth < 1024) {
-      setIsCollapsed(true);
-    } else {
-      setIsCollapsed(false);
-    }
-
-    let prevCategory: 'mobile' | 'tablet' | 'desktop' = 
-      initialWidth < 768 ? 'mobile' : initialWidth < 1024 ? 'tablet' : 'desktop';
-
-    const handleScreenResize = () => {
-      const width = window.innerWidth;
-      const currentCategory: 'mobile' | 'tablet' | 'desktop' = 
-        width < 768 ? 'mobile' : width < 1024 ? 'tablet' : 'desktop';
-
-      if (currentCategory !== prevCategory) {
-        if (currentCategory === 'tablet') setIsCollapsed(true);
-        else if (currentCategory === 'desktop') setIsCollapsed(false);
-        if (currentCategory !== 'mobile') {
-          setIsOpen(false);
-          setShowNotificationsMobile(false);
-        }
-        prevCategory = currentCategory;
-      }
-    };
-
-    window.addEventListener('resize', handleScreenResize);
-
-    const handleAuthChange = () => {
-      const updated = getCurrentUser();
-      setUser(updated);
-      fetchUserTokenAndNotifications(updated);
-      fetchWalletData(updated);
-    };
-    const handleSiteSync = () => {
-      setSiteName(getSiteName());
-      setSiteIcon(getSiteIcon());
-      updateFavicon(getSiteIcon());
-    };
-    const handleLangSync = () => loadLanguagesFromAdmin();
-    const handleThemeModeSync = () => {
-      const isDark = localStorage.getItem('zecratary_theme_mode') !== 'light';
-      setIsDarkMode(isDark);
-    };
-    const handleTokenSync = () => {
-      const u = getCurrentUser();
-      if (u) fetchUserTokenAndNotifications(u);
-    };
-    const handleWalletSync = () => {
-      const u = getCurrentUser();
-      fetchWalletData(u);
-    };
-
-    const handleClickOutside = (e: MouseEvent) => {
-      if (profileDropdownRef.current && !profileDropdownRef.current.contains(e.target as Node)) {
-        setShowProfileMenu(false);
-      }
-      if (notifDropdownRef.current && !notifDropdownRef.current.contains(e.target as Node)) {
-        setShowNotifications(false);
-      }
-      if (notifMobileDropdownRef.current && !notifMobileDropdownRef.current.contains(e.target as Node)) {
-        setShowNotificationsMobile(false);
-      }
-      if (topUpDropdownRef.current && !topUpDropdownRef.current.contains(e.target as Node)) {
-        setShowTopUpMenu(false);
-      }
-      if (topUpMobileDropdownRef.current && !topUpMobileDropdownRef.current.contains(e.target as Node)) {
-        setShowTopUpMobileMenu(false);
-      }
-      if (walletDropdownRef.current && !walletDropdownRef.current.contains(e.target as Node)) {
-        setShowWalletTopUpMenu(false);
-      }
-      if (walletMobileDropdownRef.current && !walletMobileDropdownRef.current.contains(e.target as Node)) {
-        setShowWalletMobileMenu(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    window.addEventListener('zecratary_auth_changed', handleAuthChange);
-    window.addEventListener('zecratary_site_settings_changed', handleSiteSync);
-    window.addEventListener('zecratary_languages_updated', handleLangSync);
-    window.addEventListener('zecratary_theme_mode_changed', handleThemeModeSync);
-    window.addEventListener('zecratary_theme_changed', handleThemeModeSync);
-    window.addEventListener('zecratary_token_settings_updated', handleTokenSync);
-    window.addEventListener('zecratary_tokens_updated', handleTokenSync);
-    window.addEventListener('zecratary_wallet_updated', handleWalletSync);
-    window.addEventListener('zecratary_wallet_settings_updated', handleWalletSync);
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-      window.removeEventListener('resize', handleScreenResize);
-      window.removeEventListener('zecratary_auth_changed', handleAuthChange);
-      window.removeEventListener('zecratary_site_settings_changed', handleSiteSync);
-      window.removeEventListener('zecratary_languages_updated', handleLangSync);
-      window.removeEventListener('zecratary_theme_mode_changed', handleThemeModeSync);
-      window.removeEventListener('zecratary_theme_changed', handleThemeModeSync);
-      window.removeEventListener('zecratary_token_settings_updated', handleTokenSync);
-      window.removeEventListener('zecratary_tokens_updated', handleTokenSync);
-      window.removeEventListener('zecratary_wallet_updated', handleWalletSync);
-      window.removeEventListener('zecratary_wallet_settings_updated', handleWalletSync);
-    };
-  }, [fetchUserTokenAndNotifications, fetchWalletData]);
-
-  // Route-Aware Auto-Expansion
-  useEffect(() => {
-    if (!pathname) return;
-    if (['/chef', '/import', '/manual'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
-      setOpenSections(prev => prev.create ? prev : { ...prev, create: true });
-    } else if (['/recipes', '/saved', '/books', '/pantry'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
-      setOpenSections(prev => prev.manage ? prev : { ...prev, manage: true });
-    } else if (['/shopping', '/planner', '/templates'].some(p => pathname === p || pathname.startsWith(`${p}/`))) {
-      setOpenSections(prev => prev.plan ? prev : { ...prev, plan: true });
-    } else if (pathname.startsWith('/admin')) {
-      setOpenSections(prev => prev.admin ? prev : { ...prev, admin: true });
-    }
-  }, [pathname]);
-
-  const toggleThemeMode = () => {
+  const toggleTheme = () => {
     const nextMode = !isDarkMode;
     setIsDarkMode(nextMode);
-    if (typeof document !== 'undefined') {
-      document.documentElement.classList.toggle('dark', nextMode);
-      localStorage.setItem('zecratary_theme_mode', nextMode ? 'dark' : 'light');
-      window.dispatchEvent(new Event('zecratary_theme_mode_changed'));
-      window.dispatchEvent(new Event('zecratary_theme_changed'));
+    if (typeof window !== 'undefined') {
+      const modeStr = nextMode ? 'dark' : 'light';
+      localStorage.setItem('zecratary_theme_mode', modeStr);
+      if (nextMode) {
+        document.documentElement.classList.add('dark');
+        document.documentElement.classList.remove('light');
+      } else {
+        document.documentElement.classList.remove('dark');
+        document.documentElement.classList.add('light');
+      }
+      window.dispatchEvent(new CustomEvent('zecratary_theme_mode_changed', { detail: { mode: modeStr } }));
     }
   };
 
-  useEffect(() => {
-    setIsOpen(false);
-    setShowProfileMenu(false);
-    setShowNotifications(false);
-    setShowNotificationsMobile(false);
-    setShowTopUpMenu(false);
-    setShowTopUpMobileMenu(false);
-    setShowWalletTopUpMenu(false);
-    setShowWalletMobileMenu(false);
-  }, [pathname]);
-
-  const handlePurchasePackage = async (pkg: TokenPackage) => {
-    if (!pkg) return;
-    setPurchasingId(pkg.id);
-    setTopUpErrorMsg('');
-    setTopUpSuccessMsg('');
-
+  const markAllNotificationsRead = async () => {
+    setUnreadCount(0);
+    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
     try {
-      const currentUser = getCurrentUser() || user;
-      const res = await fetch('/api/tokens', {
+      const u = getCurrentUser();
+      const params = new URLSearchParams();
+      if (u?.id) params.set('userId', String(u.id));
+      if (u?.email) params.set('email', String(u.email));
+      await fetch(`/api/notifications?${params.toString()}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'purchase',
-          packageId: pkg.id,
-          tokens: Number(pkg.tokens),
-          price: Number(pkg.price),
-          packageName: pkg.name,
-          userEmail: currentUser?.email,
-          userId: currentUser?.id
-        })
+        body: JSON.stringify({ action: 'mark_all_read' })
       });
+    } catch (_) {}
+  };
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || data.message || 'Failed to complete token purchase');
-      }
-
-      const newBal = typeof data.balance === 'number' ? data.balance : (tokenBalance + Number(pkg.tokens));
-      setTokenBalance(newBal);
-      setTopUpSuccessMsg(
-        t('tokenPurchasedSuccess', `Successfully added +${Number(pkg.tokens).toLocaleString()} ${tokenSymbol}!`)
-      );
-
-      window.dispatchEvent(new Event('zecratary_tokens_updated'));
-      window.dispatchEvent(new Event('zecratary_token_settings_updated'));
-
-      setTimeout(() => {
-        setTopUpSuccessMsg('');
-      }, 4000);
-    } catch (err: any) {
-      setTopUpErrorMsg(err.message || 'Purchase failed. Please try again.');
+  const handleLogout = async () => {
+    try {
+      setProfileDropdownOpen(false);
+      await logoutUser();
+    } catch (err) {
+      console.error('Logout error:', err);
     } finally {
-      setPurchasingId(null);
+      if (typeof window !== 'undefined') {
+        window.location.replace('/login?logout=true');
+      }
     }
   };
 
-  const isAdmin = user && (
-    user.role === 'admin' || 
-    user.email === 'admin@foodieprep.com' || 
-    user.email?.includes('admin')
+  const isAuthRoute = Boolean(
+    pathname === '/login' ||
+    pathname === '/register' ||
+    pathname === '/forgot-password' ||
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/register') ||
+    pathname.startsWith('/forgot-password')
   );
 
-  // Evaluates both /recipes and /saved so Saved Recipes highlights accurately
-  const isActive = (href: string) => {
-    if (href === '/dashboard') return pathname === '/dashboard' || pathname === '/';
-    if (href === '/admin') return pathname === '/admin';
-    if (href === '/chef') return pathname === '/chef';
-    if (href === '/recipes' || href === '/saved') {
-      return pathname === '/recipes' || pathname.startsWith('/recipes/') || pathname === '/saved' || pathname.startsWith('/saved/');
-    }
-    return pathname === href || pathname.startsWith(`${href}/`);
+  const isHomePage = Boolean(
+    pathname === '/' ||
+    pathname === '' ||
+    pathname === '/index'
+  );
+
+  if (!mounted || isAuthRoute || isHomePage || !currentUser) {
+    return null;
+  }
+
+  const isAdmin = Boolean(
+    currentUser?.role === 'admin' ||
+    currentUser?.email === 'admin@zecratary.com' ||
+    currentUser?.email?.includes('admin')
+  );
+
+  const navClass = (route: string) => {
+    const active = pathname === route || (route !== '/' && pathname.startsWith(route));
+    return `flex items-center gap-3 px-3 py-2 rounded-xl font-bold text-xs transition duration-200 cursor-pointer ${
+      active ? 'text-white shadow-xs' : 'hover:text-white hover:bg-slate-800/30'
+    }`;
   };
 
-  const showCollapsed = isCollapsed && !isOpen;
+  const navStyle = (route: string) => {
+    const active = pathname === route || (route !== '/' && pathname.startsWith(route));
+    return active
+      ? { backgroundColor: 'var(--color-primary)', color: '#ffffff' }
+      : { color: 'var(--color-text-secondary)', backgroundColor: 'transparent' };
+  };
 
-  const navClass = (href: string) => `
-    w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition-colors duration-150 select-none
-    ${isActive(href)
-      ? isDarkMode
-        ? 'bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/30 shadow-md font-bold'
-        : 'bg-[var(--color-primary)]/10 text-slate-900 border border-[var(--color-primary)]/40 shadow-sm font-bold'
-      : isDarkMode
-        ? 'text-slate-300 hover:text-white hover:bg-[#141b2d]/50'
-        : 'text-slate-800 hover:text-slate-950 hover:bg-slate-200/80 font-bold'
-    }
-  `;
-
-  const displayName = mounted ? siteName : DEFAULT_SITE_NAME;
-  const displayIcon = mounted ? siteIcon : DEFAULT_SITE_ICON;
-  const iconStyle = { color: 'var(--color-sidebar-icon, var(--color-primary))' };
-  const displayPackages = tokenPackages.length > 0 ? tokenPackages : DEFAULT_FALLBACK_PACKAGES;
+  const planBadgeText = isAdmin 
+    ? t('topbarPlanAdmin', 'Admin Access')
+    : currentUser?.subscription_plan === 'pro' 
+      ? t('topbarPlanPro', 'Pro Plan') 
+      : t('topbarPlanFree', 'Free Tier');
 
   return (
     <>
-      {/* MOBILE TOP BAR */}
-      <header className="md:hidden sticky top-0 z-40 bg-[var(--color-card)] border-b border-[var(--color-border)] px-4 py-3 flex items-center justify-between w-full">
-        <Link href="/dashboard" className="flex items-center gap-2">
-          {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
-          <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate max-w-[100px]">
-            {displayName}
-          </span>
+      {/* DESKTOP TOP BAR (Fixed Header with Real-Time Telemetry) */}
+      <header
+        id="zecratary-desktop-topbar"
+        className="hidden md:flex fixed top-0 left-0 right-0 h-16 border-b z-40 items-center justify-between px-6 transition-colors duration-200"
+        style={{
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)',
+          color: 'var(--color-text)'
+        }}
+        ref={topbarRef}
+      >
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            className="p-1.5 rounded-lg border hover:bg-slate-800/20 cursor-pointer transition mr-1"
+            style={{ borderColor: 'var(--color-border)' }}
+            title={isCollapsed ? t('expandSidebar', 'Expand Menu') : t('collapseSidebar', 'Collapse Menu')}
+          >
+            <Menu className="h-4 w-4" />
+          </button>
+          <Link href="/dashboard" className="flex items-center gap-2.5 font-black text-lg text-[var(--color-primary)]">
+            {isImageIcon(siteIcon) ? (
+              <img src={siteIcon} alt="Logo" className="w-7 h-7 rounded-lg object-contain" />
+            ) : (
+              <span className="text-2xl">{siteIcon || '🍳'}</span>
+            )}
+            <span>{siteName || 'Zecratary'}</span>
+          </Link>
+        </div>
+
+        <div className="flex items-center gap-2.5 sm:gap-3">
+          {/* 1. DEDICATED STORE WALLET CAPSULE + DIRECT BUTTON */}
+          <div 
+            className="flex items-center rounded-2xl border p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <Link 
+              href="/wallet" 
+              className="flex items-center gap-2 px-3 py-1 rounded-xl hover:opacity-85 transition group cursor-pointer"
+              title={t('viewWalletBalance', 'View Wallet Balance & History')}
+            >
+              <Wallet className="h-4 w-4 text-[var(--color-primary)] group-hover:scale-110 transition-transform shrink-0" />
+              <span 
+                suppressHydrationWarning
+                className="text-xs font-mono font-black" 
+                style={{ color: 'var(--color-emerald)' }}
+              >
+                {walletSymbol}{Number(walletBalance || 0).toFixed(2)}
+              </span>
+              <span className="text-[10px] font-bold opacity-60 font-mono">
+                {walletCurrency}
+              </span>
+            </Link>
+
+            <Link
+              href="/wallet"
+              className="flex items-center justify-center w-7 h-7 rounded-xl text-xs font-black transition cursor-pointer hover:opacity-90 active:scale-95 text-white shadow-xs shrink-0"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              title={t('topUpWallet', 'Top Up Wallet')}
+              aria-label="Top Up Wallet"
+            >
+              <Plus className="h-3.5 w-3.5 stroke-[3]" />
+            </Link>
+          </div>
+
+          {/* 2. DEDICATED AI TOKEN CAPSULE + DIRECT BUTTON */}
+          <div 
+            className="flex items-center rounded-2xl border p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <Link 
+              href="/token" 
+              className="flex items-center gap-2 px-3 py-1 rounded-xl hover:opacity-85 transition group cursor-pointer"
+              title={t('viewTokenBalance', 'View Token Balance & History')}
+            >
+              <DynamicTokenIcon icon={tokenIcon} symbol={tokenSymbol} size={16} className="group-hover:scale-110 transition-transform" />
+              <span 
+                suppressHydrationWarning
+                className="text-xs font-mono font-black" 
+                style={{ color: 'var(--color-emerald)' }}
+              >
+                {Number(tokenBalance || 0).toLocaleString()}
+              </span>
+              <span className="text-xs font-bold text-amber-500 font-mono">
+                {tokenSymbol}
+              </span>
+            </Link>
+
+            <Link
+              href="/token"
+              className="flex items-center justify-center w-7 h-7 rounded-xl text-xs font-black transition cursor-pointer hover:opacity-90 active:scale-95 text-white shadow-xs shrink-0"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              title={t('topUpTokens', 'Top Up Tokens')}
+              aria-label="Top Up Tokens"
+            >
+              <Plus className="h-3.5 w-3.5 stroke-[3]" />
+            </Link>
+          </div>
+
+          {/* 3. NOTIFICATIONS BELL & POPOVER */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setNotifDropdownOpen(!notifDropdownOpen);
+                setLangDropdownOpen(false);
+                setProfileDropdownOpen(false);
+              }}
+              className="p-2 rounded-xl border transition cursor-pointer shadow-xs relative"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+              title={t('topbarNotifications', 'Notifications')}
+              aria-label="Notifications"
+            >
+              <Bell className="h-4 w-4" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md animate-pulse">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {notifDropdownOpen && (
+              <div
+                role="region"
+                aria-label="Notifications Panel"
+                data-lpignore="true"
+                data-form-type="other"
+                className="absolute right-0 mt-2 w-80 border rounded-3xl p-4 shadow-2xl z-50 space-y-3 text-xs transition-colors duration-200"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <div className="flex items-center justify-between pb-2 border-b" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold uppercase tracking-wider text-xs">{t('topbarNotifications', 'Notifications')}</span>
+                    {unreadCount > 0 && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-400 font-bold text-[10px]">
+                        {unreadCount} {t('topbarUnreadCount', 'unread')}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {unreadCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={markAllNotificationsRead}
+                        className="text-[10px] font-bold text-[var(--color-primary)] hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        <CheckCheck className="h-3 w-3" />
+                        <span>{t('topbarMarkAllRead', 'Mark all read')}</span>
+                      </button>
+                    )}
+                    {isAdmin && (
+                      <Link
+                        href="/admin/notification-settings"
+                        onClick={() => setNotifDropdownOpen(false)}
+                        className="text-[10px] opacity-70 hover:opacity-100"
+                      >
+                        {t('settings', 'Settings')}
+                      </Link>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {notifications.length === 0 ? (
+                    <div className="text-center py-8 opacity-60 text-xs">
+                      {t('topbarNoNotifications', 'No unread notifications')}
+                    </div>
+                  ) : (
+                    notifications.map((n) => (
+                      <div
+                        key={n.id}
+                        className={`p-2.5 rounded-2xl border space-y-1 transition ${
+                          n.isRead ? 'opacity-70' : 'border-[var(--color-primary)]/40 shadow-xs'
+                        }`}
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: n.isRead ? 'var(--color-border)' : 'var(--color-primary)'
+                        }}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-xs">{n.title}</span>
+                          {!n.isRead && (
+                            <span className="w-2 h-2 rounded-full bg-[var(--color-primary)] shrink-0" />
+                          )}
+                        </div>
+                        <div className="text-[11px] opacity-80 leading-relaxed">{n.message}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 4. QUICK LANGUAGE SELECTOR */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setLangDropdownOpen(!langDropdownOpen);
+                setNotifDropdownOpen(false);
+                setProfileDropdownOpen(false);
+              }}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-xs font-bold transition shadow-xs cursor-pointer"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+              title={t('topbarLanguageSelector', 'Select Language')}
+            >
+              <span className="text-sm">{getLanguageMeta(currentLanguage).flag}</span>
+              <span className="uppercase text-[11px] font-extrabold">{currentLanguage || 'EN'}</span>
+            </button>
+
+            {langDropdownOpen && (
+              <div
+                role="menu"
+                aria-label="Language Selector"
+                data-lpignore="true"
+                data-form-type="other"
+                className="absolute right-0 mt-2 w-48 border rounded-2xl p-2 shadow-xl z-50 space-y-1 text-xs transition-colors duration-200"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                {availableLanguages.map((lang: any) => {
+                  const meta = getLanguageMeta(lang.code);
+                  const isSelected = currentLanguage === lang.code;
+                  return (
+                    <button
+                      key={lang.code}
+                      type="button"
+                      onClick={() => {
+                        if (typeof changeLanguage === 'function') changeLanguage(lang.code);
+                        setLangDropdownOpen(false);
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-slate-800/40 text-xs font-semibold cursor-pointer transition"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="text-base">{meta.flag}</span>
+                        <span>{lang.native || meta.native}</span>
+                        <span className="text-[10px] opacity-60 uppercase font-mono">({lang.code})</span>
+                      </span>
+                      {isSelected && <Check className="h-3.5 w-3.5 text-emerald-400" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* 5. QUICK DAY / DARK TOGGLE */}
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="p-2 rounded-xl border transition cursor-pointer shadow-xs"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)',
+              color: 'var(--color-text)'
+            }}
+            title={isDarkMode ? t('switchToDayMode', 'Day Mode') : t('switchToDarkMode', 'Dark Mode')}
+          >
+            {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-300" />}
+          </button>
+
+          {/* 6. USER PROFILE DROPDOWN */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setProfileDropdownOpen(!profileDropdownOpen);
+                setNotifDropdownOpen(false);
+                setLangDropdownOpen(false);
+                setDropdownLangExpanded(false);
+              }}
+              className="flex items-center gap-2 p-1.5 pr-2.5 rounded-xl border transition cursor-pointer shadow-xs"
+              style={{
+                backgroundColor: 'var(--color-inner-dark)',
+                borderColor: 'var(--color-border)',
+                color: 'var(--color-text)'
+              }}
+              aria-label={t('topbarUserMenu', 'User Menu')}
+            >
+              <div className="w-6 h-6 rounded-lg bg-[var(--color-primary)] text-white flex items-center justify-center font-black text-xs">
+                {currentUser?.name ? currentUser.name.charAt(0).toUpperCase() : 'U'}
+              </div>
+              <span className="text-xs font-bold max-w-[85px] truncate">{currentUser?.name || 'User'}</span>
+              <ChevronDown className="h-3 w-3 opacity-60" />
+            </button>
+
+            {profileDropdownOpen && (
+              <div
+                role="menu"
+                aria-label="User Profile Dropdown"
+                data-lpignore="true"
+                data-form-type="other"
+                className="absolute right-0 mt-2 w-64 border rounded-3xl p-2.5 shadow-2xl z-50 space-y-1.5 text-xs transition-colors duration-200"
+                style={{
+                  backgroundColor: 'var(--color-card)',
+                  borderColor: 'var(--color-border)',
+                  color: 'var(--color-text)'
+                }}
+              >
+                <div className="px-3 py-2 border-b mb-1 space-y-1" style={{ borderColor: 'var(--color-border)' }}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-extrabold truncate text-xs">{currentUser?.name || 'User'}</span>
+                    <span 
+                      className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider text-white"
+                      style={{ backgroundColor: 'var(--color-primary)' }}
+                    >
+                      {planBadgeText}
+                    </span>
+                  </div>
+                  <div className="text-[11px] opacity-60 truncate">{currentUser?.email || ''}</div>
+                </div>
+
+                <Link
+                  href="/profile"
+                  onClick={() => setProfileDropdownOpen(false)}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-800/40 font-bold transition"
+                >
+                  <UserIcon className="h-4 w-4 opacity-75" />
+                  <span>{t('topbarProfile', 'User Profile')}</span>
+                </Link>
+
+                <Link
+                  href="/subscriptions"
+                  onClick={() => setProfileDropdownOpen(false)}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-800/40 font-bold transition"
+                >
+                  <Layers className="h-4 w-4 text-sky-400 opacity-80" />
+                  <span>{t('topbarSubscriptions', 'Subscriptions')}</span>
+                </Link>
+
+                <Link
+                  href="/billing"
+                  onClick={() => setProfileDropdownOpen(false)}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-800/40 font-bold transition"
+                >
+                  <Receipt className="h-4 w-4 opacity-75" />
+                  <span>{t('topbarBillingHistory', 'Billing History')}</span>
+                </Link>
+
+                <Link
+                  href="/contacts"
+                  onClick={() => setProfileDropdownOpen(false)}
+                  className="flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-slate-800/40 font-bold transition"
+                >
+                  <Mail className="h-4 w-4 opacity-75" />
+                  <span>{t('contactSupport', 'Contact Support')}</span>
+                </Link>
+
+                <div className="pt-1.5 border-t space-y-1" style={{ borderColor: 'var(--color-border)' }}>
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setDropdownLangExpanded(!dropdownLangExpanded)}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-slate-800/40 font-bold transition cursor-pointer"
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <Globe className="h-4 w-4 text-[var(--color-primary)]" />
+                        <span>{t('interfaceLanguage', 'Language')}</span>
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-xs">{getLanguageMeta(currentLanguage).flag}</span>
+                        <span className="text-[10px] font-mono uppercase opacity-75">{currentLanguage}</span>
+                        <ChevronRight className={`h-3 w-3 opacity-60 transition-transform duration-200 ${dropdownLangExpanded ? 'rotate-90' : 'rotate-0'}`} />
+                      </span>
+                    </button>
+
+                    {dropdownLangExpanded && (
+                      <div 
+                        className="my-1 ml-2 p-1.5 border rounded-2xl space-y-1 transition-colors duration-200"
+                        style={{
+                          backgroundColor: 'var(--color-inner-dark)',
+                          borderColor: 'var(--color-border)'
+                        }}
+                      >
+                        {availableLanguages.map((lang: any) => {
+                          const meta = getLanguageMeta(lang.code);
+                          const isSel = currentLanguage === lang.code;
+                          return (
+                            <button
+                              key={lang.code}
+                              type="button"
+                              onClick={() => {
+                                if (typeof changeLanguage === 'function') changeLanguage(lang.code);
+                                setDropdownLangExpanded(false);
+                              }}
+                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-slate-800/30 text-xs font-semibold cursor-pointer transition"
+                            >
+                              <span className="flex items-center gap-2">
+                                <span>{meta.flag}</span>
+                                <span>{lang.native || meta.native}</span>
+                              </span>
+                              {isSel && <Check className="h-3 w-3 text-emerald-400" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={toggleTheme}
+                    className="w-full flex items-center justify-between px-3 py-2 rounded-xl hover:bg-slate-800/40 font-bold transition cursor-pointer"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-300" />}
+                      <span>{t('themeMode', 'Theme Mode')}</span>
+                    </span>
+                    <span 
+                      className="px-2 py-0.5 rounded-lg border text-[10px] font-bold"
+                      style={{
+                        borderColor: 'var(--color-border)',
+                        backgroundColor: 'var(--color-inner-dark)'
+                      }}
+                    >
+                      {isDarkMode ? t('topbarThemeDark', 'Dark') : t('topbarThemeDay', 'Day')}
+                    </span>
+                  </button>
+                </div>
+
+                <div className="pt-1.5 border-t" style={{ borderColor: 'var(--color-border)' }}>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-red-400 hover:bg-red-500/10 font-bold transition text-left cursor-pointer"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    <span>{t('logOut', 'Log Out')}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* MOBILE APPLICATION HEADER WITH COMPACT WALLET & TOKEN WIDGETS */}
+      <header
+        className="md:hidden fixed top-0 left-0 right-0 h-14 border-b z-40 flex items-center justify-between px-3 transition-colors duration-200"
+        style={{
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)',
+          color: 'var(--color-text)'
+        }}
+      >
+        <Link href="/dashboard" className="flex items-center gap-1.5 font-black text-sm text-[var(--color-primary)] truncate max-w-[110px]">
+          {isImageIcon(siteIcon) ? (
+            <img src={siteIcon} alt="Logo" className="w-6 h-6 rounded-md object-contain shrink-0" />
+          ) : (
+            <span className="text-xl shrink-0">{siteIcon || '🍳'}</span>
+          )}
+          <span className="truncate">{siteName || 'Zecratary'}</span>
         </Link>
 
         <div className="flex items-center gap-1.5">
-          {/* Mobile Wallet Balance & Top Up */}
-          <div className="relative" ref={walletMobileDropdownRef}>
-            <button
-              type="button"
-              onClick={() => {
-                setShowWalletMobileMenu(!showWalletMobileMenu);
-                setShowTopUpMobileMenu(false);
-                setShowProfileMenu(false);
-                setShowNotificationsMobile(false);
-              }}
-              className="flex items-center gap-1 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
-              title="Wallet Balance & Top Up"
+          {/* Mobile Wallet Capsule */}
+          <div 
+            className="flex items-center rounded-xl border p-0.5 text-[11px] font-mono font-bold shadow-xs"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <Link 
+              href="/wallet" 
+              className="flex items-center gap-1 px-1.5 py-0.5 hover:opacity-85 transition"
+              title={t('wallet', 'Store Wallet')}
             >
-              <Wallet className="h-3.5 w-3.5 text-[var(--color-primary)]" />
+              <Wallet className="h-3.5 w-3.5 text-[var(--color-primary)] shrink-0" />
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
-                {walletSymbol}{mounted ? walletBalance.toFixed(0) : '0'}
+                {walletSymbol}{Number(walletBalance || 0).toFixed(2)}
               </span>
-              <span className="p-1 rounded-md bg-[var(--color-primary)] text-white text-[10px] font-sans font-black flex items-center justify-center">
-                <Plus className="h-2.5 w-2.5 stroke-[3]" />
-              </span>
-            </button>
+            </Link>
+            <Link 
+              href="/wallet"
+              className="w-5 h-5 rounded-lg text-white flex items-center justify-center cursor-pointer hover:opacity-90 active:scale-95 shrink-0"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              title={t('topUpWallet', 'Top Up Wallet')}
+            >
+              <Plus className="h-3 w-3 stroke-[3]" />
+            </Link>
           </div>
 
-          {/* Mobile Token Balance & Top Up (Icon Only '+') */}
-          <div className="relative" ref={topUpMobileDropdownRef}>
-            <button
-              type="button"
-              onClick={() => {
-                setShowTopUpMobileMenu(!showTopUpMobileMenu);
-                setShowWalletMobileMenu(false);
-                setShowProfileMenu(false);
-                setShowNotificationsMobile(false);
-              }}
-              className="flex items-center gap-1.5 px-2 py-1 rounded-xl border border-[var(--color-border)] text-[11px] font-mono font-bold bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition cursor-pointer"
-              title="Token Balance & Top Up"
+          {/* Mobile Token Capsule */}
+          <div 
+            className="flex items-center rounded-xl border p-0.5 text-[11px] font-mono font-bold shadow-xs"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            <Link 
+              href="/token" 
+              className="flex items-center gap-1 px-1.5 py-0.5 hover:opacity-85 transition"
+              title={t('token', 'AI Tokens')}
             >
-              <Coins className="h-3.5 w-3.5" style={iconStyle} />
+              <DynamicTokenIcon icon={tokenIcon} symbol={tokenSymbol} size={14} />
               <span suppressHydrationWarning style={{ color: 'var(--color-emerald)' }}>
-                {mounted ? tokenBalance.toLocaleString() : '0'}
+                {Number(tokenBalance || 0).toLocaleString()}
               </span>
-              <span className="p-1 rounded-md bg-[var(--color-primary)] text-white text-[10px] font-sans font-black flex items-center justify-center">
-                <Plus className="h-2.5 w-2.5 stroke-[3]" />
-              </span>
-            </button>
+            </Link>
+            <Link 
+              href="/token"
+              className="w-5 h-5 rounded-lg text-white flex items-center justify-center cursor-pointer hover:opacity-90 active:scale-95 shrink-0"
+              style={{ backgroundColor: 'var(--color-primary)' }}
+              title={t('topUpTokens', 'Top Up Tokens')}
+            >
+              <Plus className="h-3 w-3 stroke-[3]" />
+            </Link>
           </div>
 
           <button
             type="button"
-            onClick={() => setIsOpen(!isOpen)}
-            className={`p-2 rounded-xl border border-[var(--color-border)] transition cursor-pointer ${
-              isDarkMode ? 'bg-[#141b2d] text-slate-300 hover:text-white' : 'bg-slate-200 text-slate-800 hover:text-slate-950'
-            }`}
-            aria-label="Toggle navigation menu"
+            onClick={toggleTheme}
+            className="p-1.5 rounded-lg border shrink-0"
+            style={{ borderColor: 'var(--color-border)' }}
+            title={isDarkMode ? 'Day Mode' : 'Dark Mode'}
           >
-            {isOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            {isDarkMode ? <Sun className="h-4 w-4 text-amber-400" /> : <Moon className="h-4 w-4 text-slate-300" />}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="p-1.5 rounded-xl border cursor-pointer shrink-0"
+            style={{
+              backgroundColor: 'var(--color-inner-dark)',
+              borderColor: 'var(--color-border)'
+            }}
+          >
+            {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
         </div>
       </header>
 
-      {/* DESKTOP TOP BAR */}
-      <div 
-        id="zecratary-desktop-topbar"
-        className={`hidden md:flex fixed top-0 right-0 z-30 h-16 bg-[var(--color-card)] border-b border-[var(--color-border)] px-6 items-center justify-between transition-all duration-300 ${
-          showCollapsed ? 'left-20' : 'left-64'
+      {/* SIDEBAR NAVIGATION DRAWER */}
+      <aside
+        className={`hidden md:flex flex-col fixed top-16 bottom-0 left-0 border-r z-30 transition-all duration-200 ${
+          isCollapsed ? 'w-20' : 'w-64'
         }`}
-        style={{ height: '4rem', boxSizing: 'border-box' }}
+        style={{
+          backgroundColor: 'var(--color-card)',
+          borderColor: 'var(--color-border)'
+        }}
       >
-        <div className="flex items-center gap-3">
-          <span className="text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border border-[var(--color-border)] bg-[var(--color-inner-dark)]" style={{ color: 'var(--color-primary)' }}>
-            {pathname === '/' ? 'Dashboard' : pathname.replace('/', '').toUpperCase()}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-3">
-          {/* WALLET BALANCE & TOP UP (ICON ONLY '+') */}
-          <div className="relative flex items-center" ref={walletDropdownRef}>
-            <div className="flex items-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40">
-              <Link 
-                href="/wallet" 
-                className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
-                title={t('viewWalletBalance') || 'View Wallet Balance & History'}
-              >
-                <Wallet className="h-4 w-4 text-[var(--color-primary)] group-hover:scale-110 transition-transform" />
-                <span suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                  {walletSymbol}{mounted ? walletBalance.toFixed(2) : '0.00'}
-                </span>
-                <span className="text-[10px] font-bold opacity-60 font-mono">{walletCurrency}</span>
-              </Link>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setShowWalletTopUpMenu(!showWalletTopUpMenu);
-                  setShowTopUpMenu(false);
-                  setShowNotifications(false);
-                  setShowProfileMenu(false);
-                }}
-                className="flex items-center justify-center p-1.5 px-2.5 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-                title={t('topUpWallet') || 'Top Up Wallet Balance'}
-                aria-label="Top Up Wallet"
-              >
-                <Plus className="h-3.5 w-3.5 stroke-[3]" />
-              </button>
-            </div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-4">
+          <div>
+            <Link
+              href="/dashboard"
+              className={navClass('/dashboard')}
+              style={navStyle('/dashboard')}
+              title={t('dashboard', 'Dashboard')}
+            >
+              <LayoutDashboard className="h-4 w-4 shrink-0" />
+              {!isCollapsed && <span>{t('dashboard', 'Dashboard')}</span>}
+            </Link>
           </div>
 
-          {/* TOKEN BALANCE & TOP UP (ICON ONLY '+') */}
-          <div className="relative flex items-center" ref={topUpDropdownRef}>
-            <div className="flex items-center rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] p-0.5 shadow-xs transition hover:border-[var(--color-primary)]/40">
-              <Link 
-                href="/token" 
-                className="flex items-center gap-2 px-3 py-1 rounded-xl hover:bg-[var(--color-card)]/60 transition group"
-                title={t('viewTokenBalance') || 'View Token Balance & Summary'}
-              >
-                <Coins className="h-4 w-4" style={iconStyle} />
-                <span suppressHydrationWarning className="text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                  {mounted ? tokenBalance.toLocaleString() : '0'}
-                </span>
-                <span className="text-xs font-bold text-amber-500 font-mono">{tokenSymbol}</span>
-              </Link>
-
+          {/* 1. CREATE ACCORDION */}
+          <div className="space-y-1">
+            {!isCollapsed ? (
               <button
                 type="button"
-                onClick={() => {
-                  setShowTopUpMenu(!showTopUpMenu);
-                  setShowWalletTopUpMenu(false);
-                  setShowNotifications(false);
-                  setShowProfileMenu(false);
-                }}
-                className="flex items-center justify-center p-1.5 px-2.5 rounded-xl text-xs font-black transition cursor-pointer hover:brightness-110 active:scale-95 text-white shadow-xs"
-                style={{ backgroundColor: 'var(--color-primary)' }}
-                title={t('topUpTokens') || 'Top Up Tokens'}
-                aria-label="Top Up Tokens"
+                onClick={() => toggleSection('create')}
+                className="w-full flex items-center justify-between px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider opacity-70 hover:opacity-100 transition cursor-pointer"
               >
-                <Plus className="h-3.5 w-3.5 stroke-[3]" />
+                <span>{t('createSection', 'Create')}</span>
+                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${openSections.create ? 'rotate-0' : '-rotate-90'}`} />
               </button>
-            </div>
-
-            {/* Token Packages Dropdown Menu */}
-            {showTopUpMenu && (
-              <div 
-                className="absolute right-0 top-full mt-2 w-88 sm:w-96 rounded-3xl border p-4 space-y-3.5 shadow-2xl z-50 animate-in fade-in"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
-              >
-                <div className="flex items-center justify-between border-b pb-2.5" style={{ borderColor: 'var(--color-border)' }}>
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)]">
-                      <Coins className="h-4 w-4" style={iconStyle} />
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                        {t('topUpTokens') || 'Top Up Tokens'}
-                      </h3>
-                      <p className="text-[10px] opacity-70">
-                        {t('topUpSubtitle') || 'Add tokens directly to your balance'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                    <span suppressHydrationWarning>{mounted ? tokenBalance.toLocaleString() : '0'}</span>
-                    <span className="text-amber-500 font-bold">{tokenSymbol}</span>
-                  </div>
-                </div>
-
-                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                  {displayPackages.map((pkg) => {
-                    const price = Number(pkg.price);
-                    return (
-                      <div 
-                        key={pkg.id}
-                        className="p-3 rounded-2xl border transition flex items-center justify-between gap-3 group hover:border-[var(--color-primary)]/50"
-                        style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)' }}
-                      >
-                        <div className="min-w-0 space-y-0.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>{pkg.name}</span>
-                            {pkg.badge && (
-                              <span className="px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider rounded-md bg-amber-500/15 text-amber-500 border border-amber-500/30">
-                                {pkg.badge}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1 text-xs font-mono font-black" style={{ color: 'var(--color-emerald)' }}>
-                            <span>+{Number(pkg.tokens).toLocaleString()}</span>
-                            <span className="text-amber-500 font-bold">{tokenSymbol}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className="text-xs font-mono font-black" style={{ color: 'var(--color-text)' }}>${price.toFixed(2)}</span>
-                          <button
-                            type="button"
-                            disabled={purchasingId === pkg.id}
-                            onClick={() => handlePurchasePackage(pkg)}
-                            className="px-3.5 py-1.5 rounded-xl text-xs font-extrabold text-white transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 hover:brightness-110 active:scale-95 shadow-xs"
-                            style={{ backgroundColor: 'var(--color-primary)' }}
-                          >
-                            {purchasingId === pkg.id ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : (t('buy') || 'Buy')}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+            ) : (
+              <div className="h-px bg-slate-800/40 my-2" />
             )}
-          </div>
 
-          {/* NOTIFICATION BELL */}
-          <div className="relative" ref={notifDropdownRef}>
-            <button
-              type="button"
-              onClick={() => {
-                setShowNotifications(!showNotifications);
-                setShowProfileMenu(false);
-                setShowTopUpMenu(false);
-                setShowWalletTopUpMenu(false);
-              }}
-              className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
-              aria-label="Notifications"
-            >
-              <Bell className="h-4 w-4" style={iconStyle} />
-              {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 bg-red-500 text-white text-[9px] font-black rounded-full flex items-center justify-center shadow-md animate-pulse">
-                  {unreadCount > 99 ? '99+' : unreadCount}
-                </span>
-              )}
-            </button>
-          </div>
-
-          {/* PROFILE DROPDOWN */}
-          <div className="relative" ref={profileDropdownRef}>
-            <button
-              type="button"
-              onClick={() => {
-                setShowProfileMenu(!showProfileMenu);
-                setShowNotifications(false);
-                setShowTopUpMenu(false);
-                setShowWalletTopUpMenu(false);
-              }}
-              className="p-2.5 rounded-2xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] hover:border-[var(--color-primary)]/50 transition relative cursor-pointer flex items-center justify-center"
-              aria-label="User Profile Dropdown"
-            >
-              <UserIcon className="h-4 w-4" style={iconStyle} />
-            </button>
-
-            {showProfileMenu && (
-              <div 
-                className="absolute right-0 mt-2 w-72 rounded-2xl border p-3 space-y-2 shadow-2xl z-50 animate-in fade-in"
-                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)' }}
-              >
-                <Link
-                  href="/profile"
-                  onClick={() => setShowProfileMenu(false)}
-                  className="flex items-center gap-3 p-2 rounded-xl hover:bg-[var(--color-inner-dark)] transition border-b border-[var(--color-border)] pb-3"
-                >
-                  <div className="w-8 h-8 rounded-xl border border-[var(--color-border)] bg-[var(--color-inner-dark)] flex items-center justify-center">
-                    <UserIcon className="w-4 h-4" style={iconStyle} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-black truncate" style={{ color: 'var(--color-text)' }}>
-                      {user?.name || user?.email || 'User Account'}
-                    </p>
-                    <p className="text-[11px] opacity-60 truncate">
-                      {user?.email || t('viewProfile') || 'View Profile'}
-                    </p>
-                  </div>
+            {(openSections.create || isCollapsed) && (
+              <div className="space-y-0.5">
+                <Link href="/chef" className={navClass('/chef')} style={navStyle('/chef')} title={t('aiChef', 'AI Assistant')}>
+                  <MessageSquare className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('aiChef', 'AI Assistant')}</span>}
                 </Link>
-
-                <div className="space-y-1 pt-1">
-                  <Link
-                    href="/token"
-                    onClick={() => setShowProfileMenu(false)}
-                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <Coins className="h-4 w-4" style={iconStyle} />
-                    <span>{t('token') || 'Token'}</span>
-                  </Link>
-
-                  <Link
-                    href="/wallet"
-                    onClick={() => setShowProfileMenu(false)}
-                    className="flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold hover:bg-[var(--color-inner-dark)] transition"
-                    style={{ color: 'var(--color-text)' }}
-                  >
-                    <Wallet className="h-4 w-4 text-[var(--color-primary)]" />
-                    <span>{t('myWallet') || 'Store Wallet'}</span>
-                  </Link>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowProfileMenu(false);
-                      logoutUser();
-                      window.location.href = '/login';
-                    }}
-                    className="w-full flex items-center gap-2.5 p-2.5 rounded-xl text-xs font-bold text-red-400 hover:bg-red-500/10 transition cursor-pointer text-left border-t border-[var(--color-border)] mt-1.5 pt-2"
-                  >
-                    <LogOut className="h-4 w-4" />
-                    <span>{t('logout') || 'Logout'}</span>
-                  </button>
-                </div>
+                <Link href="/manual" className={navClass('/manual')} style={navStyle('/manual')} title={t('manualEntry', 'Add Recipe')}>
+                  <SquarePen className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('manualEntry', 'Add Recipe')}</span>}
+                </Link>
+                <Link href="/import" className={navClass('/import')} style={navStyle('/import')} title={t('importRecipe', 'Import Recipe')}>
+                  <UploadCloud className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('importRecipe', 'Import Recipe')}</span>}
+                </Link>
               </div>
             )}
           </div>
-        </div>
-      </div>
 
-      {isOpen && (
-        <div 
-          onClick={() => setIsOpen(false)} 
-          className="fixed inset-0 z-40 bg-black/75 backdrop-blur-sm md:hidden transition-opacity"
-        />
-      )}
-
-      {/* SIDEBAR CONTAINER: STRICTLY POSITION: FIXED OUT-OF-FLOW (ZERO HEIGHT COLLISION) */}
-      <aside 
-        id="zecratary-sidebar"
-        className={`
-          fixed top-0 left-0 z-40 h-screen bg-[var(--color-card)] border-r border-[var(--color-border)] 
-          flex flex-col justify-between shrink-0 select-none transition-all duration-300 ease-in-out
-          ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}
-          ${isOpen ? 'translate-x-0 w-64 p-5' : '-translate-x-full md:translate-x-0'}
-          ${!isOpen && showCollapsed ? 'md:w-20 p-3' : 'md:w-64 p-5'}
-        `}
-      >
-        <div className="space-y-4 overflow-y-auto overflow-x-hidden pr-1">
-          {showCollapsed ? (
-            <div className="flex flex-col items-center gap-3 pb-2 border-b border-[var(--color-border)]">
+          {/* 2. MANAGE ACCORDION */}
+          <div className="space-y-1">
+            {!isCollapsed ? (
               <button
                 type="button"
-                onClick={() => setIsCollapsed(false)}
-                className={`p-2 rounded-xl transition cursor-pointer ${
-                  isDarkMode ? 'text-slate-400 hover:text-white hover:bg-[#141b2d]' : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200'
-                }`}
-                title="Expand navigation"
+                onClick={() => toggleSection('manage')}
+                className="w-full flex items-center justify-between px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider opacity-70 hover:opacity-100 transition cursor-pointer"
               >
-                <Menu className="h-5 w-5" />
+                <span>{t('manageSection', 'Manage')}</span>
+                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${openSections.manage ? 'rotate-0' : '-rotate-90'}`} />
               </button>
-              <Link href="/dashboard" className="flex items-center justify-center p-1" title={displayName}>
-                {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
-              </Link>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between pb-2 border-b border-[var(--color-border)]">
-              <div className="flex items-center gap-2.5 min-w-0">
+            ) : (
+              <div className="h-px bg-slate-800/40 my-2" />
+            )}
+
+            {(openSections.manage || isCollapsed) && (
+              <div className="space-y-0.5">
+                <Link href="/saved" className={navClass('/saved')} style={navStyle('/saved')} title={t('savedRecipes', 'Saved Recipes')}>
+                  <BookOpen className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('savedRecipes', 'Saved Recipes')}</span>}
+                </Link>
+                <Link href="/books" className={navClass('/books')} style={navStyle('/books')} title={t('cookbooks', 'Cookbooks')}>
+                  <Book className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('cookbooks', 'Cookbooks')}</span>}
+                </Link>
+                <Link href="/pantry" className={navClass('/pantry')} style={navStyle('/pantry')} title={t('pantryInventory', 'Pantry Inventory')}>
+                  <Package className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('pantryInventory', 'Pantry Inventory')}</span>}
+                </Link>
+              </div>
+            )}
+          </div>
+
+          {/* 3. PLAN ACCORDION */}
+          <div className="space-y-1">
+            {!isCollapsed ? (
+              <button
+                type="button"
+                onClick={() => toggleSection('plan')}
+                className="w-full flex items-center justify-between px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider opacity-70 hover:opacity-100 transition cursor-pointer"
+              >
+                <span>{t('planSection', 'Plan')}</span>
+                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${openSections.plan ? 'rotate-0' : '-rotate-90'}`} />
+              </button>
+            ) : (
+              <div className="h-px bg-slate-800/40 my-2" />
+            )}
+
+            {(openSections.plan || isCollapsed) && (
+              <div className="space-y-0.5">
+                <Link href="/planner" className={navClass('/planner')} style={navStyle('/planner')} title={t('mealPlanner', 'Meal Planner')}>
+                  <Calendar className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('mealPlanner', 'Meal Planner')}</span>}
+                </Link>
+                <Link href="/templates" className={navClass('/templates')} style={navStyle('/templates')} title={t('templates', 'Meal Blueprints')}>
+                  <LayoutTemplate className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('templates', 'Meal Blueprints')}</span>}
+                </Link>
+                <Link href="/shopping" className={navClass('/shopping')} style={navStyle('/shopping')} title={t('shoppingList', 'Shopping List')}>
+                  <ShoppingCart className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('shoppingList', 'Shopping List')}</span>}
+                </Link>
+              </div>
+            )}
+          </div>
+
+          {/* 4. FINANCIAL & UTILITY ACCORDION */}
+          <div className="space-y-1">
+            {!isCollapsed ? (
+              <button
+                type="button"
+                onClick={() => toggleSection('finance')}
+                className="w-full flex items-center justify-between px-3 py-1 text-[10px] font-extrabold uppercase tracking-wider opacity-70 hover:opacity-100 transition cursor-pointer"
+              >
+                <span>{t('financeSection', 'Finance & Hub')}</span>
+                <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${openSections.finance ? 'rotate-0' : '-rotate-90'}`} />
+              </button>
+            ) : (
+              <div className="h-px bg-slate-800/40 my-2" />
+            )}
+
+            {(openSections.finance || isCollapsed) && (
+              <div className="space-y-0.5">
+                <Link href="/token" className={navClass('/token')} style={navStyle('/token')} title={t('tokenPortal', 'Token Portal')}>
+                  <Coins className="h-4 w-4 shrink-0 text-amber-400" />
+                  {!isCollapsed && <span>{t('tokenPortal', 'Token Portal')}</span>}
+                </Link>
+                <Link href="/wallet" className={navClass('/wallet')} style={navStyle('/wallet')} title={t('walletPortal', 'Store Wallet')}>
+                  <Wallet className="h-4 w-4 shrink-0 text-emerald-400" />
+                  {!isCollapsed && <span>{t('walletPortal', 'Store Wallet')}</span>}
+                </Link>
+                <Link href="/subscriptions" className={navClass('/subscriptions')} style={navStyle('/subscriptions')} title={t('subscriptions', 'Subscriptions')}>
+                  <Layers className="h-4 w-4 shrink-0 text-sky-400" />
+                  {!isCollapsed && <span>{t('subscriptions', 'Subscriptions')}</span>}
+                </Link>
+                <Link href="/billing" className={navClass('/billing')} style={navStyle('/billing')} title={t('billing', 'Billing History')}>
+                  <Receipt className="h-4 w-4 shrink-0" />
+                  {!isCollapsed && <span>{t('billing', 'Billing History')}</span>}
+                </Link>
+              </div>
+            )}
+          </div>
+
+          {/* 5. ADMIN MANAGEMENT ACCORDION */}
+          {isAdmin && (
+            <div className="space-y-1 pt-2 border-t" style={{ borderColor: 'var(--color-border)' }}>
+              {!isCollapsed ? (
                 <button
                   type="button"
-                  onClick={() => setIsCollapsed(true)}
-                  className={`p-2 rounded-xl transition cursor-pointer shrink-0 ${
-                    isDarkMode ? 'text-slate-400 hover:text-white hover:bg-[#141b2d]' : 'text-slate-700 hover:text-slate-950 hover:bg-slate-200'
-                  }`}
-                  title="Collapse navigation"
+                  onClick={() => toggleSection('admin')}
+                  className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-[var(--color-primary)] hover:opacity-100 transition cursor-pointer"
                 >
-                  <Menu className="h-5 w-5" />
+                  <span>{t('adminAccess', 'Admin Access')}</span>
+                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${openSections.admin ? 'rotate-0' : '-rotate-90'}`} />
                 </button>
-                <Link href="/dashboard" className="flex items-center gap-2 truncate">
-                  {isImageIcon(displayIcon) ? <img src={displayIcon} alt="Logo" className="w-7 h-7 object-contain rounded shrink-0" /> : <span className="text-2xl shrink-0">{displayIcon}</span>}
-                  <span className="text-lg font-black tracking-tight text-[var(--color-primary)] truncate">
-                    {displayName}
-                  </span>
-                </Link>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsOpen(false)}
-                className="md:hidden p-1.5 rounded-lg transition cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
+              ) : (
+                <div className="h-px bg-slate-800/40 my-2" />
+              )}
+
+              {(openSections.admin || isCollapsed) && (
+                <div className="space-y-0.5">
+                  <Link href="/admin" className={navClass('/admin')} style={navStyle('/admin')} title={t('adminOverview', 'Overview')}>
+                    <Settings className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('adminOverview', 'Overview')}</span>}
+                  </Link>
+                  <Link href="/admin/frontend" className={navClass('/admin/frontend')} style={navStyle('/admin/frontend')} title={t('pageBuilder', 'Page Builder')}>
+                    <Globe className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('pageBuilder', 'Page Builder')}</span>}
+                  </Link>
+                  <Link href="/admin/users" className={navClass('/admin/users')} style={navStyle('/admin/users')} title={t('users', 'Users')}>
+                    <UserPlus className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('users', 'User Accounts')}</span>}
+                  </Link>
+                  <Link href="/admin/plans" className={navClass('/admin/plans')} style={navStyle('/admin/plans')} title={t('plans', 'Plans')}>
+                    <CreditCard className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('plans', 'Subscription Plans')}</span>}
+                  </Link>
+                  <Link href="/admin/payment" className={navClass('/admin/payment')} style={navStyle('/admin/payment')} title={t('payments', 'Payments')}>
+                    <ShieldCheck className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('payments', 'Payment Gateway')}</span>}
+                  </Link>
+                  <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} style={navStyle('/admin/token-setting')} title={t('tokens', 'Tokens')}>
+                    <Coins className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('tokens', 'Token Pricing')}</span>}
+                  </Link>
+                  <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} style={navStyle('/admin/wallet-settings')} title={t('wallet', 'Wallet')}>
+                    <Wallet className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('wallet', 'Wallet Settings')}</span>}
+                  </Link>
+                  <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} style={navStyle('/admin/notification-settings')} title={t('notifications', 'Alerts')}>
+                    <BellRing className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('notifications', 'Notifications')}</span>}
+                  </Link>
+                  <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} style={navStyle('/admin/ai-settings')} title={t('aiModels', 'AI Models')}>
+                    <Cpu className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('aiModels', 'AI Engine')}</span>}
+                  </Link>
+                  <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} style={navStyle('/admin/recipe-type')} title={t('recipeTypes', 'Recipe Types')}>
+                    <Utensils className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('recipeTypes', 'Recipe Types')}</span>}
+                  </Link>
+                  <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} style={navStyle('/admin/ingredient-categories')} title={t('categories', 'Categories')}>
+                    <Tag className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('categories', 'Categories')}</span>}
+                  </Link>
+                  <Link href="/admin/social-login-setting" className={navClass('/admin/social-login-setting')} style={navStyle('/admin/social-login-setting')} title={t('socialLogin', 'OAuth')}>
+                    <Key className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('socialLogin', 'Social Login')}</span>}
+                  </Link>
+                  <Link href="/admin/database" className={navClass('/admin/database')} style={navStyle('/admin/database')} title={t('database', 'Database')}>
+                    <Database className="h-4 w-4 shrink-0" />
+                    {!isCollapsed && <span>{t('database', 'Database')}</span>}
+                  </Link>
+                </div>
+              )}
             </div>
           )}
-
-          <nav className="space-y-1">
-            <Link href="/dashboard" className={navClass('/dashboard')} title={t('dashboard')}>
-              <Home className="h-4 w-4 shrink-0" style={iconStyle} />
-              {!showCollapsed && <span className="truncate whitespace-nowrap">{t('dashboard')}</span>}
-            </Link>
-
-            {/* COLLAPSIBLE SECTION: CREATE */}
-            <div className="pt-2">
-              {!showCollapsed && (
-                <button
-                  type="button"
-                  onClick={() => toggleSection('create')}
-                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition cursor-pointer select-none rounded-lg ${
-                    isDarkMode ? 'text-slate-500 hover:text-slate-300 hover:bg-[#141b2d]/40' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                  }`}
-                  aria-expanded={openSections.create}
-                  title={openSections.create ? t('collapseSection', 'Collapse section') : t('expandSection', 'Expand section')}
-                >
-                  <span className="truncate">{t('create')}</span>
-                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-70 ${openSections.create ? 'rotate-0' : '-rotate-90'}`} />
-                </button>
-              )}
-              {(openSections.create || showCollapsed) && (
-                <div className="space-y-1 pt-0.5">
-                  <Link href="/chef" className={navClass('/chef')} title={t('chefAi')}>
-                    <MessageSquare className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('chefAi')}</span>}
-                  </Link>
-                  <Link href="/import" className={navClass('/import')} title={t('import')}>
-                    <UploadCloud className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('import')}</span>}
-                  </Link>
-                  <Link href="/manual" className={navClass('/manual')} title={t('manual')}>
-                    <SquarePen className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('manual')}</span>}
-                  </Link>
-                </div>
-              )}
-            </div>
-
-            {/* COLLAPSIBLE SECTION: MANAGE */}
-            <div className="pt-2">
-              {!showCollapsed && (
-                <button
-                  type="button"
-                  onClick={() => toggleSection('manage')}
-                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition cursor-pointer select-none rounded-lg ${
-                    isDarkMode ? 'text-slate-500 hover:text-slate-300 hover:bg-[#141b2d]/40' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-                  }`}
-                  aria-expanded={openSections.manage}
-                  title={openSections.manage ? t('collapseSection', 'Collapse section') : t('expandSection', 'Expand section')}
-                >
-                  <span className="truncate">{t('manage')}</span>
-                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-70 ${openSections.manage ? 'rotate-0' : '-rotate-90'}`} />
-                </button>
-              )}
-              {(openSections.manage || showCollapsed) && (
-                <div className="space-y-1 pt-0.5">
-                  <Link href="/recipes" className={navClass('/recipes')} title={t('savedRecipes')}>
-                    <BookOpen className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('savedRecipes')}</span>}
-                  </Link>
-                  <Link href="/books" className={navClass('/books')} title={t('books')}>
-                    <Book className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('books')}</span>}
-                  </Link>
-                  <Link href="/pantry" className={navClass('/pantry')}>
-                    <Package className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('pantry')}</span>}
-                  </Link>
-                </div>
-              )}
-            </div>
-
-            {/* COLLAPSIBLE SECTION: PLAN */}
-            <div className="pt-2">
-              {!showCollapsed && (
-                <button
-                  type="button"
-                  onClick={() => toggleSection('plan')}
-                  className={`w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider transition cursor-pointer select-none rounded-lg ${
-                    isDarkMode ? 'text-slate-500 hover:text-slate-300 hover:bg-[#141b2d]/40' : 'text-slate-600 hover:text-slate-950 hover:bg-slate-200/50'
-                  }`}
-                  aria-expanded={openSections.plan}
-                  title={openSections.plan ? t('collapseSection', 'Collapse section') : t('expandSection', 'Expand section')}
-                >
-                  <span className="truncate">{t('plan')}</span>
-                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-70 ${openSections.plan ? 'rotate-0' : '-rotate-90'}`} />
-                </button>
-              )}
-              {(openSections.plan || showCollapsed) && (
-                <div className="space-y-1 pt-0.5">
-                  <Link href="/shopping" className={navClass('/shopping')} title={t('shoppingList')}>
-                    <ShoppingCart className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('shoppingList')}</span>}
-                  </Link>
-                  <Link href="/planner" className={navClass('/planner')}>
-                    <Calendar className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('planner')}</span>}
-                  </Link>
-                  <Link href="/templates" className={navClass('/templates')}>
-                    <LayoutTemplate className="h-4 w-4 shrink-0" style={iconStyle} />
-                    {!showCollapsed && <span className="truncate whitespace-nowrap">{t('templates')}</span>}
-                  </Link>
-                </div>
-              )}
-            </div>
-
-            {/* COLLAPSIBLE SECTION: ADMIN ACCESS */}
-            {isAdmin && (
-              <div className="pt-2">
-                {!showCollapsed && (
-                  <button
-                    type="button"
-                    onClick={() => toggleSection('admin')}
-                    className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-[var(--color-primary)] transition cursor-pointer select-none rounded-lg hover:opacity-85 hover:bg-[var(--color-primary)]/10"
-                    aria-expanded={openSections.admin}
-                    title={openSections.admin ? t('collapseSection', 'Collapse section') : t('expandSection', 'Expand section')}
-                  >
-                    <span className="truncate">{t('adminAccess') || 'Admin Access'}</span>
-                    <ChevronDown className={`h-3 w-3 transition-transform duration-200 opacity-75 ${openSections.admin ? 'rotate-0' : '-rotate-90'}`} />
-                  </button>
-                )}
-                {(openSections.admin || showCollapsed) && (
-                  <div className="space-y-1 pt-0.5">
-                    <Link href="/admin" className={navClass('/admin')} title="Admin Setting">
-                      <ShieldCheck className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Admin Setting</span>}
-                    </Link>
-                    <Link href="/admin/ai-settings" className={navClass('/admin/ai-settings')} title="Ai Settings">
-                      <Cpu className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Ai Settings</span>}
-                    </Link>
-                    <Link href="/admin/token-setting" className={navClass('/admin/token-setting')} title="Token Settings">
-                      <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Token Settings</span>}
-                    </Link>
-                    <Link href="/admin/wallet-settings" className={navClass('/admin/wallet-settings')} title="Wallet Settings">
-                      <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Wallet Settings</span>}
-                    </Link>
-                    <Link href="/admin/storage" className={navClass('/admin/storage')} title="Storage Settings">
-                      <HardDrive className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Storage Settings</span>}
-                    </Link>
-                    <Link href="/admin/notification-settings" className={navClass('/admin/notification-settings')} title={t('notificationSettings', 'Notification Settings')}>
-                      <BellRing className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">{t('notificationSettings', 'Notification Settings')}</span>}
-                    </Link>
-                    <Link href="/admin/plans" className={navClass('/admin/plans')} title="Subscription Plans">
-                      <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Subscription Plans</span>}
-                    </Link>
-                    <Link href="/admin/payment" className={navClass('/admin/payment')} title="Payment Gateway">
-                      <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Payment Gateway</span>}
-                    </Link>
-                    <Link href="/admin/social-login-setting" className={navClass('/admin/social-login-setting')} title="Social Login">
-                      <Key className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Social Login</span>}
-                    </Link>
-                    <Link href="/admin/users" className={navClass('/admin/users')} title="Users">
-                      <UserPlus className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Users</span>}
-                    </Link>
-                    <Link href="/admin/recipe-type" className={navClass('/admin/recipe-type')} title="Recipe Type">
-                      <Utensils className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Recipe Type</span>}
-                    </Link>
-                    <Link href="/admin/ingredient-categories" className={navClass('/admin/ingredient-categories')} title="Ingredient Category">
-                      <Tag className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Ingredient Category</span>}
-                    </Link>
-                    <Link href="/admin/language" className={navClass('/admin/language')} title="Language">
-                      <Languages className="h-4 w-4 shrink-0" style={iconStyle} />
-                      {!showCollapsed && <span className="truncate whitespace-nowrap">Language</span>}
-                    </Link>
-                  </div>
-                )}
-              </div>
-            )}
-          </nav>
         </div>
 
         {/* FOOTER CONTROLS */}
-        <div className="pt-3 border-t border-[var(--color-border)] space-y-1">
-          {showCollapsed ? (
-            <div className="flex flex-col items-center gap-2 p-1">
-              <button
-                type="button"
-                onClick={toggleThemeMode}
-                className={`p-2 rounded-xl border border-[var(--color-border)] transition-colors flex items-center justify-center cursor-pointer ${
-                  isDarkMode ? 'bg-[#070b13] hover:bg-[#141b2d]' : 'bg-slate-200 hover:bg-slate-300'
-                }`}
-                title="Toggle Theme Mode"
-              >
-                {isDarkMode ? <Moon className="h-4 w-4 shrink-0" style={iconStyle} /> : <Sun className="h-4 w-4 text-amber-500 shrink-0" />}
-              </button>
-            </div>
-          ) : (
-            <div className="px-1 py-1 flex items-center gap-2">
-              <div className={`flex-1 flex items-center border border-[var(--color-border)] rounded-xl px-2.5 py-1.5 shadow-sm ${
-                isDarkMode ? 'bg-[#070b13]' : 'bg-slate-200'
-              }`}>
-                <select
-                  value={locale}
-                  onChange={(e) => setLocale(e.target.value)}
-                  className={`w-full bg-transparent text-xs font-bold outline-none cursor-pointer ${
-                    isDarkMode ? 'text-white' : 'text-slate-900'
-                  }`}
-                >
-                  {availableLanguages.map((lang) => (
-                    <option key={lang.code} value={lang.code} className={isDarkMode ? 'bg-[#111726] text-white' : 'bg-white text-slate-900'}>
-                      {lang.flag} {lang.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <button
-                type="button"
-                onClick={toggleThemeMode}
-                className={`p-2 rounded-xl border border-[var(--color-border)] transition-colors flex items-center justify-center cursor-pointer shrink-0 ${
-                  isDarkMode ? 'bg-[#070b13] hover:bg-[#141b2d]' : 'bg-slate-200 hover:bg-slate-300'
-                }`}
-                title="Toggle Theme Mode"
-              >
-                {isDarkMode ? <Moon className="h-4 w-4 shrink-0" style={iconStyle} /> : <Sun className="h-4 w-4 text-amber-500 shrink-0" />}
-              </button>
-            </div>
-          )}
-
-          <Link href="/profile" className={navClass('/profile')} title={t('profile')}>
-            <Settings className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('profile')}</span>}
+        <div className="p-3 border-t space-y-2" style={{ borderColor: 'var(--color-border)' }}>
+          <Link href="/contacts" className={navClass('/contacts')} style={navStyle('/contacts')} title={t('contactSupport', 'Contact Support')}>
+            <Mail className="h-4 w-4 shrink-0" />
+            {!isCollapsed && <span>{t('contactSupport', 'Contact Support')}</span>}
           </Link>
 
-          <Link href="/token" className={navClass('/token')} title={t('token') || 'Token'}>
-            <Coins className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('token') || 'Token'}</span>}
-          </Link>
-
-          <Link href="/wallet" className={navClass('/wallet')} title={t('wallet') || 'Wallet'}>
-            <Wallet className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('wallet') || 'Wallet'}</span>}
-          </Link>
-
-          <Link href="/subscriptions" className={navClass('/subscriptions')} title={t('subscriptions') || 'Subscriptions'}>
-            <Layers className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('subscriptions') || 'Subscriptions'}</span>}
-          </Link>
-
-          <Link href="/billing" className={navClass('/billing')} title={t('billing') || 'Billing'}>
-            <CreditCard className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('billing') || 'Billing'}</span>}
-          </Link>
-
-          <Link href="/contacts" className={navClass('/contacts')} title={t('contactUs')}>
-            <Mail className="h-4 w-4 shrink-0" style={iconStyle} />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('contactUs')}</span>}
-          </Link>
-
-          <button
-            onClick={() => {
-              logoutUser();
-              window.location.href = '/login';
-            }}
-            className={`w-full flex items-center ${showCollapsed ? 'justify-center px-0' : 'gap-3 px-3.5'} py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer text-left ${
-              isDarkMode ? 'text-slate-400 hover:text-red-400 hover:bg-red-950/20' : 'text-slate-800 hover:text-red-600 hover:bg-red-100/70 font-bold'
-            }`}
-            title={t('logout')}
-          >
-            <LogOut className="h-4 w-4 shrink-0" />
-            {!showCollapsed && <span className="truncate whitespace-nowrap">{t('logout')}</span>}
-          </button>
-
-          <div className={`pt-2 select-none flex items-center ${showCollapsed ? 'justify-center text-[10px]' : 'px-3.5 justify-between text-[11px]'} font-mono ${
-            isDarkMode ? 'text-slate-500' : 'text-slate-600'
-          }`}>
-            {!showCollapsed && <span className="text-[10px] uppercase tracking-wider font-semibold opacity-75">Version</span>}
-            <span className="font-semibold tracking-tight opacity-90">v{packageInfo.version || '1.0.0'}</span>
+          <div className="flex items-center justify-between pt-1 px-1 text-[10px] font-mono opacity-60">
+            {!isCollapsed && <span>{t('version', 'App Version')}</span>}
+            <span>v{packageInfo.version || '1.0.0'}</span>
           </div>
         </div>
       </aside>
+
+      {/* MOBILE APPLICATION DRAWER */}
+      {mobileMenuOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-50 flex"
+          style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)' }}
+          onClick={() => setMobileMenuOpen(false)}
+        >
+          <div
+            className="w-72 h-full flex flex-col p-5 space-y-4 overflow-y-auto"
+            style={{
+              backgroundColor: 'var(--color-card)',
+              color: 'var(--color-text)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b" style={{ borderColor: 'var(--color-border)' }}>
+              <span className="font-extrabold text-sm">{siteName || 'Zecratary'}</span>
+              <button type="button" onClick={() => setMobileMenuOpen(false)} className="p-1 rounded-lg">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              <Link href="/dashboard" onClick={() => setMobileMenuOpen(false)} className={navClass('/dashboard')} style={navStyle('/dashboard')}>
+                <LayoutDashboard className="h-4 w-4" /> <span>{t('dashboard', 'Dashboard')}</span>
+              </Link>
+              <Link href="/chef" onClick={() => setMobileMenuOpen(false)} className={navClass('/chef')} style={navStyle('/chef')}>
+                <MessageSquare className="h-4 w-4" /> <span>{t('aiChef', 'AI Assistant')}</span>
+              </Link>
+              <Link href="/saved" onClick={() => setMobileMenuOpen(false)} className={navClass('/saved')} style={navStyle('/saved')}>
+                <BookOpen className="h-4 w-4" /> <span>{t('savedRecipes', 'Saved Recipes')}</span>
+              </Link>
+              <Link href="/books" onClick={() => setMobileMenuOpen(false)} className={navClass('/books')} style={navStyle('/books')}>
+                <Book className="h-4 w-4" /> <span>{t('cookbooks', 'Cookbooks')}</span>
+              </Link>
+              <Link href="/pantry" onClick={() => setMobileMenuOpen(false)} className={navClass('/pantry')} style={navStyle('/pantry')}>
+                <Package className="h-4 w-4" /> <span>{t('pantryInventory', 'Pantry Inventory')}</span>
+              </Link>
+              <Link href="/planner" onClick={() => setMobileMenuOpen(false)} className={navClass('/planner')} style={navStyle('/planner')}>
+                <Calendar className="h-4 w-4" /> <span>{t('mealPlanner', 'Meal Planner')}</span>
+              </Link>
+              <Link href="/shopping" onClick={() => setMobileMenuOpen(false)} className={navClass('/shopping')} style={navStyle('/shopping')}>
+                <ShoppingCart className="h-4 w-4" /> <span>{t('shoppingList', 'Shopping List')}</span>
+              </Link>
+              <Link href="/token" onClick={() => setMobileMenuOpen(false)} className={navClass('/token')} style={navStyle('/token')}>
+                <Coins className="h-4 w-4 text-amber-400" /> <span>{t('tokenPortal', 'Token Portal')}</span>
+              </Link>
+              <Link href="/wallet" onClick={() => setMobileMenuOpen(false)} className={navClass('/wallet')} style={navStyle('/wallet')}>
+                <Wallet className="h-4 w-4 text-emerald-400" /> <span>{t('walletPortal', 'Store Wallet')}</span>
+              </Link>
+              <Link href="/profile" onClick={() => setMobileMenuOpen(false)} className={navClass('/profile')} style={navStyle('/profile')}>
+                <UserIcon className="h-4 w-4" /> <span>{t('topbarProfile', 'User Profile')}</span>
+              </Link>
+              <Link href="/contacts" onClick={() => setMobileMenuOpen(false)} className={navClass('/contacts')} style={navStyle('/contacts')}>
+                <Mail className="h-4 w-4" /> <span>{t('contactSupport', 'Contact Support')}</span>
+              </Link>
+            </div>
+
+            <div className="pt-4 border-t space-y-2" style={{ borderColor: 'var(--color-border)' }}>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold text-red-400 border border-red-500/20 hover:bg-red-500/10 transition"
+              >
+                <LogOut className="h-4 w-4" />
+                <span>{t('logOut', 'Log Out')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -75417,11 +75265,38 @@ export function loginUser(
 
 export async function logoutUser(): Promise<void> {
   try {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    await fetch('/api/auth/logout', { method: 'POST', cache: 'no-store' });
   } catch (_) {}
+
+  if (typeof window !== 'undefined') {
+    const keys = [
+      'zecratary_current_user',
+      'zecratary_session',
+      'zecratary_auth_session',
+      'currentUser',
+      'user',
+      'zec_login_bounce_ts',
+      'zec_login_bounce_count'
+    ];
+    keys.forEach(k => {
+      try { localStorage.removeItem(k); } catch (_) {}
+      try { sessionStorage.removeItem(k); } catch (_) {}
+      document.cookie = `${k}=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+    });
+
+    try {
+      Object.keys(localStorage).forEach(k => {
+        if (k.startsWith('zecratary_tokens_') || k.startsWith('zecratary_wallet_')) {
+          localStorage.removeItem(k);
+        }
+      });
+    } catch (_) {}
+  }
+
   setCurrentUser(null);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('zecratary_auth_changed'));
+    window.dispatchEvent(new Event('storage'));
   }
 }
 
