@@ -1,7 +1,8 @@
 // Universal Multi-Dialect Database Client (PostgreSQL & MySQL)
 // GitHub: cygnusorbit/zecratary
-// Satisfies Constraint 8: Direct persistence to PostgreSQL & MySQL with driver-scoped SSL
-// Fully exports getPool, query, closePool, and backward-compatible pool proxy
+// Satisfies Constraint 8: Adaptive SSL resolution without global process.env pollution
+
+declare const __non_webpack_require__: any;
 
 import { Pool } from 'pg';
 import type { PoolConfig } from 'pg';
@@ -11,6 +12,8 @@ declare global {
   var __zecratary_pg_pool: Pool | undefined;
   // eslint-disable-next-line no-var
   var __zecratary_current_conn: string | undefined;
+  // eslint-disable-next-line no-var
+  var __zecratary_ssl_unsupported: boolean | undefined;
 }
 
 export function getConnectionString(): string {
@@ -48,18 +51,62 @@ export function parseDbRows<T = any>(res: any): T[] {
   return [];
 }
 
-export function getPool(): Pool | null {
+export function parseDbRow<T = any>(res: any): T | null {
+  const rows = parseDbRows<T>(res);
+  return rows.length > 0 ? rows[0] : null;
+}
+
+function buildPoolConfig(rawConnStr: string, forcePlaintext = false): PoolConfig {
+  const cleanConnStr = rawConnStr
+    .replace(/([?&])sslmode=[^&]+(&|$)/, '$1')
+    .replace(/[?&]$/, '');
+
+  const isLocal =
+    rawConnStr.includes('localhost') ||
+    rawConnStr.includes('127.0.0.1') ||
+    rawConnStr.includes('0.0.0.0') ||
+    rawConnStr.includes('::1') ||
+    rawConnStr.includes('@postgres:') ||
+    rawConnStr.includes('sslmode=disable');
+
+  const isSupabaseOrPooler =
+    rawConnStr.includes('supabase') ||
+    rawConnStr.includes('pooler') ||
+    rawConnStr.includes('aws-0') ||
+    rawConnStr.includes('sslmode=require');
+
+  const poolConfig: PoolConfig = {
+    connectionString: cleanConnStr,
+    connectionTimeoutMillis: 8000,
+    idleTimeoutMillis: 30000,
+    max: 10,
+  };
+
+  // Driver-scoped SSL: Enable strictly for remote/pooler endpoints when not flagged as unsupported
+  if (!forcePlaintext && !globalThis.__zecratary_ssl_unsupported && (!isLocal || isSupabaseOrPooler)) {
+    poolConfig.ssl = {
+      rejectUnauthorized: false,
+    };
+  }
+
+  return poolConfig;
+}
+
+export function getPool(forcePlaintext = false): Pool | null {
   const rawConnStr = getConnectionString();
   if (!rawConnStr || rawConnStr.includes('[YOUR-PASSWORD]')) {
     return null;
   }
 
-  // Reuse existing pool instance if connection string is unchanged
-  if (globalThis.__zecratary_pg_pool && globalThis.__zecratary_current_conn === rawConnStr) {
+  // Reuse existing pool instance if connection string and SSL mode match
+  if (
+    !forcePlaintext &&
+    globalThis.__zecratary_pg_pool &&
+    globalThis.__zecratary_current_conn === rawConnStr
+  ) {
     return globalThis.__zecratary_pg_pool;
   }
 
-  // Cleanly close prior pool on connection change
   if (globalThis.__zecratary_pg_pool) {
     try {
       globalThis.__zecratary_pg_pool.end().catch(() => {});
@@ -69,33 +116,8 @@ export function getPool(): Pool | null {
 
   globalThis.__zecratary_current_conn = rawConnStr;
 
-  const isRemote = !rawConnStr.includes('localhost') && !rawConnStr.includes('127.0.0.1');
-  const isSupabaseOrPooler =
-    rawConnStr.includes('supabase') ||
-    rawConnStr.includes('pooler') ||
-    rawConnStr.includes('aws-0') ||
-    rawConnStr.includes('sslmode=require');
-
-  // Strip conflicting sslmode query parameters to allow explicit driver-scoped SSL configuration
-  const cleanConnStr = rawConnStr
-    .replace(/([?&])sslmode=[^&]+(&|$)/, '$1')
-    .replace(/[?&]$/, '');
-
-  const poolConfig: PoolConfig = {
-    connectionString: cleanConnStr,
-    connectionTimeoutMillis: 10000,
-    idleTimeoutMillis: 30000,
-    max: 10,
-  };
-
-  // Driver-scoped SSL: Bypasses pooler CA chain verification without polluting global process.env
-  if (isRemote || isSupabaseOrPooler) {
-    poolConfig.ssl = {
-      rejectUnauthorized: false,
-    };
-  }
-
-  const newPool = new Pool(poolConfig);
+  const config = buildPoolConfig(rawConnStr, forcePlaintext);
+  const newPool = new Pool(config);
 
   newPool.on('error', (err) => {
     console.warn('[PostgreSQL Pool Client Notice]:', err.message);
@@ -105,27 +127,24 @@ export function getPool(): Pool | null {
   return newPool;
 }
 
-/**
- * Backward-compatible pool proxy:
- * Allows routes to access pool.query(), pool.connect(), db.pool, etc.
- * Supports TS2339 in src/app/api/pantry/route.ts and other legacy endpoints.
- */
-export const pool: Pool & { [key: string]: any } = new Proxy({} as any, {
+// Proxied pool export ensuring full compatibility with both named and default imports
+export const pool: any = new Proxy({}, {
   get(_target, prop) {
-    const activePool = getPool();
-    if (!activePool) {
-      if (prop === 'then') return undefined;
-      if (prop === 'connect') return async () => ({
-        query: async () => ({ rows: [], rowCount: 0 }),
-        release: () => {},
-      });
-      if (prop === 'query') return async () => ({ rows: [], rowCount: 0 });
-      if (prop === 'on') return () => {};
-      if (prop === 'end') return async () => {};
+    const p = getPool();
+    if (!p) {
+      if (prop === 'connect') {
+        return async () => ({
+          query: async () => ({ rows: [] }),
+          release: () => {},
+        });
+      }
+      if (prop === 'query') {
+        return async () => ({ rows: [] });
+      }
       return undefined;
     }
-    const val = (activePool as any)[prop];
-    return typeof val === 'function' ? val.bind(activePool) : val;
+    const val = (p as any)[prop];
+    return typeof val === 'function' ? val.bind(p) : val;
   }
 });
 
@@ -138,13 +157,33 @@ export async function query(sql: string, params: any[] = []): Promise<any> {
   }
 
   if (dialect === 'postgres') {
-    const activePool = getPool();
-    if (!activePool) return [];
+    let poolInstance = getPool();
+    if (!poolInstance) return [];
 
     let client: any = null;
     try {
-      client = await activePool.connect();
-      const res = await client.query(sql, params);
+      try {
+        client = await poolInstance.connect();
+      } catch (connectErr: any) {
+        // Automatic SSL Handshake Fallback: If local PostgreSQL rejects SSL with 'N' packet
+        if (
+          connectErr.message &&
+          connectErr.message.includes('The server does not support SSL connections')
+        ) {
+          globalThis.__zecratary_ssl_unsupported = true;
+          poolInstance = getPool(true);
+          if (!poolInstance) return [];
+          client = await poolInstance.connect();
+        } else {
+          throw connectErr;
+        }
+      }
+
+      // Simple Query Protocol for parameterless DDL, Extended Query Protocol for parameters
+      const res = (!params || params.length === 0)
+        ? await client.query(sql)
+        : await client.query(sql, params);
+
       return Array.isArray(res) ? res : (res?.rows || []);
     } catch (err: any) {
       console.warn('[PostgreSQL Query Notice]:', err.message);
@@ -162,7 +201,9 @@ export async function query(sql: string, params: any[] = []): Promise<any> {
       let mysqlModule: any = null;
       try {
         // @ts-ignore
-        mysqlModule = typeof __non_webpack_require__ !== 'undefined' ? __non_webpack_require__('mysql2/promise') : eval('require')('mysql2/promise');
+        mysqlModule = typeof __non_webpack_require__ !== 'undefined'
+          ? __non_webpack_require__('mysql2/promise')
+          : eval('require')('mysql2/promise');
       } catch (_) {
         mysqlModule = await import('mysql2/promise').catch(() => null);
       }
@@ -195,16 +236,29 @@ export async function closePool(): Promise<void> {
   }
 }
 
-const dbModule = {
+const defaultExport: any = {
   query,
   getDatabaseDialect,
   getConnectionString,
   getPool,
-  pool,
   isPostgres,
   isMySQL,
   parseDbRows,
+  parseDbRow,
   closePool,
+  pool,
 };
 
-export default dbModule;
+Object.setPrototypeOf(
+  defaultExport,
+  new Proxy({}, {
+    get(_target, prop) {
+      const p = getPool();
+      if (!p) return undefined;
+      const val = (p as any)[prop];
+      return typeof val === 'function' ? val.bind(p) : val;
+    },
+  })
+);
+
+export default defaultExport;
