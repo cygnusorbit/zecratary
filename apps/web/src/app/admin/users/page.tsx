@@ -1,5 +1,5 @@
+// Generated / Updated by AI Collaborator - Production Build Ready
 'use client';
-// @ts-nocheck
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
@@ -24,9 +24,7 @@ interface AppUser {
   password?: string;
   role: 'admin' | 'user';
   subscriptionPlan?: string;
-  subscription_plan?: string;
-  createdAt?: string;
-  created_at?: string;
+  createdAt: string;
 }
 
 interface PlanOption {
@@ -62,7 +60,9 @@ const calculateRenewalExpiry = (startDate: Date = new Date(), interval?: string)
 };
 
 export default function AdminUserManagementPage() {
-  const { t, locale } = useTranslation();
+  const langContext = useTranslation();
+  const t = langContext?.t;
+  const locale = langContext?.locale;
 
   const tr = useCallback((key: string, fallback: string): string => {
     if (typeof t === 'function') {
@@ -81,20 +81,16 @@ export default function AdminUserManagementPage() {
   const isFetchingUsersRef = useRef(false);
   const isFetchingPlansRef = useRef(false);
 
-  // Selected User IDs for Export
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
-
-  // Admin Table Sorting & Pagination State
   const [adminSortField, setAdminSortField] = useState<SortField>('createdAt');
   const [adminSortOrder, setAdminSortOrder] = useState<SortOrder>('desc');
   const [adminCurrentPage, setAdminCurrentPage] = useState(1);
 
-  // Standard User Table Sorting & Pagination State
   const [userSortField, setUserSortField] = useState<SortField>('createdAt');
   const [userSortOrder, setUserSortOrder] = useState<SortOrder>('desc');
   const [userCurrentPage, setUserCurrentPage] = useState(1);
 
-  // Add User Modal State
+  // Modals state
   const [showAddModal, setShowAddModal] = useState(false);
   const [addName, setAddName] = useState('');
   const [addEmail, setAddEmail] = useState('');
@@ -103,7 +99,6 @@ export default function AdminUserManagementPage() {
   const [addSubscriptionPlan, setAddSubscriptionPlan] = useState<string>('taster');
   const [addError, setAddError] = useState('');
 
-  // Edit User Modal State
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -113,7 +108,6 @@ export default function AdminUserManagementPage() {
   const [editSubscriptionPlan, setEditSubscriptionPlan] = useState<string>('taster');
   const [editError, setEditError] = useState('');
 
-  // Identify primary root administrator (usr_admin_1)
   const isFirstAdminUser = useCallback((targetUser: AppUser | null | undefined): boolean => {
     if (!targetUser) return false;
     return targetUser.id === 'usr_admin_1' || targetUser.email?.toLowerCase() === 'admin@zecratary.com';
@@ -124,10 +118,16 @@ export default function AdminUserManagementPage() {
     return isFirstAdminUser(target);
   }, [editingUserId, users, isFirstAdminUser]);
 
-  // Synchronize dynamic theme
   const syncTheme = useCallback(() => {
     try {
-      window.dispatchEvent(new Event('zecratary_theme_updated'));
+      const stored = typeof window !== 'undefined'
+        ? (localStorage.getItem('zecratary_theme_colors') || localStorage.getItem('zecratary_theme_config'))
+        : null;
+      if (stored) {
+        applyThemeToDocument(JSON.parse(stored));
+      } else {
+        applyThemeToDocument(null);
+      }
     } catch (_) {}
   }, []);
 
@@ -159,9 +159,9 @@ export default function AdminUserManagementPage() {
           if (isFree) {
             parsedPlans.push({
               id: cfg.id || cleanBase,
-              name: `${cfg.name || 'Taster'} (${tr('adminUsersTasterFree', 'Free')})`,
+              name: `${cfg.name || 'Taster'} (Free)`,
               slug: cleanBase,
-              priceFormatted: tr('adminUsersTasterFree', 'Free'),
+              priceFormatted: 'Free',
               isFree: true,
               priceDollars: 0
             });
@@ -197,7 +197,7 @@ export default function AdminUserManagementPage() {
 
     if (parsedPlans.length === 0) {
       try {
-        const res = await fetch('/api/admin/plans?t=' + Date.now(), { cache: 'no-store' });
+        const res = await fetch('/api/admin/plans', { cache: 'no-store' });
         if (res.ok) {
           const data = await res.json();
           const list = Array.isArray(data) ? data : (data?.plans || data?.packages || data?.configs);
@@ -229,11 +229,11 @@ export default function AdminUserManagementPage() {
       ];
     }
 
-    setAvailablePlans(parsedPlans);
+    const freshPlans = parsedPlans;
+    setAvailablePlans(prev => JSON.stringify(prev) === JSON.stringify(freshPlans) ? prev : freshPlans);
     isFetchingPlansRef.current = false;
-  }, [tr]);
+  }, []);
 
-  // Load and normalize users from server database
   const loadUsers = useCallback(async () => {
     if (isFetchingUsersRef.current) return;
     isFetchingUsersRef.current = true;
@@ -244,16 +244,7 @@ export default function AdminUserManagementPage() {
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.users)) {
-          let list: AppUser[] = data.users.map((u: any) => ({
-            id: u.id,
-            name: u.name,
-            email: u.email,
-            password: u.password,
-            role: (u.role || 'user').toLowerCase() === 'admin' ? 'admin' : 'user',
-            subscriptionPlan: u.subscriptionPlan || u.subscription_plan || 'taster',
-            createdAt: u.createdAt || u.created_at || new Date().toISOString()
-          }));
-
+          let list: AppUser[] = [...data.users];
           const hasRootAdmin = list.some(u => u.id === 'usr_admin_1' || u.email?.toLowerCase() === 'admin@zecratary.com');
           if (!hasRootAdmin) {
             const rootAdmin: AppUser = {
@@ -265,13 +256,14 @@ export default function AdminUserManagementPage() {
               createdAt: '2026-01-01T00:00:00.000Z'
             };
             list.unshift(rootAdmin);
-            await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rootAdmin) }).catch(() => {});
+            await fetch('/api/admin/users?t=' + Date.now(), { 
+              method: 'POST', 
+              headers: { 'Content-Type': 'application/json' }, 
+              body: JSON.stringify(rootAdmin) 
+            }).catch(() => {});
           }
-
-          setUsers(list);
-
-          // Prune selection if users were removed
-          setSelectedUserIds(prev => prev.filter(id => list.some(u => u.id === id)));
+          const freshList = list;
+          setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
           return;
         }
       }
@@ -284,7 +276,10 @@ export default function AdminUserManagementPage() {
   }, []);
 
   useEffect(() => {
-    document.title = tr('adminUsersDocTitle', 'User Management - Admin Console');
+    document.title = tr('admin.users.docTitle', 'User Management - Admin Console');
+  }, [tr]);
+
+  useEffect(() => {
     initAuthStorage();
     const u = getCurrentUser();
     setCurrentUser(u);
@@ -304,9 +299,6 @@ export default function AdminUserManagementPage() {
     window.addEventListener('zecratary_plans_updated', handleSync);
     window.addEventListener('zecratary_payment_updated', handleSync);
     window.addEventListener('zecratary_admin_settings_updated', handleSync);
-    window.addEventListener('zecratary_languages_updated', handleSync);
-    window.addEventListener('zecratary_dictionary_updated', handleSync);
-    window.addEventListener('zecratary_locale_changed', handleSync);
 
     return () => {
       if (debounceTimer) clearTimeout(debounceTimer);
@@ -314,11 +306,8 @@ export default function AdminUserManagementPage() {
       window.removeEventListener('zecratary_plans_updated', handleSync);
       window.removeEventListener('zecratary_payment_updated', handleSync);
       window.removeEventListener('zecratary_admin_settings_updated', handleSync);
-      window.removeEventListener('zecratary_languages_updated', handleSync);
-      window.removeEventListener('zecratary_dictionary_updated', handleSync);
-      window.removeEventListener('zecratary_locale_changed', handleSync);
     };
-  }, [loadUsers, loadPlans, tr]);
+  }, [loadUsers, loadPlans]);
 
   const showToast = (msg: string) => {
     setFeedbackMsg(msg);
@@ -332,7 +321,7 @@ export default function AdminUserManagementPage() {
   const handleExportSelected = (format: 'csv' | 'json' = 'csv') => {
     const selectedUsers = users.filter(u => selectedUserIds.includes(u.id));
     if (selectedUsers.length === 0) {
-      showToast(tr('adminUsersSelectToExportPrompt', 'Please select at least one user to export.'));
+      showToast(tr('admin.users.selectUsersPrompt', 'Please select at least one user to export.'));
       return;
     }
     const timestamp = new Date().toISOString().split('T')[0];
@@ -347,15 +336,15 @@ export default function AdminUserManagementPage() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      showToast(`${selectedUsers.length} ${tr('adminUsersExportSuccessJson', 'user(s) exported to JSON successfully!')}`);
+      showToast(`${tr('admin.users.exportedJson', 'Exported')} ${selectedUsers.length} ${tr('admin.users.usersCountJson', 'selected user(s) to JSON!')}`);
     } else {
       const headers = [
-        tr('adminUsersColAdminUser', 'ID'), 
-        tr('adminUsersLabelFullName', 'Name'), 
-        tr('adminUsersColEmail', 'Email Address'), 
-        tr('adminUsersColRole', 'Role'), 
-        tr('adminUsersColSubscriptionType', 'Subscription Plan'), 
-        tr('adminUsersColCreatedDate', 'Created At')
+        tr('admin.users.colEmail', 'ID'), 
+        tr('admin.users.labelFullName', 'Name'), 
+        tr('admin.users.colEmail', 'Email Address'), 
+        tr('admin.users.colRole', 'Role'), 
+        tr('admin.users.colSubscriptionType', 'Subscription Plan'), 
+        tr('admin.users.colCreatedDate', 'Created At')
       ];
       const rows = selectedUsers.map(u => [
         `"${(u.id || '').replace(/"/g, '""')}"`,
@@ -375,7 +364,7 @@ export default function AdminUserManagementPage() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      showToast(`${selectedUsers.length} ${tr('adminUsersExportSuccessCsv', 'user(s) exported to CSV successfully!')}`);
+      showToast(`${tr('admin.users.exportedCsv', 'Exported')} ${selectedUsers.length} ${tr('admin.users.usersCountCsv', 'selected user(s) to CSV!')}`);
     }
   };
 
@@ -447,18 +436,13 @@ export default function AdminUserManagementPage() {
     else setSelectedUserIds(prev => Array.from(new Set([...prev, ...pageUserIds])));
   };
 
-  useEffect(() => {
-    setAdminCurrentPage(1);
-    setUserCurrentPage(1);
-  }, [search]);
-
   const syncUserPlanWithPaymentLedger = async (email: string, planSlug: string, planName: string, priceDollars: number, interval?: string) => {
     const cleanEmail = email.toLowerCase().trim();
     const isFree = !planSlug || planSlug === 'taster' || planSlug === 'free' || priceDollars === 0;
     const targetSlug = isFree ? 'taster' : sanitizeSinglePlan(planSlug);
 
     try {
-      const txRes = await fetch('/api/admin/payment?t=' + Date.now(), { cache: 'no-store' });
+      const txRes = await fetch('/api/admin/payment', { cache: 'no-store' });
       if (txRes.ok) {
         const txData = await txRes.json();
         const existingList: any[] = Array.isArray(txData.transactions) ? txData.transactions : [];
@@ -521,22 +505,21 @@ export default function AdminUserManagementPage() {
 
   const handleAddUserSubmit = async () => {
     setAddError('');
-
     const cleanEmail = addEmail.trim().toLowerCase();
     const cleanName = addName.trim();
 
     if (!cleanName || !cleanEmail) {
-      setAddError(tr('adminUsersFillRequired', 'Please fill in all required fields.'));
+      setAddError(tr('admin.users.fillRequired', 'Please fill in all required fields.'));
       return;
     }
 
     if (users.some(u => u && u.email && u.email.toLowerCase() === cleanEmail)) {
-      setAddError(tr('adminUsersEmailExists', 'A user with this email address already exists.'));
+      setAddError(tr('admin.users.emailExists', 'A user with this email address already exists.'));
       return;
     }
 
     if (addPassword.length < 4) {
-      setAddError(tr('adminUsersPasswordLength', 'Password must be at least 4 characters long.'));
+      setAddError(tr('admin.users.passwordLength', 'Password must be at least 4 characters long.'));
       return;
     }
 
@@ -559,7 +542,7 @@ export default function AdminUserManagementPage() {
     try {
       await syncUserPlanWithPaymentLedger(cleanEmail, assignedPlan, planName, priceDollars, interval);
 
-      const res = await fetch('/api/admin/users', {
+      const res = await fetch('/api/admin/users?t=' + Date.now(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newUser),
@@ -572,7 +555,8 @@ export default function AdminUserManagementPage() {
 
       const data = await res.json();
       if (data.users && Array.isArray(data.users)) {
-        setUsers(data.users);
+        const freshList = data.users;
+        setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
       } else {
         setUsers(prev => [newUser, ...prev.filter(u => u.email.toLowerCase() !== cleanEmail)]);
       }
@@ -583,7 +567,7 @@ export default function AdminUserManagementPage() {
       }
 
       setShowAddModal(false);
-      showToast(`${tr('adminUsersRoleStandard', 'User')} "${newUser.name}" ${tr('adminUsersUserCreatedSuccess', 'created successfully!')}`);
+      showToast(`${tr('admin.users.userDeletedPrefix', 'User')} "${newUser.name}" ${tr('admin.users.userCreatedSuccess', 'created successfully with plan')} "${planName}"!`);
     } catch (err: any) {
       setAddError(err.message || 'Failed to persist new user');
     }
@@ -593,7 +577,7 @@ export default function AdminUserManagementPage() {
     setEditingUserId(user.id);
     setEditName(user.name);
     setEditEmail(user.email);
-    setEditPassword('');
+    setEditPassword(user.password || '');
     setEditRole(user.role);
     setEditSubscriptionPlan(user.subscriptionPlan || 'taster');
     setEditError('');
@@ -608,13 +592,13 @@ export default function AdminUserManagementPage() {
     const cleanName = editName.trim();
 
     if (!cleanName || !cleanEmail) {
-      setEditError(tr('adminUsersNameEmailEmpty', 'Name and Email cannot be empty.'));
+      setEditError(tr('admin.users.nameEmailEmpty', 'Name and Email cannot be empty.'));
       return;
     }
 
     const emailTaken = users.some(u => u.id !== editingUserId && u.email && u.email.toLowerCase() === cleanEmail);
     if (emailTaken) {
-      setEditError(tr('adminUsersEmailTaken', 'Another user is already registered with this email.'));
+      setEditError(tr('admin.users.emailTaken', 'Another user is already registered with this email.'));
       return;
     }
 
@@ -641,7 +625,7 @@ export default function AdminUserManagementPage() {
     try {
       await syncUserPlanWithPaymentLedger(cleanEmail, assignedPlan, planName, priceDollars, interval);
 
-      const res = await fetch('/api/admin/users', {
+      const res = await fetch('/api/admin/users?t=' + Date.now(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updatedUser),
@@ -654,7 +638,8 @@ export default function AdminUserManagementPage() {
 
       const data = await res.json();
       if (data.users && Array.isArray(data.users)) {
-        setUsers(data.users);
+        const freshList = data.users;
+        setUsers(prev => JSON.stringify(prev) === JSON.stringify(freshList) ? prev : freshList);
       } else {
         setUsers(prev => prev.map(u => u.id === editingUserId ? updatedUser : u));
       }
@@ -669,7 +654,7 @@ export default function AdminUserManagementPage() {
       }
 
       setShowEditModal(false);
-      showToast(`${tr('adminUsersRoleStandard', 'User')} "${cleanName}" ${tr('adminUsersUserUpdatedSuccess', 'updated successfully!')}`);
+      showToast(`${tr('admin.users.userDeletedPrefix', 'User')} "${cleanName}" ${tr('admin.users.userUpdatedSuccess', 'updated successfully with plan')} "${planName}"!`);
     } catch (err: any) {
       setEditError(err.message || 'Failed to update user');
     }
@@ -678,16 +663,16 @@ export default function AdminUserManagementPage() {
   const handleDeleteUser = async (id: string, userEmail: string, userName?: string) => {
     const targetUser = users.find((u) => u.id === id || (u.email && u.email.toLowerCase() === userEmail.toLowerCase()));
     if (currentUser?.email?.toLowerCase() === userEmail.toLowerCase() || currentUser?.id === id) {
-      alert(tr('adminUsersCannotDeleteSelf', 'You cannot delete your own active admin account.'));
+      alert(tr('admin.users.cannotDeleteSelf', 'You cannot delete your own active admin account.'));
       return;
     }
     if (isFirstAdminUser(targetUser)) {
-      alert(tr('adminUsersCannotDeletePrimary', 'The primary system administrator account cannot be deleted.'));
+      alert(tr('admin.users.cannotDeletePrimary', 'The primary system administrator account cannot be deleted.'));
       return;
     }
 
     const displayName = userName || targetUser?.name || userEmail;
-    const confirmPrompt = `${tr('adminUsersDeleteConfirmPrompt', 'Are you sure you want to delete')} "${displayName}" (${userEmail})? ${tr('adminUsersActionUndone', 'This action cannot be undone.')}`;
+    const confirmPrompt = `${tr('admin.users.deleteConfirmPrompt', 'Are you sure you want to delete')} "${displayName}" (${userEmail})? ${tr('admin.users.actionUndone', 'This action cannot be undone.')}`;
     if (!confirm(confirmPrompt)) return;
 
     try {
@@ -720,10 +705,10 @@ export default function AdminUserManagementPage() {
         window.dispatchEvent(new Event('zecratary_users_updated'));
       }
 
-      showToast(`${tr('adminUsersRoleStandard', 'User')} "${displayName}" ${tr('adminUsersUserDeletedSuccess', 'has been deleted.')}`);
+      showToast(`${tr('admin.users.userDeletedPrefix', 'User')} "${displayName}" ${tr('admin.users.userDeletedSuffix', 'has been deleted.')}`);
     } catch (err: any) {
       console.error('Failed to delete user:', err);
-      showToast(tr('adminUsersDeleteFail', 'Failed to delete user: ') + (err?.message || 'Server error'));
+      showToast(tr('admin.users.deleteFail', 'Failed to delete user: ') + (err?.message || 'Server error'));
     }
   };
 
@@ -735,18 +720,12 @@ export default function AdminUserManagementPage() {
   const getPlanBadge = (planKey?: string) => {
     const isFreePlan = !planKey || planKey === 'taster' || planKey.includes('free');
     if (isFreePlan) {
-      return { 
-        label: `${tr('adminUsersTasterFree', 'Taster (Free)')}`, 
-        bg: 'var(--color-inner-dark)', 
-        border: 'var(--color-emerald, #10b981)', 
-        color: 'var(--color-emerald, #10b981)', 
-        icon: Sparkles 
-      };
+      return { label: 'Taster (Free)', bg: 'var(--color-inner-dark)', border: 'var(--color-emerald)', color: 'var(--color-emerald)', icon: Sparkles };
     }
     const matched = availablePlans.find(p => p.slug === planKey || p.id === planKey || p.slug.toLowerCase() === planKey?.toLowerCase());
     if (matched) {
       if (matched.isFree || planKey === 'taster') {
-        return { label: matched.name, bg: 'var(--color-inner-dark)', border: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)', icon: Sparkles };
+        return { label: matched.name, bg: 'var(--color-inner-dark)', border: 'var(--color-emerald)', color: 'var(--color-emerald)', icon: Sparkles };
       }
       if (matched.interval === 'YEAR' || planKey.includes('annual')) {
         return { label: matched.name, bg: 'var(--color-inner-dark)', border: '#3b82f6', color: '#60a5fa', icon: Zap };
@@ -759,26 +738,32 @@ export default function AdminUserManagementPage() {
 
   return (
     <div 
-      className="max-w-6xl mx-auto space-y-6 pb-24 px-2 sm:px-4 pt-2 font-sans transition-colors duration-200"
+      className="w-full max-w-full space-y-6 pb-24 px-4 sm:px-6 lg:px-8 xl:px-10 pt-2 font-sans transition-colors duration-200" 
       style={{ color: 'var(--color-text)' }}
     >
       {/* ACCESS WARNING FOR NON-ADMINS */}
       {currentUser && currentUser.role !== 'admin' && (
         <div 
           className="rounded-2xl p-4 flex items-center justify-between text-xs border shadow-xs" 
-          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'rgba(217, 119, 6, 0.4)', color: '#fde68a' }}
+          style={{ 
+            backgroundColor: 'var(--color-inner-dark)', 
+            borderColor: 'rgba(217, 119, 6, 0.4)', 
+            color: '#fde68a' 
+          }}
         >
           <div className="flex items-center gap-2">
             <ShieldAlert className="h-5 w-5 text-amber-500 shrink-0" />
-            <span>{tr('adminUsersSignedInAs', 'Signed in as')} <strong>{currentUser.email}</strong>. {tr('adminUsersSwitchNotice', 'Switch to an admin account to manage user subscription permissions.')}</span>
+            <span>
+              {tr('admin.users.signedInAs', 'Signed in as')} <strong>{currentUser.email}</strong>. {tr('admin.users.switchNotice', 'Switch to an admin account to manage user subscription permissions.')}
+            </span>
           </div>
           <button 
             type="button"
             onClick={() => window.location.href = '/login'} 
-            className="px-3.5 py-1.5 text-white font-bold rounded-xl shrink-0 ml-3 cursor-pointer shadow-xs hover:opacity-90" 
+            className="px-3.5 py-1.5 text-white font-bold rounded-xl shrink-0 ml-3 cursor-pointer shadow-xs hover:opacity-90 transition" 
             style={{ backgroundColor: 'var(--color-primary)' }}
           >
-            {tr('adminUsersSwitchToAdmin', 'Switch to Admin')}
+            {tr('admin.users.switchToAdmin', 'Switch to Admin')}
           </button>
         </div>
       )}
@@ -787,9 +772,13 @@ export default function AdminUserManagementPage() {
       {feedbackMsg && (
         <div 
           className="p-3.5 rounded-2xl text-xs font-semibold flex items-center gap-2 shadow-lg animate-in fade-in border" 
-          style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)' }}
+          style={{ 
+            backgroundColor: 'var(--color-inner-dark)', 
+            borderColor: 'var(--color-emerald)', 
+            color: 'var(--color-emerald)' 
+          }}
         >
-          <CheckCircle className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald, #10b981)' }} />
+          <CheckCircle className="h-4 w-4 shrink-0" style={{ color: 'var(--color-emerald)' }} />
           <span>{feedbackMsg}</span>
         </div>
       )}
@@ -797,11 +786,11 @@ export default function AdminUserManagementPage() {
       {/* PAGE HEADER */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="space-y-1">
-          <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--color-primary)' }}>
-            {tr('adminUsersTitle', 'User & Subscription Management')}
+          <h1 className="text-2xl font-black tracking-tight text-[var(--color-primary)]">
+            {tr('admin.users.title', 'User & Subscription Management')}
           </h1>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {tr('adminUsersSubtitle', 'Active System Packages synced: {count} plans available from /admin/plans and synchronized with /admin/payment').replace('{count}', String(availablePlans.length))}
+            {tr('admin.users.subtitle', 'Active System Packages synced:')} {availablePlans.length} {tr('admin.users.plansAvailable', 'plans available from /admin/plans and synchronized with /admin/payment')}
           </p>
         </div>
 
@@ -811,10 +800,14 @@ export default function AdminUserManagementPage() {
             onClick={loadUsers} 
             disabled={isLoading} 
             className="border font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50" 
-            style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+            style={{ 
+              backgroundColor: 'var(--color-card)', 
+              borderColor: 'var(--color-border)', 
+              color: 'var(--color-text)' 
+            }}
           >
             <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} style={{ color: 'var(--color-primary)' }} />
-            <span>{tr('adminUsersReloadBtn', 'Reload')}</span>
+            <span>{tr('admin.users.reload', 'Reload')}</span>
           </button>
 
           <button 
@@ -829,7 +822,7 @@ export default function AdminUserManagementPage() {
             }}
           >
             <Download className="h-4 w-4" />
-            <span>{tr('adminUsersExportCsv', 'Export CSV')} {selectedUserIds.length > 0 ? `(${selectedUserIds.length})` : ''}</span>
+            <span>{tr('admin.users.exportCsv', 'Export CSV')} {selectedUserIds.length > 0 ? `(${selectedUserIds.length})` : ''}</span>
           </button>
 
           <button 
@@ -844,7 +837,7 @@ export default function AdminUserManagementPage() {
             }}
           >
             <Download className="h-4 w-4" />
-            <span>{tr('adminUsersExportJson', 'Export JSON')}</span>
+            <span>{tr('admin.users.exportJson', 'Export JSON')}</span>
           </button>
 
           <button 
@@ -853,12 +846,12 @@ export default function AdminUserManagementPage() {
             className="text-white font-bold text-xs px-4 py-2.5 rounded-xl transition flex items-center gap-2 shadow-lg cursor-pointer hover:opacity-90" 
             style={{ backgroundColor: 'var(--color-primary)' }}
           >
-            <UserPlus className="h-4 w-4" /> {tr('adminUsersAddNewUserBtn', 'Add New User')}
+            <UserPlus className="h-4 w-4" /> {tr('admin.users.addNewUser', 'Add New User')}
           </button>
         </div>
       </div>
 
-      {/* SELECTION BANNER */}
+      {/* SELECTION BAR */}
       {selectedUserIds.length > 0 && (
         <div 
           className="p-3.5 px-5 rounded-2xl flex items-center justify-between text-xs border shadow-lg animate-in fade-in"
@@ -870,7 +863,7 @@ export default function AdminUserManagementPage() {
         >
           <div className="flex items-center gap-3">
             <span className="font-bold">
-              {selectedUserIds.length} {tr('adminUsersOf', 'of')} {users.length} {tr('adminUsersUsersSelected', 'user(s) selected')}
+              {selectedUserIds.length} {tr('admin.users.of', 'of')} {users.length} {tr('admin.users.usersSelected', 'user(s) selected')}
             </span>
             <button 
               type="button"
@@ -878,7 +871,7 @@ export default function AdminUserManagementPage() {
               className="text-[11px] underline cursor-pointer hover:opacity-80"
               style={{ color: 'var(--color-text-secondary)' }}
             >
-              {tr('adminUsersClearSelection', 'Clear selection')}
+              {tr('admin.users.clearSelection', 'Clear selection')}
             </button>
           </div>
           <div className="flex items-center gap-2">
@@ -888,7 +881,7 @@ export default function AdminUserManagementPage() {
               className="px-3.5 py-1.5 rounded-xl text-white font-bold flex items-center gap-1.5 cursor-pointer transition shadow-xs text-xs hover:opacity-90"
               style={{ backgroundColor: 'var(--color-primary)' }}
             >
-              <Download className="h-3.5 w-3.5" /> {tr('adminUsersExportSelectedCsv', 'Export Selected (CSV)')}
+              <Download className="h-3.5 w-3.5" /> {tr('admin.users.exportSelectedCsv', 'Export Selected (CSV)')}
             </button>
             <button
               type="button"
@@ -906,16 +899,16 @@ export default function AdminUserManagementPage() {
         </div>
       )}
 
-      {/* SEARCH BAR (Autofill Guardrail) */}
-      <div className="relative" data-lpignore="true">
+      {/* SEARCH BAR */}
+      <div className="relative">
         <Search className="h-4 w-4 absolute left-4 top-3.5 pointer-events-none" style={{ color: 'var(--color-text-secondary)' }} />
         <input
           type="text"
-          autoComplete="off"
           data-lpignore="true"
           data-form-type="other"
-          spellCheck="false"
-          placeholder={tr('adminUsersSearchPlaceholder', 'Search by name, email, or subscription plan across all tables...')}
+          autoComplete="off"
+          spellCheck={false}
+          placeholder={tr('admin.users.searchPlaceholder', 'Search by name, email, or subscription plan across all tables...')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="w-full border rounded-2xl pl-11 pr-4 py-3 text-sm outline-none transition shadow-inner font-medium"
@@ -925,16 +918,24 @@ export default function AdminUserManagementPage() {
         />
       </div>
 
-      {/* TABLE 1: ADMINISTRATORS */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* 1. ADMINISTRATORS TABLE */}
+      {/* ───────────────────────────────────────────────────────────── */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl border flex items-center justify-center" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)' }}>
+            <div 
+              className="w-8 h-8 rounded-xl border flex items-center justify-center" 
+              style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
+            >
               <Shield className="h-4 w-4" />
             </div>
             <h2 className="text-lg font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-              {tr('adminUsersAdminsHeading', 'Administrators')}
-              <span className="text-xs border font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)' }}>
+              {tr('admin.users.administrators', 'Administrators')}
+              <span 
+                className="text-xs border font-bold px-2 py-0.5 rounded-full" 
+                style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}
+              >
                 {processedAdmins.length}
               </span>
             </h2>
@@ -943,9 +944,9 @@ export default function AdminUserManagementPage() {
             type="button"
             onClick={() => handleOpenAddModal('admin')} 
             className="text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:underline" 
-            style={{ color: 'var(--color-emerald, #10b981)' }}
+            style={{ color: 'var(--color-emerald)' }}
           >
-            <UserPlus className="h-3.5 w-3.5" /> {tr('adminUsersAddAdminBtn', 'Add Admin')}
+            <UserPlus className="h-3.5 w-3.5" /> {tr('admin.users.addAdmin', 'Add Admin')}
           </button>
         </div>
 
@@ -955,34 +956,44 @@ export default function AdminUserManagementPage() {
               <thead className="border-b uppercase font-bold text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
                 <tr>
                   <th className="w-10 px-4 py-4 text-center">
-                    <input type="checkbox" checked={isAllAdminsOnPageSelected} onChange={handleToggleSelectAllAdmins} className="rounded cursor-pointer" />
+                    <input 
+                      type="checkbox" 
+                      checked={isAllAdminsOnPageSelected} 
+                      onChange={handleToggleSelectAllAdmins} 
+                      className="rounded cursor-pointer accent-[#E05638]" 
+                      title={tr('admin.users.selectAllAdmins', 'Select all administrators on this page')}
+                    />
                   </th>
                   <th className="px-5 py-4">
                     <button type="button" onClick={() => handleAdminSort('name')} className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                      <span>{tr('adminUsersColAdminUser', 'Admin User')}</span>
+                      <span>{tr('admin.users.colAdminUser', 'Admin User')}</span>
                       {renderSortIcon(adminSortField, 'name', adminSortOrder)}
                     </button>
                   </th>
-                  <th className="px-5 py-4">{tr('adminUsersColEmail', 'Email Address')}</th>
-                  <th className="px-5 py-4">{tr('adminUsersColRole', 'Role')}</th>
+                  <th className="px-5 py-4">{tr('admin.users.colEmail', 'Email Address')}</th>
+                  <th className="px-5 py-4">{tr('admin.users.colRole', 'Role')}</th>
                   <th className="px-5 py-4">
                     <button type="button" onClick={() => handleAdminSort('subscriptionPlan')} className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                      <span>{tr('adminUsersColSubscriptionType', 'Subscription Type')}</span>
+                      <span>{tr('admin.users.colSubscriptionType', 'Subscription Type')}</span>
                       {renderSortIcon(adminSortField, 'subscriptionPlan', adminSortOrder)}
                     </button>
                   </th>
                   <th className="px-5 py-4">
                     <button type="button" onClick={() => handleAdminSort('createdAt')} className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                      <span>{tr('adminUsersColCreatedDate', 'Created Date')}</span>
+                      <span>{tr('admin.users.colCreatedDate', 'Created Date')}</span>
                       {renderSortIcon(adminSortField, 'createdAt', adminSortOrder)}
                     </button>
                   </th>
-                  <th className="px-5 py-4 text-right">{tr('adminUsersColActions', 'Actions')}</th>
+                  <th className="px-5 py-4 text-right">{tr('admin.users.colActions', 'Actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
                 {paginatedAdmins.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center py-10" style={{ color: 'var(--color-text-secondary)' }}>{tr('adminUsersNoAdminsFound', 'No administrators found')}{search ? ` matching "${search}"` : '.'}</td></tr>
+                  <tr>
+                    <td colSpan={7} className="text-center py-10" style={{ color: 'var(--color-text-secondary)' }}>
+                      {tr('admin.users.noAdminsFound', 'No administrators found')} {search ? `${tr('admin.users.matching', 'matching')} "${search}"` : ''}.
+                    </td>
+                  </tr>
                 ) : (
                   paginatedAdmins.map((user) => {
                     const isCurrent = currentUser?.id === user.id || currentUser?.email?.toLowerCase() === user.email?.toLowerCase();
@@ -991,26 +1002,46 @@ export default function AdminUserManagementPage() {
                     const planBadge = getPlanBadge(user.subscriptionPlan);
                     const PlanIcon = planBadge.icon;
                     return (
-                      <tr key={user.id} className="transition" style={{ borderColor: 'var(--color-border)', backgroundColor: isSelected ? 'var(--color-inner-dark)' : undefined }}>
+                      <tr 
+                        key={user.id} 
+                        className="transition" 
+                        style={{ 
+                          borderColor: 'var(--color-border)', 
+                          backgroundColor: isSelected ? 'var(--color-inner-dark)' : undefined 
+                        }}
+                      >
                         <td className="w-10 px-4 py-4 text-center">
-                          <input type="checkbox" checked={isSelected} onChange={() => toggleSelectUser(user.id)} className="rounded cursor-pointer" />
+                          <input 
+                            type="checkbox" 
+                            checked={isSelected} 
+                            onChange={() => toggleSelectUser(user.id)} 
+                            className="rounded cursor-pointer accent-[#E05638]" 
+                          />
                         </td>
                         <td className="px-5 py-4 font-bold flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)' }}>
+                          <div className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}>
                             {(user.name || 'A').charAt(0).toUpperCase()}
                           </div>
                           <div>
                             <div className="flex items-center gap-1.5">
                               <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{user.name}</span>
-                              {isPrimary && <span className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-500 border-amber-500">{tr('adminUsersBadgePrimary', 'PRIMARY')}</span>}
-                              {isCurrent && !isPrimary && <span className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-500 border-emerald-500">{tr('adminUsersBadgeYou', 'YOU')}</span>}
+                              {isPrimary && (
+                                <span className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded" style={{ backgroundColor: 'rgba(245, 158, 11, 0.15)', borderColor: '#f59e0b', color: '#fbbf24' }}>
+                                  {tr('admin.users.badgePrimary', 'PRIMARY')}
+                                </span>
+                              )}
+                              {isCurrent && !isPrimary && (
+                                <span className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded" style={{ backgroundColor: 'rgba(16, 185, 129, 0.15)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}>
+                                  {tr('admin.users.badgeYou', 'YOU')}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </td>
                         <td className="px-5 py-4 font-mono text-xs" style={{ color: 'var(--color-text-secondary)' }}>{user.email}</td>
                         <td className="px-5 py-4">
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border flex items-center gap-1 w-fit" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald, #10b981)', color: 'var(--color-emerald, #10b981)' }}>
-                            <Shield className="h-3 w-3" /> {tr('adminUsersRoleAdmin', 'Admin')}
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border flex items-center gap-1 w-fit" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-emerald)', color: 'var(--color-emerald)' }}>
+                            <Shield className="h-3 w-3" /> {tr('admin.users.roleAdmin', 'Admin')}
                           </span>
                         </td>
                         <td className="px-5 py-4">
@@ -1020,14 +1051,33 @@ export default function AdminUserManagementPage() {
                           </span>
                         </td>
                         <td className="px-5 py-4" style={{ color: 'var(--color-text-secondary)' }}>
-                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString(locale === 'th' ? 'th-TH' : (locale || 'en-US'), { year: 'numeric', month: 'short', day: 'numeric' }) : tr('adminUsersActiveStatus', 'Active')}
+                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString(locale === 'th' ? 'th-TH' : (locale || 'en-US')) : tr('admin.users.activeStatus', 'Active')}
                         </td>
                         <td className="px-5 py-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                            <button type="button" onClick={() => handleOpenEditModal(user)} className="p-2 rounded-xl border transition shadow-xs cursor-pointer hover:opacity-85" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} title={tr('adminUsersEditAdminTooltip', 'Edit Admin Account & Plan')}>
+                            <button 
+                              type="button" 
+                              onClick={() => handleOpenEditModal(user)} 
+                              className="p-2 rounded-xl border transition shadow-xs cursor-pointer hover:opacity-85" 
+                              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
+                              title={tr('admin.users.editAdminAccount', 'Edit Admin Account & Plan')}
+                            >
                               <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                             </button>
-                            <button type="button" disabled={isCurrent || isPrimary} onClick={() => handleDeleteUser(user.id, user.email, user.name)} className={`p-2 rounded-xl border transition shadow-xs ${isCurrent || isPrimary ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer hover:bg-red-500/10'}`} style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: isCurrent || isPrimary ? 'var(--color-text-secondary)' : '#ef4444' }} title={isPrimary ? tr('adminUsersCannotDeletePrimaryTooltip', 'Cannot delete primary system admin (usr_admin_1)') : isCurrent ? tr('adminUsersCannotDeleteActiveSession', 'Cannot delete active session account') : tr('adminUsersDeleteAdminTooltip', 'Delete Admin')}>
+                            <button 
+                              type="button" 
+                              disabled={isCurrent || isPrimary} 
+                              onClick={() => handleDeleteUser(user.id, user.email, user.name)} 
+                              className={`p-2 rounded-xl border transition shadow-xs ${isCurrent || isPrimary ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`} 
+                              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} 
+                              title={
+                                isPrimary 
+                                  ? tr('admin.users.cannotDeletePrimaryTooltip', 'Cannot delete primary system admin (usr_admin_1)')
+                                  : isCurrent 
+                                    ? tr('admin.users.cannotDeleteActiveSession', 'Cannot delete active session account')
+                                    : tr('admin.users.deleteAdmin', 'Delete Admin')
+                              }
+                            >
                               <Trash2 className="h-4 w-4" />
                             </button>
                           </div>
@@ -1044,14 +1094,14 @@ export default function AdminUserManagementPage() {
           {processedAdmins.length > ITEMS_PER_PAGE && (
             <div className="px-5 py-3.5 border-t flex items-center justify-between text-xs transition-colors" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
               <span>
-                {tr('adminUsersShowing', 'Showing')} {adminStartIndex + 1} {tr('adminUsersTo', 'to')} {adminEndIndex} {tr('adminUsersOf', 'of')} {processedAdmins.length} {tr('adminUsersAdminsCount', 'admins')}
+                {tr('admin.users.showing', 'Showing')} {adminStartIndex + 1} {tr('admin.users.to', 'to')} {adminEndIndex} {tr('admin.users.of', 'of')} {processedAdmins.length} {tr('admin.users.adminsCount', 'admins')}
               </span>
               <div className="flex items-center gap-1.5">
                 <button type="button" disabled={adminCurrentPage <= 1} onClick={() => setAdminCurrentPage(p => Math.max(1, p - 1))} className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
                   <ChevronLeft className="h-4 w-4" />
                 </button>
                 <span className="font-bold px-2" style={{ color: 'var(--color-text)' }}>
-                  {tr('adminUsersPage', 'Page')} {adminCurrentPage} {tr('adminUsersOf', 'of')} {adminTotalPages}
+                  {tr('admin.users.page', 'Page')} {adminCurrentPage} {tr('admin.users.of', 'of')} {adminTotalPages}
                 </span>
                 <button type="button" disabled={adminCurrentPage >= adminTotalPages} onClick={() => setAdminCurrentPage(p => Math.min(adminTotalPages, p + 1))} className="p-1.5 rounded-lg border disabled:opacity-40 transition cursor-pointer" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
                   <ChevronRight className="h-4 w-4" />
@@ -1062,7 +1112,9 @@ export default function AdminUserManagementPage() {
         </div>
       </div>
 
-      {/* TABLE 2: STANDARD USERS */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* 2. STANDARD USERS TABLE */}
+      {/* ───────────────────────────────────────────────────────────── */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-2">
@@ -1070,7 +1122,7 @@ export default function AdminUserManagementPage() {
               <Users className="h-4 w-4" />
             </div>
             <h2 className="text-lg font-black flex items-center gap-2" style={{ color: 'var(--color-text)' }}>
-              {tr('adminUsersStandardHeading', 'Standard Users')}
+              {tr('admin.users.standardUsers', 'Standard Users')}
               <span className="text-xs border font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: '#3b82f6', color: '#93c5fd' }}>
                 {processedStandardUsers.length}
               </span>
@@ -1082,7 +1134,7 @@ export default function AdminUserManagementPage() {
             className="text-xs font-bold transition flex items-center gap-1 cursor-pointer hover:underline" 
             style={{ color: 'var(--color-primary)' }}
           >
-            <UserPlus className="h-3.5 w-3.5" /> {tr('adminUsersAddStandardBtn', 'Add Standard User')}
+            <UserPlus className="h-3.5 w-3.5" /> {tr('admin.users.addStandardUser', 'Add Standard User')}
           </button>
         </div>
 
@@ -1092,34 +1144,44 @@ export default function AdminUserManagementPage() {
               <thead className="border-b uppercase font-bold text-[10px] tracking-wider" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
                 <tr>
                   <th className="w-10 px-4 py-4 text-center">
-                    <input type="checkbox" checked={isAllStandardOnPageSelected} onChange={handleToggleSelectAllStandardUsers} className="rounded cursor-pointer" />
+                    <input 
+                      type="checkbox" 
+                      checked={isAllStandardOnPageSelected} 
+                      onChange={handleToggleSelectAllStandardUsers} 
+                      className="rounded cursor-pointer accent-[#E05638]" 
+                      title={tr('admin.users.selectAllStandard', 'Select all standard users on this page')}
+                    />
                   </th>
                   <th className="px-5 py-4">
                     <button type="button" onClick={() => handleUserSort('name')} className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                      <span>{tr('adminUsersColStandardUser', 'Standard User')}</span>
+                      <span>{tr('admin.users.colStandardUser', 'Standard User')}</span>
                       {renderSortIcon(userSortField, 'name', userSortOrder)}
                     </button>
                   </th>
-                  <th className="px-5 py-4">{tr('adminUsersColEmail', 'Email Address')}</th>
-                  <th className="px-5 py-4">{tr('adminUsersColRole', 'Role')}</th>
+                  <th className="px-5 py-4">{tr('admin.users.colEmail', 'Email Address')}</th>
+                  <th className="px-5 py-4">{tr('admin.users.colRole', 'Role')}</th>
                   <th className="px-5 py-4">
                     <button type="button" onClick={() => handleUserSort('subscriptionPlan')} className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                      <span>{tr('adminUsersColSubscriptionType', 'Subscription Type')}</span>
+                      <span>{tr('admin.users.colSubscriptionType', 'Subscription Type')}</span>
                       {renderSortIcon(userSortField, 'subscriptionPlan', userSortOrder)}
                     </button>
                   </th>
                   <th className="px-5 py-4">
                     <button type="button" onClick={() => handleUserSort('createdAt')} className="flex items-center gap-1.5 hover:opacity-80 transition cursor-pointer select-none font-bold uppercase tracking-wider" style={{ color: 'var(--color-text)' }}>
-                      <span>{tr('adminUsersColCreatedDate', 'Created Date')}</span>
+                      <span>{tr('admin.users.colCreatedDate', 'Created Date')}</span>
                       {renderSortIcon(userSortField, 'createdAt', userSortOrder)}
                     </button>
                   </th>
-                  <th className="px-5 py-4 text-right">{tr('adminUsersColActions', 'Actions')}</th>
+                  <th className="px-5 py-4 text-right">{tr('admin.users.colActions', 'Actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
                 {paginatedStandardUsers.length === 0 ? (
-                  <tr><td colSpan={7} className="text-center py-10" style={{ color: 'var(--color-text-secondary)' }}>{tr('adminUsersNoStandardFound', 'No standard users found')}{search ? ` matching "${search}"` : '.'}</td></tr>
+                  <tr>
+                    <td colSpan={7} className="text-center py-10" style={{ color: 'var(--color-text-secondary)' }}>
+                      {tr('admin.users.noStandardFound', 'No standard users found')} {search ? `${tr('admin.users.matching', 'matching')} "${search}"` : ''}.
+                    </td>
+                  </tr>
                 ) : (
                   paginatedStandardUsers.map((user) => {
                     const isCurrent = currentUser?.id === user.id || currentUser?.email?.toLowerCase() === user.email?.toLowerCase();
@@ -1127,25 +1189,32 @@ export default function AdminUserManagementPage() {
                     const planBadge = getPlanBadge(user.subscriptionPlan);
                     const PlanIcon = planBadge.icon;
                     return (
-                      <tr key={user.id} className="transition" style={{ borderColor: 'var(--color-border)', backgroundColor: isSelected ? 'var(--color-inner-dark)' : undefined }}>
+                      <tr 
+                        key={user.id} 
+                        className="transition" 
+                        style={{ 
+                          borderColor: 'var(--color-border)', 
+                          backgroundColor: isSelected ? 'var(--color-inner-dark)' : undefined 
+                        }}
+                      >
                         <td className="w-10 px-4 py-4 text-center">
-                          <input type="checkbox" checked={isSelected} onChange={() => toggleSelectUser(user.id)} className="rounded cursor-pointer" />
+                          <input 
+                            type="checkbox" 
+                            checked={isSelected} 
+                            onChange={() => toggleSelectUser(user.id)} 
+                            className="rounded cursor-pointer accent-[#E05638]" 
+                          />
                         </td>
                         <td className="px-5 py-4 font-bold flex items-center gap-3">
                           <div className="w-8 h-8 rounded-xl border flex items-center justify-center text-xs font-black shrink-0" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-primary)' }}>
                             {(user.name || 'U').charAt(0).toUpperCase()}
                           </div>
-                          <div>
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{user.name}</span>
-                              {isCurrent && <span className="border text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-500 border-emerald-500">{tr('adminUsersBadgeYou', 'YOU')}</span>}
-                            </div>
-                          </div>
+                          <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{user.name}</span>
                         </td>
                         <td className="px-5 py-4 font-mono text-xs" style={{ color: 'var(--color-text-secondary)' }}>{user.email}</td>
                         <td className="px-5 py-4">
                           <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide border flex items-center gap-1 w-fit" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
-                            <UserIcon className="h-3 w-3" /> {tr('adminUsersRoleStandard', 'Standard User')}
+                            <UserIcon className="h-3 w-3" /> {tr('admin.users.roleStandard', 'Standard User')}
                           </span>
                         </td>
                         <td className="px-5 py-4">
@@ -1155,14 +1224,27 @@ export default function AdminUserManagementPage() {
                           </span>
                         </td>
                         <td className="px-5 py-4" style={{ color: 'var(--color-text-secondary)' }}>
-                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString(locale === 'th' ? 'th-TH' : (locale || 'en-US'), { year: 'numeric', month: 'short', day: 'numeric' }) : tr('adminUsersActiveStatus', 'Active')}
+                          {user.createdAt ? new Date(user.createdAt).toLocaleDateString(locale === 'th' ? 'th-TH' : (locale || 'en-US')) : tr('admin.users.activeStatus', 'Active')}
                         </td>
                         <td className="px-5 py-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
-                            <button type="button" onClick={() => handleOpenEditModal(user)} className="p-2 rounded-xl border transition shadow-xs cursor-pointer hover:opacity-85" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} title={tr('adminUsersModalEditTitle', 'Edit User & Plan')}>
+                            <button 
+                              type="button" 
+                              onClick={() => handleOpenEditModal(user)} 
+                              className="p-2 rounded-xl border transition shadow-xs cursor-pointer hover:opacity-85" 
+                              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
+                              title={tr('admin.users.editUserAndPlan', 'Edit User & Plan Assignment')}
+                            >
                               <Edit3 className="h-4 w-4" style={{ color: 'var(--color-primary)' }} />
                             </button>
-                            <button type="button" disabled={isCurrent} onClick={() => handleDeleteUser(user.id, user.email, user.name)} className={`p-2 rounded-xl border transition shadow-xs ${isCurrent ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer hover:bg-red-500/10'}`} style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: isCurrent ? 'var(--color-text-secondary)' : '#ef4444' }} title={isCurrent ? tr('adminUsersCannotDeleteActiveSession', 'Cannot delete active session account') : tr('adminUsersDeleteAdminTooltip', 'Delete User')}>
+                            <button 
+                              type="button" 
+                              disabled={isCurrent} 
+                              onClick={() => handleDeleteUser(user.id, user.email, user.name)} 
+                              className={`p-2 rounded-xl border transition shadow-xs ${isCurrent ? 'opacity-30 cursor-not-allowed' : 'cursor-pointer'}`} 
+                              style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }} 
+                              title={isCurrent ? tr('admin.users.cannotDeleteActiveAccount', 'Cannot delete active account') : tr('admin.users.deleteUser', 'Delete User')}
+                            >
                               <Trash2 className="h-4 w-4" />
                             </button>
                           </div>
@@ -1178,35 +1260,50 @@ export default function AdminUserManagementPage() {
           {/* Standard User Pagination */}
           <div className="px-5 py-4 border-t flex flex-col sm:flex-row items-center justify-between gap-3 text-xs transition-colors" style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}>
             <div>
-              {tr('adminUsersShowing', 'Showing')} <span className="font-bold" style={{ color: 'var(--color-text)' }}>{userStartIndex + 1}</span> {tr('adminUsersTo', 'to')} <span className="font-bold" style={{ color: 'var(--color-text)' }}>{userEndIndex}</span> {tr('adminUsersOf', 'of')} <span className="font-bold" style={{ color: 'var(--color-text)' }}>{processedStandardUsers.length}</span> {tr('adminUsersStandardCount', 'standard users')}
+              {processedStandardUsers.length === 0 ? (
+                tr('admin.users.showingZeroStandard', 'Showing 0 standard users')
+              ) : (
+                <>
+                  {tr('admin.users.showing', 'Showing')}{' '}
+                  <span className="font-bold" style={{ color: 'var(--color-text)' }}>{userStartIndex + 1}</span>{' '}
+                  {tr('admin.users.to', 'to')}{' '}
+                  <span className="font-bold" style={{ color: 'var(--color-text)' }}>{userEndIndex}</span>{' '}
+                  {tr('admin.users.of', 'of')}{' '}
+                  <span className="font-bold" style={{ color: 'var(--color-text)' }}>{processedStandardUsers.length}</span>{' '}
+                  {tr('admin.users.standardUsersCount', 'standard users')}
+                </>
+              )}
             </div>
-
             <div className="flex items-center gap-1.5">
-              <button type="button" disabled={userCurrentPage <= 1} onClick={() => setUserCurrentPage(p => Math.max(1, p - 1))} className="p-2 rounded-xl border flex items-center justify-center transition disabled:opacity-40 cursor-pointer" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+              <button 
+                type="button" 
+                disabled={userCurrentPage <= 1} 
+                onClick={() => setUserCurrentPage(p => Math.max(1, p - 1))} 
+                className={`p-2 rounded-xl border flex items-center justify-center transition ${userCurrentPage <= 1 ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:opacity-80'}`} 
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                title={tr('admin.users.prevPage', 'Previous Page')}
+              >
                 <ChevronLeft className="h-4 w-4" />
               </button>
-
-              {Array.from({ length: userTotalPages }, (_, i) => i + 1).map((pageNum) => (
-                <button
-                  key={pageNum}
-                  type="button"
-                  onClick={() => setUserCurrentPage(pageNum)}
-                  className="min-w-[34px] h-[34px] rounded-xl text-xs font-bold transition flex items-center justify-center border cursor-pointer"
-                  style={userCurrentPage === pageNum ? {
-                    backgroundColor: 'var(--color-primary)',
-                    borderColor: 'var(--color-primary)',
-                    color: '#ffffff'
-                  } : {
-                    backgroundColor: 'var(--color-card)',
-                    borderColor: 'var(--color-border)',
-                    color: 'var(--color-text-secondary)'
-                  }}
+              {Array.from({ length: userTotalPages }, (_, i) => i + 1).map(pageNum => (
+                <button 
+                  key={pageNum} 
+                  type="button" 
+                  onClick={() => setUserCurrentPage(pageNum)} 
+                  className="min-w-[34px] h-[34px] rounded-xl text-xs font-bold transition flex items-center justify-center border cursor-pointer" 
+                  style={userCurrentPage === pageNum ? { backgroundColor: 'var(--color-primary)', borderColor: 'var(--color-primary)', color: '#ffffff' } : { backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
                 >
                   {pageNum}
                 </button>
               ))}
-
-              <button type="button" disabled={userCurrentPage >= userTotalPages} onClick={() => setUserCurrentPage(p => Math.min(userTotalPages, p + 1))} className="p-2 rounded-xl border flex items-center justify-center transition disabled:opacity-40 cursor-pointer" style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}>
+              <button 
+                type="button" 
+                disabled={userCurrentPage >= userTotalPages} 
+                onClick={() => setUserCurrentPage(p => Math.min(userTotalPages, p + 1))} 
+                className={`p-2 rounded-xl border flex items-center justify-center transition ${userCurrentPage >= userTotalPages ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:opacity-80'}`} 
+                style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
+                title={tr('admin.users.nextPage', 'Next Page')}
+              >
                 <ChevronRight className="h-4 w-4" />
               </button>
             </div>
@@ -1214,7 +1311,9 @@ export default function AdminUserManagementPage() {
         </div>
       </div>
 
-      {/* 1. ADD USER MODAL (Accessible & Autofill Guardrail <div> Container - Constraint 9) */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* 3. ADD USER MODAL (Accessible Container with Autofill Guard) */}
+      {/* ───────────────────────────────────────────────────────────── */}
       {showAddModal && (
         <div 
           onClick={() => setShowAddModal(false)} 
@@ -1228,20 +1327,20 @@ export default function AdminUserManagementPage() {
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <button 
-              type="button"
+              type="button" 
               onClick={() => setShowAddModal(false)} 
-              className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer" 
+              className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer hover:opacity-80" 
               style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text-secondary)' }}
             >
               <X className="h-4 w-4" />
             </button>
-
+            
             <div className="space-y-1 pr-6">
               <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-                <UserPlus className="h-5 w-5" /> {tr('adminUsersModalAddTitle', 'Add New User')}
+                <UserPlus className="h-5 w-5" /> {tr('admin.users.modalAddTitle', 'Add New User')}
               </h2>
               <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {tr('adminUsersModalAddSubtitle', 'Create a new user account with role & active package tier.')}
+                {tr('admin.users.modalAddSubtitle', 'Create a new user account with role & active package tier.')}
               </p>
             </div>
 
@@ -1252,78 +1351,81 @@ export default function AdminUserManagementPage() {
               </div>
             )}
 
-            <div className="space-y-3.5 pt-1" onKeyDown={(e) => { if (e.key === 'Enter') handleAddUserSubmit(); }}>
+            <div className="space-y-3.5">
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  {tr('adminUsersLabelFullName', 'Full Name')} *
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  {tr('admin.users.labelFullName', 'Full Name')} *
                 </label>
                 <div className="relative">
                   <UserIcon className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
                   <input 
                     type="text" 
-                    autoComplete="new-password"
+                    required 
                     data-lpignore="true"
                     data-form-type="other"
-                    spellCheck="false"
-                    placeholder={tr('adminUsersPlaceholderName', 'e.g. Jordan Smith')} 
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={tr('admin.users.placeholderName', 'e.g. Jordan Smith')} 
                     value={addName} 
                     onChange={e => setAddName(e.target.value)} 
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none" 
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddUserSubmit(); } }}
+                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none shadow-inner" 
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  {tr('adminUsersLabelEmail', 'Email Address')} *
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  {tr('admin.users.labelEmail', 'Email Address')} *
                 </label>
                 <div className="relative">
                   <Mail className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
                   <input 
                     type="email" 
-                    autoComplete="new-password"
+                    required 
                     data-lpignore="true"
                     data-form-type="other"
-                    spellCheck="false"
-                    placeholder="jordan@example.com" 
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={tr('admin.users.placeholderEmail', 'jordan@example.com')} 
                     value={addEmail} 
                     onChange={e => setAddEmail(e.target.value)} 
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none font-mono" 
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddUserSubmit(); } }}
+                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none font-mono shadow-inner" 
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  {tr('adminUsersLabelPassword', 'Password')} *
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  {tr('admin.users.labelPassword', 'Password')} *
                 </label>
                 <div className="relative">
                   <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
                   <input 
                     type="password" 
-                    autoComplete="new-password"
+                    required 
                     data-lpignore="true"
                     data-form-type="other"
-                    spellCheck="false"
-                    placeholder={tr('adminUsersPlaceholderPassword', 'Minimum 4 characters')} 
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    placeholder={tr('admin.users.placeholderPassword', 'Minimum 4 characters')} 
                     value={addPassword} 
                     onChange={e => setAddPassword(e.target.value)} 
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none font-mono" 
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddUserSubmit(); } }}
+                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none font-mono shadow-inner" 
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5 flex items-center justify-between" style={{ color: 'var(--color-text)' }}>
-                  <span className="flex items-center gap-1.5">
-                    <CreditCard className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                    {tr('adminUsersLabelActivePlan', 'Active Subscription Plan')} *
-                  </span>
-                  <Link href="/admin/plans" className="text-[10px] underline" style={{ color: 'var(--color-text-secondary)' }}>
-                    {tr('adminUsersManagePlans', 'Manage Plans')} ({availablePlans.length})
+                <label className="block font-bold mb-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
+                  <span>{tr('admin.users.labelActivePlan', 'Active Subscription Plan')} *</span>
+                  <Link href="/admin/plans" className="text-[10px] underline hover:opacity-80" style={{ color: 'var(--color-text-secondary)' }}>
+                    {tr('admin.users.managePlans', 'Manage Plans')} ({availablePlans.length})
                   </Link>
                 </label>
                 <select 
@@ -1341,36 +1443,40 @@ export default function AdminUserManagementPage() {
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  {tr('adminUsersLabelAssignedRole', 'Assigned Role')}
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  {tr('admin.users.labelAssignedRole', 'Assigned Role')}
                 </label>
                 <div className="grid grid-cols-2 gap-3 pt-1">
                   <div 
                     onClick={() => setAddRole('user')}
                     className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between shadow-xs"
                     style={addRole === 'user' ? {
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-primary)',
-                      borderWidth: '2px'
+                      backgroundColor: 'rgba(224, 86, 56, 0.12)',
+                      borderColor: 'var(--color-primary)'
                     } : {
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)'
                     }}
                   >
                     <div>
-                      <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{tr('adminUsersRoleStandardUser', 'Standard User')}</div>
-                      <div className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('adminUsersDescSubscriber', 'App Subscriber')}</div>
+                      <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{tr('admin.users.roleStandardUser', 'Standard User')}</div>
+                      <div className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('admin.users.descSubscriber', 'App Subscriber')}</div>
                     </div>
-                    <input type="radio" name="addRole" checked={addRole === 'user'} onChange={() => setAddRole('user')} className="cursor-pointer" />
+                    <input
+                      type="radio"
+                      name="addRole"
+                      checked={addRole === 'user'}
+                      onChange={() => setAddRole('user')}
+                      className="accent-[#E05638]"
+                    />
                   </div>
 
                   <div 
                     onClick={() => setAddRole('admin')}
                     className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between shadow-xs"
                     style={addRole === 'admin' ? {
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-primary)',
-                      borderWidth: '2px'
+                      backgroundColor: 'rgba(224, 86, 56, 0.12)',
+                      borderColor: 'var(--color-primary)'
                     } : {
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)'
@@ -1378,11 +1484,17 @@ export default function AdminUserManagementPage() {
                   >
                     <div>
                       <div className="font-bold text-xs flex items-center gap-1" style={{ color: 'var(--color-text)' }}>
-                        <Shield className="h-3 w-3" style={{ color: 'var(--color-emerald, #10b981)' }} /> {tr('adminUsersRoleAdmin', 'Admin')}
+                        <Shield className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {tr('admin.users.roleAdmin', 'Admin')}
                       </div>
-                      <div className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('adminUsersDescFullAccess', 'Full Access')}</div>
+                      <div className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('admin.users.descFullAccess', 'Full Access')}</div>
                     </div>
-                    <input type="radio" name="addRole" checked={addRole === 'admin'} onChange={() => setAddRole('admin')} className="cursor-pointer" />
+                    <input
+                      type="radio"
+                      name="addRole"
+                      checked={addRole === 'admin'}
+                      onChange={() => setAddRole('admin')}
+                      className="accent-[#E05638]"
+                    />
                   </div>
                 </div>
               </div>
@@ -1391,18 +1503,18 @@ export default function AdminUserManagementPage() {
                 <button 
                   type="button" 
                   onClick={() => setShowAddModal(false)} 
-                  className="px-4 py-2.5 border font-bold rounded-xl text-xs cursor-pointer transition hover:opacity-80" 
+                  className="px-4 py-2.5 border font-bold rounded-xl text-xs cursor-pointer hover:opacity-85 transition" 
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
                 >
-                  {tr('adminUsersBtnCancel', 'Cancel')}
+                  {tr('admin.users.btnCancel', 'Cancel')}
                 </button>
                 <button 
                   type="button" 
-                  onClick={handleAddUserSubmit}
-                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-xs cursor-pointer transition hover:opacity-90 flex items-center gap-1.5" 
+                  onClick={() => handleAddUserSubmit()} 
+                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-xs cursor-pointer hover:opacity-90 transition flex items-center gap-1.5" 
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
-                  <UserPlus className="h-4 w-4" /> {tr('adminUsersBtnCreateUser', 'Create User')}
+                  <UserPlus className="h-4 w-4" /> {tr('admin.users.btnCreateUser', 'Create User')}
                 </button>
               </div>
             </div>
@@ -1410,7 +1522,9 @@ export default function AdminUserManagementPage() {
         </div>
       )}
 
-      {/* 2. EDIT USER MODAL (Accessible & Autofill Guardrail <div> Container - Constraint 9) */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* 4. EDIT USER MODAL (Accessible Container with Autofill Guard) */}
+      {/* ───────────────────────────────────────────────────────────── */}
       {showEditModal && (
         <div 
           onClick={() => setShowEditModal(false)} 
@@ -1424,9 +1538,9 @@ export default function AdminUserManagementPage() {
             style={{ backgroundColor: 'var(--color-card)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }}
           >
             <button 
-              type="button"
+              type="button" 
               onClick={() => setShowEditModal(false)} 
-              className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer" 
+              className="absolute top-4 right-4 p-1.5 rounded-md transition cursor-pointer hover:opacity-80" 
               style={{ backgroundColor: 'var(--color-inner-dark)', color: 'var(--color-text-secondary)' }}
             >
               <X className="h-4 w-4" />
@@ -1434,10 +1548,10 @@ export default function AdminUserManagementPage() {
 
             <div className="space-y-1 pr-6">
               <h2 className="text-xl font-black flex items-center gap-2" style={{ color: 'var(--color-primary)' }}>
-                <Edit3 className="h-5 w-5" /> {tr('adminUsersModalEditTitle', 'Edit User & Plan')}
+                <Edit3 className="h-5 w-5" /> {tr('admin.users.modalEditTitle', 'Edit User & Plan')}
               </h2>
               <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                {tr('adminUsersModalEditSubtitle', 'Update account details, role permissions, and active subscription plan.')}
+                {tr('admin.users.modalEditSubtitle', 'Update account details, role permissions, and active subscription plan.')}
               </p>
             </div>
 
@@ -1448,76 +1562,78 @@ export default function AdminUserManagementPage() {
               </div>
             )}
 
-            <div className="space-y-3.5 pt-1" onKeyDown={(e) => { if (e.key === 'Enter') handleEditUserSubmit(); }}>
+            <div className="space-y-3.5">
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  {tr('adminUsersLabelFullName', 'Full Name')} *
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  {tr('admin.users.labelFullName', 'Full Name')} *
                 </label>
                 <div className="relative">
                   <UserIcon className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
                   <input 
                     type="text" 
-                    autoComplete="new-password"
+                    required 
                     data-lpignore="true"
                     data-form-type="other"
-                    spellCheck="false"
+                    autoComplete="off"
+                    spellCheck={false}
                     value={editName} 
                     onChange={e => setEditName(e.target.value)} 
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none" 
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleEditUserSubmit(); } }}
+                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none shadow-inner" 
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  {tr('adminUsersLabelEmail', 'Email Address')} *
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  {tr('admin.users.labelEmail', 'Email Address')} *
                 </label>
                 <div className="relative">
                   <Mail className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
                   <input 
                     type="email" 
-                    autoComplete="new-password"
+                    required 
                     data-lpignore="true"
                     data-form-type="other"
-                    spellCheck="false"
+                    autoComplete="off"
+                    spellCheck={false}
                     value={editEmail} 
                     onChange={e => setEditEmail(e.target.value)} 
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none font-mono" 
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleEditUserSubmit(); } }}
+                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none font-mono shadow-inner" 
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text)' }}>
-                  {tr('adminUsersLabelChangePass', 'Change Password (leave blank to keep current)')}
+                <label className="block font-bold mb-1.5" style={{ color: 'var(--color-text-secondary)' }}>
+                  {tr('admin.users.labelChangePassword', 'Change Password (leave blank to keep current)')}
                 </label>
                 <div className="relative">
                   <Lock className="h-4 w-4 absolute left-3.5 top-3" style={{ color: 'var(--color-text-secondary)' }} />
                   <input 
                     type="password" 
-                    autoComplete="new-password"
                     data-lpignore="true"
                     data-form-type="other"
-                    spellCheck="false"
-                    placeholder={tr('adminUsersPlaceholderNewPass', 'Enter new password...')} 
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    placeholder={tr('admin.users.placeholderNewPass', 'Enter new password...')} 
                     value={editPassword} 
                     onChange={e => setEditPassword(e.target.value)} 
-                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none font-mono" 
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleEditUserSubmit(); } }}
+                    className="w-full border rounded-xl pl-10 pr-3.5 py-2.5 text-xs outline-none font-mono shadow-inner" 
                     style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text)' }} 
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1.5 flex items-center justify-between" style={{ color: 'var(--color-text)' }}>
-                  <span className="flex items-center gap-1.5">
-                    <CreditCard className="h-3.5 w-3.5" style={{ color: 'var(--color-primary)' }} />
-                    {tr('adminUsersLabelActivePlan', 'Active Subscription Plan')}
-                  </span>
-                  <span className="text-[10px] font-bold" style={{ color: 'var(--color-emerald, #10b981)' }}>
-                    {tr('adminUsersLiveSynced', 'Live Synced')} ({availablePlans.length})
+                <label className="block font-bold mb-1.5 flex items-center justify-between" style={{ color: 'var(--color-text-secondary)' }}>
+                  <span>{tr('admin.users.labelActivePlan', 'Active Subscription Plan')}</span>
+                  <span className="text-[10px] font-bold" style={{ color: 'var(--color-emerald)' }}>
+                    {tr('admin.users.liveSynced', 'Live Synced with Payment Ledger')}
                   </span>
                 </label>
                 <select 
@@ -1536,43 +1652,61 @@ export default function AdminUserManagementPage() {
 
               <div>
                 <div className="flex items-center justify-between mb-1.5">
-                  <label className="block font-bold" style={{ color: 'var(--color-text)' }}>
-                    {tr('adminUsersLabelAssignedRole', 'Assigned Role')}
+                  <label className="block font-bold" style={{ color: 'var(--color-text-secondary)' }}>
+                    {tr('admin.users.labelAssignedRole', 'Assigned Role')}
                   </label>
                   {isEditingFirstAdmin && (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border bg-amber-500/10 border-amber-500 text-amber-500">
-                      <Lock className="h-3 w-3" /> {tr('adminUsersPrimaryAdminLocked', 'Primary Admin Locked')}
+                    <span 
+                      className="text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 border"
+                      style={{
+                        backgroundColor: 'rgba(245, 158, 11, 0.15)',
+                        borderColor: '#f59e0b',
+                        color: '#fbbf24'
+                      }}
+                    >
+                      <Lock className="h-3 w-3" /> {tr('admin.users.primaryAdminLocked', 'Primary Admin Locked')}
                     </span>
                   )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 pt-1">
                   <div 
-                    onClick={() => { if (!isEditingFirstAdmin) setEditRole('user'); }}
-                    className={`p-3 rounded-2xl border transition flex items-center justify-between shadow-xs ${isEditingFirstAdmin ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+                    onClick={() => {
+                      if (!isEditingFirstAdmin) setEditRole('user');
+                    }}
+                    className={`p-3 rounded-2xl border transition flex items-center justify-between shadow-xs ${
+                      isEditingFirstAdmin ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'
+                    }`}
                     style={editRole === 'user' && !isEditingFirstAdmin ? {
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-primary)',
-                      borderWidth: '2px'
+                      backgroundColor: 'rgba(224, 86, 56, 0.12)',
+                      borderColor: 'var(--color-primary)'
                     } : {
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)'
                     }}
                   >
                     <div>
-                      <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{tr('adminUsersRoleStandardUser', 'Standard User')}</div>
-                      <div className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('adminUsersDescSubscriber', 'App Subscriber')}</div>
+                      <div className="font-bold text-xs" style={{ color: 'var(--color-text)' }}>{tr('admin.users.roleStandardUser', 'Standard User')}</div>
+                      <div className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('admin.users.descSubscriber', 'App Subscriber')}</div>
                     </div>
-                    <input type="radio" name="editRole" disabled={isEditingFirstAdmin} checked={editRole === 'user'} onChange={() => { if (!isEditingFirstAdmin) setEditRole('user'); }} />
+                    <input
+                      type="radio"
+                      name="editRole"
+                      disabled={isEditingFirstAdmin}
+                      checked={editRole === 'user'}
+                      onChange={() => {
+                        if (!isEditingFirstAdmin) setEditRole('user');
+                      }}
+                      className="accent-[#E05638] disabled:opacity-50"
+                    />
                   </div>
 
                   <div 
                     onClick={() => setEditRole('admin')}
                     className="p-3 rounded-2xl border cursor-pointer transition flex items-center justify-between shadow-xs"
                     style={editRole === 'admin' ? {
-                      backgroundColor: 'var(--color-inner-dark)',
-                      borderColor: 'var(--color-primary)',
-                      borderWidth: '2px'
+                      backgroundColor: 'rgba(224, 86, 56, 0.12)',
+                      borderColor: 'var(--color-primary)'
                     } : {
                       backgroundColor: 'var(--color-inner-dark)',
                       borderColor: 'var(--color-border)'
@@ -1580,17 +1714,23 @@ export default function AdminUserManagementPage() {
                   >
                     <div>
                       <div className="font-bold text-xs flex items-center gap-1" style={{ color: 'var(--color-text)' }}>
-                        <Shield className="h-3 w-3" style={{ color: 'var(--color-emerald, #10b981)' }} /> {tr('adminUsersRoleAdmin', 'Admin')}
+                        <Shield className="h-3 w-3" style={{ color: 'var(--color-emerald)' }} /> {tr('admin.users.roleAdmin', 'Admin')}
                       </div>
-                      <div className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('adminUsersDescFullAccess', 'Full Access')}</div>
+                      <div className="text-[10px]" style={{ color: 'var(--color-text-secondary)' }}>{tr('admin.users.descFullAccess', 'Full Access')}</div>
                     </div>
-                    <input type="radio" name="editRole" checked={editRole === 'admin'} onChange={() => setEditRole('admin')} />
+                    <input
+                      type="radio"
+                      name="editRole"
+                      checked={editRole === 'admin'}
+                      onChange={() => setEditRole('admin')}
+                      className="accent-[#E05638]"
+                    />
                   </div>
                 </div>
 
                 {isEditingFirstAdmin && (
                   <p className="text-[11px] mt-1.5 font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-                    {tr('adminUsersPrimaryAdminLockedNote', 'The primary system administrator role is permanently protected and cannot be changed or demoted.')}
+                    {tr('admin.users.primaryAdminLockedNote', 'The primary system administrator role is permanently protected and cannot be changed or demoted.')}
                   </p>
                 )}
               </div>
@@ -1599,18 +1739,18 @@ export default function AdminUserManagementPage() {
                 <button 
                   type="button" 
                   onClick={() => setShowEditModal(false)} 
-                  className="px-4 py-2.5 border font-bold rounded-xl text-xs cursor-pointer transition hover:opacity-80" 
+                  className="px-4 py-2.5 border font-bold rounded-xl text-xs cursor-pointer hover:opacity-85 transition" 
                   style={{ backgroundColor: 'var(--color-inner-dark)', borderColor: 'var(--color-border)', color: 'var(--color-text-secondary)' }}
                 >
-                  {tr('adminUsersBtnCancel', 'Cancel')}
+                  {tr('admin.users.btnCancel', 'Cancel')}
                 </button>
                 <button 
                   type="button" 
-                  onClick={handleEditUserSubmit}
-                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-xs cursor-pointer transition hover:opacity-90 flex items-center gap-1.5" 
+                  onClick={() => handleEditUserSubmit()} 
+                  className="px-5 py-2.5 text-white font-bold rounded-xl shadow-md text-xs cursor-pointer hover:opacity-90 transition flex items-center gap-1.5" 
                   style={{ backgroundColor: 'var(--color-primary)' }}
                 >
-                  <Check className="h-4 w-4" /> {tr('adminUsersBtnSaveChanges', 'Save Changes')}
+                  <Check className="h-4 w-4" /> {tr('admin.users.btnSaveChanges', 'Save Changes')}
                 </button>
               </div>
             </div>
